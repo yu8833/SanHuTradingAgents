@@ -1,0 +1,120 @@
+// 全局样式文件
+
+// 重置样式
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+// 亮色主题优化（使用柔和的微暖色调，减少眼睛疲劳）
+html:not(.dark) {
+  background-color: #f8f9fc !important;
+  --el-bg-color: #ffffff;
+  --el-bg-color-page: #f8f9fc;
+  --el-bg-color-overlay: #ffffff;
+  --el-text-color-primary: #2d3748;
+  --el-text-color-regular: #4a5568;
+  --el-text-color-secondary: #718096;
+  --el-text-color-placeholder: #a0aec0;
+  --el-border-color: #e2e8f0;
+  --el-border-color-light: #edf2f7;
+  --el-border-color-lighter: #f7fafc;
+  --el-fill-color-blank: #ffffff;
+  --el-fill-color-light: #f7fafc;
+  --el-fill-color-lighter: #fafbfc;
+  --el-fill-color-extra-light: #f0f4f8;
+}
+
+// 优化标题样式（浅色主题）
+h1, h2, h3, h4, h5, h6 {
+  color: #1a202c;
+  font-weight: 600;
+}
+
+h1 {
+  font-size: 32px;
+}
+
+h2 {
+  font-size: 28px;
+}
+
+h3 {
+  font-size: 24px;
+}
+
+h4 {
+  font-size: 20px;
+}
+
+h5 {
+  font-size: 18px;
+}
+
+h6 {
+  font-size: 16px;
+}
+
+// 优化卡片标题
+.el-card__header {
+  h1, h2, h3, h4, h5, h6 {
+    color: #1a202c;
+    font-weight: 600;
+    margin: 0;
+  }
+}
+
+// 优化页面标题
+.page-title,
+.section-title,
+.card-title {
+  color: #1a202c !important;
+  font-weight: 600 !important;
+}
+
+// 全局工具类
+.text-center {
+  text-align: center;
+}
+
+.text-left {
+  text-align: left;
+}
+
+.text-right {
+  text-align: right;
+}
+
+.flex {
+  display: flex;
+}
+
+.flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.flex-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+// 响应式工具类
+@media (max-width: 768px) {
+  .mobile-hidden {
+    display: none !important;
+  }
+}
+
+@media (min-width: 769px) {
+  .desktop-hidden {
+    display: none !important;
+  }
+}

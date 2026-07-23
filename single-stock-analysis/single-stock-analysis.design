@@ -1,0 +1,64 @@
+{
+  "data": [
+    {
+      "id": "page-dashboard",
+      "title": "分析仪表盘",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1782480707000,
+      "canvasData": {
+        "x": 820,
+        "y": 0,
+        "group": 0
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/dashboard.html",
+        "interactions": [
+          {
+            "domId": "nav-result",
+            "targetPageId": "page-analysis-result",
+            "transitionLabel": "查看分析"
+          },
+          {
+            "domId": "cta-analyze",
+            "targetPageId": "page-analysis-result",
+            "transitionLabel": "开始分析"
+          }
+        ]
+      }
+    },
+    {
+      "id": "page-analysis-result",
+      "title": "分析结果",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1782480708000,
+      "canvasData": {
+        "x": 200,
+        "y": 0,
+        "group": 0
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/analysis-result.html",
+        "interactions": [
+          {
+            "domId": "nav-dashboard",
+            "targetPageId": "page-dashboard",
+            "transitionLabel": "返回仪表盘"
+          },
+          {
+            "domId": "back-dashboard",
+            "targetPageId": "page-dashboard",
+            "hideEdge": true,
+            "transitionLabel": "返回"
+          }
+        ]
+      }
+    }
+  ],
+  "config": {
+    "autoLayout": true,
+    "deviceType": "desktop",
+    "projectName": "单股分析界面"
+  }
+}

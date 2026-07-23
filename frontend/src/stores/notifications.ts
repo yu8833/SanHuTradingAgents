@@ -1,0 +1,276 @@
+import { defineStore } from 'pinia'
+import { ref, computed, watch } from 'vue'
+import { notificationsApi, type NotificationItem } from '@/api/notifications'
+import { useAuthStore } from '@/stores/auth'
+
+export const useNotificationStore = defineStore('notifications', () => {
+  const items = ref<NotificationItem[]>([])
+  const unreadCount = ref(0)
+  const loading = ref(false)
+  const drawerVisible = ref(false)
+
+  const ws = ref<WebSocket | null>(null)
+  const wsConnected = ref(false)
+  let wsReconnectTimer: any = null
+  let wsReconnectAttempts = 0
+  const maxReconnectAttempts = 10
+  const minReconnectDelay = 1000
+  const maxReconnectDelay = 30000
+
+  const connected = computed(() => wsConnected.value)
+  const hasUnread = computed(() => unreadCount.value > 0)
+
+  async function refreshUnreadCount() {
+    try {
+      const res = await notificationsApi.getUnreadCount()
+      unreadCount.value = res?.data?.count ?? 0
+    } catch (e) {
+      console.error('[Notifications] 获取未读数失败:', e)
+    }
+  }
+
+  async function loadList(status: 'unread' | 'all' = 'all') {
+    loading.value = true
+    try {
+      const res = await notificationsApi.getList({ status, page: 1, page_size: 50 })
+      items.value = res?.data?.items ?? []
+    } catch (e) {
+      console.error('[Notifications] 加载通知列表失败:', e)
+      items.value = []
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function markRead(id: string) {
+    try {
+      await notificationsApi.markRead(id)
+      const idx = items.value.findIndex(x => x.id === id)
+      if (idx !== -1) {
+        items.value[idx].status = 'read'
+      }
+      if (unreadCount.value > 0) {
+        unreadCount.value -= 1
+      }
+    } catch (e) {
+      console.error('[Notifications] 标记已读失败:', e)
+    }
+  }
+
+  async function markAllRead() {
+    try {
+      await notificationsApi.markAllRead()
+      items.value = items.value.map(x => ({ ...x, status: 'read' }))
+      unreadCount.value = 0
+    } catch (e) {
+      console.error('[Notifications] 全部标记已读失败:', e)
+    }
+  }
+
+  function addNotification(n: Omit<NotificationItem, 'id' | 'status' | 'created_at'> & { id?: string; created_at?: string; status?: 'unread' | 'read' }) {
+    const id = n.id || `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    const created_at = n.created_at || new Date().toISOString()
+    
+    const existingIdx = items.value.findIndex(x => x.id === id)
+    if (existingIdx !== -1) {
+      items.value[existingIdx] = {
+        ...items.value[existingIdx],
+        title: n.title,
+        content: n.content,
+        status: n.status ?? 'unread',
+        created_at
+      }
+    } else {
+      const item: NotificationItem = {
+        id,
+        title: n.title,
+        content: n.content,
+        type: n.type,
+        status: n.status ?? 'unread',
+        created_at,
+        link: n.link,
+        source: n.source
+      }
+      items.value.unshift(item)
+    }
+    
+    if (n.status !== 'read') {
+      refreshUnreadCount()
+    }
+  }
+
+  function connectWebSocket() {
+    try {
+      if (ws.value) {
+        try {
+          ws.value.close(1000, 'Reconnecting')
+        } catch {}
+        ws.value = null
+      }
+      if (wsReconnectTimer) {
+        clearTimeout(wsReconnectTimer)
+        wsReconnectTimer = null
+      }
+
+      const authStore = useAuthStore()
+      const token = authStore.token || localStorage.getItem('auth-token') || ''
+      if (!token) {
+        console.warn('[WS] 未找到 token，无法连接 WebSocket')
+        scheduleReconnect()
+        return
+      }
+
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const host = window.location.host
+      const wsUrl = `${wsProtocol}//${host}/api/ws/notifications?token=${encodeURIComponent(token)}`
+
+      console.log('[WS] 连接到:', wsUrl)
+
+      const socket = new WebSocket(wsUrl)
+      ws.value = socket
+
+      socket.onopen = () => {
+        console.log('[WS] 连接成功')
+        wsConnected.value = true
+        wsReconnectAttempts = 0
+      }
+
+      socket.onclose = (event) => {
+        console.log('[WS] 连接关闭:', event.code, event.reason)
+        wsConnected.value = false
+        ws.value = null
+
+        if (event.code !== 1000) {
+          scheduleReconnect()
+        }
+      }
+
+      socket.onerror = (error) => {
+        console.error('[WS] 连接错误:', error)
+        wsConnected.value = false
+      }
+
+      socket.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data)
+          handleWebSocketMessage(message)
+        } catch (error) {
+          console.error('[WS] 解析消息失败:', error)
+        }
+      }
+    } catch (error) {
+      console.error('[WS] 连接失败:', error)
+      wsConnected.value = false
+      scheduleReconnect()
+    }
+  }
+
+  function scheduleReconnect() {
+    if (wsReconnectAttempts >= maxReconnectAttempts) {
+      console.error('[WS] 达到最大重连次数，停止重连')
+      return
+    }
+
+    const delay = Math.min(
+      minReconnectDelay * Math.pow(2, wsReconnectAttempts),
+      maxReconnectDelay
+    )
+    console.log(`[WS] ${delay}ms 后重连 (尝试 ${wsReconnectAttempts + 1}/${maxReconnectAttempts})`)
+
+    wsReconnectTimer = setTimeout(() => {
+      wsReconnectAttempts++
+      connectWebSocket()
+    }, delay)
+  }
+
+  function handleWebSocketMessage(message: any) {
+    console.log('[WS] 收到消息:', message)
+
+    switch (message.type) {
+      case 'connected':
+        console.log('[WS] 连接确认:', message.data)
+        break
+
+      case 'notification':
+        if (message.data && message.data.title && message.data.type) {
+          addNotification({
+            id: message.data.id,
+            title: message.data.title,
+            content: message.data.content,
+            type: message.data.type,
+            link: message.data.link,
+            source: message.data.source,
+            created_at: message.data.created_at,
+            status: message.data.status || 'unread'
+          })
+        }
+        break
+
+      case 'heartbeat':
+        break
+
+      default:
+        console.warn('[WS] 未知消息类型:', message.type)
+    }
+  }
+
+  function disconnectWebSocket() {
+    if (wsReconnectTimer) {
+      clearTimeout(wsReconnectTimer)
+      wsReconnectTimer = null
+    }
+
+    if (ws.value) {
+      try {
+        ws.value.close(1000, 'User disconnected')
+      } catch {}
+      ws.value = null
+    }
+
+    wsConnected.value = false
+    wsReconnectAttempts = 0
+  }
+
+  function connect() {
+    console.log('[Notifications] 开始连接...')
+    connectWebSocket()
+  }
+
+  function disconnect() {
+    console.log('[Notifications] 断开连接...')
+    disconnectWebSocket()
+  }
+
+  function setDrawerVisible(v: boolean) {
+    drawerVisible.value = v
+    if (v) {
+      loadList('all')
+    }
+  }
+
+  watch(() => useAuthStore().token, (newToken, oldToken) => {
+    if (newToken && newToken !== oldToken) {
+      connectWebSocket()
+    }
+  })
+
+  return {
+    items,
+    unreadCount,
+    hasUnread,
+    loading,
+    drawerVisible,
+    connected,
+    wsConnected,
+    refreshUnreadCount,
+    loadList,
+    markRead,
+    markAllRead,
+    addNotification,
+    connect,
+    disconnect,
+    connectWebSocket,
+    disconnectWebSocket,
+    setDrawerVisible
+  }
+})

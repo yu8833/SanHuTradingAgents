@@ -1,0 +1,208 @@
+{
+  "project": {
+    "name": "单股分析界面",
+    "path": "/Users/yupeng/stock/TradingAgents-CN/single-stock-analysis",
+    "operation": "create",
+    "deviceType": "desktop",
+    "language": "zh-CN",
+    "dashboardMode": false,
+    "replicationMode": null,
+    "sourceUrl": null,
+    "visualSpecExcerpt": null,
+    "styleDefinitionBrief": "Finance SaaS dashboard, cool neutral + emerald green accent, Inter + Noto Sans SC, card-based layout with data-dense panels, restrained surfaces with subtle borders.",
+    "designRead": "Stock analysis dashboard / retail+pro investors / calm data-driven trust / medium-high density / avoid purple neon AI hero",
+    "designDials": {
+      "layoutVariance": 2,
+      "motionIntensity": 2,
+      "visualDensity": 4
+    },
+    "styleContinuityAnchors": {
+      "colorSystem": {
+        "primaryColorRole": "single emerald brand hue used for primary CTA, selected states, and positive indicators",
+        "brandHuePolicy": "free-explore uses no secondary/accent brand hue; identities/categories use neutral or primary tints",
+        "stateColors": "success=green for price up, error=red for price down, warning=amber, info=blue for informational"
+      },
+      "shapeSystem": "restrained radius scale: 4px/8px/12px/full; cards use 8px, buttons use 8px, inputs use 8px",
+      "typographySystem": "Inter + Noto Sans SC for all text; JetBrains Mono for prices/numbers; size scale 11-30px; weight 400/500/600/700",
+      "spacingSystem": "4px base grid; card padding 20-24px; section gap 24px; page padding 32px",
+      "componentLanguage": "border-first cards with minimal shadow (alpha<=0.05); subtle surface layering; compact data tables",
+      "surfaceAndDepth": "static surfaces use border-only; floating layers (modal/dropdown) use shadow with alpha<=0.12",
+      "imageryAndIconography": "CSS charts via Chart.js; icons inline SVG or CSS; no decorative images needed",
+      "interactionTone": "subtle hover transitions (150-200ms); no aggressive animations; functional micro-feedback only"
+    },
+    "specsConstraints": null,
+    "sharedProjectShellContract": {
+      "navigationShell": "left sidebar with app logo + nav items (仪表盘/分析结果/历史); active item highlighted with brand color bg pill; 240px fixed width",
+      "primaryColorSystem": "single emerald brand hue #0D9373; no secondary/accent brand color",
+      "typographySystem": "Inter + Noto Sans SC; mono for numbers; size scale 11-30px",
+      "radiusScale": "4px/8px/12px/full; cards 8px; buttons 8px; inputs 8px; tags full",
+      "surfaceDepthModel": "border-only for static; shadow<=0.12 alpha for floating layers",
+      "ctaStyle": "brand bg color, white text, 8px radius, medium font-weight, subtle hover transition",
+      "alignmentRules": "left-aligned content within cards; numeric data right-aligned; centered page title in topbar"
+    },
+    "generationTree": {
+      "root": {
+        "nodeId": "gen-project-shell",
+        "kind": "project-shell",
+        "pageIds": ["page-dashboard", "page-analysis-result"],
+        "output": "partials/project-shell.html",
+        "sharedRegions": ["sidebar", "topbar"],
+        "privateRegions": [],
+        "mutableSlots": ["activeNavItem", "pageTitle"],
+        "status": "planned",
+        "children": [
+          {
+            "nodeId": "gen-page-dashboard",
+            "kind": "page-leaf",
+            "pageIds": ["page-dashboard"],
+            "output": "pages/dashboard.html",
+            "sharedRegions": [],
+            "privateRegions": ["page body"],
+            "mutableSlots": ["activeNavItem", "pageTitle"],
+            "status": "planned",
+            "children": []
+          },
+          {
+            "nodeId": "gen-page-analysis-result",
+            "kind": "page-leaf",
+            "pageIds": ["page-analysis-result"],
+            "output": "pages/analysis-result.html",
+            "sharedRegions": [],
+            "privateRegions": ["page body"],
+            "mutableSlots": ["activeNavItem", "pageTitle"],
+            "status": "planned",
+            "children": []
+          }
+        ]
+      }
+    }
+  },
+  "designSource": {
+    "operatingMode": "free-explore",
+    "libraryIdentity": null,
+    "libraryPath": null,
+    "cssFilePath": "/Users/yupeng/stock/TradingAgents-CN/single-stock-analysis/colors_and_type.css",
+    "brandPrefix": "ssa",
+    "themeMode": "light",
+    "designDecisionSummary": "Cool neutral palette with emerald green (#0D9373) accent; Inter + Noto Sans SC typography; restrained 8px radius cards with border-first depth; compact data density for financial dashboard",
+    "componentContractKind": null,
+    "forbiddenInventedComponents": [],
+    "allowedComponents": [],
+    "styleConstraints": {
+      "radiusMax": 12,
+      "spacingBase": 4,
+      "fontSizeBody": 14,
+      "fontSizeMin": 11,
+      "controlHeightDefault": 32,
+      "controlHeightLarge": 38
+    },
+    "productContext": {
+      "kitType": "finance-analysis-platform",
+      "productType": "AI-powered stock analysis SaaS"
+    },
+    "actualTokenNameReference": [
+      { "semanticPurpose": "Primary brand color", "tokenName": "ssa-color-primary" },
+      { "semanticPurpose": "Primary text color", "tokenName": "ssa-color-text-primary" },
+      { "semanticPurpose": "Secondary text color", "tokenName": "ssa-color-text-secondary" },
+      { "semanticPurpose": "Tertiary text color", "tokenName": "ssa-color-text-tertiary" },
+      { "semanticPurpose": "Page background", "tokenName": "ssa-color-bg-page" },
+      { "semanticPurpose": "Card/surface background", "tokenName": "ssa-color-bg-surface" },
+      { "semanticPurpose": "Default border", "tokenName": "ssa-color-border-default" },
+      { "semanticPurpose": "Brand border", "tokenName": "ssa-color-border-brand" },
+      { "semanticPurpose": "Success state", "tokenName": "ssa-state-success" },
+      { "semanticPurpose": "Error state", "tokenName": "ssa-state-error" },
+      { "semanticPurpose": "Warning state", "tokenName": "ssa-state-warning" },
+      { "semanticPurpose": "Info state", "tokenName": "ssa-state-info" },
+      { "semanticPurpose": "Card radius", "tokenName": "ssa-radius-md" },
+      { "semanticPurpose": "Small radius", "tokenName": "ssa-radius-sm" },
+      { "semanticPurpose": "Chart color primary", "tokenName": "ssa-color-chart-1" },
+      { "semanticPurpose": "Chart color secondary", "tokenName": "ssa-color-chart-2" },
+      { "semanticPurpose": "Mono font family", "tokenName": "ssa-font-family-mono" }
+    ]
+  },
+  "pages": [
+    {
+      "nodeId": "page-dashboard",
+      "slug": "dashboard",
+      "title": "分析仪表盘",
+      "htmlSrc": "pages/dashboard.html",
+      "pageIndex": 1,
+      "stateGroupId": null,
+      "stateRole": null,
+      "baseStatePageId": null,
+      "sharedShellContract": [],
+      "mutableRegions": [],
+      "derivedFromHtmlSrc": null,
+      "derivationType": "original",
+      "sourcePageId": null,
+      "sourceHtmlSrc": null,
+      "pageType": "information-dense",
+      "businessScenario": "Main entry point showing stock search, market overview, recent analyses, and quick-start analysis controls",
+      "visualNorthStar": "Clean data-focused dashboard with a prominent stock search bar at top, followed by key market stats cards and a recent analysis list; information-dense but well-organized with card sections",
+      "compositionPattern": "Dashboard grid: search-first hero strip + 2-column KPI cards + 3-column recent analysis table",
+      "continuityAnchors": ["sidebar nav active state", "card border/surface treatment", "numeric mono font for prices", "brand CTA color"],
+      "libraryRestraintMode": false,
+      "uiKitPath": null,
+      "componentPlan": [],
+      "imagePlan": [],
+      "chartsRequired": true,
+      "miniProgramStyle": false,
+      "qualityRisks": ["high data density in first screen", "CJK title wrapping in narrow cards"]
+    },
+    {
+      "nodeId": "page-analysis-result",
+      "slug": "analysis-result",
+      "title": "分析结果",
+      "htmlSrc": "pages/analysis-result.html",
+      "pageIndex": 2,
+      "stateGroupId": null,
+      "stateRole": null,
+      "baseStatePageId": null,
+      "sharedShellContract": [],
+      "mutableRegions": [],
+      "derivedFromHtmlSrc": null,
+      "derivationType": "original",
+      "sourcePageId": null,
+      "sourceHtmlSrc": null,
+      "pageType": "information-dense",
+      "businessScenario": "Full single-stock analysis result showing scores, price charts, AI-generated summaries, and detailed analysis sections",
+      "visualNorthStar": "Comprehensive analysis page with a stock identity header strip (price, change, basic info), followed by score gauges, a large price chart, and tabbed detailed analysis sections below",
+      "compositionPattern": "Identity header + score cards row + large chart panel + tabbed analysis sections (technical/fundamental/sentiment/risk)",
+      "continuityAnchors": ["sidebar nav active state", "card border/surface treatment", "numeric mono font for prices", "brand CTA color", "chart color palette"],
+      "libraryRestraintMode": false,
+      "uiKitPath": null,
+      "componentPlan": [],
+      "imagePlan": [],
+      "chartsRequired": true,
+      "miniProgramStyle": false,
+      "qualityRisks": ["long analysis text sections", "multiple chart types on one page", "CJK paragraph wrapping"]
+    }
+  ],
+  "assets": [],
+  "wiringPlan": [
+    {
+      "sourceNodeId": "page-dashboard",
+      "domId": "nav-result",
+      "targetPageId": "page-analysis-result"
+    },
+    {
+      "sourceNodeId": "page-dashboard",
+      "domId": "cta-analyze",
+      "targetPageId": "page-analysis-result"
+    },
+    {
+      "sourceNodeId": "page-analysis-result",
+      "domId": "nav-dashboard",
+      "targetPageId": "page-dashboard"
+    }
+  ],
+  "hiddenInteractionPlan": [
+    {
+      "sourceNodeId": "page-analysis-result",
+      "domId": "back-dashboard",
+      "targetPageId": "page-dashboard",
+      "hideEdge": true,
+      "reason": "back button return"
+    }
+  ]
+}

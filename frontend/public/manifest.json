@@ -1,0 +1,16 @@
+{
+  "name": "股票分析系统",
+  "short_name": "股票分析",
+  "description": "多智能体股票分析学习平台",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#409EFF",
+  "icons": [
+    {
+      "src": "/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

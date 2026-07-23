@@ -1,0 +1,36 @@
+{
+  "root": {
+    "nodeId": "gen-project-shell",
+    "kind": "project-shell",
+    "pageIds": ["page-dashboard", "page-analysis-result"],
+    "output": "partials/project-shell.html",
+    "sharedRegions": ["sidebar", "topbar"],
+    "privateRegions": [],
+    "mutableSlots": ["activeNavItem", "pageTitle"],
+    "status": "generated",
+    "children": [
+      {
+        "nodeId": "gen-page-dashboard",
+        "kind": "page-leaf",
+        "pageIds": ["page-dashboard"],
+        "output": "pages/dashboard.html",
+        "sharedRegions": [],
+        "privateRegions": ["page body"],
+        "mutableSlots": ["activeNavItem", "pageTitle"],
+        "status": "generated",
+        "children": []
+      },
+      {
+        "nodeId": "gen-page-analysis-result",
+        "kind": "page-leaf",
+        "pageIds": ["page-analysis-result"],
+        "output": "pages/analysis-result.html",
+        "sharedRegions": [],
+        "privateRegions": ["page body"],
+        "mutableSlots": ["activeNavItem", "pageTitle"],
+        "status": "generated",
+        "children": []
+      }
+    ]
+  }
+}

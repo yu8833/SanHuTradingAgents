@@ -1,0 +1,1052 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>分析仪表盘</title>
+
+<!-- Google Fonts: Inter + Noto Sans SC + JetBrains Mono -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<style id="theme-vars">
+/* Single Stock Analysis - Modern SaaS Dashboard */
+/* Brand prefix: ssa */
+
+/* ── Light Mode ── */
+:root {
+  /* Brand Primary */
+  --ssa-color-primary: #0D9373;
+  --ssa-color-primary-50: #E6F7F1;
+  --ssa-color-primary-100: #B3E8D8;
+  --ssa-color-primary-200: #80D9BE;
+  --ssa-color-primary-300: #4DCAA5;
+  --ssa-color-primary-400: #26BF91;
+  --ssa-color-primary-500: #0D9373;
+  --ssa-color-primary-600: #0A7A5E;
+  --ssa-color-primary-700: #076149;
+  --ssa-color-primary-800: #044833;
+  --ssa-color-primary-900: #022F1D;
+
+  /* Neutral Scale */
+  --ssa-color-neutral-0: #FFFFFF;
+  --ssa-color-neutral-50: #F8FAFB;
+  --ssa-color-neutral-100: #F1F4F6;
+  --ssa-color-neutral-200: #E4E8EC;
+  --ssa-color-neutral-300: #CDD3D9;
+  --ssa-color-neutral-400: #9CA5B0;
+  --ssa-color-neutral-500: #7A8594;
+  --ssa-color-neutral-600: #5A6573;
+  --ssa-color-neutral-700: #3D4753;
+  --ssa-color-neutral-800: #2A333D;
+  --ssa-color-neutral-900: #141B24;
+
+  /* Semantic State Colors */
+  --ssa-state-success: #16A34A;
+  --ssa-state-success-light: #DCFCE7;
+  --ssa-state-warning: #D97706;
+  --ssa-state-warning-light: #FEF3C7;
+  --ssa-state-error: #DC2626;
+  --ssa-state-error-light: #FEE2E2;
+  --ssa-state-info: #2563EB;
+  --ssa-state-info-light: #DBEAFE;
+
+  /* Surface & Background */
+  --ssa-color-bg-page: #F5F7F9;
+  --ssa-color-bg-surface: #FFFFFF;
+  --ssa-color-bg-elevated: #FFFFFF;
+  --ssa-color-bg-sunken: #F1F4F6;
+  --ssa-color-bg-hover: #F8FAFB;
+  --ssa-color-bg-active: #E6F7F1;
+  --ssa-color-bg-overlay: rgba(20, 27, 36, 0.5);
+
+  /* Text */
+  --ssa-color-text-primary: #141B24;
+  --ssa-color-text-secondary: #5A6573;
+  --ssa-color-text-tertiary: #9CA5B0;
+  --ssa-color-text-inverse: #FFFFFF;
+  --ssa-color-text-brand: #0D9373;
+  --ssa-color-text-link: #0A7A5E;
+  --ssa-color-text-success: #16A34A;
+  --ssa-color-text-warning: #D97706;
+  --ssa-color-text-error: #DC2626;
+
+  /* Border */
+  --ssa-color-border-default: #E4E8EC;
+  --ssa-color-border-strong: #CDD3D9;
+  --ssa-color-border-brand: #0D9373;
+
+  /* Chart Colors */
+  --ssa-color-chart-1: #0D9373;
+  --ssa-color-chart-2: #2563EB;
+  --ssa-color-chart-3: #D97706;
+  --ssa-color-chart-4: #DC2626;
+  --ssa-color-chart-5: #7C3AED;
+  --ssa-color-chart-6: #0891B2;
+
+  /* Radius */
+  --ssa-radius-sm: 4px;
+  --ssa-radius-md: 8px;
+  --ssa-radius-lg: 12px;
+  --ssa-radius-full: 9999px;
+
+  /* Shadow */
+  --ssa-shadow-xs: 0 1px 2px rgba(20, 27, 36, 0.03);
+  --ssa-shadow-sm: 0 1px 3px rgba(20, 27, 36, 0.04);
+  --ssa-shadow-md: 0 4px 12px rgba(20, 27, 36, 0.05);
+  --ssa-shadow-float: 0 8px 24px rgba(20, 27, 36, 0.12);
+
+  /* Spacing Scale (base 4px) */
+  --ssa-space-1: 4px;
+  --ssa-space-2: 8px;
+  --ssa-space-3: 12px;
+  --ssa-space-4: 16px;
+  --ssa-space-5: 20px;
+  --ssa-space-6: 24px;
+  --ssa-space-8: 32px;
+  --ssa-space-10: 40px;
+  --ssa-space-12: 48px;
+  --ssa-space-16: 64px;
+
+  /* Typography */
+  --ssa-font-family: 'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --ssa-font-family-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+
+  /* Font Sizes */
+  --ssa-font-size-xs: 11px;
+  --ssa-font-size-sm: 13px;
+  --ssa-font-size-base: 14px;
+  --ssa-font-size-md: 15px;
+  --ssa-font-size-lg: 16px;
+  --ssa-font-size-xl: 18px;
+  --ssa-font-size-2xl: 20px;
+  --ssa-font-size-3xl: 24px;
+  --ssa-font-size-4xl: 30px;
+
+  /* Line Heights */
+  --ssa-line-height-tight: 1.25;
+  --ssa-line-height-snug: 1.375;
+  --ssa-line-height-normal: 1.5;
+  --ssa-line-height-relaxed: 1.625;
+
+  /* Font Weights */
+  --ssa-font-weight-normal: 400;
+  --ssa-font-weight-medium: 500;
+  --ssa-font-weight-semibold: 600;
+  --ssa-font-weight-bold: 700;
+
+  /* Transitions */
+  --ssa-transition-fast: 150ms ease;
+  --ssa-transition-normal: 200ms ease;
+  --ssa-transition-slow: 300ms ease;
+}
+
+/* ── Dark Mode ── */
+.dark {
+  --ssa-color-primary: #34D399;
+  --ssa-color-primary-50: #022F1D;
+  --ssa-color-primary-100: #044833;
+  --ssa-color-primary-200: #076149;
+  --ssa-color-primary-300: #0A7A5E;
+  --ssa-color-primary-400: #0D9373;
+  --ssa-color-primary-500: #34D399;
+  --ssa-color-primary-600: #6EE7B7;
+  --ssa-color-primary-700: #A7F3D0;
+  --ssa-color-primary-800: #D1FAE5;
+  --ssa-color-primary-900: #ECFDF5;
+
+  --ssa-color-neutral-0: #0D1117;
+  --ssa-color-neutral-50: #161B22;
+  --ssa-color-neutral-100: #1C2229;
+  --ssa-color-neutral-200: #2A333D;
+  --ssa-color-neutral-300: #3D4753;
+  --ssa-color-neutral-400: #5A6573;
+  --ssa-color-neutral-500: #7A8594;
+  --ssa-color-neutral-600: #9CA5B0;
+  --ssa-color-neutral-700: #CDD3D9;
+  --ssa-color-neutral-800: #E4E8EC;
+  --ssa-color-neutral-900: #F1F4F6;
+
+  --ssa-state-success-light: #052E16;
+  --ssa-state-warning-light: #451A03;
+  --ssa-state-error-light: #450A0A;
+  --ssa-state-info-light: #172554;
+
+  --ssa-color-bg-page: #0D1117;
+  --ssa-color-bg-surface: #161B22;
+  --ssa-color-bg-elevated: #1C2229;
+  --ssa-color-bg-sunken: #0D1117;
+  --ssa-color-bg-hover: #1C2229;
+  --ssa-color-bg-active: #044833;
+  --ssa-color-bg-overlay: rgba(0, 0, 0, 0.6);
+
+  --ssa-color-text-primary: #E4E8EC;
+  --ssa-color-text-secondary: #9CA5B0;
+  --ssa-color-text-tertiary: #7A8594;
+  --ssa-color-text-inverse: #0D1117;
+  --ssa-color-text-brand: #34D399;
+  --ssa-color-text-link: #6EE7B7;
+  --ssa-color-text-success: #34D399;
+  --ssa-color-text-warning: #FBBF24;
+  --ssa-color-text-error: #F87171;
+
+  --ssa-color-border-default: #2A333D;
+  --ssa-color-border-strong: #3D4753;
+  --ssa-color-border-brand: #34D399;
+
+  --ssa-shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --ssa-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.25);
+  --ssa-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3);
+  --ssa-shadow-float: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+/* ── Typography Classes ── */
+.ssa-display {
+  font-family: var(--ssa-font-family);
+  font-size: var(--ssa-font-size-4xl);
+  font-weight: var(--ssa-font-weight-bold);
+  line-height: var(--ssa-line-height-tight);
+  letter-spacing: -0.02em;
+  color: var(--ssa-color-text-primary);
+}
+
+.ssa-h1 {
+  font-family: var(--ssa-font-family);
+  font-size: var(--ssa-font-size-3xl);
+  font-weight: var(--ssa-font-weight-semibold);
+  line-height: var(--ssa-line-height-tight);
+  letter-spacing: -0.01em;
+  color: var(--ssa-color-text-primary);
+}
+
+.ssa-h2 {
+  font-family: var(--ssa-font-family);
+  font-size: var(--ssa-font-size-2xl);
+  font-weight: var(--ssa-font-weight-semibold);
+  line-height: var(--ssa-line-height-snug);
+  color: var(--ssa-color-text-primary);
+}
+
+.ssa-h3 {
+  font-family: var(--ssa-font-family);
+  font-size: var(--ssa-font-size-xl);
+  font-weight: var(--ssa-font-weight-semibold);
+  line-height: var(--ssa-line-height-snug);
+  color: var(--ssa-color-text-primary);
+}
+
+.ssa-h4 {
+  font-family: var(--ssa-font-family);
+  font-size: var(--ssa-font-size-lg);
+  font-weight: var(--ssa-font-weight-semibold);
+  line-height: var(--ssa-line-height-normal);
+  color: var(--ssa-color-text-primary);
+}
+
+.ssa-body {
+  font-family: var(--ssa-font-family);
+  font-size: var(--ssa-font-size-base);
+  font-weight: var(--ssa-font-weight-normal);
+  line-height: var(--ssa-line-height-normal);
+  color: var(--ssa-color-text-secondary);
+}
+
+.ssa-body-lg {
+  font-family: var(--ssa-font-family);
+  font-size: var(--ssa-font-size-md);
+  font-weight: var(--ssa-font-weight-normal);
+  line-height: var(--ssa-line-height-normal);
+  color: var(--ssa-color-text-secondary);
+}
+
+.ssa-caption {
+  font-family: var(--ssa-font-family);
+  font-size: var(--ssa-font-size-sm);
+  font-weight: var(--ssa-font-weight-normal);
+  line-height: var(--ssa-line-height-normal);
+  color: var(--ssa-color-text-tertiary);
+}
+
+.ssa-overline {
+  font-family: var(--ssa-font-family);
+  font-size: var(--ssa-font-size-xs);
+  font-weight: var(--ssa-font-weight-semibold);
+  line-height: var(--ssa-line-height-normal);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ssa-color-text-tertiary);
+}
+
+.ssa-mono {
+  font-family: var(--ssa-font-family-mono);
+  font-size: var(--ssa-font-size-sm);
+  line-height: var(--ssa-line-height-normal);
+  color: var(--ssa-color-text-primary);
+}
+
+.ssa-price-up {
+  color: var(--ssa-state-success);
+}
+
+.ssa-price-down {
+  color: var(--ssa-state-error);
+}
+</style>
+
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<script src="https://unpkg.com/lucide@1.7.0"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+
+<style type="text/tailwindcss">
+@theme inline {
+  --color-primary: var(--ssa-color-primary);
+  --color-primary-50: var(--ssa-color-primary-50);
+  --color-primary-100: var(--ssa-color-primary-100);
+  --color-primary-200: var(--ssa-color-primary-200);
+  --color-primary-300: var(--ssa-color-primary-300);
+  --color-primary-400: var(--ssa-color-primary-400);
+  --color-primary-500: var(--ssa-color-primary-500);
+  --color-primary-600: var(--ssa-color-primary-600);
+  --color-primary-700: var(--ssa-color-primary-700);
+  --color-primary-800: var(--ssa-color-primary-800);
+  --color-primary-900: var(--ssa-color-primary-900);
+  --color-foreground: var(--ssa-color-text-primary);
+  --color-background: var(--ssa-color-bg-page);
+  --color-card: var(--ssa-color-bg-surface);
+  --color-muted: var(--ssa-color-bg-sunken);
+  --color-muted-foreground: var(--ssa-color-text-tertiary);
+  --color-border: var(--ssa-color-border-default);
+  --color-ring: var(--ssa-color-primary);
+  --color-accent: var(--ssa-color-bg-active);
+  --color-destructive: var(--ssa-state-error);
+  --color-success: var(--ssa-state-success);
+}
+</style>
+
+<style type="text/tailwindcss">
+@layer base {
+  body {
+    margin: 0;
+    padding: 0;
+    background: var(--ssa-color-bg-page);
+    color: var(--ssa-color-text-primary);
+    font-family: var(--ssa-font-family);
+    font-size: var(--ssa-font-size-base);
+    line-height: var(--ssa-line-height-normal);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+</style>
+
+</head>
+<body>
+
+<!-- TradingAgents Project Shell — Inherited from partials/project-shell.html -->
+<style>
+  /* ── Nav item interactive states ── */
+  .ssa-nav-item {
+    display: flex;
+    align-items: center;
+    gap: var(--ssa-space-3);
+    padding: var(--ssa-space-2) var(--ssa-space-4);
+    border-radius: var(--ssa-radius-md);
+    font-size: var(--ssa-font-size-base);
+    color: var(--ssa-color-text-secondary);
+    text-decoration: none;
+    transition: background var(--ssa-transition-fast), color var(--ssa-transition-fast);
+    cursor: pointer;
+    border: none;
+    background: transparent;
+    width: 100%;
+    text-align: left;
+  }
+  .ssa-nav-item:hover {
+    background: var(--ssa-color-bg-hover);
+    color: var(--ssa-color-text-primary);
+  }
+  .ssa-nav-item[data-active="true"] {
+    background: var(--ssa-color-primary);
+    color: var(--ssa-color-text-inverse);
+    font-weight: var(--ssa-font-weight-medium);
+  }
+  .ssa-nav-item[data-active="true"]:hover {
+    background: var(--ssa-color-primary-600);
+    color: var(--ssa-color-text-inverse);
+  }
+
+  /* ── Market pill states ── */
+  .ssa-market-btn {
+    padding: var(--ssa-space-1) var(--ssa-space-3);
+    border-radius: 6px;
+    font-size: var(--ssa-font-size-sm);
+    font-weight: var(--ssa-font-weight-medium);
+    background: transparent;
+    color: var(--ssa-color-text-secondary);
+    border: none;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background var(--ssa-transition-fast), color var(--ssa-transition-fast);
+  }
+  .ssa-market-btn:hover {
+    color: var(--ssa-color-text-primary);
+  }
+  .ssa-market-btn[data-active="true"] {
+    background: var(--ssa-color-primary);
+    color: var(--ssa-color-text-inverse);
+  }
+</style>
+
+<div class="ssa-shell" style="display:flex; min-height:100vh; font-family: var(--ssa-font-family);">
+
+  <!-- ══════════════════════════════════════════════ -->
+  <!-- Sidebar                                        -->
+  <!-- ══════════════════════════════════════════════ -->
+  <aside class="ssa-sidebar" style="width:240px; min-width:240px; background:var(--ssa-color-bg-surface); border-right:1px solid var(--ssa-color-border-default); display:flex; flex-direction:column; height:100vh; position:sticky; top:0; z-index:10;">
+
+    <!-- Brand mark -->
+    <div style="padding:var(--ssa-space-6) var(--ssa-space-6) var(--ssa-space-10); display:flex; align-items:center; gap:var(--ssa-space-3);">
+      <div style="width:32px; height:32px; border-radius:var(--ssa-radius-md); background:var(--ssa-color-primary); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      </div>
+      <span style="font-size:var(--ssa-font-size-lg); font-weight:var(--ssa-font-weight-semibold); color:var(--ssa-color-text-primary); letter-spacing:-0.01em;">TradingAgents</span>
+    </div>
+
+    <!-- Navigation -->
+    <nav style="flex:1; padding:0 var(--ssa-space-3); display:flex; flex-direction:column; gap:2px;">
+
+      <a data-dom-id="nav-dashboard" data-nav-key="dashboard" href="#" class="ssa-nav-item" data-active="true">
+        <i data-lucide="layout-dashboard" style="width:20px; height:20px; flex-shrink:0;"></i>
+        <span>仪表盘</span>
+      </a>
+
+      <a data-dom-id="nav-result" data-nav-key="result" href="#" class="ssa-nav-item" data-active="false">
+        <i data-lucide="bar-chart-3" style="width:20px; height:20px; flex-shrink:0;"></i>
+        <span>分析结果</span>
+      </a>
+
+      <a data-nav-key="history" href="#" class="ssa-nav-item" data-active="false">
+        <i data-lucide="clock" style="width:20px; height:20px; flex-shrink:0;"></i>
+        <span>分析历史</span>
+      </a>
+
+      <!-- Divider -->
+      <div style="height:1px; background:var(--ssa-color-border-default); margin:var(--ssa-space-4) var(--ssa-space-4);"></div>
+
+      <a data-nav-key="settings" href="#" class="ssa-nav-item" data-active="false">
+        <i data-lucide="settings" style="width:20px; height:20px; flex-shrink:0;"></i>
+        <span>系统设置</span>
+      </a>
+
+    </nav>
+
+    <!-- User (bottom) -->
+    <div style="padding:var(--ssa-space-4) var(--ssa-space-6); border-top:1px solid var(--ssa-color-border-default); display:flex; align-items:center; gap:var(--ssa-space-3);">
+      <div style="width:32px; height:32px; border-radius:var(--ssa-radius-full); background:var(--ssa-color-primary-100); color:var(--ssa-color-primary); display:flex; align-items:center; justify-content:center; font-size:var(--ssa-font-size-sm); font-weight:var(--ssa-font-weight-semibold); flex-shrink:0;">A</div>
+      <span style="font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Admin</span>
+    </div>
+
+  </aside>
+
+  <!-- ══════════════════════════════════════════════ -->
+  <!-- Main Wrapper                                    -->
+  <!-- ══════════════════════════════════════════════ -->
+  <div class="ssa-main-wrapper" style="flex:1; display:flex; flex-direction:column; min-width:0;">
+
+    <!-- ── Top Bar ── -->
+    <header class="ssa-topbar" style="height:56px; min-height:56px; background:var(--ssa-color-bg-surface); border-bottom:1px solid var(--ssa-color-border-default); display:flex; align-items:center; justify-content:space-between; padding:0 var(--ssa-space-8); position:sticky; top:0; z-index:10;">
+
+      <!-- Left: page title -->
+      <div data-page-title class="ssa-page-title" style="display:flex; align-items:center; min-width:0;">
+        <h1 class="ssa-h2" style="margin:0; font-size:var(--ssa-font-size-2xl); font-weight:var(--ssa-font-weight-semibold); color:var(--ssa-color-text-primary); white-space:nowrap;">分析仪表盘</h1>
+      </div>
+
+      <!-- Right: controls -->
+      <div style="display:flex; align-items:center; gap:var(--ssa-space-4); flex-shrink:0;">
+
+        <!-- Market selector pill -->
+        <div style="display:inline-flex; background:var(--ssa-color-bg-sunken); border-radius:var(--ssa-radius-md); padding:2px;">
+          <button class="ssa-market-btn" data-active="true">A股</button>
+          <button class="ssa-market-btn" data-active="false">美股</button>
+          <button class="ssa-market-btn" data-active="false">港股</button>
+        </div>
+
+        <!-- Notification bell -->
+        <button style="width:36px; height:36px; border-radius:var(--ssa-radius-md); background:transparent; border:1px solid var(--ssa-color-border-default); display:flex; align-items:center; justify-content:center; cursor:pointer; color:var(--ssa-color-text-secondary); position:relative; transition:background var(--ssa-transition-fast);" onmouseover="this.style.background='var(--ssa-color-bg-hover)'" onmouseout="this.style.background='transparent'">
+          <i data-lucide="bell" style="width:18px; height:18px;"></i>
+          <span style="position:absolute; top:7px; right:7px; width:7px; height:7px; background:var(--ssa-state-error); border-radius:var(--ssa-radius-full);"></span>
+        </button>
+
+        <!-- User dropdown -->
+        <button style="display:flex; align-items:center; gap:var(--ssa-space-2); padding:var(--ssa-space-1) var(--ssa-space-2); border-radius:var(--ssa-radius-md); background:transparent; border:none; cursor:pointer; transition:background var(--ssa-transition-fast);" onmouseover="this.style.background='var(--ssa-color-bg-hover)'" onmouseout="this.style.background='transparent'">
+          <div style="width:28px; height:28px; border-radius:var(--ssa-radius-full); background:var(--ssa-color-primary); color:var(--ssa-color-text-inverse); display:flex; align-items:center; justify-content:center; font-size:var(--ssa-font-size-xs); font-weight:var(--ssa-font-weight-semibold); flex-shrink:0;">A</div>
+          <i data-lucide="chevron-down" style="width:14px; height:14px; color:var(--ssa-color-text-tertiary);"></i>
+        </button>
+
+      </div>
+    </header>
+
+    <!-- ══════════════════════════════════════════════ -->
+    <!-- Dashboard Content                              -->
+    <!-- ══════════════════════════════════════════════ -->
+    <main class="ssa-content" style="flex:1; padding:var(--ssa-space-6); overflow-y:auto;">
+
+      <!-- ══════════════════════════════════════ -->
+      <!-- Section 1: Stock Search Strip            -->
+      <!-- ══════════════════════════════════════ -->
+      <section style="margin-bottom:var(--ssa-space-6);">
+        <!-- Search input row -->
+        <div style="display:flex; align-items:center; gap:var(--ssa-space-3); margin-bottom:var(--ssa-space-3);">
+          <!-- Search input with emerald left-border accent -->
+          <div style="flex:1; position:relative; display:flex; align-items:center;">
+            <div style="position:absolute; left:0; top:0; bottom:0; width:3px; border-radius:var(--ssa-radius-md) 0 0 var(--ssa-radius-md); background:var(--ssa-color-primary);"></div>
+            <i data-lucide="search" style="position:absolute; left:14px; width:18px; height:18px; color:var(--ssa-color-text-tertiary); pointer-events:none;"></i>
+            <input
+              type="text"
+              placeholder="搜索股票代码或名称，如 000001、AAPL"
+              style="width:100%; height:44px; padding:0 var(--ssa-space-4) 0 40px; border:1px solid var(--ssa-color-border-default); border-radius:var(--ssa-radius-md); background:var(--ssa-color-bg-surface); color:var(--ssa-color-text-primary); font-family:var(--ssa-font-family); font-size:var(--ssa-font-size-base); outline:none; transition:border-color var(--ssa-transition-fast);"
+              onfocus="this.style.borderColor='var(--ssa-color-primary)'"
+              onblur="this.style.borderColor='var(--ssa-color-border-default)'"
+            >
+          </div>
+          <!-- Start Analysis CTA -->
+          <a data-dom-id="cta-analyze" href="#" style="display:inline-flex; align-items:center; gap:var(--ssa-space-2); height:44px; padding:0 var(--ssa-space-5); border-radius:var(--ssa-radius-md); background:var(--ssa-color-primary); color:var(--ssa-color-text-inverse); font-size:var(--ssa-font-size-base); font-weight:var(--ssa-font-weight-semibold); text-decoration:none; white-space:nowrap; transition:background var(--ssa-transition-fast); flex-shrink:0;" onmouseover="this.style.background='var(--ssa-color-primary-600)'" onmouseout="this.style.background='var(--ssa-color-primary)'">
+            <i data-lucide="zap" style="width:16px; height:16px;"></i>
+            <span>开始分析</span>
+          </a>
+        </div>
+        <!-- Quick-access popular stocks -->
+        <div style="display:flex; align-items:center; gap:var(--ssa-space-2); padding-left:var(--ssa-space-1);">
+          <span style="font-size:var(--ssa-font-size-xs); color:var(--ssa-color-text-tertiary); white-space:nowrap;">热门:</span>
+          <button style="padding:var(--ssa-space-1) var(--ssa-space-3); border-radius:var(--ssa-radius-md); background:var(--ssa-color-bg-surface); border:1px solid var(--ssa-color-border-default); font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-secondary); cursor:pointer; white-space:nowrap; transition:border-color var(--ssa-transition-fast), background var(--ssa-transition-fast), transform var(--ssa-transition-fast); font-family:var(--ssa-font-family);" onmouseover="this.style.borderColor='var(--ssa-color-primary)';this.style.background='var(--ssa-color-primary-50)';this.style.transform='translateY(-1px)'" onmouseout="this.style.borderColor='var(--ssa-color-border-default)';this.style.background='var(--ssa-color-bg-surface)';this.style.transform='translateY(0)'">贵州茅台</button>
+          <button style="padding:var(--ssa-space-1) var(--ssa-space-3); border-radius:var(--ssa-radius-md); background:var(--ssa-color-bg-surface); border:1px solid var(--ssa-color-border-default); font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-secondary); cursor:pointer; white-space:nowrap; transition:border-color var(--ssa-transition-fast), background var(--ssa-transition-fast), transform var(--ssa-transition-fast); font-family:var(--ssa-font-family);" onmouseover="this.style.borderColor='var(--ssa-color-primary)';this.style.background='var(--ssa-color-primary-50)';this.style.transform='translateY(-1px)'" onmouseout="this.style.borderColor='var(--ssa-color-border-default)';this.style.background='var(--ssa-color-bg-surface)';this.style.transform='translateY(0)'">宁德时代</button>
+          <button style="padding:var(--ssa-space-1) var(--ssa-space-3); border-radius:var(--ssa-radius-md); background:var(--ssa-color-bg-surface); border:1px solid var(--ssa-color-border-default); font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-secondary); cursor:pointer; white-space:nowrap; transition:border-color var(--ssa-transition-fast), background var(--ssa-transition-fast), transform var(--ssa-transition-fast); font-family:var(--ssa-font-family);" onmouseover="this.style.borderColor='var(--ssa-color-primary)';this.style.background='var(--ssa-color-primary-50)';this.style.transform='translateY(-1px)'" onmouseout="this.style.borderColor='var(--ssa-color-border-default)';this.style.background='var(--ssa-color-bg-surface)';this.style.transform='translateY(0)'">比亚迪</button>
+          <button style="padding:var(--ssa-space-1) var(--ssa-space-3); border-radius:var(--ssa-radius-md); background:var(--ssa-color-bg-surface); border:1px solid var(--ssa-color-border-default); font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-secondary); cursor:pointer; white-space:nowrap; transition:border-color var(--ssa-transition-fast), background var(--ssa-transition-fast), transform var(--ssa-transition-fast); font-family:var(--ssa-font-family);" onmouseover="this.style.borderColor='var(--ssa-color-primary)';this.style.background='var(--ssa-color-primary-50)';this.style.transform='translateY(-1px)'" onmouseout="this.style.borderColor='var(--ssa-color-border-default)';this.style.background='var(--ssa-color-bg-surface)';this.style.transform='translateY(0)'">中国平安</button>
+        </div>
+      </section>
+
+      <!-- ══════════════════════════════════════ -->
+      <!-- Section 2: KPI Cards Row (4 columns)    -->
+      <!-- ══════════════════════════════════════ -->
+      <section style="display:grid; grid-template-columns:repeat(4, 1fr); gap:var(--ssa-space-5); margin-bottom:var(--ssa-space-6);">
+
+        <!-- KPI Card 1: 今日分析数 -->
+        <div style="background:var(--ssa-color-bg-surface); border:1px solid var(--ssa-color-border-default); border-radius:var(--ssa-radius-md); padding:var(--ssa-space-5);">
+          <div class="ssa-overline" style="margin-bottom:var(--ssa-space-2);">今日分析数</div>
+          <div style="display:flex; align-items:baseline; gap:var(--ssa-space-2);">
+            <span style="font-size:var(--ssa-font-size-xl); font-weight:var(--ssa-font-weight-semibold); color:var(--ssa-color-text-primary); font-variant-numeric:tabular-nums;">12</span>
+            <span style="display:inline-flex; align-items:center; gap:2px; font-size:var(--ssa-font-size-xs); color:var(--ssa-color-text-success); font-weight:var(--ssa-font-weight-medium);">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
+              23%
+            </span>
+          </div>
+          <div class="ssa-caption" style="margin-top:var(--ssa-space-1);">较昨日增长</div>
+        </div>
+
+        <!-- KPI Card 2: 分析成功率 -->
+        <div style="background:var(--ssa-color-bg-surface); border:1px solid var(--ssa-color-border-default); border-radius:var(--ssa-radius-md); padding:var(--ssa-space-5);">
+          <div class="ssa-overline" style="margin-bottom:var(--ssa-space-2);">分析成功率</div>
+          <div style="display:flex; align-items:center; gap:var(--ssa-space-3);">
+            <svg width="48" height="48" viewBox="0 0 48 48">
+              <circle cx="24" cy="24" r="18" fill="none" stroke="var(--ssa-color-border-default)" stroke-width="4"/>
+              <circle cx="24" cy="24" r="18" fill="none" stroke="var(--ssa-color-primary)" stroke-width="4" stroke-dasharray="109.56 113.1" stroke-dashoffset="0" stroke-linecap="round" transform="rotate(-90 24 24)"/>
+              <text x="24" y="26" text-anchor="middle" font-size="12" font-weight="600" fill="var(--ssa-color-text-primary)" font-family="var(--ssa-font-family-mono)">96.8%</text>
+            </svg>
+            <div class="ssa-caption">全部通过</div>
+          </div>
+        </div>
+
+        <!-- KPI Card 3: 本周热门 -->
+        <div style="background:var(--ssa-color-bg-surface); border:1px solid var(--ssa-color-border-default); border-radius:var(--ssa-radius-md); padding:var(--ssa-space-5);">
+          <div class="ssa-overline" style="margin-bottom:var(--ssa-space-2);">本周热门</div>
+          <div style="display:flex; align-items:baseline; gap:var(--ssa-space-2);">
+            <span style="font-family:var(--ssa-font-family-mono); font-size:var(--ssa-font-size-xl); font-weight:var(--ssa-font-weight-semibold); color:var(--ssa-color-text-primary);">000001</span>
+            <span style="font-size:var(--ssa-font-size-md); color:var(--ssa-color-text-secondary);">平安银行</span>
+          </div>
+          <div class="ssa-caption" style="margin-top:var(--ssa-space-1);">分析次数最多</div>
+        </div>
+
+        <!-- KPI Card 4: 数据源状态 -->
+        <div style="background:var(--ssa-color-bg-surface); border:1px solid var(--ssa-color-border-default); border-radius:var(--ssa-radius-md); padding:var(--ssa-space-5);">
+          <div class="ssa-overline" style="margin-bottom:var(--ssa-space-2);">数据源状态</div>
+          <div style="display:flex; align-items:center; gap:var(--ssa-space-2);">
+            <span style="font-size:var(--ssa-font-size-xl); font-weight:var(--ssa-font-weight-semibold); color:var(--ssa-color-text-primary); font-variant-numeric:tabular-nums;">6/6</span>
+            <span style="font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-success); font-weight:var(--ssa-font-weight-medium);">在线</span>
+          </div>
+          <div style="display:flex; gap:var(--ssa-space-1); margin-top:var(--ssa-space-2);">
+            <span style="width:8px; height:8px; border-radius:var(--ssa-radius-full); background:var(--ssa-state-success); display:inline-block;"></span>
+            <span style="width:8px; height:8px; border-radius:var(--ssa-radius-full); background:var(--ssa-state-success); display:inline-block;"></span>
+            <span style="width:8px; height:8px; border-radius:var(--ssa-radius-full); background:var(--ssa-state-success); display:inline-block;"></span>
+            <span style="width:8px; height:8px; border-radius:var(--ssa-radius-full); background:var(--ssa-state-success); display:inline-block;"></span>
+            <span style="width:8px; height:8px; border-radius:var(--ssa-radius-full); background:var(--ssa-state-success); display:inline-block;"></span>
+            <span style="width:8px; height:8px; border-radius:var(--ssa-radius-full); background:var(--ssa-state-success); display:inline-block;"></span>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ══════════════════════════════════════ -->
+      <!-- Section 3: Main Content Grid (60/40)  -->
+      <!-- ══════════════════════════════════════ -->
+      <section style="display:grid; grid-template-columns:3fr 2fr; gap:var(--ssa-space-6); margin-bottom:var(--ssa-space-6);">
+
+        <!-- Left Column (60%): Recent Analysis Table -->
+        <div style="background:var(--ssa-color-bg-surface); border:1px solid var(--ssa-color-border-default); border-radius:var(--ssa-radius-md); overflow:hidden;">
+          <div style="padding:var(--ssa-space-4) var(--ssa-space-5); border-bottom:1px solid var(--ssa-color-border-default); display:flex; align-items:center; justify-content:space-between;">
+            <h3 style="margin:0; font-size:var(--ssa-font-size-xl); font-weight:var(--ssa-font-weight-semibold); color:var(--ssa-color-text-primary);">近期分析</h3>
+            <a href="#" style="font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-link); text-decoration:none; white-space:nowrap; transition:opacity var(--ssa-transition-fast);" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">查看全部</a>
+          </div>
+          <div style="overflow-x:auto;">
+            <table style="width:100%; border-collapse:collapse; table-layout:fixed;">
+              <thead>
+                <tr style="background:var(--ssa-color-bg-sunken);">
+                  <th style="padding:var(--ssa-space-3) var(--ssa-space-4); text-align:left; font-size:var(--ssa-font-size-xs); font-weight:var(--ssa-font-weight-semibold); color:var(--ssa-color-text-tertiary); text-transform:uppercase; letter-spacing:0.06em; white-space:nowrap; width:28%;">股票代码/名称</th>
+                  <th style="padding:var(--ssa-space-3) var(--ssa-space-3); text-align:left; font-size:var(--ssa-font-size-xs); font-weight:var(--ssa-font-weight-semibold); color:var(--ssa-color-text-tertiary); text-transform:uppercase; letter-spacing:0.06em; white-space:nowrap; width:16%;">分析类型</th>
+                  <th style="padding:var(--ssa-space-3) var(--ssa-space-3); text-align:right; font-size:var(--ssa-font-size-xs); font-weight:var(--ssa-font-weight-semibold); color:var(--ssa-color-text-tertiary); text-transform:uppercase; letter-spacing:0.06em; white-space:nowrap; width:14%;">综合评分</th>
+                  <th style="padding:var(--ssa-space-3) var(--ssa-space-3); text-align:center; font-size:var(--ssa-font-size-xs); font-weight:var(--ssa-font-weight-semibold); color:var(--ssa-color-text-tertiary); text-transform:uppercase; letter-spacing:0.06em; white-space:nowrap; width:14%;">推荐操作</th>
+                  <th style="padding:var(--ssa-space-3) var(--ssa-space-3); text-align:right; font-size:var(--ssa-font-size-xs); font-weight:var(--ssa-font-weight-semibold); color:var(--ssa-color-text-tertiary); text-transform:uppercase; letter-spacing:0.06em; white-space:nowrap; width:18%;">分析时间</th>
+                  <th style="padding:var(--ssa-space-3) var(--ssa-space-4); text-align:center; font-size:var(--ssa-font-size-xs); font-weight:var(--ssa-font-weight-semibold); color:var(--ssa-color-text-tertiary); text-transform:uppercase; letter-spacing:0.06em; white-space:nowrap; width:10%;">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <!-- Row 1 -->
+                <tr style="border-top:1px solid var(--ssa-color-border-default); transition:background var(--ssa-transition-fast);" onmouseover="this.style.background='var(--ssa-color-bg-hover)'" onmouseout="this.style.background='transparent'">
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-4); display:flex; align-items:center; gap:var(--ssa-space-2);">
+                    <span style="font-family:var(--ssa-font-family-mono); font-size:var(--ssa-font-size-sm); font-weight:var(--ssa-font-weight-medium); color:var(--ssa-color-text-primary);">600519</span>
+                    <span style="font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">贵州茅台</span>
+                  </td>
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-3);"><span style="font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-secondary);">基本面</span></td>
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-3); text-align:right;"><span style="display:inline-flex; align-items:center; justify-content:center; min-width:40px; padding:2px var(--ssa-space-2); border-radius:var(--ssa-radius-sm); background:var(--ssa-state-success-light); color:var(--ssa-state-success); font-family:var(--ssa-font-family-mono); font-size:var(--ssa-font-size-sm); font-weight:var(--ssa-font-weight-semibold);">92</span></td>
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-3); text-align:center;"><span style="font-size:var(--ssa-font-size-sm); color:var(--ssa-state-success); font-weight:var(--ssa-font-weight-medium);">买入</span></td>
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-3); text-align:right; font-family:var(--ssa-font-family-mono); font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-tertiary);">10:32</td>
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-4); text-align:center;"><a data-dom-id="nav-result" href="#" style="font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-link); text-decoration:none; transition:opacity var(--ssa-transition-fast);" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">查看</a></td>
+                </tr>
+                <!-- Row 2 -->
+                <tr style="border-top:1px solid var(--ssa-color-border-default); transition:background var(--ssa-transition-fast);" onmouseover="this.style.background='var(--ssa-color-bg-hover)'" onmouseout="this.style.background='transparent'">
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-4); display:flex; align-items:center; gap:var(--ssa-space-2);">
+                    <span style="font-family:var(--ssa-font-family-mono); font-size:var(--ssa-font-size-sm); font-weight:var(--ssa-font-weight-medium); color:var(--ssa-color-text-primary);">300750</span>
+                    <span style="font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">宁德时代</span>
+                  </td>
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-3);"><span style="font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-secondary);">技术面</span></td>
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-3); text-align:right;"><span style="display:inline-flex; align-items:center; justify-content:center; min-width:40px; padding:2px var(--ssa-space-2); border-radius:var(--ssa-radius-sm); background:var(--ssa-state-success-light); color:var(--ssa-state-success); font-family:var(--ssa-font-family-mono); font-size:var(--ssa-font-size-sm); font-weight:var(--ssa-font-weight-semibold);">87</span></td>
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-3); text-align:center;"><span style="font-size:var(--ssa-font-size-sm); color:var(--ssa-state-success); font-weight:var(--ssa-font-weight-medium);">买入</span></td>
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-3); text-align:right; font-family:var(--ssa-font-family-mono); font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-tertiary);">10:15</td>
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-4); text-align:center;"><a data-dom-id="nav-result" href="#" style="font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-link); text-decoration:none; transition:opacity var(--ssa-transition-fast);" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">查看</a></td>
+                </tr>
+                <!-- Row 3 -->
+                <tr style="border-top:1px solid var(--ssa-color-border-default); transition:background var(--ssa-transition-fast);" onmouseover="this.style.background='var(--ssa-color-bg-hover)'" onmouseout="this.style.background='transparent'">
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-4); display:flex; align-items:center; gap:var(--ssa-space-2);">
+                    <span style="font-family:var(--ssa-font-family-mono); font-size:var(--ssa-font-size-sm); font-weight:var(--ssa-font-weight-medium); color:var(--ssa-color-text-primary);">002594</span>
+                    <span style="font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">比亚迪</span>
+                  </td>
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-3);"><span style="font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-secondary);">综合分析</span></td>
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-3); text-align:right;"><span style="display:inline-flex; align-items:center; justify-content:center; min-width:40px; padding:2px var(--ssa-space-2); border-radius:var(--ssa-radius-sm); background:var(--ssa-state-warning-light); color:var(--ssa-state-warning); font-family:var(--ssa-font-family-mono); font-size:var(--ssa-font-size-sm); font-weight:var(--ssa-font-weight-semibold);">74</span></td>
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-3); text-align:center;"><span style="font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-warning); font-weight:var(--ssa-font-weight-medium);">持有</span></td>
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-3); text-align:right; font-family:var(--ssa-font-family-mono); font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-tertiary);">09:58</td>
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-4); text-align:center;"><a data-dom-id="nav-result" href="#" style="font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-link); text-decoration:none; transition:opacity var(--ssa-transition-fast);" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">查看</a></td>
+                </tr>
+                <!-- Row 4 -->
+                <tr style="border-top:1px solid var(--ssa-color-border-default); transition:background var(--ssa-transition-fast);" onmouseover="this.style.background='var(--ssa-color-bg-hover)'" onmouseout="this.style.background='transparent'">
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-4); display:flex; align-items:center; gap:var(--ssa-space-2);">
+                    <span style="font-family:var(--ssa-font-family-mono); font-size:var(--ssa-font-size-sm); font-weight:var(--ssa-font-weight-medium); color:var(--ssa-color-text-primary);">601318</span>
+                    <span style="font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">中国平安</span>
+                  </td>
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-3);"><span style="font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-secondary);">基本面</span></td>
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-3); text-align:right;"><span style="display:inline-flex; align-items:center; justify-content:center; min-width:40px; padding:2px var(--ssa-space-2); border-radius:var(--ssa-radius-sm); background:var(--ssa-state-success-light); color:var(--ssa-state-success); font-family:var(--ssa-font-family-mono); font-size:var(--ssa-font-size-sm); font-weight:var(--ssa-font-weight-semibold);">81</span></td>
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-3); text-align:center;"><span style="font-size:var(--ssa-font-size-sm); color:var(--ssa-state-success); font-weight:var(--ssa-font-weight-medium);">买入</span></td>
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-3); text-align:right; font-family:var(--ssa-font-family-mono); font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-tertiary);">09:42</td>
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-4); text-align:center;"><a data-dom-id="nav-result" href="#" style="font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-link); text-decoration:none; transition:opacity var(--ssa-transition-fast);" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">查看</a></td>
+                </tr>
+                <!-- Row 5 -->
+                <tr style="border-top:1px solid var(--ssa-color-border-default); transition:background var(--ssa-transition-fast);" onmouseover="this.style.background='var(--ssa-color-bg-hover)'" onmouseout="this.style.background='transparent'">
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-4); display:flex; align-items:center; gap:var(--ssa-space-2);">
+                    <span style="font-family:var(--ssa-font-family-mono); font-size:var(--ssa-font-size-sm); font-weight:var(--ssa-font-weight-medium); color:var(--ssa-color-text-primary);">000858</span>
+                    <span style="font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">五粮液</span>
+                  </td>
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-3);"><span style="font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-secondary);">技术面</span></td>
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-3); text-align:right;"><span style="display:inline-flex; align-items:center; justify-content:center; min-width:40px; padding:2px var(--ssa-space-2); border-radius:var(--ssa-radius-sm); background:var(--ssa-state-error-light); color:var(--ssa-state-error); font-family:var(--ssa-font-family-mono); font-size:var(--ssa-font-size-sm); font-weight:var(--ssa-font-weight-semibold);">52</span></td>
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-3); text-align:center;"><span style="font-size:var(--ssa-font-size-sm); color:var(--ssa-state-error); font-weight:var(--ssa-font-weight-medium);">卖出</span></td>
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-3); text-align:right; font-family:var(--ssa-font-family-mono); font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-tertiary);">09:30</td>
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-4); text-align:center;"><a data-dom-id="nav-result" href="#" style="font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-link); text-decoration:none; transition:opacity var(--ssa-transition-fast);" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">查看</a></td>
+                </tr>
+                <!-- Row 6 -->
+                <tr style="border-top:1px solid var(--ssa-color-border-default); transition:background var(--ssa-transition-fast);" onmouseover="this.style.background='var(--ssa-color-bg-hover)'" onmouseout="this.style.background='transparent'">
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-4); display:flex; align-items:center; gap:var(--ssa-space-2);">
+                    <span style="font-family:var(--ssa-font-family-mono); font-size:var(--ssa-font-size-sm); font-weight:var(--ssa-font-weight-medium); color:var(--ssa-color-text-primary);">601012</span>
+                    <span style="font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">隆基绿能</span>
+                  </td>
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-3);"><span style="font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-secondary);">综合分析</span></td>
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-3); text-align:right;"><span style="display:inline-flex; align-items:center; justify-content:center; min-width:40px; padding:2px var(--ssa-space-2); border-radius:var(--ssa-radius-sm); background:var(--ssa-state-warning-light); color:var(--ssa-state-warning); font-family:var(--ssa-font-family-mono); font-size:var(--ssa-font-size-sm); font-weight:var(--ssa-font-weight-semibold);">68</span></td>
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-3); text-align:center;"><span style="font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-warning); font-weight:var(--ssa-font-weight-medium);">持有</span></td>
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-3); text-align:right; font-family:var(--ssa-font-family-mono); font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-tertiary);">09:18</td>
+                  <td style="padding:var(--ssa-space-3) var(--ssa-space-4); text-align:center;"><a data-dom-id="nav-result" href="#" style="font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-link); text-decoration:none; transition:opacity var(--ssa-transition-fast);" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">查看</a></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Right Column (40%): Market Overview -->
+        <div style="display:flex; flex-direction:column; gap:var(--ssa-space-6);">
+          <!-- Market Index Chart -->
+          <div style="background:var(--ssa-color-bg-surface); border:1px solid var(--ssa-color-border-default); border-radius:var(--ssa-radius-md); overflow:hidden; flex:1;">
+            <div style="padding:var(--ssa-space-4) var(--ssa-space-5); border-bottom:1px solid var(--ssa-color-border-default);">
+              <h3 style="margin:0; font-size:var(--ssa-font-size-xl); font-weight:var(--ssa-font-weight-semibold); color:var(--ssa-color-text-primary);">市场概况</h3>
+            </div>
+            <div style="padding:var(--ssa-space-4) var(--ssa-space-5);">
+              <div style="position:relative; height:180px;">
+                <canvas id="marketChart"></canvas>
+              </div>
+            </div>
+            <!-- Market Index Stats -->
+            <div style="padding:0 var(--ssa-space-5) var(--ssa-space-4); display:flex; flex-direction:column; gap:var(--ssa-space-3); border-top:1px solid var(--ssa-color-border-default); padding-top:var(--ssa-space-4);">
+              <!-- 上证指数 -->
+              <div style="display:flex; align-items:center; justify-content:space-between;">
+                <span style="font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-secondary);">上证指数</span>
+                <div style="display:flex; align-items:baseline; gap:var(--ssa-space-2);">
+                  <span style="font-family:var(--ssa-font-family-mono); font-size:var(--ssa-font-size-sm); font-weight:var(--ssa-font-weight-medium); color:var(--ssa-color-text-primary);">3,156.14</span>
+                  <span style="font-family:var(--ssa-font-family-mono); font-size:var(--ssa-font-size-xs); color:var(--ssa-state-success);">+0.82%</span>
+                </div>
+              </div>
+              <!-- 深证成指 -->
+              <div style="display:flex; align-items:center; justify-content:space-between;">
+                <span style="font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-secondary);">深证成指</span>
+                <div style="display:flex; align-items:baseline; gap:var(--ssa-space-2);">
+                  <span style="font-family:var(--ssa-font-family-mono); font-size:var(--ssa-font-size-sm); font-weight:var(--ssa-font-weight-medium); color:var(--ssa-color-text-primary);">10,234.56</span>
+                  <span style="font-family:var(--ssa-font-family-mono); font-size:var(--ssa-font-size-xs); color:var(--ssa-state-error);">-0.34%</span>
+                </div>
+              </div>
+              <!-- 创业板指 -->
+              <div style="display:flex; align-items:center; justify-content:space-between;">
+                <span style="font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-secondary);">创业板指</span>
+                <div style="display:flex; align-items:baseline; gap:var(--ssa-space-2);">
+                  <span style="font-family:var(--ssa-font-family-mono); font-size:var(--ssa-font-size-sm); font-weight:var(--ssa-font-weight-medium); color:var(--ssa-color-text-primary);">2,056.78</span>
+                  <span style="font-family:var(--ssa-font-family-mono); font-size:var(--ssa-font-size-xs); color:var(--ssa-state-success);">+1.12%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ══════════════════════════════════════ -->
+      <!-- Section 4: Bottom Row (3 columns)      -->
+      <!-- ══════════════════════════════════════ -->
+      <section style="display:grid; grid-template-columns:repeat(3, 1fr); gap:var(--ssa-space-6);">
+
+        <!-- Bottom Card 1: Analysis Type Distribution (Donut) -->
+        <div style="background:var(--ssa-color-bg-surface); border:1px solid var(--ssa-color-border-default); border-radius:var(--ssa-radius-md); overflow:hidden;">
+          <div style="padding:var(--ssa-space-4) var(--ssa-space-5); border-bottom:1px solid var(--ssa-color-border-default);">
+            <h3 style="margin:0; font-size:var(--ssa-font-size-lg); font-weight:var(--ssa-font-weight-semibold); color:var(--ssa-color-text-primary);">分析类型分布</h3>
+          </div>
+          <div style="padding:var(--ssa-space-4) var(--ssa-space-5); display:flex; align-items:center; gap:var(--ssa-space-4);">
+            <div style="width:140px; height:140px; flex-shrink:0; position:relative;">
+              <canvas id="donutChart"></canvas>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:var(--ssa-space-2);">
+              <div style="display:flex; align-items:center; gap:var(--ssa-space-2);">
+                <span style="width:8px; height:8px; border-radius:var(--ssa-radius-sm); background:var(--ssa-color-chart-1); flex-shrink:0;"></span>
+                <span style="font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-secondary);">基本面</span>
+                <span style="font-family:var(--ssa-font-family-mono); font-size:var(--ssa-font-size-xs); color:var(--ssa-color-text-tertiary); margin-left:auto;">42%</span>
+              </div>
+              <div style="display:flex; align-items:center; gap:var(--ssa-space-2);">
+                <span style="width:8px; height:8px; border-radius:var(--ssa-radius-sm); background:var(--ssa-color-chart-2); flex-shrink:0;"></span>
+                <span style="font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-secondary);">技术面</span>
+                <span style="font-family:var(--ssa-font-family-mono); font-size:var(--ssa-font-size-xs); color:var(--ssa-color-text-tertiary); margin-left:auto;">31%</span>
+              </div>
+              <div style="display:flex; align-items:center; gap:var(--ssa-space-2);">
+                <span style="width:8px; height:8px; border-radius:var(--ssa-radius-sm); background:var(--ssa-color-chart-3); flex-shrink:0;"></span>
+                <span style="font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-secondary);">综合分析</span>
+                <span style="font-family:var(--ssa-font-family-mono); font-size:var(--ssa-font-size-xs); color:var(--ssa-color-text-tertiary); margin-left:auto;">27%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Bottom Card 2: Hot Industries (Ranked List) -->
+        <div style="background:var(--ssa-color-bg-surface); border:1px solid var(--ssa-color-border-default); border-radius:var(--ssa-radius-md); overflow:hidden;">
+          <div style="padding:var(--ssa-space-4) var(--ssa-space-5); border-bottom:1px solid var(--ssa-color-border-default);">
+            <h3 style="margin:0; font-size:var(--ssa-font-size-lg); font-weight:var(--ssa-font-weight-semibold); color:var(--ssa-color-text-primary);">热门行业</h3>
+          </div>
+          <div style="padding:var(--ssa-space-4) var(--ssa-space-5); display:flex; flex-direction:column; gap:var(--ssa-space-3);">
+            <!-- Industry bars -->
+            <div>
+              <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
+                <span style="font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-secondary);">新能源</span>
+                <span style="font-family:var(--ssa-font-family-mono); font-size:var(--ssa-font-size-xs); color:var(--ssa-color-text-tertiary);">28次</span>
+              </div>
+              <div style="height:6px; background:var(--ssa-color-bg-sunken); border-radius:3px; overflow:hidden;">
+                <div style="height:100%; width:92%; background:var(--ssa-color-chart-1); border-radius:3px;"></div>
+              </div>
+            </div>
+            <div>
+              <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
+                <span style="font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-secondary);">白酒</span>
+                <span style="font-family:var(--ssa-font-family-mono); font-size:var(--ssa-font-size-xs); color:var(--ssa-color-text-tertiary);">22次</span>
+              </div>
+              <div style="height:6px; background:var(--ssa-color-bg-sunken); border-radius:3px; overflow:hidden;">
+                <div style="height:100%; width:73%; background:var(--ssa-color-chart-1); opacity:0.7; border-radius:3px;"></div>
+              </div>
+            </div>
+            <div>
+              <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
+                <span style="font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-secondary);">金融</span>
+                <span style="font-family:var(--ssa-font-family-mono); font-size:var(--ssa-font-size-xs); color:var(--ssa-color-text-tertiary);">18次</span>
+              </div>
+              <div style="height:6px; background:var(--ssa-color-bg-sunken); border-radius:3px; overflow:hidden;">
+                <div style="height:100%; width:60%; background:var(--ssa-color-chart-1); opacity:0.5; border-radius:3px;"></div>
+              </div>
+            </div>
+            <div>
+              <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
+                <span style="font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-secondary);">半导体</span>
+                <span style="font-family:var(--ssa-font-family-mono); font-size:var(--ssa-font-size-xs); color:var(--ssa-color-text-tertiary);">15次</span>
+              </div>
+              <div style="height:6px; background:var(--ssa-color-bg-sunken); border-radius:3px; overflow:hidden;">
+                <div style="height:100%; width:50%; background:var(--ssa-color-chart-1); opacity:0.35; border-radius:3px;"></div>
+              </div>
+            </div>
+            <div>
+              <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
+                <span style="font-size:var(--ssa-font-size-sm); color:var(--ssa-color-text-secondary);">医药</span>
+                <span style="font-family:var(--ssa-font-family-mono); font-size:var(--ssa-font-size-xs); color:var(--ssa-color-text-tertiary);">12次</span>
+              </div>
+              <div style="height:6px; background:var(--ssa-color-bg-sunken); border-radius:3px; overflow:hidden;">
+                <div style="height:100%; width:40%; background:var(--ssa-color-chart-1); opacity:0.25; border-radius:3px;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Bottom Card 3: Token Usage (Line Chart) -->
+        <div style="background:var(--ssa-color-bg-surface); border:1px solid var(--ssa-color-border-default); border-radius:var(--ssa-radius-md); overflow:hidden;">
+          <div style="padding:var(--ssa-space-4) var(--ssa-space-5); border-bottom:1px solid var(--ssa-color-border-default); display:flex; align-items:center; justify-content:space-between;">
+            <h3 style="margin:0; font-size:var(--ssa-font-size-lg); font-weight:var(--ssa-font-weight-semibold); color:var(--ssa-color-text-primary);">Token用量</h3>
+            <span class="ssa-caption">本周</span>
+          </div>
+          <div style="padding:var(--ssa-space-4) var(--ssa-space-5);">
+            <div style="display:flex; align-items:baseline; gap:var(--ssa-space-2); margin-bottom:var(--ssa-space-4);">
+              <span style="font-family:var(--ssa-font-family-mono); font-size:var(--ssa-font-size-xl); font-weight:var(--ssa-font-weight-semibold); color:var(--ssa-color-text-primary);">48,320</span>
+              <span style="font-size:var(--ssa-font-size-xs); color:var(--ssa-color-text-tertiary);">tokens</span>
+            </div>
+            <div style="position:relative; height:100px;">
+              <canvas id="tokenChart"></canvas>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+    </main>
+
+  </div>
+
+</div>
+
+<!-- Chart.js Initialization -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  // Common chart defaults
+  const fontFamily = "'Inter', 'Noto Sans SC', sans-serif";
+  const monoFont = "'JetBrains Mono', monospace";
+  const primaryColor = '#0D9373';
+  const gridColor = '#E4E8EC';
+  const textColor = '#9CA5B0';
+
+  Chart.defaults.font.family = fontFamily;
+  Chart.defaults.font.size = 11;
+
+  // ── Market Area Chart (30 days) ──
+  const marketCtx = document.getElementById('marketChart');
+  if (marketCtx) {
+    const labels = [];
+    const data = [];
+    const base = 3100;
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      labels.push((d.getMonth() + 1) + '/' + d.getDate());
+      data.push(base + Math.sin(i * 0.3) * 40 + Math.cos(i * 0.15) * 20 + (Math.random() - 0.5) * 15);
+    }
+    new Chart(marketCtx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [{
+          data: data,
+          borderColor: primaryColor,
+          borderWidth: 1.5,
+          backgroundColor: 'rgba(13, 147, 115, 0.08)',
+          fill: true,
+          tension: 0.4,
+          pointRadius: 0,
+          pointHoverRadius: 4,
+          pointHoverBackgroundColor: primaryColor,
+          pointHoverBorderColor: '#fff',
+          pointHoverBorderWidth: 2
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: '#141B24',
+            titleFont: { family: fontFamily, size: 11 },
+            bodyFont: { family: monoFont, size: 12 },
+            padding: 8,
+            cornerRadius: 6,
+            displayColors: false,
+            callbacks: {
+              label: function(ctx) { return ctx.parsed.y.toFixed(2); }
+            }
+          }
+        },
+        scales: {
+          x: {
+            display: true,
+            grid: { display: false },
+            ticks: {
+              color: textColor,
+              font: { size: 10 },
+              maxTicksLimit: 6,
+              maxRotation: 0
+            },
+            border: { display: false }
+          },
+          y: {
+            display: true,
+            grid: { color: gridColor, lineWidth: 0.5 },
+            ticks: {
+              color: textColor,
+              font: { size: 10, family: monoFont },
+              maxTicksLimit: 5,
+              maxRotation: 0
+            },
+            border: { display: false }
+          }
+        },
+        interaction: {
+          intersect: false,
+          mode: 'index'
+        }
+      }
+    });
+  }
+
+  // ── Donut Chart ──
+  const donutCtx = document.getElementById('donutChart');
+  if (donutCtx) {
+    new Chart(donutCtx, {
+      type: 'doughnut',
+      data: {
+        labels: ['基本面', '技术面', '综合分析'],
+        datasets: [{
+          data: [42, 31, 27],
+          backgroundColor: ['#0D9373', '#2563EB', '#D97706'],
+          borderColor: '#FFFFFF',
+          borderWidth: 2,
+          hoverOffset: 4
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        cutout: '68%',
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: '#141B24',
+            titleFont: { family: fontFamily, size: 11 },
+            bodyFont: { family: monoFont, size: 12 },
+            padding: 8,
+            cornerRadius: 6,
+            callbacks: {
+              label: function(ctx) { return ctx.label + ': ' + ctx.parsed + '%'; }
+            }
+          }
+        }
+      }
+    });
+  }
+
+  // ── Token Usage Line Chart (7 days) ──
+  const tokenCtx = document.getElementById('tokenChart');
+  if (tokenCtx) {
+    new Chart(tokenCtx, {
+      type: 'line',
+      data: {
+        labels: ['周一', '周二', '周三', '周四', '周五', '周六', '周日'],
+        datasets: [{
+          data: [5200, 7100, 8400, 6800, 9200, 5400, 6220],
+          borderColor: primaryColor,
+          borderWidth: 1.5,
+          backgroundColor: 'rgba(13, 147, 115, 0.08)',
+          fill: true,
+          tension: 0.4,
+          pointRadius: 3,
+          pointBackgroundColor: primaryColor,
+          pointBorderColor: '#FFFFFF',
+          pointBorderWidth: 2,
+          pointHoverRadius: 5
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: '#141B24',
+            titleFont: { family: fontFamily, size: 11 },
+            bodyFont: { family: monoFont, size: 12 },
+            padding: 8,
+            cornerRadius: 6,
+            displayColors: false,
+            callbacks: {
+              label: function(ctx) { return ctx.parsed.y.toLocaleString() + ' tokens'; }
+            }
+          }
+        },
+        scales: {
+          x: {
+            display: true,
+            grid: { display: false },
+            ticks: {
+              color: textColor,
+              font: { size: 10 },
+              maxRotation: 0
+            },
+            border: { display: false }
+          },
+          y: {
+            display: true,
+            grid: { color: gridColor, lineWidth: 0.5 },
+            ticks: {
+              color: textColor,
+              font: { size: 10, family: monoFont },
+              maxTicksLimit: 4,
+              maxRotation: 0,
+              callback: function(v) { return (v / 1000) + 'k'; }
+            },
+            border: { display: false }
+          }
+        },
+        interaction: {
+          intersect: false,
+          mode: 'index'
+        }
+      }
+    });
+  }
+});
+</script>
+
+<!-- Lucide Icons Init -->
+<script>lucide.createIcons();</script>
+
+</body>
+</html>
