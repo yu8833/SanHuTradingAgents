@@ -43,6 +43,7 @@
       <el-menu-item index="/screening/turnaround">困境反转</el-menu-item>
       <el-menu-item index="/screening/small-cap-value">小盘价值</el-menu-item>
       <el-menu-item index="/screening/convertible-arbitrage">转债博弈</el-menu-item>
+      <el-menu-item index="/screening/retail-center">散户策略中心</el-menu-item>
     </el-sub-menu>
 
     <el-menu-item index="/favorites">

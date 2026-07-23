@@ -164,6 +164,16 @@ const routes: RouteRecordRaw[] = [
           parentTitle: '选股',
           requiresAuth: true
         }
+      },
+      {
+        path: 'retail-center',
+        name: 'RetailCenter',
+        component: () => import('@/views/Screening/RetailCenter.vue'),
+        meta: {
+          title: '散户策略中心',
+          parentTitle: '选股',
+          requiresAuth: true
+        }
       }
     ]
   },
