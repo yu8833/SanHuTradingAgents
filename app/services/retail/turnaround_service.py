@@ -89,6 +89,9 @@ class TurnaroundService(RetailScreeningBase):
         items.sort(key=lambda x: x["score"], reverse=True)
         items = items[:limit]
 
+        # 风险过滤（排除高风险股票，保留的附加风险信息）
+        items = await self._apply_risk_filter(items, screening_data)
+
         took_ms = int((time.time() - start_time) * 1000)
         return {
             "total": len(items),

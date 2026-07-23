@@ -245,3 +245,78 @@ async def get_strategies_performance(user=Depends(get_current_user)):
             for s in strategies
         },
     }
+
+
+# ============================================================
+# 风险扫描
+# ============================================================
+
+class RiskScanRequest(BaseModel):
+    code: str = Field(..., description="股票代码，如 600519.SH")
+    name: str = Field("", description="股票名称")
+
+
+class RiskScanResponse(BaseModel):
+    code: str
+    name: str
+    risk_count: int
+    has_high_risk: bool
+    has_any_risk: bool
+    risk_level: str
+    risks: List[dict]
+
+
+@router.post("/risk-scan")
+async def scan_stock_risks(
+    req: RiskScanRequest,
+    user=Depends(get_current_user),
+):
+    """
+    扫描单只股票的风险
+
+    5类风险：财务造假 / 商誉减值 / 质押爆仓 / 退市 / 解禁减持
+    高风险股票（ST/质押>50%/商誉>50%/财务造假）会被标记 has_high_risk=True
+    """
+    from app.services.retail.risk_scanner import get_risk_scanner
+
+    scanner = get_risk_scanner()
+    result = scanner.scan_stock_risks(req.code, req.name)
+    return result
+
+
+@router.post("/risk-scan/batch")
+async def batch_scan_risks(
+    stocks: List[dict],
+    user=Depends(get_current_user),
+):
+    """
+    批量扫描股票风险
+
+    输入：[{"code": "600519.SH", "name": "贵州茅台"}, ...]
+    返回：{"results": [...], "safe_count": N, "risky_count": M}
+    """
+    from app.services.retail.risk_scanner import get_risk_scanner
+
+    scanner = get_risk_scanner()
+    results = []
+    safe_count = 0
+    risky_count = 0
+
+    for s in stocks[:50]:  # 最多50只，避免超时
+        code = s.get("code", "")
+        name = s.get("name", "")
+        if not code:
+            continue
+        risk = scanner.scan_stock_risks(code, name)
+        results.append(risk)
+        if risk["has_high_risk"]:
+            risky_count += 1
+        else:
+            safe_count += 1
+
+    return {
+        "total": len(results),
+        "safe_count": safe_count,
+        "risky_count": risky_count,
+        "results": results,
+    }

@@ -217,6 +217,69 @@ class RetailScreeningBase:
         slippage = amount * SLIPPAGE_RATE
         return commission + stamp_tax + slippage
 
+    # ---- 风险扫描前置过滤 ----
+
+    async def _apply_risk_filter(
+        self,
+        items: List[dict],
+        screening_data: Optional[Dict[str, dict]] = None,
+    ) -> List[dict]:
+        """
+        对扫描结果做风险过滤
+
+        策略：
+        1. 高风险股票（ST/质押>50%/商誉>50%/财务造假）直接排除
+        2. 中低风险股票保留，但在结果中附加 risk_info 字段
+
+        Args:
+            items: 扫描结果列表，每项需含 code 字段
+            screening_data: 行情数据（可选，用于获取股票名称）
+
+        Returns:
+            过滤后的列表（高风险已排除，其余附加 risk_info）
+        """
+        if not items:
+            return items
+
+        try:
+            from app.services.retail.risk_scanner import get_risk_scanner
+
+            scanner = get_risk_scanner()
+            filtered = []
+
+            for item in items:
+                code = item.get("code", "")
+                if not code:
+                    continue
+
+                name = item.get("name", "")
+                if not name and screening_data:
+                    name = screening_data.get(code, {}).get("name", "")
+
+                risk = scanner.scan_stock_risks(code, name)
+
+                # 高风险直接排除
+                if risk["has_high_risk"]:
+                    logger.info(
+                        f"⚠️ 风险过滤: 排除 {code} {name} - "
+                        f"{'; '.join(r['risk_name'] for r in risk['risks'])}"
+                    )
+                    continue
+
+                # 保留，附加风险信息
+                item["risk_info"] = risk
+                filtered.append(item)
+
+            excluded = len(items) - len(filtered)
+            if excluded > 0:
+                logger.info(f"风险过滤: 排除 {excluded} 只高风险股票，剩余 {len(filtered)} 只")
+
+            return filtered
+
+        except Exception as e:
+            logger.warning(f"风险过滤失败（跳过）: {e}")
+            return items
+
     # ---- 通用回测引擎 ----
 
     async def run_backtest(

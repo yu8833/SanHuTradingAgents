@@ -159,6 +159,14 @@
                 <el-progress :percentage="row.score" :color="getScoreColor(row.score)" :stroke-width="12" />
               </template>
             </el-table-column>
+            <el-table-column label="风险" width="100" fixed="right">
+              <template #default="{ row }">
+                <el-tag v-if="row.risk_info" :type="getRiskTagType(row.risk_info.risk_level)" size="small">
+                  {{ getRiskLabel(row.risk_info) }}
+                </el-tag>
+                <span v-else style="color:#909399;font-size:11px;">未扫描</span>
+              </template>
+            </el-table-column>
             <el-table-column label="操作" width="140" fixed="right">
               <template #default="{ row }">
                 <router-link :to="{ path: '/analysis/single', query: { stock: row.code } }" class="table-link">分析</router-link>
@@ -431,6 +439,18 @@ const getScoreColor = (score: number) => {
   if (score >= 60) return '#E6A23C'
   if (score >= 40) return '#F56C6C'
   return '#909399'
+}
+
+const getRiskTagType = (level: string) => {
+  if (level === 'high') return 'danger'
+  if (level === 'medium') return 'warning'
+  return 'success'
+}
+
+const getRiskLabel = (riskInfo: any) => {
+  if (!riskInfo || riskInfo.risk_count === 0) return '安全'
+  const names = riskInfo.risks.map((r: any) => r.risk_name.replace('风险', ''))
+  return names.join('/')
 }
 
 const formatNum = (n: any) => (typeof n === 'number' ? n.toFixed(2) : '-')

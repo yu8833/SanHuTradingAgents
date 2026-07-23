@@ -145,6 +145,38 @@ export interface StrategiesPerformanceResp {
   suggested_params: Record<string, SuggestedParams>
 }
 
+// ---- 风险扫描 ----
+export interface RiskSignal {
+  type: string
+  message: string
+  [key: string]: any
+}
+
+export interface RiskItem {
+  risk_type: string
+  risk_name: string
+  level: 'high' | 'medium' | 'low'
+  signals: RiskSignal[]
+  message: string
+}
+
+export interface RiskScanResult {
+  code: string
+  name: string
+  risk_count: number
+  has_high_risk: boolean
+  has_any_risk: boolean
+  risk_level: 'high' | 'medium' | 'safe'
+  risks: RiskItem[]
+}
+
+export interface BatchRiskScanResult {
+  total: number
+  safe_count: number
+  risky_count: number
+  results: RiskScanResult[]
+}
+
 export const retailApi = {
   // 仓位建议（后端返回原始dict，非ok()包装）
   calculatePosition: async (payload: PositionReq): Promise<PositionAdvice> => {
@@ -179,6 +211,18 @@ export const retailApi = {
   // 策略表现统计（基于已平仓持仓的真实数据）
   getStrategiesPerformance: async (): Promise<StrategiesPerformanceResp> => {
     const res = await ApiClient.get('/api/retail/strategies/performance')
+    return res as any
+  },
+
+  // 风险扫描（单只）
+  scanRisk: async (code: string, name?: string): Promise<RiskScanResult> => {
+    const res = await ApiClient.post('/api/retail/risk-scan', { code, name: name || '' })
+    return res as any
+  },
+
+  // 风险扫描（批量）
+  batchScanRisk: async (stocks: Array<{ code: string; name?: string }>): Promise<BatchRiskScanResult> => {
+    const res = await ApiClient.post('/api/retail/risk-scan/batch', stocks)
     return res as any
   },
 }
