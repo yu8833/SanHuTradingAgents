@@ -602,6 +602,13 @@ async def lifespan(app: FastAPI):
         else:
             logger.info(f"📰 新闻数据同步已配置（自选股 + 市场新闻）: {settings.NEWS_SYNC_CRON}")
 
+        # ==================== 散户策略定时任务（退出扫描 + 环境检测） ====================
+        try:
+            from app.services.retail.scheduler_jobs import register_retail_jobs
+            register_retail_jobs(scheduler, settings)
+        except Exception as e:
+            logger.error(f"❌ 散户策略定时任务注册失败: {e}", exc_info=True)
+
         scheduler.start()
 
         # 设置调度器实例到服务中，以便API可以管理任务
