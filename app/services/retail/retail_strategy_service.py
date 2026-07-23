@@ -164,6 +164,19 @@ class RetailStrategyService:
             turnover_ma20=turnover_ma20,
         )
 
+    async def detect_regime_auto(self) -> tuple:
+        """
+        自动采集数据并检测市场环境
+
+        Returns:
+            tuple: (MarketRegime, raw_data: dict)
+            raw_data 包含采集到的7个原始指标，便于前端展示数据来源
+        """
+        from app.services.retail.market_data_collector import collect_market_regime_data
+        data = await collect_market_regime_data()
+        regime = self.regime_detector.detect(**data)
+        return regime, data
+
 
 # 单例
 _service: Optional[RetailStrategyService] = None

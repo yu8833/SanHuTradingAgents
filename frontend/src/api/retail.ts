@@ -88,6 +88,22 @@ export interface MarketRegime {
   summary: string
 }
 
+// 自动检测返回（包含原始采集数据）
+export interface RegimeRawData {
+  index_price: number
+  index_ma250: number
+  volatility_percentile: number
+  breadth_ratio: number
+  margin_balance_change_pct: number
+  turnover_ratio: number
+  turnover_ma20: number
+}
+
+export interface MarketRegimeAuto extends MarketRegime {
+  raw_data: RegimeRawData
+  data_source: string
+}
+
 // ---- 策略列表 ----
 export interface StrategyInfo {
   name: string
@@ -107,6 +123,28 @@ export interface StrategiesResp {
   risk_params: Record<string, RiskParams>
 }
 
+// ---- 策略表现统计 ----
+export interface StrategyPerformance {
+  strategy: string
+  total_trades: number
+  win_rate: number
+  avg_win: number
+  avg_loss: number
+  profit_loss_ratio: number
+  avg_return: number
+}
+
+export interface SuggestedParams {
+  win_rate: number
+  profit_loss_ratio: number
+}
+
+export interface StrategiesPerformanceResp {
+  strategies: Record<string, StrategyPerformance>
+  overall: StrategyPerformance
+  suggested_params: Record<string, SuggestedParams>
+}
+
 export const retailApi = {
   // 仓位建议（后端返回原始dict，非ok()包装）
   calculatePosition: async (payload: PositionReq): Promise<PositionAdvice> => {
@@ -120,15 +158,27 @@ export const retailApi = {
     return res as any
   },
 
-  // 市场环境检测
+  // 市场环境检测（手动传参）
   detectRegime: async (payload: RegimeReq): Promise<MarketRegime> => {
     const res = await ApiClient.post('/api/retail/regime', payload)
+    return res as any
+  },
+
+  // 市场环境自动检测（无需传参，后端自动采集数据）
+  detectRegimeAuto: async (): Promise<MarketRegimeAuto> => {
+    const res = await ApiClient.get('/api/retail/regime/auto')
     return res as any
   },
 
   // 策略列表及风控参数
   getStrategies: async (): Promise<StrategiesResp> => {
     const res = await ApiClient.get('/api/retail/strategies')
+    return res as any
+  },
+
+  // 策略表现统计（基于已平仓持仓的真实数据）
+  getStrategiesPerformance: async (): Promise<StrategiesPerformanceResp> => {
+    const res = await ApiClient.get('/api/retail/strategies/performance')
     return res as any
   },
 }

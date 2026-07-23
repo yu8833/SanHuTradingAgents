@@ -298,6 +298,11 @@ export interface RetailScanReq {
   top_n?: number           // 回测每次选股数
   hold_days?: number       // 持有天数
   initial_capital?: number // 初始资金
+  // 转债下修博弈专用参数
+  max_bond_price?: number          // 转债价格上限
+  max_stock_vs_conversion?: number // 正股/转股价最大比值
+  min_issue_size?: number          // 最小发行规模（亿元）
+  [key: string]: any
 }
 
 export interface RetailBacktestReq extends RetailScanReq {

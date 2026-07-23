@@ -824,7 +824,57 @@ def extract_structured_fields(reports: Dict[str, Any]) -> Dict[str, Any]:
 
     result["维度评分详情"] = dimension_details
 
+    # 仓位建议：当评级为"买入"时，自动调用 PositionSizer 计算"买多少"
+    _inject_position_advice(result)
+
     return result
+
+
+def _inject_position_advice(result: Dict[str, Any]) -> None:
+    """
+    当评级为买入时，自动计算仓位建议并注入到 result 中。
+
+    使用已抽取的"理想买入"或"支撑位"作为参考价格，
+    账户大小默认10万元（散户标准账户），策略类型为 default。
+    """
+    action = result.get("评级") or result.get("操作建议") or result.get("action")
+    if not action or "买入" not in str(action):
+        return
+
+    # 获取参考价格：优先用"理想买入"，其次"支撑位"，最后"二次买入"
+    price_str = result.get("理想买入") or result.get("支撑位") or result.get("二次买入")
+    if not price_str:
+        return
+
+    # 从字符串中提取数字（如 "10.70 元" -> 10.70）
+    try:
+        price_match = re.search(r"(\d+\.?\d*)", str(price_str))
+        if not price_match:
+            return
+        price = float(price_match.group(1))
+        if price <= 0:
+            return
+    except (ValueError, AttributeError):
+        return
+
+    try:
+        from app.services.retail.retail_strategy_service import get_retail_strategy_service
+        from app.services.retail.position_sizer import StrategyType
+
+        service = get_retail_strategy_service()
+        # 默认账户10万元，无持仓，default 策略
+        advice = service.calculate_position(
+            account_size=100000.0,
+            holdings=[],
+            symbol="",
+            strategy=StrategyType.DEFAULT,
+            price=price,
+            win_rate=0.55,
+            profit_loss_ratio=1.5,
+        )
+        result["仓位建议"] = advice.to_dict()
+    except Exception as e:
+        logger.warning(f"⚠️ 计算仓位建议失败: {e}")
 
 
 def _calculate_confidence(reports: Dict[str, Any]) -> Dict[str, Any]:

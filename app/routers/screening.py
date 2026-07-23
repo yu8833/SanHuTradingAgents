@@ -604,6 +604,10 @@ class RetailStrategyRequest(BaseModel):
     initial_capital: float = Field(1000000, ge=100000, description="初始资金")
     limit: int = Field(50, ge=1, le=200, description="扫描返回数量限制")
     max_position_pct: float = Field(0.1, ge=0.01, le=0.5, description="单股最大仓位比例")
+    # 转债下修博弈专用参数（其他策略忽略）
+    max_bond_price: Optional[float] = Field(None, description="转债价格上限")
+    max_stock_vs_conversion: Optional[float] = Field(None, description="正股/转股价最大比值")
+    min_issue_size: Optional[float] = Field(None, description="最小发行规模（亿元）")
 
 
 class RetailStrategyScanResponse(BaseModel):

@@ -11,16 +11,16 @@
       </p>
     </div>
 
-    <!-- 数据源接入提示 -->
+    <!-- 数据源已接入提示 -->
     <el-alert
-      title="转债数据源接入中"
-      type="warning"
+      title="转债数据源已接入（akshare bond_zh_cov）"
+      type="success"
       :closable="false"
       show-icon
       style="margin-bottom: 16px;"
     >
       <template #default>
-        可转债行情与下修历史数据源正在接入中，当前扫描将返回空结果。UI框架已就绪，数据接入后即可正常使用。
+        通过 akshare bond_zh_cov 接口获取全市场已上市可转债行情，基于「正股/转股价偏离度 + 转债价格 + 转股溢价率 + 信用评级」四维评分筛选下修博弈候选。
       </template>
     </el-alert>
 
@@ -65,13 +65,32 @@
       </template>
 
       <el-form :model="params" label-position="top" size="default" class="params-form">
-        <el-row :gutter="32">
-          <el-col :span="8">
+        <el-row :gutter="24">
+          <el-col :span="6">
+            <el-form-item label="转债价格上限(元)">
+              <el-input-number v-model="params.max_bond_price" :min="80" :max="200" :step="5" style="width: 100%;" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="6">
+            <el-form-item label="正股/转股价最大比值">
+              <el-input-number v-model="params.max_stock_vs_conversion" :min="0.3" :max="0.95" :step="0.05" :precision="2" style="width: 100%;" />
+              <div class="param-hint">越低表示正股越深跌，下修动力越强</div>
+            </el-form-item>
+          </el-col>
+          <el-col :span="6">
+            <el-form-item label="最小发行规模(亿元)">
+              <el-input-number v-model="params.min_issue_size" :min="0.1" :max="50" :step="0.5" :precision="1" style="width: 100%;" />
+              <div class="param-hint">流动性保障</div>
+            </el-form-item>
+          </el-col>
+          <el-col :span="6">
             <el-form-item label="最低评分(100分制)">
               <el-slider v-model="params.min_score" :min="0" :max="100" :step="5" show-stops />
             </el-form-item>
           </el-col>
-          <el-col :span="8">
+        </el-row>
+        <el-row :gutter="24">
+          <el-col :span="6">
             <el-form-item label="返回数量限制">
               <el-input-number v-model="params.limit" :min="10" :max="200" :step="10" style="width: 100%;" />
             </el-form-item>
@@ -112,16 +131,16 @@
           </template>
 
           <div v-if="!loading && results.length === 0 && !hasSearched" class="empty-state">
-            <el-empty description="调整参数后点击开始扫描（转债数据源接入中，当前返回空结果）">
+            <el-empty description="调整参数后点击开始扫描，将获取全市场已上市可转债并筛选下修博弈候选">
               <el-button type="primary" @click="doScan">立即扫描</el-button>
             </el-empty>
           </div>
 
-          <!-- 数据源接入中的提示 -->
+          <!-- 扫描后无结果的提示 -->
           <div v-if="!loading && results.length === 0 && hasSearched" class="data-source-tip">
-            <el-result icon="info" title="转债数据源接入中" sub-title="当前返回空结果，数据接入后将自动展示符合条件的转债">
+            <el-result icon="info" title="未找到符合条件的转债" sub-title="可尝试调低最低评分或放宽筛选参数后重试">
               <template #extra>
-                <el-tag type="warning" effect="plain">数据接入中</el-tag>
+                <el-button type="primary" @click="doScan">重新扫描</el-button>
               </template>
             </el-result>
           </div>
@@ -133,59 +152,110 @@
             element-loading-text="扫描中..."
             stripe
             :height="tableHeight"
-            row-key="code"
+            row-key="bond_code"
             style="width: 100%"
           >
-            <el-table-column prop="code" label="转债代码" width="110" fixed="left">
+            <el-table-column prop="bond_code" label="转债代码" width="100" fixed="left">
               <template #default="{ row }">
-                <span class="stock-code">{{ row.code }}</span>
+                <span class="stock-code">{{ row.bond_code }}</span>
               </template>
             </el-table-column>
-            <el-table-column prop="name" label="转债名称" width="140" fixed="left">
+            <el-table-column prop="bond_name" label="转债名称" width="120" fixed="left">
               <template #default="{ row }">
-                <span class="stock-name">{{ row.name }}</span>
+                <span class="stock-name">{{ row.bond_name }}</span>
               </template>
             </el-table-column>
-            <el-table-column prop="underlying_name" label="正股" width="110" />
-            <el-table-column prop="close" label="现价" width="90" sortable>
+            <el-table-column prop="stock_name" label="正股" width="100" />
+            <el-table-column prop="bond_price" label="转债现价" width="100" sortable>
               <template #default="{ row }">
-                <span class="price">{{ formatNum(row.close) }}</span>
+                <span class="price">{{ formatNum(row.bond_price) }}</span>
               </template>
             </el-table-column>
-            <el-table-column prop="pct_chg" label="涨跌幅" width="100" sortable>
+            <el-table-column prop="stock_price" label="正股价" width="90" sortable>
+              <template #default="{ row }">{{ formatNum(row.stock_price) }}</template>
+            </el-table-column>
+            <el-table-column prop="conversion_price" label="转股价" width="90" sortable>
+              <template #default="{ row }">{{ formatNum(row.conversion_price) }}</template>
+            </el-table-column>
+            <el-table-column prop="stock_vs_conversion" label="正股/转股价" width="120" sortable>
               <template #default="{ row }">
-                <span :class="['pct', (row.pct_chg ?? 0) >= 0 ? 'up' : 'down']">
-                  {{ (row.pct_chg ?? 0) >= 0 ? '+' : '' }}{{ (row.pct_chg ?? 0).toFixed(2) }}%
+                <span :class="['pct', row.stock_vs_conversion <= 0.5 ? 'down' : '']">
+                  {{ (row.stock_vs_conversion * 100).toFixed(1) }}%
+                </span>
+                <div class="param-hint" style="font-size:11px;">{{ row.down_revision_motivation }}</div>
+              </template>
+            </el-table-column>
+            <el-table-column prop="conversion_premium" label="转股溢价率" width="120" sortable>
+              <template #default="{ row }">
+                <span :class="['pct', row.conversion_premium >= 0.5 ? 'up' : '']">
+                  {{ (row.conversion_premium * 100).toFixed(1) }}%
                 </span>
               </template>
             </el-table-column>
-            <el-table-column prop="bond_value" label="债底" width="90" sortable>
-              <template #default="{ row }">{{ formatNum(row.bond_value) }}</template>
+            <el-table-column prop="double_low" label="双低值" width="100" sortable>
+              <template #default="{ row }">{{ formatNum(row.double_low) }}</template>
             </el-table-column>
-            <el-table-column prop="premium_rate" label="转股溢价率" width="120" sortable>
-              <template #default="{ row }">{{ formatNum(row.premium_rate) }}%</template>
+            <el-table-column prop="rating" label="评级" width="80">
+              <template #default="{ row }">
+                <el-tag size="small" :type="getRatingTagType(row.rating)">{{ row.rating || '-' }}</el-tag>
+              </template>
             </el-table-column>
-            <el-table-column prop="days_to_sellback" label="距回售期(天)" width="130" sortable>
-              <template #default="{ row }">{{ row.days_to_sellback ?? '-' }}</template>
+            <el-table-column prop="issue_size" label="发行规模(亿)" width="110" sortable>
+              <template #default="{ row }">{{ formatNum(row.issue_size) }}</template>
             </el-table-column>
-            <el-table-column prop="signal_type" label="信号类型" width="110">
+            <el-table-column prop="years_to_maturity" label="剩余年限(年)" width="120" sortable>
+              <template #default="{ row }">
+                {{ row.years_to_maturity ? row.years_to_maturity.toFixed(1) : '-' }}
+                <el-tag v-if="row.in_put_period" size="small" type="warning" style="margin-left:4px;">回售期</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="signal_type" label="信号类型" width="100">
               <template #default="{ row }">
                 <el-tag :type="getSignalTypeTag(row.signal_type)" size="small">
                   {{ row.signal_type || '-' }}
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="score" label="综合评分" width="120" sortable fixed="right">
+            <el-table-column prop="score" label="综合评分" width="130" sortable fixed="right">
               <template #default="{ row }">
                 <el-progress :percentage="row.score" :color="getScoreColor(row.score)" :stroke-width="12" />
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="140" fixed="right">
+            <el-table-column label="操作" width="120" fixed="right">
               <template #default="{ row }">
                 <el-button type="success" link @click="addToFavorites(row)">自选</el-button>
               </template>
             </el-table-column>
           </el-table>
+
+          <!-- 评分明细展开 -->
+          <el-card v-if="results.length > 0" shadow="never" style="margin-top: 12px;">
+            <template #header>
+              <div class="card-header">
+                <span class="panel-title">评分明细（前5名）</span>
+              </div>
+            </template>
+            <el-table :data="results.slice(0, 5)" size="small" border>
+              <el-table-column prop="bond_name" label="转债" width="120" />
+              <el-table-column label="下修动力" min-width="180">
+                <template #default="{ row }">{{ row.score_details?.['下修动力'] || '-' }}</template>
+              </el-table-column>
+              <el-table-column label="转债价格" min-width="140">
+                <template #default="{ row }">{{ row.score_details?.['转债价格'] || '-' }}</template>
+              </el-table-column>
+              <el-table-column label="转股溢价率" min-width="140">
+                <template #default="{ row }">{{ row.score_details?.['转股溢价率'] || '-' }}</template>
+              </el-table-column>
+              <el-table-column label="信用评级" min-width="120">
+                <template #default="{ row }">{{ row.score_details?.['信用评级'] || '-' }}</template>
+              </el-table-column>
+              <el-table-column prop="score" label="总分" width="80">
+                <template #default="{ row }">
+                  <span style="font-weight:bold;color:#e6232a;">{{ row.score }}</span>
+                </template>
+              </el-table-column>
+            </el-table>
+          </el-card>
         </el-card>
       </el-tab-pane>
 
@@ -343,7 +413,7 @@ const results = ref<RetailScanResp['items']>([])
 const tookMs = ref(0)
 const hasSearched = ref(false)
 
-const defaultParams = { min_score: 40, limit: 50 }
+const defaultParams = { max_bond_price: 110, max_stock_vs_conversion: 0.7, min_issue_size: 1.0, min_score: 40, limit: 50 }
 const params = reactive<RetailScanReq>({ ...defaultParams })
 
 const resetParams = () => {
@@ -361,10 +431,9 @@ const doScan = async () => {
     results.value = resp.items
     tookMs.value = resp.took_ms || 0
     if (resp.items.length > 0) {
-      ElMessage.success(`找到 ${resp.items.length} 只符合条件的转债`)
+      ElMessage.success(`扫描完成：共扫描 ${resp.scanned_count || 0} 只转债，找到 ${resp.items.length} 只下修博弈候选`)
     } else {
-      // 转债数据源尚未接入
-      ElMessage.warning('转债数据源接入中，当前返回空结果')
+      ElMessage.warning('未找到符合条件的转债，可尝试调低最低评分或放宽筛选参数')
     }
   } catch (e: any) {
     ElMessage.error(e?.message || '扫描失败，请稍后重试')
@@ -421,7 +490,7 @@ const doBacktest = async () => {
     if (resp.total_trades > 0) {
       ElMessage.success(`回测完成，共 ${resp.total_trades} 笔交易，胜率 ${resp.win_rate.toFixed(2)}%`)
     } else {
-      ElMessage.warning('回测完成，但未产生交易（转债数据源接入中）')
+      ElMessage.warning('回测完成，但未产生交易（可能历史数据不足）')
     }
   } catch (e: any) {
     ElMessage.error(e?.message || '回测失败，请稍后重试')
@@ -432,8 +501,8 @@ const doBacktest = async () => {
 
 const addToFavorites = async (row: any) => {
   try {
-    await favoritesApi.add({ stock_code: row.code, stock_name: row.name || '', market: '可转债' })
-    ElMessage.success(`已添加 ${row.name}(${row.code}) 到自选`)
+    await favoritesApi.add({ stock_code: row.bond_code, stock_name: row.bond_name || '', market: '可转债' })
+    ElMessage.success(`已添加 ${row.bond_name}(${row.bond_code}) 到自选`)
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || e?.message || '添加自选失败')
   }
@@ -444,7 +513,19 @@ const getSignalTypeTag = (type?: string) => {
   if (type.includes('右侧') || type.includes('确认')) return 'success'
   if (type.includes('左侧') || type.includes('潜伏')) return 'warning'
   if (type.includes('观察')) return 'info'
+  if (type.includes('下修')) return 'primary'
   return ''
+}
+
+const getRatingTagType = (rating?: string) => {
+  if (!rating) return 'info'
+  const r = rating.toUpperCase()
+  if (r.startsWith('AAA')) return 'success'
+  if (r.startsWith('AA')) return 'primary'
+  if (r.startsWith('A')) return 'warning'
+  if (r.startsWith('BB') || r.startsWith('B')) return 'danger'
+  if (r.startsWith('C')) return 'danger'
+  return 'info'
 }
 
 const getScoreColor = (score: number) => {
@@ -490,6 +571,9 @@ onUnmounted(() => { window.removeEventListener('resize', handleResize) })
 .params-form {
   :deep(.el-form-item) { margin-bottom: 18px; }
   :deep(.el-form-item__label) { font-weight: 500; color: var(--el-text-color-regular); }
+  .param-hint {
+    font-size: 11px; color: var(--el-text-color-secondary); margin-top: 2px; line-height: 1.4;
+  }
 }
 
 .form-actions {

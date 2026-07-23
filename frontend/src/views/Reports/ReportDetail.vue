@@ -129,6 +129,37 @@
           </div>
         </div>
 
+        <!-- 仓位建议（仅当评级为买入且有仓位建议数据时显示） -->
+        <div v-if="report['仓位建议'] && getFinalAction() === '买入'" class="position-advice-card">
+          <div class="pipeline-section section--position-advice">
+            <div class="section-header">
+              <h3>💰 仓位建议</h3>
+              <span class="section-hint">基于10万元标准散户账户自动计算</span>
+            </div>
+            <div class="position-advice-body">
+              <el-result
+                :icon="report['仓位建议'].blocked ? 'error' : 'success'"
+                :title="report['仓位建议'].blocked ? '买入被风控阻断' : `建议买入 ${report['仓位建议'].suggested_shares} 股`"
+                :sub-title="report['仓位建议'].blocked ? (report['仓位建议'].block_reasons || []).join('；') : `建议金额 ${report['仓位建议'].suggested_amount.toLocaleString()} 元`"
+              />
+              <div v-if="!report['仓位建议'].blocked" style="padding: 0 20px;">
+                <el-descriptions :column="2" border size="small">
+                  <el-descriptions-item label="建议股数">{{ report['仓位建议'].suggested_shares }} 股</el-descriptions-item>
+                  <el-descriptions-item label="建议金额">{{ report['仓位建议'].suggested_amount.toLocaleString() }} 元</el-descriptions-item>
+                  <el-descriptions-item label="目标仓位">{{ (report['仓位建议'].target_position_ratio * 100).toFixed(2) }}%</el-descriptions-item>
+                  <el-descriptions-item label="买入后总仓位">{{ (report['仓位建议'].total_position_ratio_after * 100).toFixed(2) }}%</el-descriptions-item>
+                </el-descriptions>
+              </div>
+              <div v-if="report['仓位建议'].warnings && report['仓位建议'].warnings.length" style="padding: 8px 20px;">
+                <el-alert v-for="(w, i) in report['仓位建议'].warnings" :key="i" :title="w" type="warning" :closable="false" show-icon style="margin-bottom: 6px;" />
+              </div>
+              <div v-if="report['仓位建议'].block_reasons && report['仓位建议'].block_reasons.length" style="padding: 8px 20px;">
+                <el-alert v-for="(r, i) in report['仓位建议'].block_reasons" :key="i" :title="r" type="error" :closable="false" show-icon style="margin-bottom: 6px;" />
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- 多维度评分 -->
         <div v-if="hasAnyDimensionScore" class="scores-confidence-row">
           <div class="pipeline-section section--scores">
@@ -5292,6 +5323,37 @@ html.dark {
     align-items: center;
     justify-content: center;
     height: 300px;
+  }
+}
+
+/* 仓位建议卡片 */
+.position-advice-card {
+  margin-bottom: 24px;
+
+  .section--position-advice {
+    background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%);
+    border: 1px solid #bbf7d0;
+    border-radius: 16px;
+    padding: 24px;
+    box-shadow: 0 4px 16px rgba(22, 163, 74, 0.08);
+
+    .section-header {
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 2px solid #dcfce7;
+
+      h3 {
+        margin: 0;
+        font-size: 20px;
+        font-weight: 700;
+        color: #166534;
+      }
+      .section-hint {
+        font-size: 13px;
+        color: #15803d;
+        margin-left: 12px;
+      }
+    }
   }
 }
 </style>

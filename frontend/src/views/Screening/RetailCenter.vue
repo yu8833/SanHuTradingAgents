@@ -39,6 +39,77 @@
               </el-card>
             </el-col>
           </el-row>
+
+          <!-- 策略表现统计 -->
+          <el-card shadow="never" style="margin-top: 16px;">
+            <template #header>
+              <div class="card-header">
+                <el-icon><DataLine /></el-icon>
+                <span class="panel-title">策略表现统计</span>
+                <span class="header-hint">基于已平仓持仓的真实数据，交易满5次后自动反馈到仓位计算的胜率/盈亏比参数</span>
+                <el-button size="small" :loading="perfLoading" @click="loadPerformance" style="margin-left:auto;">刷新统计</el-button>
+              </div>
+            </template>
+            <div v-if="perfData">
+              <!-- 汇总 -->
+              <el-descriptions :column="5" border size="small" style="margin-bottom: 12px;">
+                <el-descriptions-item label="总交易次数">{{ perfData.overall.total_trades }}</el-descriptions-item>
+                <el-descriptions-item label="总体胜率">
+                  <span :style="{color: perfData.overall.win_rate >= 0.5 ? '#e6232a' : '#19a519', fontWeight:'bold'}">
+                    {{ (perfData.overall.win_rate * 100).toFixed(1) }}%
+                  </span>
+                </el-descriptions-item>
+                <el-descriptions-item label="盈亏比">{{ perfData.overall.profit_loss_ratio.toFixed(2) }}</el-descriptions-item>
+                <el-descriptions-item label="平均盈利">{{ (perfData.overall.avg_win * 100).toFixed(2) }}%</el-descriptions-item>
+                <el-descriptions-item label="平均亏损">{{ (perfData.overall.avg_loss * 100).toFixed(2) }}%</el-descriptions-item>
+              </el-descriptions>
+
+              <!-- 各策略明细 -->
+              <el-table :data="perfTableData" size="small" border>
+                <el-table-column label="策略" width="140">
+                  <template #default="{ row }">{{ getStrategyLabel(row.strategy) }}</template>
+                </el-table-column>
+                <el-table-column label="交易次数" prop="total_trades" width="100" sortable />
+                <el-table-column label="胜率" width="100" sortable :sort-by="'win_rate'">
+                  <template #default="{ row }">
+                    <span :style="{color: row.win_rate >= 0.5 ? '#e6232a' : '#19a519', fontWeight:'bold'}">
+                      {{ (row.win_rate * 100).toFixed(1) }}%
+                    </span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="盈亏比" width="100" sortable :sort-by="'profit_loss_ratio'">
+                  <template #default="{ row }">{{ row.profit_loss_ratio.toFixed(2) }}</template>
+                </el-table-column>
+                <el-table-column label="平均收益" width="120" sortable :sort-by="'avg_return'">
+                  <template #default="{ row }">
+                    <span :style="{color: row.avg_return >= 0 ? '#e6232a' : '#19a519'}">
+                      {{ (row.avg_return * 100).toFixed(2) }}%
+                    </span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="建议胜率参数" width="130">
+                  <template #default="{ row }">
+                    <el-tag size="small" :type="row.total_trades >= 5 ? 'success' : 'info'">
+                      {{ (perfData.suggested_params[row.strategy].win_rate * 100).toFixed(0) }}%
+                    </el-tag>
+                    <span v-if="row.total_trades < 5" style="font-size:11px;color:#909399;margin-left:4px;">(默认)</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="建议盈亏比参数" width="130">
+                  <template #default="{ row }">
+                    <el-tag size="small" :type="row.total_trades >= 5 ? 'success' : 'info'">
+                      {{ perfData.suggested_params[row.strategy].profit_loss_ratio.toFixed(1) }}
+                    </el-tag>
+                    <span v-if="row.total_trades < 5" style="font-size:11px;color:#909399;margin-left:4px;">(默认)</span>
+                  </template>
+                </el-table-column>
+              </el-table>
+              <div style="margin-top:8px;font-size:12px;color:#909399;">
+                注：交易次数不足5次的策略使用默认参数（胜率55%，盈亏比1.5），满5次后自动使用真实表现数据
+              </div>
+            </div>
+            <el-empty v-else description="暂无已平仓持仓数据，平仓后将自动生成策略表现统计" />
+          </el-card>
         </div>
       </el-tab-pane>
 
@@ -264,9 +335,15 @@
             <div class="card-header">
               <el-icon><TrendCharts /></el-icon>
               <span class="panel-title">市场环境检测</span>
-              <span class="header-hint">输入市场指标，判断趋势/波动率/宽度/情绪，输出策略激活建议</span>
+              <span class="header-hint">可一键自动采集市场数据，或手动输入指标判断趋势/波动率/宽度/情绪</span>
             </div>
           </template>
+
+          <div style="margin-bottom: 16px; text-align: right;">
+            <el-button type="success" :loading="autoRegimeLoading" @click="detectRegimeAuto">
+              <el-icon><Aim /></el-icon> 一键自动采集并检测
+            </el-button>
+          </div>
 
           <el-form :model="regimeForm" label-position="top" size="default">
             <el-row :gutter="24">
@@ -310,7 +387,7 @@
             </el-row>
             <div style="text-align:center; margin-top:12px;">
               <el-button type="primary" size="large" :loading="regimeLoading" @click="detectRegime">
-                <el-icon><Aim /></el-icon> 检测市场环境
+                <el-icon><Aim /></el-icon> 手动检测市场环境
               </el-button>
             </div>
           </el-form>
@@ -322,6 +399,8 @@
             <div class="card-header">
               <el-icon><Odometer /></el-icon>
               <span class="panel-title">环境检测结果</span>
+              <el-tag v-if="regimeDataMode === 'auto'" type="success" size="small" effect="plain">数据来源：自动采集</el-tag>
+              <el-tag v-else type="info" size="small" effect="plain">数据来源：手动输入</el-tag>
             </div>
           </template>
           <el-row :gutter="16">
@@ -368,6 +447,24 @@
               {{ getStrategyLabel(s) }}{{ regimeResult.active_strategies.includes(s) ? ' ✓' : ' ✗' }}
             </el-tag>
           </div>
+          <!-- 自动采集的原始数据 -->
+          <template v-if="regimeRawData">
+            <el-divider content-position="left">自动采集的原始市场数据</el-divider>
+            <el-descriptions :column="4" border size="small">
+              <el-descriptions-item label="沪深300价格">{{ regimeRawData.index_price.toFixed(2) }}</el-descriptions-item>
+              <el-descriptions-item label="沪深300 MA250">{{ regimeRawData.index_ma250.toFixed(2) }}</el-descriptions-item>
+              <el-descriptions-item label="波动率分位">{{ (regimeRawData.volatility_percentile * 100).toFixed(1) }}%</el-descriptions-item>
+              <el-descriptions-item label="市场宽度">{{ (regimeRawData.breadth_ratio * 100).toFixed(1) }}%</el-descriptions-item>
+              <el-descriptions-item label="融资余额5日变化">{{ (regimeRawData.margin_balance_change_pct * 100).toFixed(2) }}%</el-descriptions-item>
+              <el-descriptions-item label="全市场换手率">{{ regimeRawData.turnover_ratio.toFixed(2) }}%</el-descriptions-item>
+              <el-descriptions-item label="换手率MA20">{{ regimeRawData.turnover_ma20.toFixed(2) }}%</el-descriptions-item>
+              <el-descriptions-item label="指数vs MA250">
+                <span :style="{color: regimeRawData.index_price >= regimeRawData.index_ma250 ? '#e6232a' : '#19a519', fontWeight:'bold'}">
+                  {{ regimeRawData.index_price >= regimeRawData.index_ma250 ? '在MA250上方（多头）' : '在MA250下方（空头）' }}
+                </span>
+              </el-descriptions-item>
+            </el-descriptions>
+          </template>
         </el-card>
       </el-tab-pane>
     </el-tabs>
@@ -375,13 +472,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   Aim, Wallet, DataLine, Warning,
   Clock, TrendCharts, Odometer, InfoFilled, MagicStick
 } from '@element-plus/icons-vue'
-import { retailApi, type PositionAdvice, type ExitResp, type MarketRegime, type StrategiesResp } from '@/api/retail'
+import { retailApi, type PositionAdvice, type ExitResp, type MarketRegime, type RegimeRawData, type StrategiesResp, type StrategiesPerformanceResp, type StrategyPerformance } from '@/api/retail'
 
 const activeTab = ref('strategies')
 
@@ -400,6 +497,25 @@ const loadStrategies = async () => {
     ElMessage.error('加载策略列表失败：' + (e.message || e))
   } finally {
     strategyLoading.value = false
+  }
+}
+
+// ---- 策略表现统计 ----
+const perfLoading = ref(false)
+const perfData = ref<StrategiesPerformanceResp | null>(null)
+const perfTableData = computed<StrategyPerformance[]>(() => {
+  if (!perfData.value?.strategies) return []
+  return Object.values(perfData.value.strategies).filter(s => s.strategy !== 'default')
+})
+
+const loadPerformance = async () => {
+  perfLoading.value = true
+  try {
+    perfData.value = await retailApi.getStrategiesPerformance()
+  } catch (e: any) {
+    ElMessage.error('加载策略表现统计失败：' + (e.message || e))
+  } finally {
+    perfLoading.value = false
   }
 }
 
@@ -482,7 +598,10 @@ const checkExits = async () => {
 
 // ---- 市场环境 ----
 const regimeLoading = ref(false)
+const autoRegimeLoading = ref(false)
 const regimeResult = ref<MarketRegime | null>(null)
+const regimeRawData = ref<RegimeRawData | null>(null)
+const regimeDataMode = ref<'auto' | 'manual'>('manual')
 const regimeForm = reactive({
   index_price: 3800,
   index_ma250: 3700,
@@ -497,10 +616,44 @@ const detectRegime = async () => {
   regimeLoading.value = true
   try {
     regimeResult.value = await retailApi.detectRegime({ ...regimeForm })
+    regimeRawData.value = null
+    regimeDataMode.value = 'manual'
   } catch (e: any) {
     ElMessage.error('市场环境检测失败：' + (e.message || e))
   } finally {
     regimeLoading.value = false
+  }
+}
+
+const detectRegimeAuto = async () => {
+  autoRegimeLoading.value = true
+  try {
+    const res = await retailApi.detectRegimeAuto()
+    regimeResult.value = {
+      trend: res.trend,
+      volatility: res.volatility,
+      breadth: res.breadth,
+      sentiment: res.sentiment,
+      active_strategies: res.active_strategies,
+      summary: res.summary,
+    }
+    regimeRawData.value = res.raw_data
+    regimeDataMode.value = 'auto'
+    // 同步回填表单，方便用户微调
+    if (res.raw_data) {
+      regimeForm.index_price = res.raw_data.index_price
+      regimeForm.index_ma250 = res.raw_data.index_ma250
+      regimeForm.volatility_percentile = res.raw_data.volatility_percentile
+      regimeForm.breadth_ratio = res.raw_data.breadth_ratio
+      regimeForm.margin_balance_change_pct = res.raw_data.margin_balance_change_pct * 100
+      regimeForm.turnover_ratio = res.raw_data.turnover_ratio
+      regimeForm.turnover_ma20 = res.raw_data.turnover_ma20
+    }
+    ElMessage.success('市场数据自动采集完成')
+  } catch (e: any) {
+    ElMessage.error('自动采集市场数据失败：' + (e.message || e))
+  } finally {
+    autoRegimeLoading.value = false
   }
 }
 
@@ -530,7 +683,10 @@ const getBreadthLabel = (b: string) => ({ broad: '宽度健康', narrow: '宽度
 const getSentimentType = (s: string) => ({ euphoric: 'danger', neutral: 'info', panic: 'success' }[s] || 'info')
 const getSentimentLabel = (s: string) => ({ euphoric: '过热', neutral: '中性', panic: '恐慌' }[s] || s)
 
-onMounted(() => { loadStrategies() })
+onMounted(() => {
+  loadStrategies()
+  loadPerformance()
+})
 </script>
 
 <style scoped>

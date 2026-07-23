@@ -184,64 +184,17 @@ async def check_all_users_exit_signals():
 
 async def _get_market_regime_data() -> Optional[dict]:
     """
-    获取市场环境检测所需的数据
+    获取市场环境检测所需的数据（自动采集）
 
-    沪深300当前价 + MA250 来自 akshare；市场宽度来自 market_overview。
-    波动率分位/融资余额变化/换手率MA20 暂无直接数据源，用中性默认值。
+    委托给 market_data_collector 服务，自动获取：
+    - 沪深300当前价 + MA250 + 波动率分位
+    - 市场宽度（涨跌家数占比）
+    - 融资余额近5日变化
+    - 全市场换手率及20日均值
     """
     try:
-        from app.services import vibe_astock as astock
-
-        # 1. 指数当前价（沪深300）
-        index_price = None
-        try:
-            indices = astock.index_quote()
-            for idx in indices:
-                name = idx.get("name", "")
-                if "沪深300" in name or "300" in name:
-                    index_price = float(idx.get("price", 0))
-                    break
-        except Exception as e:
-            logger.warning(f"获取沪深300指数失败: {e}")
-
-        if not index_price or index_price <= 0:
-            return None
-
-        # 2. 指数MA250
-        index_ma250 = index_price  # 降级默认
-        try:
-            import akshare as ak
-            df = ak.stock_zh_index_daily(symbol="sh000300")
-            if df is not None and len(df) >= 250:
-                index_ma250 = float(df["close"].tail(250).mean())
-        except Exception as e:
-            logger.warning(f"获取沪深300 MA250失败，使用降级值: {e}")
-
-        # 3. 市场宽度（上涨占比）
-        breadth_ratio = 0.5
-        try:
-            from app.services.market_overview import _sentiment
-            sentiment = _sentiment()
-            if sentiment:
-                up = sentiment.get("up", 0)
-                down = sentiment.get("down", 0)
-                flat = sentiment.get("flat", 0)
-                total = up + down + flat
-                if total > 0:
-                    breadth_ratio = up / total
-        except Exception as e:
-            logger.warning(f"获取市场宽度失败: {e}")
-
-        # 4. 暂无直接数据源，使用中性默认值
-        return {
-            "index_price": index_price,
-            "index_ma250": index_ma250,
-            "volatility_percentile": 0.5,
-            "breadth_ratio": breadth_ratio,
-            "margin_balance_change_pct": 0.0,
-            "turnover_ratio": 1.0,
-            "turnover_ma20": 1.0,
-        }
+        from app.services.retail.market_data_collector import collect_market_regime_data
+        return await collect_market_regime_data()
     except Exception as e:
         logger.error(f"获取市场环境数据失败: {e}")
         return None
