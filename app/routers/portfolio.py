@@ -14,7 +14,7 @@ from app.core.response import ok
 
 logger = logging.getLogger("webapi")
 
-router = APIRouter(prefix="/portfolio", tags=["持仓追踪"])
+router = APIRouter(tags=["持仓追踪"])
 
 
 class AddPositionRequest(BaseModel):
@@ -26,6 +26,10 @@ class AddPositionRequest(BaseModel):
     position_ratio: float            # 仓位占比 (0-1)
     buy_date: str                    # 买入日期，格式 "YYYY-MM-DD"
     notes: Optional[str] = None      # 备注
+    strategy: Optional[str] = "default"  # 策略类型
+    stop_loss_price: Optional[float] = None   # 止损价
+    take_profit_price: Optional[float] = None  # 止盈价
+    thesis: Optional[str] = None     # 投资逻辑
 
 
 class UpdatePositionRequest(BaseModel):
@@ -34,6 +38,9 @@ class UpdatePositionRequest(BaseModel):
     cost_price: Optional[float] = None
     position_ratio: Optional[float] = None
     notes: Optional[str] = None
+    stop_loss_price: Optional[float] = None
+    take_profit_price: Optional[float] = None
+    thesis: Optional[str] = None
 
 
 class ImportPositionsRequest(BaseModel):
@@ -264,4 +271,97 @@ async def get_portfolio_summary(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取持仓汇总失败: {str(e)}"
+        )
+
+
+# ============================================================
+# 散户策略持仓扩展：平仓 / 未平仓 / 策略表现
+# ============================================================
+
+class ClosePositionRequest(BaseModel):
+    """平仓请求"""
+    exit_price: float                    # 平仓价
+    exit_date: Optional[str] = None      # 平仓日期（默认今天）
+    exit_reason: str = ""                # 平仓原因
+
+
+@router.post("/{position_id}/close")
+async def close_position(
+    position_id: str,
+    req: ClosePositionRequest,
+    user=Depends(get_current_user)
+):
+    """平仓（保留记录用于策略表现统计）"""
+    try:
+        result = await portfolio_service.close_position(
+            position_id=position_id,
+            exit_price=req.exit_price,
+            exit_date=req.exit_date,
+            exit_reason=req.exit_reason
+        )
+        if result is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="持仓不存在或已平仓"
+            )
+        return ok(result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 平仓失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"平仓失败: {str(e)}"
+        )
+
+
+@router.get("/open/list")
+async def get_open_positions(user=Depends(get_current_user)):
+    """获取所有未平仓持仓"""
+    try:
+        positions = await portfolio_service.get_open_positions(user["id"])
+        return ok(positions)
+    except Exception as e:
+        logger.error(f"❌ 获取未平仓持仓失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取未平仓持仓失败: {str(e)}"
+        )
+
+
+@router.get("/strategy/{strategy}/positions")
+async def get_positions_by_strategy(
+    strategy: str,
+    user=Depends(get_current_user)
+):
+    """按策略获取未平仓持仓"""
+    try:
+        positions = await portfolio_service.get_positions_by_strategy(
+            user["id"], strategy
+        )
+        return ok(positions)
+    except Exception as e:
+        logger.error(f"❌ 按策略获取持仓失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"按策略获取持仓失败: {str(e)}"
+        )
+
+
+@router.get("/strategy/performance")
+async def get_strategy_performance(
+    strategy: Optional[str] = None,
+    user=Depends(get_current_user)
+):
+    """获取策略表现统计（胜率/盈亏比/平均收益）"""
+    try:
+        perf = await portfolio_service.get_strategy_performance(
+            user["id"], strategy
+        )
+        return ok(perf)
+    except Exception as e:
+        logger.error(f"❌ 获取策略表现失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取策略表现失败: {str(e)}"
         )

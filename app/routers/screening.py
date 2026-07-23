@@ -590,3 +590,181 @@ async def backtest_three_buys_three_sells(
     except Exception as e:
         logger.error(f"[three_buys_three_sells_backtest] 回测失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"三买三卖回测失败: {str(e)}")
+
+
+# ============================================================
+# 散户策略：极端反转 / 困境反转 / 小盘价值 / 转债博弈
+# ============================================================
+
+class RetailStrategyRequest(BaseModel):
+    """散户策略通用请求"""
+    min_score: int = Field(40, ge=0, le=100, description="最低评分阈值")
+    top_n: int = Field(10, ge=1, le=50, description="回测时每次最多选股数")
+    hold_days: int = Field(20, ge=5, le=120, description="最大持有天数")
+    initial_capital: float = Field(1000000, ge=100000, description="初始资金")
+    limit: int = Field(50, ge=1, le=200, description="扫描返回数量限制")
+    max_position_pct: float = Field(0.1, ge=0.01, le=0.5, description="单股最大仓位比例")
+
+
+class RetailStrategyScanResponse(BaseModel):
+    """散户策略扫描响应"""
+    total: int
+    items: List[dict]
+    took_ms: Optional[int] = None
+    params: Optional[dict] = None
+    scanned_count: Optional[int] = None
+    message: Optional[str] = None
+
+
+class RetailStrategyBacktestRequest(RetailStrategyRequest):
+    """散户策略回测请求"""
+    start_date: Optional[str] = Field(None, description="回测开始日期 YYYY-MM-DD")
+    end_date: Optional[str] = Field(None, description="回测结束日期 YYYY-MM-DD")
+
+
+class RetailStrategyBacktestResponse(BaseModel):
+    """散户策略回测响应"""
+    strategy: Optional[str] = None
+    total_trades: int = 0
+    win_rate: float = 0
+    avg_return: float = 0
+    avg_win: float = 0
+    avg_loss: float = 0
+    profit_loss_ratio: float = 0
+    max_drawdown: float = 0
+    sharpe_ratio: float = 0
+    calmar_ratio: float = 0
+    annualized_return: float = 0
+    max_consecutive_losses: int = 0
+    total_fees_est: float = 0
+    total_return: float = 0
+    final_capital: float = 0
+    initial_capital: float = 0
+    backtest_days: int = 0
+    sell_reason_stats: Optional[Dict[str, Any]] = None
+    daily_results: Optional[List[dict]] = None
+    top_trades: Optional[List[dict]] = None
+    worst_trades: Optional[List[dict]] = None
+    params: Optional[dict] = None
+    took_ms: Optional[int] = None
+    message: Optional[str] = None
+
+
+# ---- 极端反转 ----
+
+@router.post("/extreme-reversal/scan", response_model=RetailStrategyScanResponse)
+async def scan_extreme_reversal(req: RetailStrategyRequest):
+    """极端情绪反转策略 - 扫描选股"""
+    try:
+        from app.services.retail.extreme_reversal_service import get_extreme_reversal_service
+        service = get_extreme_reversal_service()
+        params = req.model_dump()
+        result = await service.scan_extreme_reversal(params)
+        return RetailStrategyScanResponse(**result)
+    except Exception as e:
+        logger.error(f"[extreme_reversal_scan] 失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"极端反转扫描失败: {str(e)}")
+
+
+@router.post("/extreme-reversal/backtest", response_model=RetailStrategyBacktestResponse)
+async def backtest_extreme_reversal(req: RetailStrategyBacktestRequest):
+    """极端情绪反转策略 - 回测分析"""
+    try:
+        from app.services.retail.extreme_reversal_service import get_extreme_reversal_service
+        service = get_extreme_reversal_service()
+        params = req.model_dump()
+        result = await service.backtest(params)
+        return RetailStrategyBacktestResponse(**result)
+    except Exception as e:
+        logger.error(f"[extreme_reversal_backtest] 失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"极端反转回测失败: {str(e)}")
+
+
+# ---- 困境反转 ----
+
+@router.post("/turnaround/scan", response_model=RetailStrategyScanResponse)
+async def scan_turnaround(req: RetailStrategyRequest):
+    """困境反转策略 - 扫描选股"""
+    try:
+        from app.services.retail.turnaround_service import get_turnaround_service
+        service = get_turnaround_service()
+        params = req.model_dump()
+        result = await service.scan_turnaround(params)
+        return RetailStrategyScanResponse(**result)
+    except Exception as e:
+        logger.error(f"[turnaround_scan] 失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"困境反转扫描失败: {str(e)}")
+
+
+@router.post("/turnaround/backtest", response_model=RetailStrategyBacktestResponse)
+async def backtest_turnaround(req: RetailStrategyBacktestRequest):
+    """困境反转策略 - 回测分析"""
+    try:
+        from app.services.retail.turnaround_service import get_turnaround_service
+        service = get_turnaround_service()
+        params = req.model_dump()
+        result = await service.backtest(params)
+        return RetailStrategyBacktestResponse(**result)
+    except Exception as e:
+        logger.error(f"[turnaround_backtest] 失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"困境反转回测失败: {str(e)}")
+
+
+# ---- 小盘价值 ----
+
+@router.post("/small-cap-value/scan", response_model=RetailStrategyScanResponse)
+async def scan_small_cap_value(req: RetailStrategyRequest):
+    """小盘价值策略 - 扫描选股"""
+    try:
+        from app.services.retail.small_cap_value_service import get_small_cap_value_service
+        service = get_small_cap_value_service()
+        params = req.model_dump()
+        result = await service.scan_small_cap_value(params)
+        return RetailStrategyScanResponse(**result)
+    except Exception as e:
+        logger.error(f"[small_cap_value_scan] 失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"小盘价值扫描失败: {str(e)}")
+
+
+@router.post("/small-cap-value/backtest", response_model=RetailStrategyBacktestResponse)
+async def backtest_small_cap_value(req: RetailStrategyBacktestRequest):
+    """小盘价值策略 - 回测分析"""
+    try:
+        from app.services.retail.small_cap_value_service import get_small_cap_value_service
+        service = get_small_cap_value_service()
+        params = req.model_dump()
+        result = await service.backtest(params)
+        return RetailStrategyBacktestResponse(**result)
+    except Exception as e:
+        logger.error(f"[small_cap_value_backtest] 失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"小盘价值回测失败: {str(e)}")
+
+
+# ---- 转债博弈 ----
+
+@router.post("/convertible-arbitrage/scan", response_model=RetailStrategyScanResponse)
+async def scan_convertible_arbitrage(req: RetailStrategyRequest):
+    """转债下修博弈策略 - 扫描选股"""
+    try:
+        from app.services.retail.convertible_arbitrage_service import get_convertible_arbitrage_service
+        service = get_convertible_arbitrage_service()
+        params = req.model_dump()
+        result = await service.scan_convertible_arbitrage(params)
+        return RetailStrategyScanResponse(**result)
+    except Exception as e:
+        logger.error(f"[convertible_arbitrage_scan] 失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"转债博弈扫描失败: {str(e)}")
+
+
+@router.post("/convertible-arbitrage/backtest", response_model=RetailStrategyBacktestResponse)
+async def backtest_convertible_arbitrage(req: RetailStrategyBacktestRequest):
+    """转债下修博弈策略 - 回测分析"""
+    try:
+        from app.services.retail.convertible_arbitrage_service import get_convertible_arbitrage_service
+        service = get_convertible_arbitrage_service()
+        params = req.model_dump()
+        result = await service.backtest(params)
+        return RetailStrategyBacktestResponse(**result)
+    except Exception as e:
+        logger.error(f"[convertible_arbitrage_backtest] 失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"转债博弈回测失败: {str(e)}")

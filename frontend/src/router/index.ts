@@ -124,6 +124,46 @@ const routes: RouteRecordRaw[] = [
           parentTitle: '选股',
           requiresAuth: true
         }
+      },
+      {
+        path: 'extreme-reversal',
+        name: 'ExtremeReversal',
+        component: () => import('@/views/Screening/ExtremeReversal.vue'),
+        meta: {
+          title: '极端反转',
+          parentTitle: '选股',
+          requiresAuth: true
+        }
+      },
+      {
+        path: 'turnaround',
+        name: 'Turnaround',
+        component: () => import('@/views/Screening/Turnaround.vue'),
+        meta: {
+          title: '困境反转',
+          parentTitle: '选股',
+          requiresAuth: true
+        }
+      },
+      {
+        path: 'small-cap-value',
+        name: 'SmallCapValue',
+        component: () => import('@/views/Screening/SmallCapValue.vue'),
+        meta: {
+          title: '小盘价值',
+          parentTitle: '选股',
+          requiresAuth: true
+        }
+      },
+      {
+        path: 'convertible-arbitrage',
+        name: 'ConvertibleArbitrage',
+        component: () => import('@/views/Screening/ConvertibleArbitrage.vue'),
+        meta: {
+          title: '转债博弈',
+          parentTitle: '选股',
+          requiresAuth: true
+        }
       }
     ]
   },

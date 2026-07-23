@@ -290,6 +290,65 @@ export interface ThreeBuysThreeSellsBacktestResp {
   took_ms?: number
 }
 
+// ===== 散户策略通用类型（极端反转 / 困境反转 / 小盘价值 / 转债下修博弈） =====
+
+export interface RetailScanReq {
+  min_score?: number       // 最低评分
+  limit?: number           // 返回数量
+  top_n?: number           // 回测每次选股数
+  hold_days?: number       // 持有天数
+  initial_capital?: number // 初始资金
+}
+
+export interface RetailBacktestReq extends RetailScanReq {
+  start_date?: string
+  end_date?: string
+}
+
+export interface RetailScanItem {
+  code: string
+  name: string
+  industry?: string
+  close: number
+  pct_chg?: number
+  score: number
+  signal_type?: string
+  score_details?: Record<string, any>
+  [key: string]: any // 各策略会有额外字段
+}
+
+export interface RetailScanResp {
+  total: number
+  items: RetailScanItem[]
+  took_ms?: number
+  params?: any
+}
+
+export interface RetailBacktestResp {
+  total_trades: number
+  win_rate: number
+  avg_return: number
+  avg_win: number
+  avg_loss: number
+  profit_loss_ratio: number
+  max_drawdown: number
+  sharpe_ratio: number
+  calmar_ratio: number
+  annualized_return: number
+  max_consecutive_losses: number
+  total_fees_est: number
+  total_return: number
+  final_capital: number
+  initial_capital: number
+  backtest_days: number
+  sell_reason_stats?: Record<string, { count: number; win_rate: number; avg_return: number }>
+  daily_results?: any[]
+  top_trades?: any[]
+  worst_trades?: any[]
+  params?: any
+  took_ms?: number
+}
+
 export const screeningApi = {
   run: (payload: ScreeningRunReq, options?: { timeout?: number }) =>
     ApiClient.post<ScreeningRunResp>('/api/screening/run', payload, { timeout: options?.timeout ?? 120000 }),
@@ -302,6 +361,27 @@ export const screeningApi = {
   scanThreeBuysThreeSells: (payload: ThreeBuysThreeSellsScanReq, options?: { timeout?: number }) =>
     ApiClient.post<ThreeBuysThreeSellsScanResp>('/api/screening/three-buys-three-sells/scan', payload, { timeout: options?.timeout ?? 180000 }),
   backtestThreeBuysThreeSells: (payload: ThreeBuysThreeSellsBacktestReq, options?: { timeout?: number }) =>
-    ApiClient.post<ThreeBuysThreeSellsBacktestResp>('/api/screening/three-buys-three-sells/backtest', payload, { timeout: options?.timeout ?? 600000 })
+    ApiClient.post<ThreeBuysThreeSellsBacktestResp>('/api/screening/three-buys-three-sells/backtest', payload, { timeout: options?.timeout ?? 600000 }),
+
+  // ===== 散户策略：极端反转 / 困境反转 / 小盘价值 / 转债下修博弈 =====
+  scanExtremeReversal: (payload: RetailScanReq, options?: { timeout?: number }) =>
+    ApiClient.post<RetailScanResp>('/api/screening/extreme-reversal/scan', payload, { timeout: options?.timeout ?? 180000 }),
+  backtestExtremeReversal: (payload: RetailBacktestReq, options?: { timeout?: number }) =>
+    ApiClient.post<RetailBacktestResp>('/api/screening/extreme-reversal/backtest', payload, { timeout: options?.timeout ?? 300000 }),
+
+  scanTurnaround: (payload: RetailScanReq, options?: { timeout?: number }) =>
+    ApiClient.post<RetailScanResp>('/api/screening/turnaround/scan', payload, { timeout: options?.timeout ?? 180000 }),
+  backtestTurnaround: (payload: RetailBacktestReq, options?: { timeout?: number }) =>
+    ApiClient.post<RetailBacktestResp>('/api/screening/turnaround/backtest', payload, { timeout: options?.timeout ?? 300000 }),
+
+  scanSmallCapValue: (payload: RetailScanReq, options?: { timeout?: number }) =>
+    ApiClient.post<RetailScanResp>('/api/screening/small-cap-value/scan', payload, { timeout: options?.timeout ?? 180000 }),
+  backtestSmallCapValue: (payload: RetailBacktestReq, options?: { timeout?: number }) =>
+    ApiClient.post<RetailBacktestResp>('/api/screening/small-cap-value/backtest', payload, { timeout: options?.timeout ?? 300000 }),
+
+  scanConvertibleArbitrage: (payload: RetailScanReq, options?: { timeout?: number }) =>
+    ApiClient.post<RetailScanResp>('/api/screening/convertible-arbitrage/scan', payload, { timeout: options?.timeout ?? 180000 }),
+  backtestConvertibleArbitrage: (payload: RetailBacktestReq, options?: { timeout?: number }) =>
+    ApiClient.post<RetailBacktestResp>('/api/screening/convertible-arbitrage/backtest', payload, { timeout: options?.timeout ?? 300000 })
 }
 
