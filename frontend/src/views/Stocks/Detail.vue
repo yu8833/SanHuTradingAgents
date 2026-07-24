@@ -934,7 +934,8 @@ async function clearCache() {
       fetchFundamentals(),
       fetchKline(),
       fetchNews(),
-      fetchRiskAnalysis()
+      fetchSectorInfo(),  // 🔥 板块联动
+      fetchMoneyFlow()    // 🔥 主力资金
     ])
 
     ElMessage.success('数据已刷新')
@@ -1047,7 +1048,6 @@ async function loadPageData() {
     fetchFundamentals(),
     fetchKline(),
     fetchNews(),
-    fetchRiskAnalysis(),
     checkFavorite(),
     fetchLatestAnalysis(),  // 获取最新的历史分析报告
     fetchSyncStatus(),  // 获取同步状态
