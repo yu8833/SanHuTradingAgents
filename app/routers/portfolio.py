@@ -1,12 +1,16 @@
 """
 持仓追踪API路由
-提供持仓的增删改查、批量导入和汇总统计功能
+提供持仓的增删改查、批量导入和汇总统计功能。
+支持CSV导入实盘交易记录。
 """
 
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from pydantic import BaseModel
 import logging
+import io
+import csv
+from datetime import datetime
 
 from app.routers.auth_db import get_current_user
 from app.services.portfolio_service import portfolio_service, Position, PositionUpdate
@@ -94,7 +98,7 @@ async def add_position(
     try:
         logger.info(f"📝 添加持仓请求: user_id={current_user['id']}, symbol={request.symbol}, stock_name={request.stock_name}")
 
-        # 构建持仓对象
+        # 构建持仓对象（含策略元数据）
         position = Position(
             user_id=current_user["id"],
             symbol=request.symbol,
@@ -103,7 +107,11 @@ async def add_position(
             cost_price=request.cost_price,
             position_ratio=request.position_ratio,
             buy_date=request.buy_date,
-            notes=request.notes
+            notes=request.notes,
+            strategy=request.strategy,
+            stop_loss_price=request.stop_loss_price,
+            take_profit_price=request.take_profit_price,
+            thesis=request.thesis,
         )
 
         # 创建持仓
@@ -130,7 +138,7 @@ async def update_position(
     try:
         logger.info(f"📝 更新持仓: position_id={position_id}")
 
-        # 构建更新字段
+        # 构建更新字段（含策略元数据）
         updates = {}
         if request.quantity is not None:
             updates["quantity"] = request.quantity
@@ -140,6 +148,12 @@ async def update_position(
             updates["position_ratio"] = request.position_ratio
         if request.notes is not None:
             updates["notes"] = request.notes
+        if request.stop_loss_price is not None:
+            updates["stop_loss_price"] = request.stop_loss_price
+        if request.take_profit_price is not None:
+            updates["take_profit_price"] = request.take_profit_price
+        if request.thesis is not None:
+            updates["thesis"] = request.thesis
 
         if not updates:
             raise HTTPException(
@@ -215,7 +229,7 @@ async def import_positions(
                 detail="导入列表为空"
             )
 
-        # 构建持仓对象列表
+        # 构建持仓对象列表（含策略元数据）
         positions = []
         for pos_req in request.positions:
             positions.append(Position(
@@ -226,7 +240,11 @@ async def import_positions(
                 cost_price=pos_req.cost_price,
                 position_ratio=pos_req.position_ratio,
                 buy_date=pos_req.buy_date,
-                notes=pos_req.notes
+                notes=pos_req.notes,
+                strategy=pos_req.strategy,
+                stop_loss_price=pos_req.stop_loss_price,
+                take_profit_price=pos_req.take_profit_price,
+                thesis=pos_req.thesis,
             ))
 
         # 批量导入
@@ -245,6 +263,140 @@ async def import_positions(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"批量导入持仓失败: {str(e)}"
+        )
+
+
+@router.post("/positions/import-csv", response_model=dict)
+async def import_positions_csv(
+    file: UploadFile = File(...),
+    strategy: str = Form("default"),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    从CSV文件导入实盘交易记录
+
+    支持的CSV列名（不区分大小写，支持中英文）：
+    - 代码/symbol/code: 股票代码
+    - 名称/name/stock_name: 股票名称
+    - 数量/quantity/qty: 持股数量
+    - 成本价/cost_price/avg_cost: 成本价
+    - 买入日期/buy_date/date: 买入日期（YYYY-MM-DD）
+    - 止损价/stop_loss: 止损价（可选）
+    - 止盈价/take_profit: 止盈价（可选）
+
+    CSV第一行必须为表头。strategy 参数为统一策略标签，应用于本次导入的所有记录。
+    """
+    try:
+        if not file.filename or not file.filename.lower().endswith('.csv'):
+            raise HTTPException(status_code=400, detail="请上传CSV格式文件")
+
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="文件为空")
+
+        # 尝试多种编码（券商导出常为GBK）
+        text = None
+        for enc in ('utf-8-sig', 'utf-8', 'gbk', 'gb18030'):
+            try:
+                text = content.decode(enc)
+                break
+            except UnicodeDecodeError:
+                continue
+        if text is None:
+            raise HTTPException(status_code=400, detail="无法解码文件，请使用UTF-8或GBK编码")
+
+        reader = csv.DictReader(io.StringIO(text))
+        raw_rows = list(reader)
+        if not raw_rows:
+            raise HTTPException(status_code=400, detail="CSV文件无数据行")
+
+        # 字段别名映射
+        def _pick(row, *keys):
+            for k in keys:
+                for actual_key in row.keys():
+                    if actual_key.strip().lower() == k.lower():
+                        val = row[actual_key]
+                        return val.strip() if isinstance(val, str) else val
+            return None
+
+        positions = []
+        skipped = 0
+        for row in raw_rows:
+            code = _pick(row, '代码', 'symbol', 'code', '股票代码')
+            name = _pick(row, '名称', 'name', 'stock_name', '股票名称') or ''
+            qty_str = _pick(row, '数量', 'quantity', 'qty', '持股数量')
+            cost_str = _pick(row, '成本价', 'cost_price', 'avg_cost', '买入价')
+            date_str = _pick(row, '买入日期', 'buy_date', 'date', '日期')
+            stop_str = _pick(row, '止损价', 'stop_loss', 'stop_loss_price')
+            tp_str = _pick(row, '止盈价', 'take_profit', 'take_profit_price')
+
+            if not code or not qty_str:
+                skipped += 1
+                continue
+
+            try:
+                qty = int(float(str(qty_str).replace(',', '')))
+                cost = float(str(cost_str).replace(',', '')) if cost_str else 0.0
+            except (ValueError, TypeError):
+                skipped += 1
+                continue
+
+            # 日期格式归一化
+            buy_date = datetime.now().strftime("%Y-%m-%d")
+            if date_str:
+                try:
+                    # 尝试 YYYY-MM-DD 或 YYYY/MM/DD
+                    ds = str(date_str).replace('/', '-').strip()
+                    if len(ds) >= 10:
+                        buy_date = ds[:10]
+                except Exception:
+                    pass
+
+            try:
+                stop_loss = float(str(stop_str).replace(',', '')) if stop_str else None
+            except (ValueError, TypeError):
+                stop_loss = None
+            try:
+                take_profit = float(str(tp_str).replace(',', '')) if tp_str else None
+            except (ValueError, TypeError):
+                take_profit = None
+
+            positions.append(Position(
+                user_id=current_user["id"],
+                symbol=str(code),
+                stock_name=str(name),
+                quantity=qty,
+                cost_price=cost,
+                position_ratio=0.0,
+                buy_date=buy_date,
+                strategy=strategy,
+                stop_loss_price=stop_loss,
+                take_profit_price=take_profit,
+                thesis=None,
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
+            ))
+
+        if not positions:
+            raise HTTPException(status_code=400, detail=f"CSV中无有效记录（跳过{skipped}行）")
+
+        success_count = await portfolio_service.import_positions(positions)
+        logger.info(f"✅ CSV导入成功: user={current_user['id']}, 成功{success_count}条, 跳过{skipped}条")
+
+        return ok({
+            "total": len(raw_rows),
+            "success_count": success_count,
+            "skipped": skipped,
+            "strategy": strategy,
+        }, f"成功导入 {success_count} 条持仓（跳过 {skipped} 行无效记录）")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ CSV导入失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"CSV导入失败: {str(e)}"
         )
 
 

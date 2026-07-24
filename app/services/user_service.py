@@ -9,6 +9,8 @@ from typing import Optional, Dict, Any, List
 from pymongo import MongoClient
 from bson import ObjectId
 
+import bcrypt
+
 from app.core.config import settings
 from app.models.user import User, UserCreate, UserUpdate, UserResponse
 
@@ -22,6 +24,9 @@ except ImportError:
         return logging.getLogger(name)
 
 logger = get_logger('user_service')
+
+# 旧哈希算法标记前缀（用于懒迁移识别）
+_LEGACY_SHA256_PREFIX = "sha256$"
 
 
 class UserService:
@@ -41,17 +46,41 @@ class UserService:
     def __del__(self):
         """析构函数，确保连接被关闭"""
         self.close()
-    
+
     @staticmethod
     def hash_password(password: str) -> str:
-        """密码哈希"""
-        # 使用 bcrypt 会更安全，但为了兼容性先使用 SHA-256
+        """密码哈希（bcrypt，带盐）"""
+        # bcrypt 要求密码为 bytes，且自动生成盐并嵌入哈希结果
+        pwd_bytes = password.encode('utf-8')
+        salt = bcrypt.gensalt(rounds=12)
+        hashed = bcrypt.hashpw(pwd_bytes, salt)
+        return hashed.decode('utf-8')
+
+    @staticmethod
+    def _legacy_sha256(password: str) -> str:
+        """旧版 SHA-256 哈希（仅用于兼容已存储的旧密码）"""
         return hashlib.sha256(password.encode()).hexdigest()
-    
+
     @staticmethod
     def verify_password(plain_password: str, hashed_password: str) -> bool:
-        """验证密码"""
-        return UserService.hash_password(plain_password) == hashed_password
+        """
+        验证密码，支持 bcrypt 与旧版 SHA-256（懒迁移）
+        - bcrypt 哈希：直接验证
+        - 旧 SHA-256 哈希（64位十六进制）：验证后由调用方触发升级
+        """
+        if not hashed_password:
+            return False
+        # bcrypt 哈希以 $2b$ / $2a$ / $2y$ 开头
+        if hashed_password.startswith('$2'):
+            try:
+                return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+            except Exception:
+                return False
+        # 兼容旧版 SHA-256（64位十六进制字符串）
+        if len(hashed_password) == 64 and all(c in '0123456789abcdef' for c in hashed_password.lower()):
+            return UserService._legacy_sha256(plain_password) == hashed_password
+        # 未知格式
+        return False
     
     async def create_user(self, user_data: UserCreate) -> Optional[User]:
         """创建用户"""
@@ -130,15 +159,10 @@ class UserService:
 
             logger.info(f"🔍 [authenticate_user] 用户信息: username={user_doc.get('username')}, email={user_doc.get('email')}, is_active={user_doc.get('is_active')}")
 
-            # 验证密码
-            input_password_hash = self.hash_password(password)
+            # 验证密码（不再打印哈希，避免敏感信息泄露）
             stored_password_hash = user_doc["hashed_password"]
-            logger.info(f"🔍 [authenticate_user] 密码哈希对比:")
-            logger.info(f"   输入密码哈希: {input_password_hash[:20]}...")
-            logger.info(f"   存储密码哈希: {stored_password_hash[:20]}...")
-            logger.info(f"   哈希匹配: {input_password_hash == stored_password_hash}")
 
-            if not self.verify_password(password, user_doc["hashed_password"]):
+            if not self.verify_password(password, stored_password_hash):
                 logger.warning(f"❌ [authenticate_user] 密码错误: {username}")
                 return None
 
@@ -146,6 +170,18 @@ class UserService:
             if not user_doc.get("is_active", True):
                 logger.warning(f"❌ [authenticate_user] 用户已禁用: {username}")
                 return None
+
+            # 懒迁移：旧版 SHA-256 哈希在登录成功后自动升级为 bcrypt
+            if not stored_password_hash.startswith('$2'):
+                try:
+                    new_bcrypt_hash = self.hash_password(password)
+                    self.users_collection.update_one(
+                        {"_id": user_doc["_id"]},
+                        {"$set": {"hashed_password": new_bcrypt_hash}}
+                    )
+                    logger.info(f"🔐 [authenticate_user] 已将用户 {username} 的密码哈希从 SHA-256 升级为 bcrypt")
+                except Exception as upgrade_err:
+                    logger.warning(f"⚠️ 密码哈希升级失败（不影响本次登录）: {upgrade_err}")
 
             # 更新最后登录时间
             self.users_collection.update_one(

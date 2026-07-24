@@ -96,12 +96,17 @@ const appStore = useAppStore()
 const route = useRoute()
 const { width } = useWindowSize()
 
-// 需要缓存的组件
+// 需要缓存的组件（使用路由 name，与 router/index.ts 中的 name 一致）
+// keep-alive 的 include 匹配的是组件 name，但 Vue SFC 未显式声明 name 时，
+// 会回退到路由 matched 组件的 name。这里用路由 name 作为缓存标识。
+// 缓存高频返回的列表/工作台页面，保留滚动位置与查询状态。
 const keepAliveComponents = computed(() => [
-  'Dashboard',
-  'StockScreening',
-  'AnalysisHistory',
-  'QueueManagement'
+  'DashboardHome',       // 仪表盘
+  'StockScreeningCommon',// 常用策略
+  'TaskCenterHome',      // 任务中心
+  'FavoritesHome',       // 自选股
+  'ReportsHome',         // 历史报告
+  'ReviewOverview'       // 大盘看板
 ])
 
 // 移动端判断

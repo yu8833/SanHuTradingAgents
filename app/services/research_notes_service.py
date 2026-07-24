@@ -47,6 +47,10 @@ class ResearchNotesService:
             "ts": note.get("ts", 0),
             "created_at": created_at,
             "updated_at": updated_at,
+            # 交易复盘关联字段（可选）
+            "related_code": note.get("related_code"),
+            "related_strategy": note.get("related_strategy"),
+            "related_trade_id": note.get("related_trade_id"),
         }
 
     async def get_user_notes(self, user_id: str, kind: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -68,6 +72,9 @@ class ResearchNotesService:
         kind: str,
         title: str,
         content: str,
+        related_code: Optional[str] = None,
+        related_strategy: Optional[str] = None,
+        related_trade_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """添加研究笔记"""
         try:
@@ -83,6 +90,13 @@ class ResearchNotesService:
                 "created_at": now,
                 "updated_at": now,
             }
+            # 交易复盘关联字段（可选）
+            if related_code:
+                note["related_code"] = related_code
+            if related_strategy:
+                note["related_strategy"] = related_strategy
+            if related_trade_id:
+                note["related_trade_id"] = related_trade_id
 
             result = await db.research_notes.insert_one(note)
             note["_id"] = result.inserted_id

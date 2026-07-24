@@ -24,6 +24,7 @@
       <el-menu-item index="/analysis/single">单股分析</el-menu-item>
       <el-menu-item index="/analysis/batch">批量分析</el-menu-item>
       <el-menu-item index="/reports">分析报告</el-menu-item>
+      <el-menu-item index="/analysis/notifications">通知中心</el-menu-item>
     </el-sub-menu>
 
     <el-menu-item index="/tasks">
@@ -59,27 +60,21 @@
       <el-menu-item index="/vibe/review/overview">大盘看板</el-menu-item>
       <el-menu-item index="/vibe/review/fundflow">资金流向</el-menu-item>
       <el-menu-item index="/vibe/review/emotion">短线情绪</el-menu-item>
-    </el-sub-menu>
-
-    <el-menu-item index="/vibe/intel/radar">
-      <el-icon><DataLine /></el-icon>
-      <template #title>资讯</template>
-    </el-menu-item>
-
-    <el-sub-menu index="/vibe-notes">
-      <template #title>
-        <el-icon><EditPen /></el-icon>
-        <span>记录</span>
-      </template>
+      <el-menu-item index="/vibe/intel/radar">资讯雷达</el-menu-item>
       <el-menu-item index="/vibe/notes">研究记录</el-menu-item>
     </el-sub-menu>
 
-    <el-menu-item index="/paper">
-      <el-icon><CreditCard /></el-icon>
-      <template #title>交易</template>
-    </el-menu-item>
+    <el-sub-menu index="/paper-root">
+      <template #title>
+        <el-icon><CreditCard /></el-icon>
+        <span>交易</span>
+      </template>
+      <el-menu-item index="/paper">模拟交易</el-menu-item>
+      <el-menu-item index="/portfolio">持仓追踪</el-menu-item>
+      <el-menu-item index="/stock-alerts">个股预警</el-menu-item>
+    </el-sub-menu>
 
-    <el-sub-menu index="/settings">
+    <el-sub-menu index="/settings-root">
       <template #title>
         <el-icon><Setting /></el-icon>
         <span>设置</span>
@@ -93,6 +88,7 @@
         <el-menu-item index="/settings?tab=analysis">分析偏好</el-menu-item>
         <el-menu-item index="/settings?tab=notifications">通知设置</el-menu-item>
         <el-menu-item index="/settings?tab=security">安全设置</el-menu-item>
+        <el-menu-item index="/settings/tags">标签管理</el-menu-item>
       </el-sub-menu>
 
       <!-- 系统配置 -->
@@ -137,8 +133,9 @@ import {
   InfoFilled,
   CreditCard,
   DataAnalysis,
-  DataLine,
-  EditPen
+  Wallet,
+  Bell,
+  ChatDotRound
 } from '@element-plus/icons-vue'
 
 const route = useRoute()

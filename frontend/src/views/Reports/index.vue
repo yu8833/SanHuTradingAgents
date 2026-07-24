@@ -157,6 +157,8 @@
 </template>
 
 <script setup lang="ts">
+// 显式声明组件名，供 <keep-alive :include> 匹配
+defineOptions({ name: 'ReportsHome' })
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'

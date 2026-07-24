@@ -172,21 +172,77 @@ class RetailScreeningBase:
         days: int = 60,
         concurrency: int = 100,
     ) -> Dict[str, List[dict]]:
-        """批量获取多只股票的日线数据"""
-        semaphore = asyncio.Semaphore(concurrency)
+        """
+        批量获取多只股票的日线数据（单次 $in 查询，替代 N 次单股查询）
 
-        async def fetch_one(code: str) -> Tuple[str, List[dict]]:
-            async with semaphore:
-                try:
-                    quotes = await self._get_daily_quotes(code, end_date, days)
-                    return code, quotes
-                except Exception as e:
-                    logger.debug(f"获取 {code} 日线失败: {e}")
-                    return code, []
+        性能优化：将 N 次 _get_daily_quotes 单股查询合并为 1 次 $in 批量查询，
+        消除回测/扫描时的 N×M 查询风暴。
 
-        tasks = [fetch_one(c) for c in codes]
-        results = await asyncio.gather(*tasks)
-        return {code: quotes for code, quotes in results}
+        Args:
+            codes: 股票代码列表
+            end_date: 截止日期 YYYY-MM-DD
+            days: 每只股票获取的最近天数
+            concurrency: 保留参数兼容旧调用（单次查询无需限流）
+        """
+        if not codes:
+            return {}
+        db = await self._get_db()
+
+        # 计算日期下界：交易日 days 天约需 days*2 个自然日（含周末），加 30 天缓冲
+        # 避免全表扫描，同时保证足够数据量
+        try:
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+        except Exception:
+            end_dt = datetime.now()
+        start_lower = (end_dt - timedelta(days=days * 2 + 30)).strftime("%Y-%m-%d")
+
+        cursor = db["stock_daily_quotes"].find(
+            {
+                "code": {"$in": codes},
+                "trade_date": {"$lte": end_date, "$gte": start_lower},
+                "period": "daily",
+            },
+            {
+                "trade_date": 1,
+                "code": 1,
+                "open": 1,
+                "close": 1,
+                "high": 1,
+                "low": 1,
+                "volume": 1,
+                "amount": 1,
+                "pct_chg": 1,
+                "pre_close": 1,
+                "data_source": 1,
+                "_id": 0,
+            },
+        ).sort("trade_date", -1)
+
+        docs = await cursor.to_list(length=None)
+
+        # 按 code 分组，按 data_source 优先级去重，每只取最近 days 天
+        source_priority = {"tushare": 4, "sina": 3, "baostock": 2, "akshare": 1}
+        by_code: Dict[str, Dict[str, dict]] = {}
+        for d in docs:
+            code = d.get("code")
+            if not code:
+                continue
+            bucket = by_code.setdefault(code, {})
+            dt = d.get("trade_date")
+            src = d.get("data_source", "")
+            if dt not in bucket or source_priority.get(
+                src, 0
+            ) > source_priority.get(bucket[dt].get("data_source", ""), 0):
+                bucket[dt] = d
+
+        result: Dict[str, List[dict]] = {}
+        for code, bucket in by_code.items():
+            # 取最近 days 天，按日期正序返回（与 _get_daily_quotes 一致）
+            sorted_quotes = sorted(
+                bucket.values(), key=lambda x: x["trade_date"], reverse=True
+            )[:days]
+            result[code] = sorted(sorted_quotes, key=lambda x: x["trade_date"])
+        return result
 
     # ---- 通用工具 ----
 
@@ -245,23 +301,49 @@ class RetailScreeningBase:
             from app.services.retail.risk_scanner import get_risk_scanner
 
             scanner = get_risk_scanner()
-            filtered = []
 
-            for item in items:
+            # 并行扫描：每只股票的风险扫描含多次 akshare 网络请求（I/O 密集），
+            # 用 asyncio.gather + 信号量并发执行，替代串行 for 循环阻塞。
+            # 信号量控制并发上限，避免数据源限流。
+            semaphore = asyncio.Semaphore(10)
+
+            async def scan_one(item: dict) -> Tuple[dict, Optional[dict]]:
                 code = item.get("code", "")
                 if not code:
-                    continue
-
+                    return item, None
                 name = item.get("name", "")
                 if not name and screening_data:
                     name = screening_data.get(code, {}).get("name", "")
+                async with semaphore:
+                    try:
+                        risk = await scanner.scan_stock_risks_async(code, name)
+                        return item, risk
+                    except Exception as e:
+                        logger.warning(f"风险扫描异常 {code}: {e}")
+                        return item, None
 
-                risk = scanner.scan_stock_risks(code, name)
+            results = await asyncio.gather(*[scan_one(it) for it in items])
+
+            filtered = []
+            for item, risk in results:
+                if risk is None:
+                    # 单只扫描失败：标记 risk_scan_failed 但保留（与整体失败策略一致，避免静默放行未扫描股）
+                    item["risk_info"] = {
+                        "risk_level": "unknown",
+                        "risk_count": 0,
+                        "has_high_risk": False,
+                        "has_any_risk": False,
+                        "risks": [],
+                        "risk_scan_failed": True,
+                        "message": "该股票风险扫描异常，请谨慎对待",
+                    }
+                    filtered.append(item)
+                    continue
 
                 # 高风险直接排除
                 if risk["has_high_risk"]:
                     logger.info(
-                        f"⚠️ 风险过滤: 排除 {code} {name} - "
+                        f"⚠️ 风险过滤: 排除 {item.get('code', '')} {item.get('name', '')} - "
                         f"{'; '.join(r['risk_name'] for r in risk['risks'])}"
                     )
                     continue
@@ -277,7 +359,19 @@ class RetailScreeningBase:
             return filtered
 
         except Exception as e:
-            logger.warning(f"风险过滤失败（跳过）: {e}")
+            # 风险扫描失败时，绝不能静默放行未过滤的原始列表（违背"高风险股票必须排除"的约束）
+            # 为每个 item 标记 risk_scan_failed，前端据此提示用户"风险未扫描"
+            logger.error(f"风险过滤整体失败，标记所有候选为 risk_scan_failed: {e}", exc_info=True)
+            for item in items:
+                item["risk_info"] = {
+                    "risk_level": "unknown",
+                    "risk_count": 0,
+                    "has_high_risk": False,
+                    "has_any_risk": False,
+                    "risks": [],
+                    "risk_scan_failed": True,
+                    "message": "风险扫描服务异常，未完成风险检查，请谨慎对待",
+                }
             return items
 
     # ---- 通用回测引擎 ----
@@ -340,9 +434,15 @@ class RetailScreeningBase:
 
         for i, date_str in enumerate(trade_dates):
             # 1. 检查持仓是否触发卖出
+            # 性能优化：单次批量查询所有持仓当日行情，替代逐持仓 N 次查询
             new_holdings = []
+            holding_codes = [h["code"] for h in holdings]
+            if holding_codes:
+                quotes_map = await self._batch_get_quotes(holding_codes, date_str, days=5)
+            else:
+                quotes_map = {}
             for h in holdings:
-                quotes = await self._get_daily_quotes(h["code"], date_str, 5)
+                quotes = quotes_map.get(h["code"], [])
                 if not quotes:
                     new_holdings.append(h)
                     continue

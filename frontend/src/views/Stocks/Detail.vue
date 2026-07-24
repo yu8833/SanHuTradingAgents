@@ -41,47 +41,114 @@
           <el-button text size="small" @click="refreshMockQuote" :icon="Refresh">刷新</el-button>
         </div>
         <div class="stats">
-          <div class="item"><span>今开</span><b>{{ fmtPrice(quote.open) }}</b></div>
-          <div class="item"><span>最高</span><b>{{ fmtPrice(quote.high) }}</b></div>
-          <div class="item"><span>最低</span><b>{{ fmtPrice(quote.low) }}</b></div>
-          <div class="item"><span>昨收</span><b>{{ fmtPrice(quote.prevClose) }}</b></div>
           <div class="item">
-            <span>成交量</span>
+            <span>
+              今开
+              <el-tooltip content="今日开盘价，即当天第一笔成交的价格。若高开说明市场情绪偏多，低开说明偏空。" placement="top">
+                <el-icon class="help-icon-inline"><QuestionFilled /></el-icon>
+              </el-tooltip>
+            </span>
+            <b>{{ fmtPrice(quote.open) }}</b>
+          </div>
+          <div class="item">
+            <span>
+              最高
+              <el-tooltip content="今日盘中最高成交价。离最高价越远，说明上方抛压越重。" placement="top">
+                <el-icon class="help-icon-inline"><QuestionFilled /></el-icon>
+              </el-tooltip>
+            </span>
+            <b>{{ fmtPrice(quote.high) }}</b>
+          </div>
+          <div class="item">
+            <span>
+              最低
+              <el-tooltip content="今日盘中最低成交价。离最低价越远，说明下方支撑越强。" placement="top">
+                <el-icon class="help-icon-inline"><QuestionFilled /></el-icon>
+              </el-tooltip>
+            </span>
+            <b>{{ fmtPrice(quote.low) }}</b>
+          </div>
+          <div class="item">
+            <span>
+              昨收
+              <el-tooltip content="昨日收盘价，是今日涨跌幅计算的基准价。" placement="top">
+                <el-icon class="help-icon-inline"><QuestionFilled /></el-icon>
+              </el-tooltip>
+            </span>
+            <b>{{ fmtPrice(quote.prevClose) }}</b>
+          </div>
+          <div class="item">
+            <span>
+              成交量
+              <el-tooltip content="今日成交的股票总手数（1手=100股）。放量说明交易活跃，缩量说明市场观望。" placement="top">
+                <el-icon class="help-icon-inline"><QuestionFilled /></el-icon>
+              </el-tooltip>
+            </span>
             <b>
               {{ fmtVolume(quote.volume) }}
-              <el-tooltip v-if="quote.tradeDate && !isToday(quote.tradeDate)" :content="`数据日期: ${quote.tradeDate}`" placement="top">
-                <el-tag size="small" type="warning" style="margin-left: 4px;">{{ formatDateTag(quote.tradeDate) }}</el-tag>
+              <el-tooltip v-if="quote.tradeDate && !isToday(quote.tradeDate)" :content="getDataExpiredWarning(quote.tradeDate)" placement="top">
+                <el-tag size="small" :type="getDataExpiredType(quote.tradeDate)" style="margin-left: 4px;">{{ formatDateTag(quote.tradeDate) }}</el-tag>
               </el-tooltip>
             </b>
           </div>
           <div class="item">
-            <span>成交额</span>
+            <span>
+              成交额
+              <el-tooltip content="今日成交的总金额（元）。成交额比成交量更能反映资金参与度。" placement="top">
+                <el-icon class="help-icon-inline"><QuestionFilled /></el-icon>
+              </el-tooltip>
+            </span>
             <b>
               {{ fmtAmount(quote.amount) }}
-              <el-tooltip v-if="quote.tradeDate && !isToday(quote.tradeDate)" :content="`数据日期: ${quote.tradeDate}`" placement="top">
-                <el-tag size="small" type="warning" style="margin-left: 4px;">{{ formatDateTag(quote.tradeDate) }}</el-tag>
+              <el-tooltip v-if="quote.tradeDate && !isToday(quote.tradeDate)" :content="getDataExpiredWarning(quote.tradeDate)" placement="top">
+                <el-tag size="small" :type="getDataExpiredType(quote.tradeDate)" style="margin-left: 4px;">{{ formatDateTag(quote.tradeDate) }}</el-tag>
               </el-tooltip>
             </b>
           </div>
           <div class="item">
-            <span>换手率</span>
+            <span>
+              换手率
+              <el-tooltip content="今日成交量占流通股本的比例。换手率高（>5%）说明交投活跃，低（<1%）说明关注度高但交易清淡。" placement="top">
+                <el-icon class="help-icon-inline"><QuestionFilled /></el-icon>
+              </el-tooltip>
+            </span>
             <b>
               {{ fmtPercent(quote.turnover) }}
-              <el-tooltip v-if="quote.turnoverDate && !isToday(quote.turnoverDate)" :content="`数据日期: ${quote.turnoverDate}`" placement="top">
-                <el-tag size="small" type="warning" style="margin-left: 4px;">{{ formatDateTag(quote.turnoverDate) }}</el-tag>
+              <el-tooltip v-if="quote.turnoverDate && !isToday(quote.turnoverDate)" :content="getDataExpiredWarning(quote.turnoverDate)" placement="top">
+                <el-tag size="small" :type="getDataExpiredType(quote.turnoverDate)" style="margin-left: 4px;">{{ formatDateTag(quote.turnoverDate) }}</el-tag>
               </el-tooltip>
             </b>
           </div>
           <div class="item">
-            <span>振幅</span>
+            <span>
+              振幅
+              <el-tooltip content="今日最高价与最低价之差占昨收价的比例。振幅大说明多空分歧大，波动剧烈。" placement="top">
+                <el-icon class="help-icon-inline"><QuestionFilled /></el-icon>
+              </el-tooltip>
+            </span>
             <b>
               {{ Number.isFinite(quote.amplitude) ? quote.amplitude.toFixed(2) + '%' : '-' }}
-              <el-tooltip v-if="quote.amplitudeDate && !isToday(quote.amplitudeDate)" :content="`数据日期: ${quote.amplitudeDate}`" placement="top">
-                <el-tag size="small" type="warning" style="margin-left: 4px;">{{ formatDateTag(quote.amplitudeDate) }}</el-tag>
+              <el-tooltip v-if="quote.amplitudeDate && !isToday(quote.amplitudeDate)" :content="getDataExpiredWarning(quote.amplitudeDate)" placement="top">
+                <el-tag size="small" :type="getDataExpiredType(quote.amplitudeDate)" style="margin-left: 4px;">{{ formatDateTag(quote.amplitudeDate) }}</el-tag>
               </el-tooltip>
             </b>
           </div>
         </div>
+        <!-- 🔥 数据过期醒目提示 -->
+        <el-alert
+          v-if="quote.tradeDate && getDataExpiredDays(quote.tradeDate) > 1"
+          :type="getDataExpiredDays(quote.tradeDate) > 7 ? 'error' : 'warning'"
+          show-icon
+          :closable="false"
+          style="margin-top: 8px;"
+        >
+          <template #title>
+            ⚠️ 数据已过期 {{ getDataExpiredDays(quote.tradeDate) }} 天（数据日期：{{ quote.tradeDate }}）
+          </template>
+          <div style="font-size: 12px;">
+            当前显示的数据可能不是最新的，建议点击"同步数据"获取最新行情。
+          </div>
+        </el-alert>
         <!-- 同步状态提示 -->
         <div class="sync-status" v-if="quote.updatedAt || syncStatus">
           <el-icon><Clock /></el-icon>
@@ -235,8 +302,117 @@
           </div>
         </el-card>
 
+        <!-- 🔥 板块联动分析 -->
+        <el-card shadow="hover" class="sector-card" style="margin-top: 16px;">
+          <template #header>
+            <div class="card-hd">
+              <div>
+                板块联动分析
+                <el-tooltip content="展示该股票所属行业的其他股票涨跌情况，帮助判断是板块联动还是个股异动。" placement="top">
+                  <el-icon class="help-icon-inline"><QuestionFilled /></el-icon>
+                </el-tooltip>
+              </div>
+              <el-tag v-if="sectorData?.sector_name" type="info" size="small">{{ sectorData.sector_name }}</el-tag>
+            </div>
+          </template>
+          <el-empty v-if="!sectorData || !sectorData.sector_name" description="暂无板块数据" :image-size="60" />
+          <div v-else>
+            <!-- 板块概况 -->
+            <el-descriptions :column="3" border size="small" style="margin-bottom: 12px;">
+              <el-descriptions-item label="板块名称">{{ sectorData.sector_name }}</el-descriptions-item>
+              <el-descriptions-item label="板块均涨幅">
+                <span :style="{color: sectorData.sector_avg_change >= 0 ? '#e53935' : '#16a34a', fontWeight: 'bold'}">
+                  {{ sectorData.sector_avg_change >= 0 ? '+' : '' }}{{ sectorData.sector_avg_change }}%
+                </span>
+              </el-descriptions-item>
+              <el-descriptions-item label="个股排名">
+                <el-tag v-if="sectorData.sector_rank" type="warning" size="small">第{{ sectorData.sector_rank }}名 / {{ sectorData.total_in_sector }}</el-tag>
+                <span v-else>-</span>
+              </el-descriptions-item>
+            </el-descriptions>
+            <!-- 同板块股票 -->
+            <el-table :data="sectorData.sector_stocks" size="small" border style="width: 100%" max-height="240">
+              <el-table-column label="代码" prop="code" width="80" />
+              <el-table-column label="名称" prop="name" width="100" />
+              <el-table-column label="最新价" prop="price" width="80">
+                <template #default="{ row }">{{ row.price?.toFixed(2) || '-' }}</template>
+              </el-table-column>
+              <el-table-column label="涨跌幅" prop="change_pct" width="100">
+                <template #default="{ row }">
+                  <span :style="{color: row.change_pct >= 0 ? '#e53935' : '#16a34a', fontWeight: 'bold'}">
+                    {{ row.change_pct >= 0 ? '+' : '' }}{{ row.change_pct?.toFixed(2) || '0.00' }}%
+                  </span>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </el-card>
 
-
+        <!-- 🔥 主力资金追踪 -->
+        <el-card shadow="hover" class="money-flow-card" style="margin-top: 16px;">
+          <template #header>
+            <div class="card-hd">
+              <div>
+                主力资金追踪
+                <el-tooltip content="展示主力资金（超大单+大单）的净流入流出情况。主力净流入为正说明大资金在买入，为负说明在卖出。" placement="top">
+                  <el-icon class="help-icon-inline"><QuestionFilled /></el-icon>
+                </el-tooltip>
+              </div>
+              <el-tag v-if="moneyFlowData?.trend" :type="moneyFlowData.trend === 'inflow' ? 'danger' : moneyFlowData.trend === 'outflow' ? 'success' : 'info'" size="small">
+                {{ moneyFlowData.trend === 'inflow' ? '资金流入' : moneyFlowData.trend === 'outflow' ? '资金流出' : '资金均衡' }}
+              </el-tag>
+            </div>
+          </template>
+          <el-empty v-if="!moneyFlowData || !moneyFlowData.realtime || Object.keys(moneyFlowData.realtime).length === 0" description="暂无资金流向数据" :image-size="60" />
+          <div v-else>
+            <!-- 实时资金流向 -->
+            <el-descriptions :column="2" border size="small" style="margin-bottom: 12px;">
+              <el-descriptions-item label="主力净流入">
+                <span :style="{color: moneyFlowData.realtime.main_net_inflow >= 0 ? '#e53935' : '#16a34a', fontWeight: 'bold'}">
+                  {{ fmtAmount(moneyFlowData.realtime.main_net_inflow) }} 元
+                </span>
+              </el-descriptions-item>
+              <el-descriptions-item label="主力净占比">
+                <span :style="{color: moneyFlowData.realtime.main_net_inflow >= 0 ? '#e53935' : '#16a34a'}">
+                  {{ moneyFlowData.realtime.main_net_inflow_pct?.toFixed(2) || '0.00' }}%
+                </span>
+              </el-descriptions-item>
+              <el-descriptions-item label="超大单净流入">
+                <span :style="{color: moneyFlowData.realtime.super_large_net >= 0 ? '#e53935' : '#16a34a'}">
+                  {{ fmtAmount(moneyFlowData.realtime.super_large_net) }}
+                </span>
+              </el-descriptions-item>
+              <el-descriptions-item label="大单净流入">
+                <span :style="{color: moneyFlowData.realtime.large_net >= 0 ? '#e53935' : '#16a34a'}">
+                  {{ fmtAmount(moneyFlowData.realtime.large_net) }}
+                </span>
+              </el-descriptions-item>
+              <el-descriptions-item label="中单净流入">
+                <span :style="{color: moneyFlowData.realtime.medium_net >= 0 ? '#e53935' : '#16a34a'}">
+                  {{ fmtAmount(moneyFlowData.realtime.medium_net) }}
+                </span>
+              </el-descriptions-item>
+              <el-descriptions-item label="小单净流入">
+                <span :style="{color: moneyFlowData.realtime.small_net >= 0 ? '#e53935' : '#16a34a'}">
+                  {{ fmtAmount(moneyFlowData.realtime.small_net) }}
+                </span>
+              </el-descriptions-item>
+            </el-descriptions>
+            <!-- 近期资金流向趋势 -->
+            <div v-if="moneyFlowData.history && moneyFlowData.history.length > 0">
+              <div style="font-size: 12px; color: var(--el-text-color-secondary); margin-bottom: 8px;">近{{ moneyFlowData.days }}日资金流向</div>
+              <div v-for="(h, i) in moneyFlowData.history" :key="i" class="flow-history-item">
+                <span class="flow-date">{{ h.date }}</span>
+                <span class="flow-change" :style="{color: h.change_pct >= 0 ? '#e53935' : '#16a34a'}">
+                  {{ h.change_pct >= 0 ? '+' : '' }}{{ h.change_pct?.toFixed(2) || '0.00' }}%
+                </span>
+                <span class="flow-inflow" :style="{color: h.main_net_inflow >= 0 ? '#e53935' : '#16a34a'}">
+                  {{ h.main_net_inflow >= 0 ? '+' : '' }}{{ fmtAmount(h.main_net_inflow) }}
+                </span>
+              </div>
+            </div>
+          </div>
+        </el-card>
 
       </el-col>
 
@@ -439,8 +615,9 @@
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { TrendCharts, Star, Refresh, Link, Document, Clock, Reading, CreditCard, Delete, Warning, WarningFilled, CircleCheckFilled, CaretBottom, CaretTop } from '@element-plus/icons-vue'
+import { TrendCharts, Star, Refresh, Link, Document, Clock, Reading, CreditCard, Delete, Warning, WarningFilled, CircleCheckFilled, CaretBottom, CaretTop, QuestionFilled } from '@element-plus/icons-vue'
 import { marked } from 'marked'
+import { sanitizeHtml } from '@/utils/sanitize'
 import { stocksApi } from '@/api/stocks'
 import { analysisApi } from '@/api/analysis'
 import { ApiClient } from '@/api/request'
@@ -565,6 +742,39 @@ function formatDateTag(dateStr: string | null): string {
     return `${cleaned.substring(4, 6)}-${cleaned.substring(6, 8)}`
   }
   return dateStr
+}
+
+// 🔥 计算数据过期天数
+function getDataExpiredDays(dateStr: string | null): number {
+  if (!dateStr) return 0
+  const cleaned = dateStr.replace(/-/g, '')
+  if (cleaned.length !== 8) return 0
+  const targetDate = new Date(
+    parseInt(cleaned.substring(0, 4)),
+    parseInt(cleaned.substring(4, 6)) - 1,
+    parseInt(cleaned.substring(6, 8))
+  )
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  targetDate.setHours(0, 0, 0, 0)
+  const diffMs = today.getTime() - targetDate.getTime()
+  return Math.floor(diffMs / (1000 * 60 * 60 * 24))
+}
+
+// 🔥 数据过期警告文本
+function getDataExpiredWarning(dateStr: string | null): string {
+  const days = getDataExpiredDays(dateStr)
+  if (days <= 1) return `数据日期: ${dateStr}`
+  if (days <= 7) return `⚠️ 数据已过期${days}天（${dateStr}），可能不是最新行情`
+  return `❌ 数据已过期${days}天（${dateStr}），建议立即同步数据`
+}
+
+// 🔥 数据过期标签类型
+function getDataExpiredType(dateStr: string | null): 'warning' | 'danger' | 'info' {
+  const days = getDataExpiredDays(dateStr)
+  if (days > 7) return 'danger'
+  if (days > 1) return 'warning'
+  return 'info'
 }
 
 // 同步状态
@@ -832,7 +1042,9 @@ async function loadPageData() {
     fetchRiskAnalysis(),
     checkFavorite(),
     fetchLatestAnalysis(),  // 获取最新的历史分析报告
-    fetchSyncStatus()  // 获取同步状态
+    fetchSyncStatus(),  // 获取同步状态
+    fetchSectorInfo(),  // 🔥 板块联动
+    fetchMoneyFlow()    // 🔥 主力资金
   ])
 }
 
@@ -897,6 +1109,13 @@ async function fetchKline() {
     klineSource.value = d.source
     const items: any[] = Array.isArray(d.items) ? d.items : []
 
+    // 🔥 检查是否有有效数据
+    if (items.length === 0) {
+      console.warn('K线数据为空，可能数据源超时或无数据')
+      ElMessage.warning('K线数据暂时不可用，请稍后重试或刷新页面')
+      return
+    }
+
     const category: string[] = []
     const values: number[][] = [] // [open, close, low, high]
 
@@ -933,8 +1152,14 @@ async function fetchKline() {
         }
       ]
     }
-  } catch (e) {
+  } catch (e: any) {
     console.error('获取K线失败', e)
+    // 🔥 增强错误提示
+    if (e.message?.includes('timeout') || e.message?.includes('超时')) {
+      ElMessage.error('K线数据获取超时，请稍后重试')
+    } else {
+      ElMessage.error('获取K线数据失败，请刷新页面重试')
+    }
   }
 }
 
@@ -965,6 +1190,28 @@ async function fetchNews() {
     newsSource.value = d.source
   } catch (e) {
     console.error('获取新闻失败', e)
+  }
+}
+
+// 🔥 板块联动数据
+const sectorData = ref<any>(null)
+async function fetchSectorInfo() {
+  try {
+    const res = await stocksApi.getSectorInfo(code.value)
+    sectorData.value = (res as any)?.data || null
+  } catch (e) {
+    console.error('获取板块信息失败', e)
+  }
+}
+
+// 🔥 主力资金流向数据
+const moneyFlowData = ref<any>(null)
+async function fetchMoneyFlow() {
+  try {
+    const res = await stocksApi.getMoneyFlow(code.value, 5)
+    moneyFlowData.value = (res as any)?.data || null
+  } catch (e) {
+    console.error('获取资金流向失败', e)
   }
 }
 
@@ -1274,10 +1521,10 @@ function formatReportName(key: string): string {
 function renderMarkdown(content: string): string {
   if (!content) return '<p>暂无内容</p>'
   try {
-    return String(marked.parse(content))
+    return sanitizeHtml(marked.parse(content))
   } catch (e) {
     console.error('Markdown渲染失败:', e)
-    return `<pre>${content}</pre>`
+    return sanitizeHtml(`<pre>${content}</pre>`)
   }
 }
 
@@ -1366,6 +1613,9 @@ function exportReport() {
 .stats { display: grid; grid-template-columns: repeat(8, 1fr); gap: 10px; margin-top: 6px; }
 .stats .item { display: flex; flex-direction: column; font-size: 12px; color: var(--el-text-color-secondary); }
 .stats .item b { color: var(--el-text-color-primary); font-size: 14px; }
+.stats .item span { display: flex; align-items: center; gap: 2px; }
+.help-icon-inline { font-size: 12px; color: var(--el-text-color-placeholder); cursor: help; }
+.help-icon-inline:hover { color: var(--el-color-primary); }
 
 .body { margin-top: 4px; }
 .card-hd { display: flex; align-items: center; justify-content: space-between; }
@@ -1373,6 +1623,11 @@ function exportReport() {
 .legend { margin-top: 8px; font-size: 12px; color: var(--el-text-color-secondary); }
 
 .news-card .news-list { display: flex; flex-direction: column; }
+.flow-history-item { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--el-border-color-lighter); font-size: 12px; }
+.flow-history-item:last-child { border-bottom: none; }
+.flow-date { color: var(--el-text-color-secondary); width: 100px; }
+.flow-change { font-weight: bold; width: 80px; text-align: right; }
+.flow-inflow { width: 120px; text-align: right; }
 .news-item { padding: 10px 12px; border-bottom: 1px solid var(--el-border-color-lighter); transition: background-color .2s ease; }
 .news-item:last-child { border-bottom: none; }
 .news-item:hover { background: var(--el-fill-color-light); border-radius: 8px; }

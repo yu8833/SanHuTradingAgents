@@ -440,39 +440,81 @@ export const vibeApi = {
     }
   },
 
-  // 研究记录（localStorage）
-  loadNotes(): Note[] {
+  // 研究记录（后端 MongoDB 存储，跨设备同步）
+  async loadNotes(): Promise<Note[]> {
+    try {
+      const list = await ApiClient.get<Note[]>('/api/vibe/notes')
+      return Array.isArray(list) ? list : []
+    } catch (e) {
+      console.error('[loadNotes] 加载失败，回退到本地缓存:', e)
+      try {
+        const data = localStorage.getItem(NOTES_KEY)
+        return data ? JSON.parse(data) : []
+      } catch {
+        return []
+      }
+    }
+  },
+
+  async saveNote(
+    kind: string,
+    title: string,
+    content: string,
+    meta?: { related_code?: string; related_strategy?: string; related_trade_id?: string }
+  ): Promise<Note | null> {
+    try {
+      const note = await ApiClient.post<Note>('/api/vibe/notes', {
+        kind, title, content,
+        related_code: meta?.related_code,
+        related_strategy: meta?.related_strategy,
+        related_trade_id: meta?.related_trade_id,
+      })
+      return note || null
+    } catch (e) {
+      console.error('[saveNote] 后端保存失败，回退到本地缓存:', e)
+      // 回退到 localStorage
+      const notes = this.loadNotesSync()
+      const newNote: Note = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        kind, title, content, ts: Date.now(),
+      }
+      const next = [newNote, ...notes].slice(0, MAX_NOTES)
+      localStorage.setItem(NOTES_KEY, JSON.stringify(next))
+      return newNote
+    }
+  },
+
+  async deleteNote(id: string): Promise<boolean> {
+    try {
+      await ApiClient.delete<{ success: boolean }>(`/api/vibe/notes/${id}`)
+      return true
+    } catch (e) {
+      console.error('[deleteNote] 后端删除失败，回退到本地缓存:', e)
+      const notes = this.loadNotesSync().filter(n => n.id !== id)
+      localStorage.setItem(NOTES_KEY, JSON.stringify(notes))
+      return true
+    }
+  },
+
+  async clearNotes(): Promise<boolean> {
+    try {
+      await ApiClient.delete<{ success: boolean }>('/api/vibe/notes')
+      return true
+    } catch (e) {
+      console.error('[clearNotes] 后端清空失败，回退到本地缓存:', e)
+      localStorage.removeItem(NOTES_KEY)
+      return true
+    }
+  },
+
+  // 同步本地加载（仅作后端不可用时的回退）
+  loadNotesSync(): Note[] {
     try {
       const data = localStorage.getItem(NOTES_KEY)
       return data ? JSON.parse(data) : []
     } catch {
       return []
     }
-  },
-
-  saveNote(kind: string, title: string, content: string): Note[] {
-    const notes = this.loadNotes()
-    const newNote: Note = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      kind,
-      title,
-      content,
-      ts: Date.now(),
-    }
-    const next = [newNote, ...notes].slice(0, MAX_NOTES)
-    localStorage.setItem(NOTES_KEY, JSON.stringify(next))
-    return next
-  },
-
-  deleteNote(id: string): Note[] {
-    const notes = this.loadNotes().filter(n => n.id !== id)
-    localStorage.setItem(NOTES_KEY, JSON.stringify(notes))
-    return notes
-  },
-
-  clearNotes(): Note[] {
-    localStorage.removeItem(NOTES_KEY)
-    return []
   },
 
   // 关注股票（localStorage）

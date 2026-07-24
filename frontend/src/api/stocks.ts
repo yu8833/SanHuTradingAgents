@@ -155,6 +155,20 @@ export const stocksApi = {
   },
 
   /**
+   * 获取板块联动信息
+   */
+  async getSectorInfo(symbol: string) {
+    return ApiClient.get(`/api/stocks/${symbol}/sector-info`)
+  },
+
+  /**
+   * 获取主力资金流向
+   */
+  async getMoneyFlow(symbol: string, days = 5) {
+    return ApiClient.get(`/api/stocks/${symbol}/money-flow`, { days })
+  },
+
+  /**
    * 获取股票风险分析数据
    * @param symbol 6位股票代码
    */

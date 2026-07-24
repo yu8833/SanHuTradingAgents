@@ -308,6 +308,7 @@ import {
   Plus
 } from '@element-plus/icons-vue'
 import { marked } from 'marked'
+import { sanitizeHtml } from '@/utils/sanitize'
 import { vibeApi } from '@/api/vibe'
 import type { RadarData, Industry, RadarItem, SectorNode, SectorLink, BottleneckLevel } from '@/api/vibe'
 
@@ -398,11 +399,15 @@ const resetSummary = () => {
   summaryError.value = ''
 }
 
-const saveSummary = () => {
+const saveSummary = async () => {
   const ind = currentIndustry.value
   if (!ind || !currentSummary.value) return
-  vibeApi.saveNote('今日要点', `板块资讯·${ind.name}·今日要点`, currentSummary.value)
-  ElMessage.success('已存入研究记录')
+  try {
+    await vibeApi.saveNote('今日要点', `板块资讯·${ind.name}·今日要点`, currentSummary.value)
+    ElMessage.success('已存入研究记录')
+  } catch (e: any) {
+    ElMessage.error(e?.message || '保存失败')
+  }
 }
 
 const switchIndustry = (key: string) => {
@@ -456,9 +461,9 @@ const aiResult = ref('')
 const renderedAi = computed(() => {
   if (!aiResult.value) return ''
   try {
-    return String(marked.parse(aiResult.value))
+    return sanitizeHtml(String(marked.parse(aiResult.value)))
   } catch {
-    return aiResult.value.replace(/\n/g, '<br/>')
+    return sanitizeHtml(aiResult.value.replace(/\n/g, '<br/>'))
   }
 })
 
@@ -525,10 +530,10 @@ const runAiAnalysis = async () => {
   }
 }
 
-const saveToNotes = () => {
+const saveToNotes = async () => {
   if (!aiResult.value || !currentSector.value) return
   try {
-    vibeApi.saveNote(
+    await vibeApi.saveNote(
       '问AI',
       `${currentSector.value.label} · AI 深度拆解`,
       aiResult.value

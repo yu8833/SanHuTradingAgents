@@ -222,6 +222,8 @@
 </template>
 
 <script setup lang="ts">
+// 显式声明组件名，供 <keep-alive :include> 匹配
+defineOptions({ name: 'ReviewOverview' })
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
@@ -372,10 +374,14 @@ const runReview = async () => {
   }
 }
 
-const saveReview = () => {
+const saveReview = async () => {
   if (!reviewText.value) return
-  vibeApi.saveNote('复盘', `${today.value} AI 当日复盘`, reviewText.value)
-  ElMessage.success('已存入研究沉淀')
+  try {
+    await vibeApi.saveNote('复盘', `${today.value} AI 当日复盘`, reviewText.value)
+    ElMessage.success('已存入研究沉淀')
+  } catch (e: any) {
+    ElMessage.error(e?.message || '保存失败')
+  }
 }
 
 // 关注股票

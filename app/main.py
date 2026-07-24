@@ -726,7 +726,10 @@ async def test_log():
 app.include_router(health.router, prefix="/api", tags=["health"])
 app.include_router(auth.router, prefix="/api/auth", tags=["authentication"])
 app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"])
-app.include_router(quick_analysis.router, prefix="/api", tags=["quick-analysis"])
+# 已废弃：quick_analysis 模块的 GET /{stock_code} 通配路由会遮蔽 /api/favorites、
+# /api/notifications 等单段路径，且功能已由 /api/analysis/single (mode=quick) 替代。
+# 如需恢复，请将通配路径改为 /api/quick/{stock_code} 后再注册。
+# app.include_router(quick_analysis.router, prefix="/api", tags=["quick-analysis"])
 app.include_router(reports.router, tags=["reports"])
 app.include_router(screening.router, prefix="/api/screening", tags=["screening"])
 app.include_router(queue.router, prefix="/api/queue", tags=["queue"])
@@ -745,6 +748,9 @@ app.include_router(operation_logs.router, prefix="/api/system", tags=["operation
 app.include_router(logs.router, prefix="/api/system", tags=["logs"])
 app.include_router(portfolio.router, prefix="/api/portfolio", tags=["portfolio"])
 app.include_router(retail.router, prefix="/api/retail", tags=["retail"])
+# 个股预警
+from app.routers import stock_alerts as stock_alerts_router
+app.include_router(stock_alerts_router.router, prefix="/api/stock", tags=["stock-alerts"])
 # 新增：系统配置只读摘要
 from app.routers import system_config as system_config_router
 app.include_router(system_config_router.router, prefix="/api/system", tags=["system"])
@@ -762,16 +768,16 @@ app.include_router(sse.router, prefix="/api/stream", tags=["streaming"])
 app.include_router(sync_router.router)
 app.include_router(multi_source_sync.router)
 app.include_router(paper_router.router, prefix="/api", tags=["paper"])
-app.include_router(tushare_init.router, prefix="/api", tags=["tushare-init"])
-app.include_router(akshare_init.router, prefix="/api", tags=["akshare-init"])
-app.include_router(baostock_init.router, prefix="/api", tags=["baostock-init"])
+app.include_router(tushare_init.router, tags=["tushare-init"])
+app.include_router(akshare_init.router, tags=["akshare-init"])
+app.include_router(baostock_init.router, tags=["baostock-init"])
 app.include_router(historical_data.router, tags=["historical-data"])
 app.include_router(multi_period_sync.router, tags=["multi-period-sync"])
 app.include_router(financial_data.router, tags=["financial-data"])
 app.include_router(news_data.router, tags=["news-data"])
-# 已弃用：前端未使用社交媒体和内部消息接口
-# app.include_router(social_media.router, tags=["social-media"])
-# app.include_router(internal_messages.router, tags=["internal-messages"])
+# 社媒舆情和内部消息路由
+app.include_router(social_media.router, tags=["social-media"])
+app.include_router(internal_messages.router, tags=["internal-messages"])
 app.include_router(vibe_router.router, tags=["vibe-research"])
 
 

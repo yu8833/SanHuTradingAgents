@@ -3,7 +3,7 @@
     <div class="page-header">
       <div class="header-left">
         <h1 class="page-title">研究记录</h1>
-        <p class="page-subtitle">AI 复盘/要点/问答沉淀在本地</p>
+        <p class="page-subtitle">AI 复盘/要点/问答沉淀，跨设备同步</p>
       </div>
       <div class="header-right">
         <el-button
@@ -70,6 +70,7 @@ import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete, CaretBottom, CaretRight } from '@element-plus/icons-vue'
 import { marked } from 'marked'
+import { sanitizeHtml } from '@/utils/sanitize'
 import { vibeApi } from '@/api/vibe'
 import type { Note } from '@/api/vibe'
 
@@ -98,9 +99,9 @@ const formatTime = (ts: number): string => {
 const renderContent = (content: string): string => {
   if (!content) return ''
   try {
-    return String(marked.parse(content))
+    return sanitizeHtml(String(marked.parse(content)))
   } catch {
-    return content.replace(/\n/g, '<br/>')
+    return sanitizeHtml(content.replace(/\n/g, '<br/>'))
   }
 }
 
@@ -114,10 +115,10 @@ const toggle = (id: string) => {
   expandedIds.value = next
 }
 
-const loadNotes = () => {
+const loadNotes = async () => {
   loading.value = true
   try {
-    const list = vibeApi.loadNotes()
+    const list = await vibeApi.loadNotes()
     notes.value = (list || []).slice().sort((a, b) => b.ts - a.ts)
   } catch (e: any) {
     console.error('加载记录失败:', e)
@@ -134,21 +135,21 @@ const confirmDelete = async (id: string) => {
       cancelButtonText: '取消',
       type: 'warning'
     })
-    const list = vibeApi.deleteNote(id)
-    notes.value = (list || []).slice().sort((a, b) => b.ts - a.ts)
+    await vibeApi.deleteNote(id)
+    await loadNotes()
     const next = new Set(expandedIds.value)
     next.delete(id)
     expandedIds.value = next
     ElMessage.success('已删除')
-  } catch {
-    // 用户取消
+  } catch (e: any) {
+    if (e !== 'cancel') ElMessage.error(e?.message || '删除失败')
   }
 }
 
 const confirmClear = async () => {
   try {
     await ElMessageBox.confirm(
-      '将清空全部本地研究记录，且不可恢复，确定继续？',
+      '将清空全部研究记录，且不可恢复，确定继续？',
       '清空记录',
       {
         confirmButtonText: '清空',
@@ -156,12 +157,12 @@ const confirmClear = async () => {
         type: 'warning'
       }
     )
-    const list = vibeApi.clearNotes()
-    notes.value = list || []
+    await vibeApi.clearNotes()
+    notes.value = []
     expandedIds.value = new Set()
     ElMessage.success('已清空')
-  } catch {
-    // 用户取消
+  } catch (e: any) {
+    if (e !== 'cancel') ElMessage.error(e?.message || '清空失败')
   }
 }
 

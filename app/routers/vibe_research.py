@@ -635,6 +635,9 @@ class AddNoteRequest(BaseModel):
     kind: str
     title: str
     content: str
+    related_code: Optional[str] = None
+    related_strategy: Optional[str] = None
+    related_trade_id: Optional[str] = None
 
 
 @router.post("/notes")
@@ -643,7 +646,12 @@ async def add_note(req: AddNoteRequest, current_user: dict = Depends(get_optiona
     try:
         from app.services.research_notes_service import research_notes_service
         uid = _get_user_id(current_user)
-        note = await research_notes_service.add_note(uid, req.kind, req.title, req.content)
+        note = await research_notes_service.add_note(
+            uid, req.kind, req.title, req.content,
+            related_code=req.related_code,
+            related_strategy=req.related_strategy,
+            related_trade_id=req.related_trade_id,
+        )
         if note:
             return ok(note)
         else:

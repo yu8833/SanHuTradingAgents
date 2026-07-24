@@ -244,17 +244,18 @@
             <div class="card-header">
               <el-icon><DataLine /></el-icon>
               <span class="panel-title">持仓退出信号监控</span>
-              <span class="header-hint">输入持仓信息，批量检查止盈/止损/时间止损信号</span>
+              <span class="header-hint">可一键加载真实持仓（来自模拟交易），或手动添加检查止盈/止损/时间止损信号</span>
+              <el-button size="small" type="primary" :loading="loadPositionsLoading" @click="loadRealPositions" style="margin-left:auto;">加载真实持仓</el-button>
             </div>
           </template>
 
           <el-table :data="exitHoldings" size="small" border style="margin-bottom:12px;">
             <el-table-column label="代码" width="130">
-              <template #default="{ row }"><el-input v-model="row.symbol" size="small" /></template>
+              <template #default="{ row }"><el-input v-model="row.symbol" size="small" :disabled="row._real" /></template>
             </el-table-column>
             <el-table-column label="策略" width="160">
               <template #default="{ row }">
-                <el-select v-model="row.strategy" size="small" style="width:100%">
+                <el-select v-model="row.strategy" size="small" style="width:100%" :disabled="row._real">
                   <el-option label="默认" value="default" />
                   <el-option label="极端反转" value="extreme_reversal" />
                   <el-option label="困境反转" value="turnaround" />
@@ -264,10 +265,10 @@
               </template>
             </el-table-column>
             <el-table-column label="买入价" width="100">
-              <template #default="{ row }"><el-input-number v-model="row.buy_price" :min="0" :step="0.1" :precision="2" size="small" style="width:100%" /></template>
+              <template #default="{ row }"><el-input-number v-model="row.buy_price" :min="0" :step="0.1" :precision="2" size="small" style="width:100%" :disabled="row._real" /></template>
             </el-table-column>
             <el-table-column label="买入日期" width="140">
-              <template #default="{ row }"><el-date-picker v-model="row.buy_date" type="date" value-format="YYYY-MM-DD" size="small" style="width:100%" /></template>
+              <template #default="{ row }"><el-date-picker v-model="row.buy_date" type="date" value-format="YYYY-MM-DD" size="small" style="width:100%" :disabled="row._real" /></template>
             </el-table-column>
             <el-table-column label="当前价" width="100">
               <template #default="{ row }"><el-input-number v-model="row.current_price" :min="0" :step="0.1" :precision="2" size="small" style="width:100%" /></template>
@@ -282,7 +283,7 @@
               <template #default="{ $index }"><el-button type="danger" size="small" link @click="exitHoldings.splice($index,1)">删除</el-button></template>
             </el-table-column>
           </el-table>
-          <el-button size="small" @click="addExitHolding">+ 添加持仓</el-button>
+          <el-button size="small" @click="addExitHolding">+ 手动添加持仓</el-button>
 
           <div style="margin-top:16px; text-align:center;">
             <el-button type="primary" size="large" :loading="exitLoading" @click="checkExits">
@@ -479,6 +480,7 @@ import {
   Clock, TrendCharts, Odometer, InfoFilled, MagicStick
 } from '@element-plus/icons-vue'
 import { retailApi, type PositionAdvice, type ExitResp, type MarketRegime, type RegimeRawData, type StrategiesResp, type StrategiesPerformanceResp, type StrategyPerformance } from '@/api/retail'
+import { paperApi } from '@/api/paper'
 
 const activeTab = ref('strategies')
 
@@ -564,6 +566,7 @@ const calcPosition = async () => {
 const exitLoading = ref(false)
 const exitResult = ref<ExitResp | null>(null)
 const exitHoldings = ref<any[]>([])
+const loadPositionsLoading = ref(false)
 
 const addExitHolding = () => {
   exitHoldings.value.push({
@@ -576,6 +579,35 @@ const addExitHolding = () => {
     thesis_invalid: false,
     thesis_invalid_reason: '',
   })
+}
+
+// 从 paper_positions 加载真实持仓，填充到退出信号检查表
+const loadRealPositions = async () => {
+  loadPositionsLoading.value = true
+  try {
+    const resp: any = await paperApi.getPositions()
+    const items = resp?.items || []
+    if (!items.length) {
+      ElMessage.info('暂无模拟交易持仓，请先在策略筛选页买入或手动添加')
+      return
+    }
+    exitHoldings.value = items.map((p: any) => ({
+      symbol: p.code || p.symbol || '',
+      strategy: p.strategy || 'default',
+      buy_price: p.avg_cost || p.cost_price || 0,
+      buy_date: p.buy_date || (p.updated_at ? String(p.updated_at).slice(0, 10) : new Date().toISOString().slice(0, 10)),
+      current_price: p.last_price || 0,
+      current_ma: null,
+      thesis_invalid: false,
+      thesis_invalid_reason: '',
+      _real: true,  // 标记为真实持仓，部分字段不可编辑
+    }))
+    ElMessage.success(`已加载 ${items.length} 条真实持仓，请补充当前价后检查退出信号`)
+  } catch (e: any) {
+    ElMessage.error('加载持仓失败：' + (e?.message || e))
+  } finally {
+    loadPositionsLoading.value = false
+  }
 }
 
 const checkExits = async () => {

@@ -65,6 +65,117 @@ def _detect_market_and_code(code: str) -> Tuple[str, str]:
     return ('CN', _zfill_code(code))
 
 
+async def _fetch_news_from_multiple_sources(code: str, days: int = 30, limit: int = 50) -> List[Dict]:
+    """
+    从多个数据源获取新闻数据（财联社、东方财富、同花顺等）
+
+    Args:
+        code: 股票代码（6位数字）
+        days: 查询天数
+        limit: 返回条数限制
+
+    Returns:
+        新闻列表
+    """
+    import asyncio
+    items = []
+    code6 = str(code).zfill(6)
+
+    # 数据源1: AKShare 东方财富新闻
+    async def _fetch_eastmoney_news():
+        try:
+            import akshare as ak
+            df = await asyncio.to_thread(ak.stock_news_em, symbol=code6)
+            if df is not None and not df.empty:
+                result = []
+                for _, row in df.head(limit).iterrows():
+                    result.append({
+                        "publish_time": str(row.get('发布时间') or row.get('时间') or ''),
+                        "title": str(row.get('新闻标题') or row.get('标题') or ''),
+                        "source": str(row.get('文章来源') or row.get('来源') or '东方财富'),
+                        "url": str(row.get('新闻链接') or row.get('链接') or ''),
+                        "type": "news",
+                        "content": "",
+                        "summary": ""
+                    })
+                return result
+        except Exception as e:
+            logger.warning(f"⚠️ 东方财富新闻获取失败: {e}")
+        return []
+
+    # 数据源2: AKShare 股吧热点
+    async def _fetch_guba_news():
+        try:
+            import akshare as ak
+            df = await asyncio.to_thread(ak.stock_guba_em, symbol=code6)
+            if df is not None and not df.empty:
+                result = []
+                for _, row in df.head(min(limit, 20)).iterrows():
+                    result.append({
+                        "publish_time": str(row.get('发布时间') or row.get('时间') or ''),
+                        "title": str(row.get('帖子标题') or row.get('标题') or ''),
+                        "source": "股吧",
+                        "url": str(row.get('帖子链接') or row.get('链接') or ''),
+                        "type": "news",
+                        "content": "",
+                        "summary": ""
+                    })
+                return result
+        except Exception as e:
+            logger.warning(f"⚠️ 股吧热点获取失败: {e}")
+        return []
+
+    # 数据源3: AKShare 互动易（投资者互动）
+    async def _fetch_interactive_news():
+        try:
+            import akshare as ak
+            df = await asyncio.to_thread(ak.stock_irm_ans_cninfo, symbol=code6)
+            if df is not None and not df.empty:
+                result = []
+                for _, row in df.head(min(limit, 10)).iterrows():
+                    result.append({
+                        "publish_time": str(row.get('答复时间') or row.get('时间') or ''),
+                        "title": str(row.get('提问内容') or row.get('标题') or '')[:50],
+                        "source": "互动易",
+                        "url": "",
+                        "type": "news",
+                        "content": str(row.get('答复内容') or ''),
+                        "summary": ""
+                    })
+                return result
+        except Exception as e:
+            logger.warning(f"⚠️ 互动易获取失败: {e}")
+        return []
+
+    # 并发获取所有数据源
+    try:
+        results = await asyncio.gather(
+            _fetch_eastmoney_news(),
+            _fetch_guba_news(),
+            _fetch_interactive_news(),
+            return_exceptions=True
+        )
+
+        for result in results:
+            if isinstance(result, list) and result:
+                items.extend(result)
+
+        # 去重（基于标题）
+        seen_titles = set()
+        unique_items = []
+        for item in items:
+            title = item.get("title", "")
+            if title and title not in seen_titles:
+                seen_titles.add(title)
+                unique_items.append(item)
+
+        logger.info(f"📡 多数据源获取新闻: {code6}, 共 {len(unique_items)} 条")
+        return unique_items[:limit]
+    except Exception as e:
+        logger.error(f"❌ 多数据源获取新闻失败: {e}")
+        return items
+
+
 @router.get("/{code}/quote", response_model=dict)
 async def get_quote(
     code: str,
@@ -779,6 +890,14 @@ async def get_kline(
                 asyncio.to_thread(mgr.get_kline_with_fallback, code_padded, period, limit, adj_norm),
                 timeout=10.0
             )
+
+            # 🔥 外部API获取成功后，异步保存到MongoDB缓存（不阻塞返回）
+            if items and source:
+                try:
+                    adapter.save_historical_data(code_padded, mongodb_period, items, source)
+                except Exception as save_err:
+                    logger.warning(f"⚠️ 保存K线到MongoDB缓存失败（不影响返回）: {save_err}")
+
         except asyncio.TimeoutError:
             logger.error(f"❌ 外部 API 获取 K 线超时（10秒）")
             raise HTTPException(status_code=504, detail="获取K线数据超时，请稍后重试")
@@ -917,29 +1036,86 @@ async def get_news(code: str, days: int = 30, limit: int = 50, include_announcem
             news_list = await service.query_news(params)
             logger.info(f"📊 数据库查询结果: 返回 {len(news_list)} 条新闻")
 
+            # 🔥 检查数据库中是否有真正的新闻（非公告）类型数据
+            has_real_news = any(
+                news.get("type", "news") == "news" and "公告" not in str(news.get("title", ""))
+                for news in news_list
+            )
+
             data_source = "database"
 
-            # 2. 如果数据库没有数据，调用同步服务
-            if not news_list:
-                logger.info(f"⚠️ 数据库无新闻数据，调用同步服务获取: {normalized_code}")
+            # 2. 如果数据库没有新闻类型数据，尝试从多个数据源实时获取
+            if not has_real_news:
+                logger.info(f"⚠️ 数据库无新闻类型数据，尝试从多数据源实时获取: {normalized_code}")
                 try:
-                    # 🔥 调用同步服务，传入单个股票代码列表
-                    logger.info(f"📡 步骤2: 调用同步服务...")
-                    await sync_service.sync_news_data(
-                        symbols=[normalized_code],
-                        max_news_per_stock=limit,
-                        force_update=False,
-                        favorites_only=False
-                    )
+                    # 🔥 直接调用AKShare适配器获取新闻（不依赖同步服务）
+                    from app.services.data_sources.akshare_adapter import AKShareAdapter
+                    adapter = AKShareAdapter()
+                    logger.info(f"📡 步骤2: 从AKShare实时获取新闻...")
+                    akshare_items = adapter.get_news(normalized_code, days=days, limit=limit, include_announcements=False)
 
-                    # 重新查询
-                    logger.info(f"🔄 步骤3: 重新从数据库查询...")
-                    news_list = await service.query_news(params)
-                    logger.info(f"📊 重新查询结果: 返回 {len(news_list)} 条新闻")
-                    data_source = "realtime"
+                    if akshare_items:
+                        logger.info(f"✅ AKShare获取到 {len(akshare_items)} 条新闻")
+                        # 转换为数据库格式并保存（异步保存，不阻塞返回）
+                        try:
+                            news_docs = []
+                            for item in akshare_items:
+                                news_docs.append({
+                                    "symbol": normalized_code,
+                                    "title": item.get("title", ""),
+                                    "source": item.get("source", ""),
+                                    "publish_time": item.get("time", ""),
+                                    "url": item.get("url", ""),
+                                    "type": item.get("type", "news"),
+                                    "content": item.get("content", ""),
+                                    "summary": item.get("summary", ""),
+                                    "data_source": "akshare",
+                                    "created_at": datetime.now(),
+                                    "updated_at": datetime.now()
+                                })
 
+                            # 异步保存到数据库（使用replace_one with upsert）
+                            db = get_mongo_db()
+                            for doc in news_docs:
+                                try:
+                                    await db["stock_news"].replace_one(
+                                        {"url": doc["url"], "title": doc["title"]},
+                                        doc,
+                                        upsert=True
+                                    )
+                                except Exception as save_err:
+                                    logger.warning(f"保存新闻失败: {save_err}")
+
+                            logger.info(f"✅ 已保存 {len(news_docs)} 条新闻到数据库")
+                        except Exception as save_err:
+                            logger.warning(f"保存新闻到数据库失败: {save_err}")
+
+                        # 合并AKShare返回的数据（保留已有的数据库数据）
+                        akshare_news_list = [{"publish_time": item.get("time", ""), "title": item.get("title", ""),
+                                     "source": item.get("source", ""), "url": item.get("url", ""),
+                                     "type": item.get("type", "news"), "content": item.get("content", ""),
+                                     "summary": item.get("summary", "")} for item in akshare_items]
+
+                        # 🔥 如果数据库有公告数据，保留；AKShare的新闻数据追加
+                        if news_list and not has_real_news:
+                            # 保留数据库的公告，追加AKShare的新闻
+                            news_list = akshare_news_list + news_list
+                        else:
+                            news_list = akshare_news_list
+                        data_source = "akshare_realtime"
+                    else:
+                        logger.warning(f"⚠️ AKShare未获取到新闻数据，尝试其他数据源")
+                        # 🔥 尝试从其他数据源获取（如同花顺、东方财富等）
+                        try:
+                            extra_news = await _fetch_news_from_multiple_sources(normalized_code, days, limit)
+                            if extra_news:
+                                logger.info(f"✅ 从其他数据源获取到 {len(extra_news)} 条新闻")
+                                news_list = extra_news + news_list
+                                data_source = "multi_source"
+                        except Exception as e2:
+                            logger.warning(f"⚠️ 其他数据源获取新闻失败: {e2}")
                 except Exception as e:
-                    logger.error(f"❌ 同步服务异常: {e}", exc_info=True)
+                    logger.error(f"❌ AKShare获取新闻失败: {e}", exc_info=True)
 
             # 转换为旧格式（兼容前端）
             logger.info(f"🔄 步骤4: 转换数据格式...")
@@ -1020,6 +1196,195 @@ async def get_news(code: str, days: int = 30, limit: int = 50, include_announcem
                 "items": []
             }
             return ok(data)
+
+
+@router.get("/{code}/sector-info", response_model=dict)
+async def get_sector_info(
+    code: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    获取股票所属板块信息及同板块股票表现
+
+    返回：
+    - sector_name: 所属板块名称
+    - sector_stocks: 同板块股票列表（含涨跌幅）
+    - sector_avg_change: 板块平均涨跌幅
+    - sector_rank: 该股票在板块中的涨跌幅排名
+    """
+    market, normalized_code = _detect_market_and_code(code)
+
+    if market != 'CN':
+        return ok(data={"code": normalized_code, "sector_name": None, "sector_stocks": [], "message": "仅支持A股板块分析"})
+
+    try:
+        import akshare as ak
+        import asyncio
+
+        code6 = str(normalized_code).zfill(6)
+
+        # 1. 获取股票所属板块
+        sector_name = None
+        sector_stocks = []
+
+        try:
+            # 获取个股所属板块
+            df_sector = await asyncio.to_thread(ak.stock_individual_info_em, symbol=code6)
+            if df_sector is not None and not df_sector.empty:
+                for _, row in df_sector.iterrows():
+                    item_name = str(row.get('item', ''))
+                    if '行业' in item_name:
+                        sector_name = str(row.get('value', ''))
+                        break
+        except Exception as e:
+            logger.warning(f"获取个股板块信息失败: {e}")
+
+        # 2. 获取同板块股票涨跌情况
+        if sector_name:
+            try:
+                # 获取板块成分股
+                df_industry = await asyncio.to_thread(ak.stock_board_industry_cons_em, symbol=sector_name)
+                if df_industry is not None and not df_industry.empty:
+                    sector_stocks = []
+                    for _, row in df_industry.head(20).iterrows():
+                        stock_code = str(row.get('代码', ''))
+                        stock_name = str(row.get('名称', ''))
+                        change_pct = float(row.get('涨跌幅', 0) or 0)
+                        sector_stocks.append({
+                            "code": stock_code,
+                            "name": stock_name,
+                            "change_pct": change_pct,
+                            "price": float(row.get('最新价', 0) or 0),
+                        })
+
+                    # 计算板块平均涨跌幅
+                    if sector_stocks:
+                        avg_change = sum(s["change_pct"] for s in sector_stocks) / len(sector_stocks)
+                        # 排名
+                        sorted_stocks = sorted(sector_stocks, key=lambda x: x["change_pct"], reverse=True)
+                        rank = next((i + 1 for i, s in enumerate(sorted_stocks) if s["code"] == code6), None)
+                    else:
+                        avg_change = 0
+                        rank = None
+                else:
+                    avg_change = 0
+                    rank = None
+            except Exception as e:
+                logger.warning(f"获取板块成分股失败: {e}")
+                avg_change = 0
+                rank = None
+        else:
+            avg_change = 0
+            rank = None
+
+        data = {
+            "code": normalized_code,
+            "sector_name": sector_name,
+            "sector_stocks": sector_stocks[:20],
+            "sector_avg_change": round(avg_change, 2) if sector_stocks else 0,
+            "sector_rank": rank,
+            "total_in_sector": len(sector_stocks)
+        }
+        return ok(data=data)
+
+    except Exception as e:
+        logger.error(f"获取板块信息失败: {e}")
+        return ok(data={"code": normalized_code, "sector_name": None, "sector_stocks": [], "message": f"获取失败: {str(e)}"})
+
+
+@router.get("/{code}/money-flow", response_model=dict)
+async def get_money_flow(
+    code: str,
+    days: int = Query(5, description="查询天数"),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    获取主力资金流向数据
+
+    返回：
+    - main_net_inflow: 主力净流入金额（元）
+    - main_net_inflow_pct: 主力净流入占比
+    - super_large_net: 超大单净流入
+    - large_net: 大单净流入
+    - medium_net: 中单净流入
+    - small_net: 小单净流入
+    - history: 近N天资金流向历史
+    """
+    market, normalized_code = _detect_market_and_code(code)
+
+    if market != 'CN':
+        return ok(data={"code": normalized_code, "message": "仅支持A股资金流向分析"})
+
+    try:
+        import akshare as ak
+        import asyncio
+        from datetime import datetime, timedelta
+
+        code6 = str(normalized_code).zfill(6)
+
+        # 1. 获取实时资金流向
+        realtime_data = {}
+        try:
+            df_realtime = await asyncio.to_thread(ak.stock_individual_fund_flow, stock=code6, market="sh" if code6.startswith('6') else "sz")
+            if df_realtime is not None and not df_realtime.empty:
+                latest = df_realtime.tail(1).iloc[0]
+                realtime_data = {
+                    "date": str(latest.get('日期', '')),
+                    "close": float(latest.get('收盘价', 0) or 0),
+                    "change_pct": float(latest.get('涨跌幅', 0) or 0),
+                    "main_net_inflow": float(latest.get('主力净流入-净额', 0) or 0),
+                    "main_net_inflow_pct": float(latest.get('主力净流入-净占比', 0) or 0),
+                    "super_large_net": float(latest.get('超大单净流入-净额', 0) or 0),
+                    "super_large_pct": float(latest.get('超大单净流入-净占比', 0) or 0),
+                    "large_net": float(latest.get('大单净流入-净额', 0) or 0),
+                    "large_pct": float(latest.get('大单净流入-净占比', 0) or 0),
+                    "medium_net": float(latest.get('中单净流入-净额', 0) or 0),
+                    "medium_pct": float(latest.get('中单净流入-净占比', 0) or 0),
+                    "small_net": float(latest.get('小单净流入-净额', 0) or 0),
+                    "small_pct": float(latest.get('小单净流入-净占比', 0) or 0),
+                }
+        except Exception as e:
+            logger.warning(f"获取实时资金流向失败: {e}")
+
+        # 2. 获取历史资金流向（近N天）
+        history = []
+        try:
+            if df_realtime is not None and not df_realtime.empty:
+                df_hist = df_realtime.tail(days)
+                for _, row in df_hist.iterrows():
+                    history.append({
+                        "date": str(row.get('日期', '')),
+                        "change_pct": float(row.get('涨跌幅', 0) or 0),
+                        "main_net_inflow": float(row.get('主力净流入-净额', 0) or 0),
+                        "main_net_inflow_pct": float(row.get('主力净流入-净占比', 0) or 0),
+                    })
+        except Exception as e:
+            logger.warning(f"获取历史资金流向失败: {e}")
+
+        # 3. 判断资金趋势
+        trend = "unknown"
+        if history:
+            recent_inflows = [h["main_net_inflow"] for h in history[-3:]]
+            positive_days = sum(1 for v in recent_inflows if v > 0)
+            if positive_days >= 2:
+                trend = "inflow"  # 资金流入
+            elif positive_days <= 1:
+                trend = "outflow"  # 资金流出
+            else:
+                trend = "balanced"
+
+        data = {
+            "code": normalized_code,
+            "realtime": realtime_data,
+            "history": history,
+            "trend": trend,
+            "days": days
+        }
+        return ok(data=data)
+
+    except Exception as e:
+        logger.error(f"获取资金流向失败: {e}")
+        return ok(data={"code": normalized_code, "message": f"获取失败: {str(e)}", "realtime": {}, "history": [], "trend": "unknown"})
 
 
 @router.get("/{code}/risk-analysis", response_model=dict)

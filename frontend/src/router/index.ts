@@ -81,6 +81,16 @@ const routes: RouteRecordRaw[] = [
           requiresAuth: true
         }
       },
+      {
+        path: 'notifications',
+        name: 'NotificationsCenter',
+        component: () => import('@/views/Notifications/index.vue'),
+        meta: {
+          title: '通知中心',
+          parentTitle: '分析',
+          requiresAuth: true
+        }
+      },
     ]
   },
   {
@@ -250,8 +260,6 @@ const routes: RouteRecordRaw[] = [
           requiresAuth: true
         }
       },
-      
-
       {
         path: 'notes',
         name: 'Notes',
@@ -507,6 +515,16 @@ const routes: RouteRecordRaw[] = [
           requiresAuth: true,
           requiresAdmin: true
         }
+      },
+      {
+        path: 'tags',
+        name: 'TagManagement',
+        component: () => import('@/views/Settings/TagManagement.vue'),
+        meta: {
+          title: '标签管理',
+          parentTitle: '设置',
+          requiresAuth: true
+        }
       }
     ]
   },
@@ -574,10 +592,27 @@ const routes: RouteRecordRaw[] = [
           title: '交易',
           requiresAuth: true
         }
+      },
+      {
+        path: '/portfolio',
+        name: 'PortfolioView',
+        component: () => import('@/views/Portfolio/PortfolioView.vue'),
+        meta: {
+          title: '持仓追踪',
+          requiresAuth: true
+        }
+      },
+      {
+        path: '/stock-alerts',
+        name: 'StockAlertsView',
+        component: () => import('@/views/StockAlerts/StockAlertsView.vue'),
+        meta: {
+          title: '个股预警',
+          requiresAuth: true
+        }
       }
     ]
   },
-
   {
     path: '/:pathMatch(.*)*',
     name: 'NotFound',
@@ -585,7 +620,7 @@ const routes: RouteRecordRaw[] = [
     meta: {
       title: '页面不存在',
       hideInMenu: true,
-      requiresAuth: true
+      requiresAuth: false  // 未登录用户输错URL也应看到404，而非跳转登录
     }
   }
 ]

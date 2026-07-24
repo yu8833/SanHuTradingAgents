@@ -497,6 +497,8 @@
 </template>
 
 <script setup lang="ts">
+// 显式声明组件名，供 <keep-alive :include> 匹配
+defineOptions({ name: 'FavoritesHome' })
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'

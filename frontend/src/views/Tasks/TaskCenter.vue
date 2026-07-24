@@ -148,6 +148,8 @@
 </template>
 
 <script setup lang="ts">
+// 显式声明组件名，供 <keep-alive :include> 匹配
+defineOptions({ name: 'TaskCenterHome' })
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'

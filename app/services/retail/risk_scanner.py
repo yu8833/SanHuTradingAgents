@@ -61,8 +61,9 @@ INVENTORY_RATIO_HIGH = 0.40
 # 现金流背离（净利润 > 0 但经营现金流 < 0，且 |经营现金流| > |净利润| * 0.5）
 CASHFLOW_DIVERGENCE_RATIO = 0.5
 
-# 连续亏损年数（>= 2 年为高风险）
-CONSECUTIVE_LOSS_YEARS = 2
+# 连续亏损检查的最近报告期数（财务摘要为季度数据，此处按"期"而非"年"判定；
+# 最近 N 期净利润均为负即视为持续亏损，触发退市风险信号）
+RECENT_LOSS_PERIODS = 2
 
 
 def _safe_float(v, default=0.0) -> float:
@@ -95,6 +96,29 @@ def _parse_amount(v) -> float:
         return 0.0
 
 
+def _recent_report_dates(today: date) -> List[str]:
+    """
+    根据当前日期返回最近3个已披露季报的期末日期（YYYYMMDD 格式）。
+
+    修复：原 _get_pledge_data 中 `today.month >= 12` 仅12月生效，导致1-3月时
+    仍取上年Q4(1231)，而 Q4 报告通常次年1-4月才发布，数据尚未披露。
+    现按报告披露季节调整：
+    - 1-3月：取上年Q3（0930）—— Q4报告尚未发布
+    - 4-8月：取上年Q4（1231）—— Q4报告已发布
+    - 9-10月：取当年Q2（0630）—— 当年Q3未发布
+    - 11-12月：取当年Q3（0930）—— 当年Q3已发布
+    """
+    m = today.month
+    y = today.year
+    if 1 <= m <= 3:
+        return [f"{y-1}0930", f"{y-1}0630", f"{y-1}0331"]
+    if 4 <= m <= 8:
+        return [f"{y-1}1231", f"{y-1}0930", f"{y-1}0630"]
+    if 9 <= m <= 10:
+        return [f"{y}0630", f"{y}0331", f"{y-1}1231"]
+    return [f"{y}0930", f"{y}0630", f"{y}0331"]
+
+
 class RiskScanner:
     """散户风险扫描器"""
 
@@ -120,13 +144,11 @@ class RiskScanner:
 
         try:
             ak = astock._akshare()
-            # 用最近的季末日期
+            # 修复：原逻辑 `today.month >= 12` 仅12月生效，1-3月会错误地取上年Q4(1231)，
+            # 但 Q4 报告通常次年1-4月才发布，数据尚未披露。改用 _recent_report_dates
+            # 按报告披露季节生成最近3个已披露季报日期。
             today = date.today()
-            quarter_ends = [
-                f"{today.year}1231" if today.month >= 12 else f"{today.year - 1}1231",
-                f"{today.year}0930" if today.month >= 9 else f"{today.year - 1}0930",
-                f"{today.year}0630" if today.month >= 6 else f"{today.year - 1}0630",
-            ]
+            quarter_ends = _recent_report_dates(today)
             for d in quarter_ends:
                 try:
                     df = ak.stock_gpzy_pledge_ratio_em(date=d)
@@ -176,6 +198,39 @@ class RiskScanner:
         except Exception as e:
             logger.debug(f"获取{code}财务摘要失败: {e}")
             return {}
+
+    def _get_financial_abstract_history(self, code: str, periods: int = 3) -> List[dict]:
+        """
+        获取最近 N 期财务摘要（用于连续亏损判断）。
+
+        修复缺陷2辅助方法：原 _scan_delisting_risk 仅依赖当期 net_profit 与
+        net_profit_yoy 判断"持续亏损"，与"连续亏损"语义不符。此方法直接调用
+        stock_financial_abstract_ths 取最近多期报告期数据，供逐一检查净利润是否
+        连续为负。
+        """
+        try:
+            ak = astock._akshare()
+            df = ak.stock_financial_abstract_ths(symbol=code, indicator="按报告期")
+            if df is None or df.empty:
+                return []
+            # df 按报告期升序，末行为最新；取最近 N 期
+            recent = df.tail(periods)
+            results = []
+            for _, row in recent.iterrows():
+                row_dict = row.to_dict()
+
+                def g(k):
+                    v = row_dict.get(k)
+                    return None if v in (False, "false", "", None) else v
+
+                results.append({
+                    "period": g("报告期"),
+                    "net_profit": g("净利润"),
+                })
+            return results
+        except Exception as e:
+            logger.debug(f"获取{code}多期财务摘要失败: {e}")
+            return []
 
     def _get_balance_sheet(self, code: str) -> dict:
         """获取资产负债表数据（单股，含商誉/应收/存货）"""
@@ -254,16 +309,44 @@ class RiskScanner:
                     })
 
         # 信号3：现金流背离（净利润>0 但 经营现金流<0）
+        # 修复：原代码比较 net_profit（净利润，总额）与 op_cf_ps（每股经营现金流），
+        # 单位不一致导致比较无意义；且 CASHFLOW_DIVERGENCE_RATIO 阈值定义后从未使用。
+        # 现优先获取总股本将每股经营现金流换算为总额，单位统一后比较并应用阈值；
+        # 若总股本不可得，则保留符号背离判断（幅度阈值因单位不一致无法有效应用）。
         net_profit = abstract.get("net_profit")
         op_cf_ps = abstract.get("op_cf_ps")  # 每股经营现金流
         if net_profit and op_cf_ps is not None:
             np_val = _safe_float(net_profit)
-            cf_val = _safe_float(op_cf_ps)
-            if np_val > 0 and cf_val < 0:
-                signals.append({
-                    "type": "cashflow_divergence",
-                    "message": f"净利润为正({np_val})但经营现金流为负({cf_val})，利润质量存疑",
-                })
+            cf_ps_val = _safe_float(op_cf_ps)
+            if np_val > 0 and cf_ps_val < 0:
+                # 尝试获取总股本，将每股经营现金流换算为总额（与净利润同单位）
+                cf_total = None
+                try:
+                    info = astock.individual_info(code)
+                    total_shares_str = info.get("总股本")
+                    if total_shares_str:
+                        total_shares = _parse_amount(total_shares_str)
+                        if total_shares > 0:
+                            cf_total = cf_ps_val * total_shares
+                except Exception as e:
+                    logger.debug(f"获取{code}总股本失败: {e}")
+
+                if cf_total is not None:
+                    # 单位已统一（总额 vs 总额）：应用 CASHFLOW_DIVERGENCE_RATIO 阈值
+                    # |经营现金流| > |净利润| * 0.5 才认为存在显著背离
+                    is_divergence = abs(cf_total) > abs(np_val) * CASHFLOW_DIVERGENCE_RATIO
+                    cf_desc = f"总额{cf_total/1e8:.2f}亿"
+                else:
+                    # 总股本不可得，单位不一致；幅度阈值无法有效应用，
+                    # 退化为仅按符号判断（净利润为正 vs 经营现金流为负）
+                    is_divergence = True
+                    cf_desc = f"每股{cf_ps_val}(总股本不可得，未应用幅度阈值)"
+
+                if is_divergence:
+                    signals.append({
+                        "type": "cashflow_divergence",
+                        "message": f"净利润为正({np_val})但经营现金流为负({cf_desc})，利润质量存疑",
+                    })
 
         # 信号4：应收账款周转天数过长
         recv_days = abstract.get("应收账款周转天数")
@@ -377,7 +460,7 @@ class RiskScanner:
         退市风险
 
         1. ST股（名称含 ST/*ST）
-        2. 连续亏损（最近2年净利润为负）
+        2. 连续亏损（最近 RECENT_LOSS_PERIODS 期报告期净利润均为负）
         """
         signals = []
 
@@ -396,17 +479,25 @@ class RiskScanner:
                 "message": f"{'*ST' if '*' in (stock_name or '') else 'ST'}股，存在退市风险",
             })
 
-        # 信号2：连续亏损（需要财务数据）
+        # 信号2：连续亏损
+        # 修复：原代码仅检查当期 net_profit<0 且 net_profit_yoy<0（同比下滑），
+        # 与"连续亏损"语义不符（同比下滑不等于连续多期亏损）。
+        # 现拉取最近 RECENT_LOSS_PERIODS 期报告期净利润，逐一检查是否均为负。
         try:
-            abstract = self._get_financial_abstract(code)
-            if abstract:
-                net_profit = _safe_float(abstract.get("net_profit"))
-                np_yoy = _safe_float(abstract.get("net_profit_yoy"))
-                # 如果净利润为负，且同比也为负（持续亏损）
-                if net_profit < 0 and np_yoy < 0:
+            history = self._get_financial_abstract_history(code, periods=RECENT_LOSS_PERIODS)
+            if history and len(history) >= RECENT_LOSS_PERIODS:
+                loss_periods = []
+                all_loss = True
+                for item in history:
+                    np_val = _safe_float(item.get("net_profit"))
+                    if np_val >= 0:
+                        all_loss = False
+                        break
+                    loss_periods.append(str(item.get("period", "")))
+                if all_loss:
                     signals.append({
                         "type": "consecutive_loss",
-                        "message": f"净利润 {net_profit} 且同比下降 {np_yoy}%，持续亏损",
+                        "message": f"最近{len(loss_periods)}期净利润连续为负（{', '.join(loss_periods)}），存在持续经营风险",
                     })
         except Exception:
             pass
@@ -427,20 +518,59 @@ class RiskScanner:
         """
         解禁减持风险
 
-        注：akshare 个股解禁接口不稳定，降级为板块解禁规模判断。
-        当近期全市场解禁规模较大时，对所有股票发出中等风险提示。
+        修复：原方法接收 code 参数但完全不使用，仅检查全市场未来90天解禁总市值
+        是否超 5000 亿，与个股无关。现优先调用个股解禁接口
+        stock_restricted_release_detail_em 获取个股解禁数据；若个股接口不可用，
+        回退到全市场判断并明确日志记录"个股解禁数据不可用，使用全市场判断"。
         """
+        code_clean = code.replace(".SH", "").replace(".SZ", "").replace(".BJ", "")
+        today = date.today()
+        future_limit = today + timedelta(days=90)
+
+        # 优先：个股解禁明细接口
         try:
             ak = astock._akshare()
-            # 获取近期解禁数据（按板块汇总）
+            df = ak.stock_restricted_release_detail_em(symbol=code_clean)
+            if df is not None and not df.empty:
+                # 兼容不同列名
+                date_col = next((c for c in ("解禁时间", "解禁日期") if c in df.columns), None)
+                value_col = next(
+                    (c for c in ("实际解禁市值", "解禁市值", "解禁金额") if c in df.columns),
+                    None,
+                )
+                if date_col and value_col:
+                    df[date_col] = pd.to_datetime(df[date_col], errors="coerce").dt.date
+                    upcoming = df[(df[date_col] >= today) & (df[date_col] <= future_limit)]
+                    if not upcoming.empty:
+                        total_value = _safe_float(upcoming[value_col].sum())
+                        # 个股未来90天解禁市值 > 5亿 视为有减持压力
+                        if total_value > 5e8:
+                            level = RISK_LEVEL_MEDIUM if total_value > 5e9 else RISK_LEVEL_LOW
+                            return {
+                                "risk_type": "lockup",
+                                "risk_name": "解禁减持风险",
+                                "level": level,
+                                "signals": [{
+                                    "type": "stock_lockup_pressure",
+                                    "message": f"未来90天个股解禁市值 {total_value/1e8:.2f}亿，存在减持压力",
+                                }],
+                                "message": f"个股未来90天解禁市值 {total_value/1e8:.2f}亿，注意减持风险",
+                            }
+                    # 个股解禁数据可用但未来90天无显著解禁 → 不触发风险
+                    return None
+        except Exception as e:
+            logger.debug(f"获取{code}个股解禁数据失败: {e}")
+
+        # 回退：全市场解禁判断（明确日志记录）
+        logger.warning(f"个股解禁数据不可用，使用全市场判断: {code}")
+        try:
+            ak = astock._akshare()
             df = ak.stock_restricted_release_summary_em(symbol="全部")
             if df is None or df.empty:
                 return None
 
-            # 最近30天内的解禁数据
-            today = date.today()
             df["解禁时间"] = pd.to_datetime(df["解禁时间"]).dt.date
-            recent = df[(df["解禁时间"] >= today) & (df["解禁时间"] <= today + timedelta(days=90))]
+            recent = df[(df["解禁时间"] >= today) & (df["解禁时间"] <= future_limit)]
 
             if recent.empty:
                 return None
@@ -459,7 +589,7 @@ class RiskScanner:
                     "message": "市场处于解禁高峰期，注意个股解禁减持风险",
                 }
         except Exception as e:
-            logger.debug(f"扫描{code}解禁风险失败: {e}")
+            logger.debug(f"扫描{code}解禁风险失败(全市场回退): {e}")
 
         return None
 

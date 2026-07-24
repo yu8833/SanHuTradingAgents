@@ -1213,6 +1213,14 @@ class LimitUpPullbackService:
 
         score = 0.0
         score_details = []
+        # 预初始化各维度得分，避免条件分支未命中时变量未定义
+        shrink_score = 0.0
+        depth_score = 0.0
+        ground_score = 0.0
+        shadow_score = 0.0
+        space_score = 0.0
+        above_score = 0.0
+        breakout_score = 0.0
 
         shrink_score = max(0, 20 * (1 - volume_shrink_ratio_val))
         score += shrink_score
@@ -1258,6 +1266,20 @@ class LimitUpPullbackService:
             score_details.append(f"突破5日线: 放量{breakout_volume:.1f}倍 → {breakout_score:.1f}分")
         elif fake_breakout:
             score_details.append(f"假突破过滤: 上影线过长，不确认右侧")
+
+        # 评分维度汇总（用于 score_validation 校验）
+        dimensions = {
+            "缩量": shrink_score,
+            "回调幅度": depth_score,
+            "地量": ground_score,
+            "下影线": shadow_score,
+            "空间位置": space_score,
+            "站上10日线": above_score,
+            "小阴小阳": small_body_score,
+            "突破5日线": breakout_score,
+        }
+        # 评分校验（修复回测时 NameError：原代码引用了未定义的 score_validation）
+        score_validation = _validate_limit_up_score(dimensions, score)
 
         signal_type = "观察"
         # 地量信号确认：有下影线 + 满足地量标准 + （地量日在第3-5天 或 次日阳线确认）
@@ -1618,11 +1640,13 @@ class LimitUpPullbackService:
             projection={"_id": 0, "code": 1, "trade_date": 1, "open": 1, "close": 1, "high": 1, "low": 1, "volume": 1, "pct_chg": 1, "data_source": 1}
         ).sort("trade_date", 1)
 
-        all_quotes = await quotes_cursor.to_list(length=total_scanned * 300)
-
+        # 性能优化：流式遍历游标直接写入分组字典，避免 to_list 产生巨型中间列表
+        # 原 to_list(length=total_scanned*300) 会把 ~1.5M 条记录全量驻留内存，
+        # 再复制到 quotes_by_date_by_stock，导致内存翻倍。流式处理只需一份内存。
         DATA_SOURCE_PRIORITY = {"tushare": 4, "sina": 3, "baostock": 2, "akshare": 1}
         quotes_by_date_by_stock = defaultdict(dict)
-        for quote in all_quotes:
+        raw_count = 0
+        async for quote in quotes_cursor:
             code = quote.get("code", "")
             if not code or len(code) != 6 or not code.isdigit():
                 continue
@@ -1640,6 +1664,8 @@ class LimitUpPullbackService:
                 new_priority = DATA_SOURCE_PRIORITY.get(new_src, 0)
                 if new_priority > existing_priority:
                     quotes_by_date_by_stock[code][trade_date] = quote
+            raw_count += 1
+        logger.info(f"📊 流式加载行情完成: {raw_count} 条原始记录, {len(quotes_by_date_by_stock)} 只股票")
 
         quotes_by_stock = {}
         all_trade_dates = set()

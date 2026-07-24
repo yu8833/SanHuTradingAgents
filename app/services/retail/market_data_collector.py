@@ -95,8 +95,8 @@ def _fetch_margin_balance_change() -> float:
         return 0.0
 
     try:
-        sse_balances = []
-        szse_balances = []
+        sse_map = {}  # {date_str: balance}
+        szse_map = {}
 
         # 上交所融资余额（支持日期过滤）
         try:
@@ -105,8 +105,12 @@ def _fetch_margin_balance_change() -> float:
                 end_date=datetime.now().strftime("%Y%m%d"),
             )
             if df_sse is not None and len(df_sse) > 0:
-                col = "融资余额" if "融资余额" in df_sse.columns else df_sse.columns[1]
-                sse_balances = df_sse[col].astype(float).tolist()
+                # 日期列名可能是"日期"或第一列
+                date_col = "日期" if "日期" in df_sse.columns else df_sse.columns[0]
+                bal_col = "融资余额" if "融资余额" in df_sse.columns else df_sse.columns[1]
+                for _, row in df_sse.iterrows():
+                    d = str(row[date_col]).replace("-", "").strip()
+                    sse_map[d] = float(row[bal_col])
         except Exception as e:
             logger.warning(f"获取上交所融资余额失败: {e}")
 
@@ -114,25 +118,28 @@ def _fetch_margin_balance_change() -> float:
         try:
             df_szse = ak.stock_margin_szse()
             if df_szse is not None and len(df_szse) > 0:
-                col = "融资余额" if "融资余额" in df_szse.columns else df_szse.columns[1]
-                szse_balances = df_szse[col].astype(float).tolist()
+                date_col = "日期" if "日期" in df_szse.columns else df_szse.columns[0]
+                bal_col = "融资余额" if "融资余额" in df_szse.columns else df_szse.columns[1]
+                for _, row in df_szse.iterrows():
+                    d = str(row[date_col]).replace("-", "").strip()
+                    szse_map[d] = float(row[bal_col])
         except Exception as e:
             logger.warning(f"获取深交所融资余额失败: {e}")
 
-        # 合并按日期对齐（取相同长度的尾部）
-        min_len = min(len(sse_balances), len(szse_balances))
-        if min_len < MARGIN_CHANGE_DAYS + 1:
+        # 按日期对齐合并（修复：原代码按数组下标对齐导致不同日期被相加）
+        all_dates = sorted(set(sse_map.keys()) & set(szse_map.keys()))
+        if len(all_dates) < MARGIN_CHANGE_DAYS + 1:
             return 0.0
 
-        total_recent = []
-        for i in range(min_len):
-            total_recent.append(sse_balances[-(min_len - i)] + szse_balances[-(min_len - i)])
+        # 取最近 MARGIN_CHANGE_DAYS+1 个共同交易日
+        recent_dates = all_dates[-(MARGIN_CHANGE_DAYS + 1):]
+        total_recent = [sse_map[d] + szse_map[d] for d in recent_dates]
 
         if len(total_recent) < MARGIN_CHANGE_DAYS + 1:
             return 0.0
 
         current = total_recent[-1]
-        before = total_recent[-(MARGIN_CHANGE_DAYS + 1)]
+        before = total_recent[0]
         if before == 0:
             return 0.0
 

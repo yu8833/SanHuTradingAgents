@@ -214,20 +214,44 @@ class StartupValidator:
     
     def _check_security_configs(self):
         """检查安全配置"""
+        # JWT_SECRET 默认值列表（这些值在公网极易被猜到，必须替换）
+        _JWT_DEFAULT_SECRETS = {
+            "change-me-in-production",
+            "your-super-secret-jwt-key-change-in-production",
+        }
+
         # 检查JWT密钥是否使用默认值
+        # 生产环境（DEBUG=false）下使用默认 JWT_SECRET 是严重安全隐患，必须阻断启动；
+        # 开发环境下仅告警，避免阻塞本地调试。
         jwt_secret = os.getenv("JWT_SECRET", "")
-        if jwt_secret in ["change-me-in-production", "your-super-secret-jwt-key-change-in-production"]:
-            self.result.warnings.append(
-                "⚠️  JWT_SECRET 使用默认值，生产环境请务必修改！"
-            )
-        
+        if jwt_secret in _JWT_DEFAULT_SECRETS:
+            if settings.is_production:
+                self.result.invalid_configs.append(
+                    (
+                        ConfigItem(
+                            key="JWT_SECRET",
+                            level=ConfigLevel.REQUIRED,
+                            description="JWT密钥（用于生成认证令牌）",
+                            example="openssl rand -hex 32 生成的高熵随机字符串",
+                        ),
+                        (
+                            "生产环境（DEBUG=false）下 JWT_SECRET 仍为默认值，"
+                            "存在令牌伪造风险。请使用 `openssl rand -hex 32` 生成随机密钥并写入 .env。"
+                        ),
+                    )
+                )
+            else:
+                self.result.warnings.append(
+                    "⚠️  JWT_SECRET 使用默认值，生产环境（DEBUG=false）下将拒绝启动，请提前修改！"
+                )
+
         # 检查CSRF密钥是否使用默认值
         csrf_secret = os.getenv("CSRF_SECRET", "")
         if csrf_secret in ["change-me-csrf-secret", "your-csrf-secret-key-change-in-production"]:
             self.result.warnings.append(
                 "⚠️  CSRF_SECRET 使用默认值，生产环境请务必修改！"
             )
-        
+
         # 检查是否在生产环境使用DEBUG模式
         debug = os.getenv("DEBUG", "true").lower() in ("true", "1", "yes", "on")
         if not debug:

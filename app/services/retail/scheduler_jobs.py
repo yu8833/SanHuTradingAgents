@@ -32,7 +32,8 @@ async def _get_all_user_ids_with_open_positions() -> List[str]:
     """获取所有有未平仓持仓的用户ID"""
     try:
         db = get_mongo_db()
-        user_ids = await db["user_positions"].distinct("user_id", {"status": "open"})
+        # 统一数据源：paper_positions（quantity > 0 即未平仓）
+        user_ids = await db["paper_positions"].distinct("user_id", {"quantity": {"$gt": 0}})
         return [str(uid) for uid in user_ids if uid]
     except Exception as e:
         logger.error(f"获取有持仓的用户列表失败: {e}")
@@ -304,4 +305,29 @@ def register_retail_jobs(scheduler, settings):
         replace_existing=True,
     )
 
-    logger.info("📊 散户策略定时任务已注册: 退出扫描(盘中每30分钟+收盘) + 环境检测(每日9:30)")
+    # 3. 个股预警检查：工作日 9:30-15:00 每10分钟
+    scheduler.add_job(
+        _check_stock_alerts_wrapper,
+        CronTrigger.from_crontab("*/10 9-14 * * 1-5", timezone=tz),
+        id="stock_alert_check",
+        name="个股预警检查（盘中每10分钟）",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _check_stock_alerts_wrapper,
+        CronTrigger.from_crontab("0 15 * * 1-5", timezone=tz),
+        id="stock_alert_check_close",
+        name="个股预警收盘检查",
+        replace_existing=True,
+    )
+
+    logger.info("📊 散户策略定时任务已注册: 退出扫描(盘中每30分钟+收盘) + 环境检测(每日9:30) + 个股预警(每10分钟)")
+
+
+async def _check_stock_alerts_wrapper():
+    """个股预警检查包装器"""
+    try:
+        from app.services.stock_alert_service import stock_alert_service
+        await stock_alert_service.check_and_trigger()
+    except Exception as e:
+        logger.error(f"❌ 个股预警检查失败: {e}", exc_info=True)

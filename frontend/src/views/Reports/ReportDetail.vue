@@ -688,6 +688,7 @@ import {
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { marked } from 'marked'
+import { sanitizeHtml } from '@/utils/sanitize'
 import { getMarketByStockCode } from '@/utils/market'
 import type { CurrencyAmount } from '@/api/paper'
 
@@ -1784,9 +1785,9 @@ const getModuleDisplayName = (moduleName: string) => {
 const renderMarkdown = (content: string) => {
   if (!content) return ''
   try {
-    return String(marked.parse(content))
+    return sanitizeHtml(String(marked.parse(content)))
   } catch (e) {
-    return `<pre style="white-space: pre-wrap; font-family: inherit;">${content}</pre>`
+    return sanitizeHtml(`<pre style="white-space: pre-wrap; font-family: inherit;">${content}</pre>`)
   }
 }
 

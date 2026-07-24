@@ -23,7 +23,7 @@
           <span class="update-time">更新于 {{ article.updateTime }}</span>
         </div>
 
-        <div class="article-content" v-html="article.content"></div>
+        <div class="article-content" v-html="sanitizedContent"></div>
 
         <div class="article-footer">
           <el-divider />
@@ -61,6 +61,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { Download, Clock, View, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { marked } from 'marked'
+import { sanitizeHtml } from '@/utils/sanitize'
 
 const route = useRoute()
 const router = useRouter()
@@ -123,6 +124,9 @@ const article = ref({
   updateTime: '',
   content: ''
 })
+
+// 文章正文经 XSS 净化后再渲染，防止恶意脚本注入
+const sanitizedContent = computed(() => sanitizeHtml(article.value.content))
 
 // 目录
 const tableOfContents = ref<{ id: string; text: string; level: number }[]>([])

@@ -28,6 +28,12 @@ class PlaceOrderRequest(BaseModel):
     market: Optional[str] = Field(None, description="市场类型 (CN/HK/US)，不传则自动识别")
     # 可选：关联的分析ID，便于从分析页面一键下单后追踪
     analysis_id: Optional[str] = None
+    # 散户策略元数据（买入时写入 paper_positions，用于退出信号监控和策略表现统计）
+    strategy: Optional[str] = Field(None, description="策略类型（extreme_reversal/turnaround/small_cap_value/convertible_arbitrage）")
+    stop_loss_price: Optional[float] = Field(None, description="止损价")
+    take_profit_price: Optional[float] = Field(None, description="止盈价")
+    thesis: Optional[str] = Field(None, description="投资逻辑")
+    stock_name: Optional[str] = Field(None, description="股票名称")
 
 
 def _detect_market_and_code(code: str) -> Tuple[str, str]:
@@ -273,8 +279,11 @@ async def get_account(current_user: dict = Depends(get_current_user)):
     db = get_mongo_db()
     acc = await _get_or_create_account(current_user["id"])
 
-    # 聚合持仓估值（按货币分类）
-    positions = await db["paper_positions"].find({"user_id": current_user["id"]}).to_list(None)
+    # 聚合持仓估值（按货币分类）—— 只统计未平仓持仓
+    positions = await db["paper_positions"].find({
+        "user_id": current_user["id"],
+        "quantity": {"$gt": 0}
+    }).to_list(None)
 
     positions_value_by_currency = {
         "CNY": 0.0,
@@ -424,7 +433,14 @@ async def place_order(payload: PlaceOrderRequest, current_user: dict = Depends(g
                 "available_qty": qty if market != "CN" else 0,  # A股T+1，今天买入不可用
                 "frozen_qty": 0,
                 "avg_cost": price,
-                "updated_at": now_iso
+                "updated_at": now_iso,
+                # 散户策略元数据（买入时写入，供退出信号监控和策略表现统计使用）
+                "strategy": payload.strategy or "default",
+                "stop_loss_price": payload.stop_loss_price,
+                "take_profit_price": payload.take_profit_price,
+                "thesis": payload.thesis,
+                "stock_name": payload.stock_name or "",
+                "buy_date": datetime.utcnow().strftime("%Y-%m-%d"),
             }
             await db["paper_positions"].insert_one(new_pos)
         else:
@@ -439,14 +455,27 @@ async def place_order(payload: PlaceOrderRequest, current_user: dict = Depends(g
             else:
                 new_available = new_qty  # 港股/美股T+0，全部可用
 
+            update_set = {
+                "quantity": new_qty,
+                "available_qty": new_available,
+                "avg_cost": new_avg,
+                "updated_at": now_iso,
+            }
+            # 买入时若传入了策略元数据，覆盖更新（便于同一股票切换策略或补充止损价）
+            if payload.strategy:
+                update_set["strategy"] = payload.strategy
+            if payload.stop_loss_price is not None:
+                update_set["stop_loss_price"] = payload.stop_loss_price
+            if payload.take_profit_price is not None:
+                update_set["take_profit_price"] = payload.take_profit_price
+            if payload.thesis:
+                update_set["thesis"] = payload.thesis
+            if payload.stock_name:
+                update_set["stock_name"] = payload.stock_name
+
             await db["paper_positions"].update_one(
                 {"_id": pos["_id"]},
-                {"$set": {
-                    "quantity": new_qty,
-                    "available_qty": new_available,
-                    "avg_cost": new_avg,
-                    "updated_at": now_iso
-                }}
+                {"$set": update_set}
             )
 
     else:  # sell
@@ -479,7 +508,21 @@ async def place_order(payload: PlaceOrderRequest, current_user: dict = Depends(g
 
         # 更新持仓
         if new_qty == 0:
-            await db["paper_positions"].delete_one({"_id": pos["_id"]})
+            # 归档而非删除：保留交易历史用于复盘和策略表现统计
+            await db["paper_positions"].update_one(
+                {"_id": pos["_id"]},
+                {"$set": {
+                    "quantity": 0,
+                    "available_qty": 0,
+                    "frozen_qty": 0,
+                    "status": "closed",
+                    "exit_price": price,
+                    "exit_date": datetime.utcnow().strftime("%Y-%m-%d"),
+                    "exit_reason": "sell_order",
+                    "realized_pnl": pnl,
+                    "updated_at": now_iso,
+                }}
+            )
         else:
             new_available = max(0, pos.get("available_qty", old_qty) - qty)
             await db["paper_positions"].update_one(
@@ -523,6 +566,12 @@ async def place_order(payload: PlaceOrderRequest, current_user: dict = Depends(g
         "pnl": realized_pnl_delta if side == "sell" else 0.0,
         "timestamp": now_iso,
     }
+    # 统一数据源：从持仓文档继承策略元数据，用于策略表现统计
+    if pos:
+        if pos.get("strategy"):
+            trade_doc["strategy"] = pos["strategy"]
+        if pos.get("stock_name"):
+            trade_doc["stock_name"] = pos["stock_name"]
     if analysis_id:
         trade_doc["analysis_id"] = analysis_id
     await db["paper_trades"].insert_one(trade_doc)
@@ -531,10 +580,26 @@ async def place_order(payload: PlaceOrderRequest, current_user: dict = Depends(g
 
 
 @router.get("/positions", response_model=dict)
-async def list_positions(current_user: dict = Depends(get_current_user)):
-    """获取持仓列表（支持多市场）"""
+async def list_positions(
+    status: Optional[str] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """获取持仓列表（支持多市场）
+
+    Args:
+        status: 持仓状态筛选。open=未平仓(quantity>0)，closed=已平仓(quantity=0)，all=全部
+    """
     db = get_mongo_db()
-    items = await db["paper_positions"].find({"user_id": current_user["id"]}).to_list(None)
+    query: Dict[str, Any] = {"user_id": current_user["id"]}
+    if status == "open":
+        query["quantity"] = {"$gt": 0}
+    elif status == "closed":
+        query["quantity"] = 0
+    # status == "all" 或未传：不过滤（兼容旧调用方）
+    if status is None:
+        query["quantity"] = {"$gt": 0}
+
+    items = await db["paper_positions"].find(query).sort("updated_at", -1).to_list(None)
     enriched: List[Dict[str, Any]] = []
     for p in items:
         code = p.get("code")
@@ -547,6 +612,7 @@ async def list_positions(current_user: dict = Depends(get_current_user)):
         last = await _get_last_price(code, market)
         mkt = round((last or 0.0) * qty, 2)
         enriched.append({
+            "id": str(p.get("_id", "")),
             "code": code,
             "market": market,
             "currency": currency,
@@ -555,7 +621,21 @@ async def list_positions(current_user: dict = Depends(get_current_user)):
             "avg_cost": avg_cost,
             "last_price": last,
             "market_value": mkt,
-            "unrealized_pnl": None if last is None else round((last - avg_cost) * qty, 2)
+            "unrealized_pnl": None if last is None else round((last - avg_cost) * qty, 2),
+            # 策略与平仓元数据（用于交易复盘）
+            "strategy": p.get("strategy", "default"),
+            "stock_name": p.get("stock_name", ""),
+            "buy_date": p.get("buy_date"),
+            "thesis": p.get("thesis"),
+            "stop_loss_price": p.get("stop_loss_price"),
+            "take_profit_price": p.get("take_profit_price"),
+            "status": p.get("status", "open" if qty > 0 else "closed"),
+            "exit_price": p.get("exit_price"),
+            "exit_date": p.get("exit_date"),
+            "exit_reason": p.get("exit_reason"),
+            "realized_pnl": p.get("realized_pnl"),
+            "created_at": p.get("created_at"),
+            "updated_at": p.get("updated_at"),
         })
     return ok({"items": enriched})
 

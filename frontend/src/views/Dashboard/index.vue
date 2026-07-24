@@ -292,6 +292,8 @@
 </template>
 
 <script setup lang="ts">
+// 显式声明组件名，供 <keep-alive :include> 匹配
+defineOptions({ name: 'DashboardHome' })
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'

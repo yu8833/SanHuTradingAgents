@@ -221,9 +221,10 @@
                 <el-progress :percentage="row.score" :color="getScoreColor(row.score)" :stroke-width="12" />
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="120" fixed="right">
+            <el-table-column label="操作" width="200" fixed="right">
               <template #default="{ row }">
                 <el-button type="success" link @click="addToFavorites(row)">自选</el-button>
+                <el-button type="primary" link @click="openBuyDialog(row)">买入</el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -396,6 +397,16 @@
         </div>
       </el-tab-pane>
     </el-tabs>
+
+    <!-- 买入对话框 -->
+    <RetailBuyDialog
+      v-model="buyDialogVisible"
+      :code="buyTarget.code"
+      :stock-name="buyTarget.stockName"
+      :price="buyTarget.price"
+      :strategy="buyTarget.strategy"
+      @success="onBuySuccess"
+    />
   </div>
 </template>
 
@@ -405,6 +416,7 @@ import { ElMessage } from 'element-plus'
 import { TrendCharts, InfoFilled, Refresh, Search, List, DataLine } from '@element-plus/icons-vue'
 import { screeningApi, type RetailScanReq, type RetailBacktestReq, type RetailScanResp, type RetailBacktestResp } from '@/api/screening'
 import { favoritesApi } from '@/api/favorites'
+import RetailBuyDialog from './components/RetailBuyDialog.vue'
 
 const activeTab = ref<'scan' | 'backtest'>('scan')
 
@@ -506,6 +518,27 @@ const addToFavorites = async (row: any) => {
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || e?.message || '添加自选失败')
   }
+}
+
+// 买入对话框
+const buyDialogVisible = ref(false)
+const buyTarget = reactive({
+  code: '',
+  stockName: '',
+  price: 0,
+  strategy: 'convertible_arbitrage',
+})
+
+const openBuyDialog = (row: any) => {
+  buyTarget.code = row.bond_code
+  buyTarget.stockName = row.bond_name || ''
+  buyTarget.price = row.bond_price || 0
+  buyTarget.strategy = 'convertible_arbitrage'
+  buyDialogVisible.value = true
+}
+
+const onBuySuccess = () => {
+  ElMessage.info('持仓已更新，可在模拟交易或持仓监控中查看')
 }
 
 const getSignalTypeTag = (type?: string) => {

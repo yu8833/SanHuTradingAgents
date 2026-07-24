@@ -16,6 +16,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { marked } from 'marked'
+import { sanitizeHtml } from '@/utils/sanitize'
 
 const props = defineProps<{ modelValue: boolean; result: any }>()
 const emit = defineEmits(['update:modelValue','close','view-report'])
@@ -26,6 +27,6 @@ const visible = computed({
 })
 
 marked.setOptions({ breaks: true, gfm: true })
-const renderMarkdown = (s: string) => { try { return marked.parse(s||'') as string } catch { return s } }
+const renderMarkdown = (s: string) => { try { return sanitizeHtml(marked.parse(s||'') as string) } catch { return sanitizeHtml(s) } }
 </script>
 

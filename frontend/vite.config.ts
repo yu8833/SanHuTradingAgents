@@ -6,7 +6,7 @@ import Components from 'unplugin-vue-components/vite'
 import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 
 // https://vitejs.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [
     vue(),
     AutoImport({
@@ -58,6 +58,11 @@ export default defineConfig({
       }
     }
   },
+  // 生产构建剔除 console.log/debug/info 与 debugger 语句，减少包体积并避免生产环境日志噪音
+  // 开发模式（mode=development）保留全部日志以便调试
+  esbuild: {
+    drop: mode === 'production' ? ['console', 'debugger'] : [],
+  },
   build: {
     target: 'es2020',  // 支持 nullish coalescing operator (??) 和 optional chaining (?.)
     outDir: 'dist',
@@ -78,4 +83,4 @@ export default defineConfig({
       }
     }
   }
-})
+}))

@@ -45,6 +45,12 @@ export interface PlaceOrderPayload {
   side: 'buy' | 'sell'
   quantity: number
   analysis_id?: string
+  // 散户策略元数据（买入时写入 paper_positions）
+  strategy?: string
+  stop_loss_price?: number | null
+  take_profit_price?: number | null
+  thesis?: string
+  stock_name?: string
 }
 
 export const paperApi = {
