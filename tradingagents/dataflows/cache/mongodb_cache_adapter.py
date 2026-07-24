@@ -52,89 +52,95 @@ class MongoCacheAdapter:
             return None
 
         try:
-            # 确定集合名称
-            collection_map = {
-                "daily": "stock_daily_data",
-                "weekly": "stock_weekly_data",
-                "monthly": "stock_monthly_data",
-                "5min": "stock_5min_data",
-                "15min": "stock_15min_data",
-                "30min": "stock_30min_data",
-                "60min": "stock_60min_data",
-            }
-            coll_name = collection_map.get(period, "stock_daily_data")
-            coll = self.db[coll_name]
+            code6 = str(code).zfill(6)
 
-            # 构建查询条件
-            query = {
-                "code": str(code).zfill(6),
-                "trade_date": {"$gte": start_date, "$lte": end_date}
-            }
+            # 优先使用的集合列表（按优先级排序）
+            if period == "daily":
+                collection_names = ["stock_daily_quotes", "stock_daily_data", "stock_historical_data"]
+            else:
+                collection_map = {
+                    "weekly": "stock_weekly_data",
+                    "monthly": "stock_monthly_data",
+                    "5min": "stock_5min_data",
+                    "15min": "stock_15min_data",
+                    "30min": "stock_30min_data",
+                    "60min": "stock_60min_data",
+                }
+                collection_names = [collection_map.get(period, "stock_daily_data")]
 
-            # 尝试查询
-            cursor = coll.find(query).sort("trade_date", 1)
-            records = list(cursor)
+            # 逐个集合尝试查询
+            for coll_name in collection_names:
+                coll = self.db[coll_name]
 
-            if not records:
-                # 尝试其他字段名
-                query2 = {
-                    "symbol": str(code).zfill(6),
+                # 尝试 code 字段
+                query = {
+                    "code": code6,
                     "trade_date": {"$gte": start_date, "$lte": end_date}
                 }
-                cursor = coll.find(query2).sort("trade_date", 1)
+                cursor = coll.find(query).sort("trade_date", 1)
                 records = list(cursor)
 
-            if not records:
+                # 尝试 symbol 字段
+                if not records:
+                    query2 = {
+                        "symbol": code6,
+                        "trade_date": {"$gte": start_date, "$lte": end_date}
+                    }
+                    cursor = coll.find(query2).sort("trade_date", 1)
+                    records = list(cursor)
+
                 # 尝试 date 字段
-                query3 = {
-                    "code": str(code).zfill(6),
-                    "date": {"$gte": start_date, "$lte": end_date}
-                }
-                cursor = coll.find(query3).sort("date", 1)
-                records = list(cursor)
+                if not records:
+                    query3 = {
+                        "code": code6,
+                        "date": {"$gte": start_date, "$lte": end_date}
+                    }
+                    cursor = coll.find(query3).sort("date", 1)
+                    records = list(cursor)
 
-            if not records:
-                logger.info(f"📊 MongoDB缓存无K线数据: {code}, period={period}")
-                return None
+                if records:
+                    logger.info(f"✅ MongoDB缓存命中: {code6}, period={period}, coll={coll_name}, {len(records)}条")
 
-            # 转换为DataFrame
-            df = pd.DataFrame(records)
+                    # 转换为DataFrame
+                    df = pd.DataFrame(records)
 
-            # 标准化列名
-            column_map = {
-                "trade_date": "trade_date",
-                "date": "trade_date",
-                "open": "open",
-                "high": "high",
-                "low": "low",
-                "close": "close",
-                "volume": "volume",
-                "vol": "volume",
-                "amount": "amount",
-                "turnover_rate": "turnover_rate",
-                "pct_chg": "pct_chg",
-                "change": "pct_chg",
-            }
+                    # 标准化列名
+                    column_map = {
+                        "trade_date": "trade_date",
+                        "date": "trade_date",
+                        "open": "open",
+                        "high": "high",
+                        "low": "low",
+                        "close": "close",
+                        "volume": "volume",
+                        "vol": "volume",
+                        "amount": "amount",
+                        "turnover_rate": "turnover_rate",
+                        "pct_chg": "pct_chg",
+                        "change": "pct_chg",
+                    }
 
-            # 重命名列
-            for old, new in column_map.items():
-                if old in df.columns and new not in df.columns:
-                    df = df.rename(columns={old: new})
+                    # 重命名列
+                    for old, new in column_map.items():
+                        if old in df.columns and new not in df.columns:
+                            df = df.rename(columns={old: new})
 
-            # 确保必要字段存在
-            required = ["open", "high", "low", "close"]
-            for col in required:
-                if col not in df.columns:
-                    logger.warning(f"⚠️ MongoDB K线数据缺少字段: {col}")
-                    return None
+                    # 确保必要字段存在
+                    required = ["open", "high", "low", "close"]
+                    missing = [col for col in required if col not in df.columns]
+                    if missing:
+                        logger.warning(f"⚠️ {coll_name} 缺少字段: {missing}, 尝试下一个集合")
+                        continue
 
-            # 转换数值
-            for col in ["open", "high", "low", "close", "volume", "amount"]:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors="coerce")
+                    # 转换数值
+                    for col in ["open", "high", "low", "close", "volume", "amount"]:
+                        if col in df.columns:
+                            df[col] = pd.to_numeric(df[col], errors="coerce")
 
-            logger.info(f"✅ MongoDB缓存命中: {code}, period={period}, {len(df)}条")
-            return df
+                    return df
+
+            logger.info(f"📊 MongoDB缓存无K线数据: {code6}, period={period}")
+            return None
 
         except Exception as e:
             logger.error(f"❌ MongoDB获取K线数据失败: {e}")

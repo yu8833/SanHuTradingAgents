@@ -847,7 +847,9 @@ async def get_kline(
     today_str_yyyymmdd = now.strftime("%Y%m%d")  # 格式：20251028（用于查询）
     today_str_formatted = now.strftime("%Y-%m-%d")  # 格式：2025-10-28（用于返回）
 
-    # 1. 优先从 MongoDB 缓存获取
+    db = get_mongo_db()
+
+    # 1. 优先从 MongoDB 缓存获取（支持多个集合）
     try:
         from tradingagents.dataflows.cache.mongodb_cache_adapter import get_mongodb_cache_adapter
         adapter = get_mongodb_cache_adapter()
@@ -864,7 +866,7 @@ async def get_kline(
             items = []
             for _, row in df.tail(limit).iterrows():
                 items.append({
-                    "time": row.get("trade_date", row.get("date", "")),  # 前端期望 time 字段
+                    "time": str(row.get("trade_date", row.get("date", ""))),  # 前端期望 time 字段
                     "open": float(row.get("open", 0)),
                     "high": float(row.get("high", 0)),
                     "low": float(row.get("low", 0)),
@@ -875,9 +877,40 @@ async def get_kline(
             source = "mongodb"
             logger.info(f"✅ 从 MongoDB 获取到 {len(items)} 条 K 线数据")
     except Exception as e:
-        logger.warning(f"⚠️ MongoDB 获取 K 线失败: {e}")
+        logger.warning(f"⚠️ MongoDB 缓存适配器获取 K 线失败: {e}")
 
-    # 2. 如果 MongoDB 没有数据，降级到外部 API（带超时保护）
+    # 1.5 备用：直接从 stock_daily_quotes 查询（日线）
+    if not items and period == "day":
+        try:
+            logger.info(f"🔍 尝试直接从 stock_daily_quotes 查询 K线: {code_padded}")
+            coll = db["stock_daily_quotes"]
+            query = {
+                "$or": [{"code": code_padded}, {"symbol": code_padded}],
+                "period": "daily"
+            }
+            cursor = coll.find(query, {"_id": 0}).sort("trade_date", -1).limit(limit)
+            records = list(cursor)
+
+            if records:
+                # 反转成正序
+                records.reverse()
+                items = []
+                for rec in records:
+                    items.append({
+                        "time": str(rec.get("trade_date", rec.get("date", ""))),
+                        "open": float(rec.get("open", 0) or 0),
+                        "high": float(rec.get("high", 0) or 0),
+                        "low": float(rec.get("low", 0) or 0),
+                        "close": float(rec.get("close", 0) or 0),
+                        "volume": float(rec.get("volume", 0) or 0),
+                        "amount": float(rec.get("amount", 0) or 0) if rec.get("amount") is not None else None,
+                    })
+                source = "stock_daily_quotes"
+                logger.info(f"✅ 从 stock_daily_quotes 获取到 {len(items)} 条 K线数据")
+        except Exception as e:
+            logger.warning(f"⚠️ 直接查询 stock_daily_quotes 失败: {e}")
+
+    # 2. 如果 MongoDB 没有数据，降级到外部 API（带超时保护，缩短超时避免长时间等待）
     if not items:
         logger.info(f"📡 MongoDB 无数据，降级到外部 API")
         try:
@@ -885,13 +918,13 @@ async def get_kline(
             from app.services.data_sources.manager import DataSourceManager
 
             mgr = DataSourceManager()
-            # 添加 10 秒超时保护
+            # 缩短超时时从 10秒 改为 8秒，避免用户等待太久
             items, source = await asyncio.wait_for(
                 asyncio.to_thread(mgr.get_kline_with_fallback, code_padded, period, limit, adj_norm),
-                timeout=10.0
+                timeout=8.0
             )
 
-            # 🔥 外部API获取成功后，异步保存到MongoDB缓存（不阻塞返回）
+            # 🔥 外部API获取成功后，保存到MongoDB缓存（不阻塞返回）
             if items and source:
                 try:
                     adapter.save_historical_data(code_padded, mongodb_period, items, source)
@@ -899,11 +932,9 @@ async def get_kline(
                     logger.warning(f"⚠️ 保存K线到MongoDB缓存失败（不影响返回）: {save_err}")
 
         except asyncio.TimeoutError:
-            logger.error(f"❌ 外部 API 获取 K 线超时（10秒）")
-            raise HTTPException(status_code=504, detail="获取K线数据超时，请稍后重试")
+            logger.warning(f"⚠️ 外部 API 获取 K 线超时（8秒），使用缓存数据或返回空")
         except Exception as e:
-            logger.error(f"❌ 外部 API 获取 K 线失败: {e}")
-            raise HTTPException(status_code=500, detail=f"获取K线数据失败: {str(e)}")
+            logger.warning(f"⚠️ 外部 API 获取 K 线失败: {e}")
 
     # 🔥 3. 检查是否需要添加当天实时数据（仅针对日线）
     if period == "day" and items:
@@ -1217,33 +1248,167 @@ async def get_sector_info(
     if market != 'CN':
         return ok(data={"code": normalized_code, "sector_name": None, "sector_stocks": [], "message": "仅支持A股板块分析"})
 
+    code6 = str(normalized_code).zfill(6)
+    db = get_mongo_db()
+    sector_name = None
+    sector_stocks = []
+    avg_change = 0
+    rank = None
+
+    # 1. 优先从 MongoDB stock_basic_info 获取行业信息
     try:
-        import akshare as ak
-        import asyncio
+        basic_info = await db["stock_basic_info"].find_one(
+            {"$or": [{"code": code6}, {"symbol": code6}]},
+            {"_id": 0, "industry": 1, "name": 1}
+        )
+        if basic_info and basic_info.get("industry"):
+            sector_name = str(basic_info["industry"])
+            logger.info(f"✅ 从 stock_basic_info 获取行业: {code6} -> {sector_name}")
+    except Exception as e:
+        logger.warning(f"从 stock_basic_info 获取行业失败: {e}")
 
-        code6 = str(normalized_code).zfill(6)
-
-        # 1. 获取股票所属板块
-        sector_name = None
-        sector_stocks = []
-
+    # 2. 如果MongoDB没有，尝试AKShare
+    if not sector_name:
         try:
-            # 获取个股所属板块
-            df_sector = await asyncio.to_thread(ak.stock_individual_info_em, symbol=code6)
+            import akshare as ak
+            import asyncio
+            df_sector = await asyncio.wait_for(
+                asyncio.to_thread(ak.stock_individual_info_em, symbol=code6),
+                timeout=5.0
+            )
             if df_sector is not None and not df_sector.empty:
                 for _, row in df_sector.iterrows():
                     item_name = str(row.get('item', ''))
                     if '行业' in item_name:
                         sector_name = str(row.get('value', ''))
                         break
+            logger.info(f"✅ 从 AKShare 获取行业: {code6} -> {sector_name}")
         except Exception as e:
-            logger.warning(f"获取个股板块信息失败: {e}")
+            logger.warning(f"从 AKShare 获取个股板块信息失败: {e}")
 
-        # 2. 获取同板块股票涨跌情况
-        if sector_name:
+    # 3. 如果有行业名称，获取同行业股票表现
+    if sector_name:
+        # 3.1 优先从 MongoDB 获取同行业股票列表和涨跌幅
+        try:
+            # 获取同行业的股票列表
+            industry_stocks = await db["stock_basic_info"].find(
+                {"industry": sector_name},
+                {"_id": 0, "code": 1, "symbol": 1, "name": 1}
+            ).to_list(length=100)
+
+            if industry_stocks:
+                # 收集股票代码
+                stock_codes = []
+                code_to_name = {}
+                for s in industry_stocks:
+                    sc = s.get("code") or s.get("symbol")
+                    if sc:
+                        stock_codes.append(sc)
+                        code_to_name[sc] = s.get("name", "")
+
+                # 从 stock_daily_quotes 获取最新交易日的涨跌幅
+                # 先找最新的交易日期
+                latest_quote = await db["stock_daily_quotes"].find_one(
+                    {"code": {"$in": stock_codes[:1]}, "period": "daily"},
+                    {"_id": 0, "trade_date": 1},
+                    sort=[("trade_date", -1)]
+                )
+
+                if latest_quote and latest_quote.get("trade_date"):
+                    latest_date = latest_quote["trade_date"]
+                    logger.info(f"📊 最新交易日期: {latest_date}")
+
+                    # 获取所有同行业股票的最新行情
+                    quotes = await db["stock_daily_quotes"].find(
+                        {"code": {"$in": stock_codes}, "period": "daily", "trade_date": latest_date},
+                        {"_id": 0, "code": 1, "close": 1, "pct_chg": 1, "open": 1, "pre_close": 1}
+                    ).to_list(length=100)
+
+                    # 获取前一个交易日的收盘价来计算涨跌幅
+                    prev_date_quote = await db["stock_daily_quotes"].find_one(
+                        {"code": {"$in": stock_codes[:1]}, "period": "daily", "trade_date": {"$lt": latest_date}},
+                        {"_id": 0, "trade_date": 1, "close": 1},
+                        sort=[("trade_date", -1)]
+                    )
+                    prev_date = prev_date_quote.get("trade_date") if prev_date_quote else None
+
+                    # 构建涨跌幅映射
+                    quote_map = {}
+                    for q in quotes:
+                        sc = q.get("code", "")
+                        close = q.get("close")
+                        pct_chg = q.get("pct_chg")
+                        pre_close = q.get("pre_close")
+
+                        # 如果没有pct_chg但有收盘价和昨收价，计算涨跌幅
+                        if pct_chg is None and close and pre_close and pre_close > 0:
+                            pct_chg = round((close / pre_close - 1) * 100, 2)
+
+                        quote_map[sc] = {
+                            "close": close,
+                            "pct_chg": pct_chg
+                        }
+
+                    # 如果没有pct_chg，从前一天数据计算
+                    if prev_date:
+                        prev_quotes = await db["stock_daily_quotes"].find(
+                            {"code": {"$in": stock_codes}, "period": "daily", "trade_date": prev_date},
+                            {"_id": 0, "code": 1, "close": 1}
+                        ).to_list(length=100)
+                        prev_map = {q.get("code", ""): q.get("close") for q in prev_quotes}
+
+                        for sc in quote_map:
+                            if quote_map[sc]["pct_chg"] is None and quote_map[sc]["close"] and prev_map.get(sc) and prev_map[sc] > 0:
+                                quote_map[sc]["pct_chg"] = round(
+                                    (quote_map[sc]["close"] / prev_map[sc] - 1) * 100, 2
+                                )
+
+                    # 构建板块股票列表
+                    sector_stocks = []
+                    for sc in stock_codes[:20]:
+                        if sc in quote_map:
+                            sector_stocks.append({
+                                "code": sc,
+                                "name": code_to_name.get(sc, ""),
+                                "change_pct": quote_map[sc].get("pct_chg") or 0,
+                                "price": quote_map[sc].get("close") or 0,
+                            })
+                        else:
+                            sector_stocks.append({
+                                "code": sc,
+                                "name": code_to_name.get(sc, ""),
+                                "change_pct": 0,
+                                "price": 0,
+                            })
+
+                    # 按涨跌幅排序
+                    sector_stocks.sort(key=lambda x: x["change_pct"], reverse=True)
+
+                    # 计算平均涨跌幅
+                    valid_changes = [s["change_pct"] for s in sector_stocks if s["change_pct"] is not None and s["change_pct"] != 0]
+                    if valid_changes:
+                        avg_change = round(sum(valid_changes) / len(valid_changes), 2)
+
+                    # 计算排名
+                    for i, s in enumerate(sector_stocks):
+                        if s["code"] == code6:
+                            rank = i + 1
+                            break
+
+                    logger.info(f"✅ 从 MongoDB 获取板块数据: {sector_name}, {len(sector_stocks)} 只股票")
+
+        except Exception as e:
+            logger.warning(f"从 MongoDB 获取板块股票数据失败: {e}")
+
+        # 3.2 如果MongoDB没有数据，尝试AKShare
+        if not sector_stocks:
             try:
-                # 获取板块成分股
-                df_industry = await asyncio.to_thread(ak.stock_board_industry_cons_em, symbol=sector_name)
+                import akshare as ak
+                import asyncio
+                df_industry = await asyncio.wait_for(
+                    asyncio.to_thread(ak.stock_board_industry_cons_em, symbol=sector_name),
+                    timeout=8.0
+                )
                 if df_industry is not None and not df_industry.empty:
                     sector_stocks = []
                     for _, row in df_industry.head(20).iterrows():
@@ -1257,39 +1422,49 @@ async def get_sector_info(
                             "price": float(row.get('最新价', 0) or 0),
                         })
 
-                    # 计算板块平均涨跌幅
                     if sector_stocks:
-                        avg_change = sum(s["change_pct"] for s in sector_stocks) / len(sector_stocks)
-                        # 排名
+                        avg_change = round(sum(s["change_pct"] for s in sector_stocks) / len(sector_stocks), 2)
                         sorted_stocks = sorted(sector_stocks, key=lambda x: x["change_pct"], reverse=True)
                         rank = next((i + 1 for i, s in enumerate(sorted_stocks) if s["code"] == code6), None)
-                    else:
-                        avg_change = 0
-                        rank = None
-                else:
-                    avg_change = 0
-                    rank = None
+                    logger.info(f"✅ 从 AKShare 获取板块成分股: {len(sector_stocks)} 只")
             except Exception as e:
-                logger.warning(f"获取板块成分股失败: {e}")
-                avg_change = 0
-                rank = None
-        else:
-            avg_change = 0
-            rank = None
+                logger.warning(f"从 AKShare 获取板块成分股失败: {e}")
 
-        data = {
-            "code": normalized_code,
-            "sector_name": sector_name,
-            "sector_stocks": sector_stocks[:20],
-            "sector_avg_change": round(avg_change, 2) if sector_stocks else 0,
-            "sector_rank": rank,
-            "total_in_sector": len(sector_stocks)
-        }
-        return ok(data=data)
+    # 4. 从 market_quotes 获取实时涨跌幅补充（如果有数据的话）
+    if sector_stocks:
+        try:
+            realtime_quotes = await db["market_quotes"].find(
+                {"code": {"$in": [s["code"] for s in sector_stocks]}},
+                {"_id": 0, "code": 1, "close": 1, "pct_chg": 1}
+            ).to_list(length=50)
+            if realtime_quotes:
+                rt_map = {q["code"]: q for q in realtime_quotes}
+                for s in sector_stocks:
+                    if s["code"] in rt_map and rt_map[s["code"]].get("pct_chg") is not None:
+                        s["change_pct"] = float(rt_map[s["code"]]["pct_chg"])
+                        if rt_map[s["code"]].get("close"):
+                            s["price"] = float(rt_map[s["code"]]["close"])
+                # 重新排序和计算
+                sector_stocks.sort(key=lambda x: x["change_pct"], reverse=True)
+                avg_change = round(sum(s["change_pct"] for s in sector_stocks) / len(sector_stocks), 2)
+                for i, s in enumerate(sector_stocks):
+                    if s["code"] == code6:
+                        rank = i + 1
+                        break
+                logger.info(f"✅ 已用实时行情更新板块数据")
+        except Exception as e:
+            logger.warning(f"更新实时行情到板块数据失败: {e}")
 
-    except Exception as e:
-        logger.error(f"获取板块信息失败: {e}")
-        return ok(data={"code": normalized_code, "sector_name": None, "sector_stocks": [], "message": f"获取失败: {str(e)}"})
+    data = {
+        "code": normalized_code,
+        "sector_name": sector_name,
+        "sector_stocks": sector_stocks[:20],
+        "sector_avg_change": round(avg_change, 2) if sector_stocks else 0,
+        "sector_rank": rank,
+        "total_in_sector": len(sector_stocks),
+        "data_source": "mongodb" if sector_stocks else "none"
+    }
+    return ok(data=data)
 
 
 @router.get("/{code}/money-flow", response_model=dict)
@@ -1315,76 +1490,157 @@ async def get_money_flow(
     if market != 'CN':
         return ok(data={"code": normalized_code, "message": "仅支持A股资金流向分析"})
 
+    code6 = str(normalized_code).zfill(6)
+    db = get_mongo_db()
+    realtime_data = {}
+    history = []
+    trend = "unknown"
+    data_source = "none"
+
+    # 1. 优先尝试从 AKShare 获取真实资金流向数据
     try:
         import akshare as ak
         import asyncio
-        from datetime import datetime, timedelta
 
-        code6 = str(normalized_code).zfill(6)
+        df_realtime = await asyncio.wait_for(
+            asyncio.to_thread(ak.stock_individual_fund_flow, stock=code6, market="sh" if code6.startswith('6') else "sz"),
+            timeout=8.0
+        )
+        if df_realtime is not None and not df_realtime.empty:
+            latest = df_realtime.tail(1).iloc[0]
+            realtime_data = {
+                "date": str(latest.get('日期', '')),
+                "close": float(latest.get('收盘价', 0) or 0),
+                "change_pct": float(latest.get('涨跌幅', 0) or 0),
+                "main_net_inflow": float(latest.get('主力净流入-净额', 0) or 0),
+                "main_net_inflow_pct": float(latest.get('主力净流入-净占比', 0) or 0),
+                "super_large_net": float(latest.get('超大单净流入-净额', 0) or 0),
+                "super_large_pct": float(latest.get('超大单净流入-净占比', 0) or 0),
+                "large_net": float(latest.get('大单净流入-净额', 0) or 0),
+                "large_pct": float(latest.get('大单净流入-净占比', 0) or 0),
+                "medium_net": float(latest.get('中单净流入-净额', 0) or 0),
+                "medium_pct": float(latest.get('中单净流入-净占比', 0) or 0),
+                "small_net": float(latest.get('小单净流入-净额', 0) or 0),
+                "small_pct": float(latest.get('小单净流入-净占比', 0) or 0),
+            }
 
-        # 1. 获取实时资金流向
-        realtime_data = {}
-        try:
-            df_realtime = await asyncio.to_thread(ak.stock_individual_fund_flow, stock=code6, market="sh" if code6.startswith('6') else "sz")
-            if df_realtime is not None and not df_realtime.empty:
-                latest = df_realtime.tail(1).iloc[0]
-                realtime_data = {
-                    "date": str(latest.get('日期', '')),
-                    "close": float(latest.get('收盘价', 0) or 0),
-                    "change_pct": float(latest.get('涨跌幅', 0) or 0),
-                    "main_net_inflow": float(latest.get('主力净流入-净额', 0) or 0),
-                    "main_net_inflow_pct": float(latest.get('主力净流入-净占比', 0) or 0),
-                    "super_large_net": float(latest.get('超大单净流入-净额', 0) or 0),
-                    "super_large_pct": float(latest.get('超大单净流入-净占比', 0) or 0),
-                    "large_net": float(latest.get('大单净流入-净额', 0) or 0),
-                    "large_pct": float(latest.get('大单净流入-净占比', 0) or 0),
-                    "medium_net": float(latest.get('中单净流入-净额', 0) or 0),
-                    "medium_pct": float(latest.get('中单净流入-净占比', 0) or 0),
-                    "small_net": float(latest.get('小单净流入-净额', 0) or 0),
-                    "small_pct": float(latest.get('小单净流入-净占比', 0) or 0),
-                }
-        except Exception as e:
-            logger.warning(f"获取实时资金流向失败: {e}")
+            # 历史数据
+            df_hist = df_realtime.tail(days)
+            for _, row in df_hist.iterrows():
+                history.append({
+                    "date": str(row.get('日期', '')),
+                    "change_pct": float(row.get('涨跌幅', 0) or 0),
+                    "main_net_inflow": float(row.get('主力净流入-净额', 0) or 0),
+                    "main_net_inflow_pct": float(row.get('主力净流入-净占比', 0) or 0),
+                })
 
-        # 2. 获取历史资金流向（近N天）
-        history = []
-        try:
-            if df_realtime is not None and not df_realtime.empty:
-                df_hist = df_realtime.tail(days)
-                for _, row in df_hist.iterrows():
-                    history.append({
-                        "date": str(row.get('日期', '')),
-                        "change_pct": float(row.get('涨跌幅', 0) or 0),
-                        "main_net_inflow": float(row.get('主力净流入-净额', 0) or 0),
-                        "main_net_inflow_pct": float(row.get('主力净流入-净占比', 0) or 0),
-                    })
-        except Exception as e:
-            logger.warning(f"获取历史资金流向失败: {e}")
-
-        # 3. 判断资金趋势
-        trend = "unknown"
-        if history:
-            recent_inflows = [h["main_net_inflow"] for h in history[-3:]]
-            positive_days = sum(1 for v in recent_inflows if v > 0)
-            if positive_days >= 2:
-                trend = "inflow"  # 资金流入
-            elif positive_days <= 1:
-                trend = "outflow"  # 资金流出
-            else:
-                trend = "balanced"
-
-        data = {
-            "code": normalized_code,
-            "realtime": realtime_data,
-            "history": history,
-            "trend": trend,
-            "days": days
-        }
-        return ok(data=data)
-
+            data_source = "akshare"
+            logger.info(f"✅ 从 AKShare 获取资金流向: {code6}")
     except Exception as e:
-        logger.error(f"获取资金流向失败: {e}")
-        return ok(data={"code": normalized_code, "message": f"获取失败: {str(e)}", "realtime": {}, "history": [], "trend": "unknown"})
+        logger.warning(f"从 AKShare 获取资金流向失败: {e}")
+
+    # 2. 如果AKShare不可用，从MongoDB stock_daily_quotes估算资金流向
+    if not realtime_data:
+        try:
+            # 获取最近N+1天的K线数据用于计算
+            coll = db["stock_daily_quotes"]
+            quotes = await coll.find(
+                {"$or": [{"code": code6}, {"symbol": code6}], "period": "daily"},
+                {"_id": 0, "trade_date": 1, "close": 1, "open": 1, "high": 1, "low": 1, "volume": 1, "amount": 1, "pct_chg": 1}
+            ).sort("trade_date", -1).limit(days + 1).to_list(length=days + 1)
+
+            if quotes and len(quotes) >= 2:
+                # 反转成正序
+                quotes.reverse()
+
+                # 估算资金流向：基于收盘价与开盘价的关系，结合成交额
+                # 简化模型：
+                # - 上涨时，假设主力净流入 = 成交额 * (涨跌幅/10) * 系数
+                # - 下跌时，主力净流入为负
+                # 这只是一个粗略估算，真实数据需要付费数据源
+
+                for i, q in enumerate(quotes[-days:]):
+                    close = float(q.get("close", 0) or 0)
+                    open_price = float(q.get("open", 0) or 0)
+                    amount = float(q.get("amount", 0) or 0)  # 万元
+                    pct_chg = float(q.get("pct_chg", 0) or 0)
+                    trade_date = str(q.get("trade_date", ""))
+
+                    # 如果没有pct_chg，从收盘价计算
+                    if pct_chg == 0 and i > 0 and quotes[-days + i - 1].get("close"):
+                        prev_close = float(quotes[-days + i - 1].get("close", 0))
+                        if prev_close > 0:
+                            pct_chg = round((close / prev_close - 1) * 100, 2)
+
+                    # 估算主力净流入（简化模型）
+                    # 主力资金约占成交额的 30%，根据涨跌幅方向调整
+                    main_ratio = 0.3  # 假设主力资金占成交额30%
+                    direction = 1 if pct_chg >= 0 else -1
+                    strength = min(abs(pct_chg) / 5.0, 1.0)  # 涨跌幅5%以上达到100%强度
+                    main_net_inflow = amount * 10000 * main_ratio * direction * strength  # 万元转元
+
+                    # 进一步拆分（只是估算）
+                    super_large_net = main_net_inflow * 0.4  # 超大单占40%
+                    large_net = main_net_inflow * 0.6  # 大单占60%
+                    medium_net = -main_net_inflow * 0.3  # 中单流出一部分
+                    small_net = -main_net_inflow * 0.7  # 小单流出大部分
+
+                    # 计算净占比
+                    total_amount = amount * 10000  # 万元转元
+                    main_net_inflow_pct = (main_net_inflow / total_amount * 100) if total_amount > 0 else 0
+
+                    history.append({
+                        "date": trade_date,
+                        "change_pct": pct_chg,
+                        "main_net_inflow": round(main_net_inflow, 2),
+                        "main_net_inflow_pct": round(main_net_inflow_pct, 2),
+                    })
+
+                if history:
+                    latest_hist = history[-1]
+                    realtime_data = {
+                        "date": latest_hist["date"],
+                        "close": close,
+                        "change_pct": latest_hist["change_pct"],
+                        "main_net_inflow": latest_hist["main_net_inflow"],
+                        "main_net_inflow_pct": latest_hist["main_net_inflow_pct"],
+                        "super_large_net": round(super_large_net, 2),
+                        "super_large_pct": round(main_net_inflow_pct * 0.4, 2),
+                        "large_net": round(large_net, 2),
+                        "large_pct": round(main_net_inflow_pct * 0.6, 2),
+                        "medium_net": round(medium_net, 2),
+                        "medium_pct": round(-main_net_inflow_pct * 0.3, 2),
+                        "small_net": round(small_net, 2),
+                        "small_pct": round(-main_net_inflow_pct * 0.7, 2),
+                        "is_estimated": True,  # 标记为估算数据
+                    }
+                    data_source = "estimated"
+                    logger.info(f"✅ 从 stock_daily_quotes 估算资金流向: {code6}, {len(history)}天")
+
+        except Exception as e:
+            logger.warning(f"从 MongoDB 估算资金流向失败: {e}")
+
+    # 3. 判断资金趋势
+    if history:
+        recent_inflows = [h["main_net_inflow"] for h in history[-3:]]
+        positive_days = sum(1 for v in recent_inflows if v > 0)
+        if positive_days >= 2:
+            trend = "inflow"
+        elif positive_days <= 1:
+            trend = "outflow"
+        else:
+            trend = "balanced"
+
+    data = {
+        "code": normalized_code,
+        "realtime": realtime_data,
+        "history": history,
+        "trend": trend,
+        "days": days,
+        "data_source": data_source,
+        "is_estimated": data_source == "estimated"
+    }
+    return ok(data=data)
 
 
 @router.get("/{code}/risk-analysis", response_model=dict)

@@ -315,7 +315,7 @@
               <el-tag v-if="sectorData?.sector_name" type="info" size="small">{{ sectorData.sector_name }}</el-tag>
             </div>
           </template>
-          <el-empty v-if="!sectorData || !sectorData.sector_name" description="暂无板块数据" :image-size="60" />
+          <el-empty v-if="!sectorData || !sectorData.sector_name" description="暂无板块数据（该股票行业信息未同步）" :image-size="60" />
           <div v-else>
             <!-- 板块概况 -->
             <el-descriptions :column="3" border size="small" style="margin-bottom: 12px;">
@@ -358,13 +358,21 @@
                   <el-icon class="help-icon-inline"><QuestionFilled /></el-icon>
                 </el-tooltip>
               </div>
-              <el-tag v-if="moneyFlowData?.trend" :type="moneyFlowData.trend === 'inflow' ? 'danger' : moneyFlowData.trend === 'outflow' ? 'success' : 'info'" size="small">
-                {{ moneyFlowData.trend === 'inflow' ? '资金流入' : moneyFlowData.trend === 'outflow' ? '资金流出' : '资金均衡' }}
-              </el-tag>
+              <div style="display: flex; gap: 6px; align-items: center;">
+                <el-tag v-if="moneyFlowData?.is_estimated" type="warning" size="small" effect="light">估算数据</el-tag>
+                <el-tag v-if="moneyFlowData?.trend" :type="moneyFlowData.trend === 'inflow' ? 'danger' : moneyFlowData.trend === 'outflow' ? 'success' : 'info'" size="small">
+                  {{ moneyFlowData.trend === 'inflow' ? '资金流入' : moneyFlowData.trend === 'outflow' ? '资金流出' : '资金均衡' }}
+                </el-tag>
+              </div>
             </div>
           </template>
           <el-empty v-if="!moneyFlowData || !moneyFlowData.realtime || Object.keys(moneyFlowData.realtime).length === 0" description="暂无资金流向数据" :image-size="60" />
           <div v-else>
+            <el-alert v-if="moneyFlowData.is_estimated" type="warning" :closable="false" size="small" style="margin-bottom: 12px;">
+              <template #title>
+                数据为基于成交额和涨跌幅的估算，仅供参考
+              </template>
+            </el-alert>
             <!-- 实时资金流向 -->
             <el-descriptions :column="2" border size="small" style="margin-bottom: 12px;">
               <el-descriptions-item label="主力净流入">
