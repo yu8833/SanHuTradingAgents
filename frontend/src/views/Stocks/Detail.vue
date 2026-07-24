@@ -192,7 +192,7 @@
           </div>
         </el-card>
 
-        <!-- 详细分析结果（方案B）：仅在进行中或有结果时显示 -->
+        <!-- 详细分析结果：超链接到分析报告 -->
         <el-card v-if="analysisStatus==='running' || lastAnalysis" shadow="hover" class="analysis-detail-card" id="analysis-detail">
           <template #header><div class="card-hd">详细分析结果</div></template>
           <div v-if="analysisStatus==='running'" class="running">
@@ -212,56 +212,12 @@
               </span>
             </div>
 
-            <!-- 投资建议 - 重点突出 -->
-            <div class="recommendation-box">
-              <div class="recommendation-header">
-                <el-icon class="icon"><TrendCharts /></el-icon>
-                <span class="title">投资建议</span>
-              </div>
-              <div class="recommendation-content">
-                <div class="recommendation-text">
-                  {{ lastAnalysis?.recommendation || '-' }}
-                </div>
-              </div>
-            </div>
-
-            <!-- 分析摘要 -->
-            <div class="summary-section">
-              <div class="summary-title">
-                <el-icon><Reading /></el-icon>
-                分析摘要
-              </div>
-              <div class="summary-text markdown-body" v-html="renderMarkdown(lastAnalysis?.summary || '-')"></div>
-            </div>
-
-            <!-- 详细报告展示 -->
-            <div v-if="lastAnalysis?.reports && Object.keys(lastAnalysis.reports).length > 0" class="reports-section">
-              <el-divider />
-              <div class="reports-header">
-                <span class="reports-title">📊 详细分析报告 ({{ Object.keys(lastAnalysis.reports).length }})</span>
-                <el-button
-                  type="primary"
-                  plain
-                  @click="showReportsDialog = true"
-                  :icon="Document"
-                >
-                  查看完整报告
-                </el-button>
-              </div>
-
-              <!-- 报告列表预览 -->
-              <div class="reports-preview">
-                <el-tag
-                  v-for="reportKey in reportKeys"
-                  :key="reportKey"
-                  size="small"
-                  effect="plain"
-                  class="report-tag"
-                  @click="openReport(reportKey)"
-                >
-                  {{ formatReportName(reportKey) }}
-                </el-tag>
-              </div>
+            <!-- 超链接到完整分析报告 -->
+            <div class="report-link-section">
+              <el-button type="primary" plain @click="goToReportPage">
+                <el-icon style="margin-right: 4px"><Document /></el-icon>
+                查看完整分析报告
+              </el-button>
             </div>
           </div>
         </el-card>
@@ -1276,6 +1232,16 @@ async function onToggleFavorite() {
 
 function goPaperTrading() {
   router.push({ name: 'PaperTradingHome', query: { code: code.value } })
+}
+
+// 跳转到分析报告详情页
+function goToReportPage() {
+  const reportId = lastTaskInfo.value?.task_id || lastTaskInfo.value?._id
+  if (reportId) {
+    router.push(`/reports/view/${reportId}`)
+  } else {
+    ElMessage.warning('未找到分析报告ID')
+  }
 }
 
 // 获取最新的历史分析报告

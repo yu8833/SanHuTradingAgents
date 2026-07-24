@@ -1252,18 +1252,54 @@ async def get_sector_info(
     db = get_mongo_db()
     sector_name = None
     sector_stocks = []
+    stock_codes = []  # 同行业全部股票代码（用于统计板块总规模）
     avg_change = 0
     rank = None
 
     # 1. 优先从 MongoDB stock_basic_info 获取行业信息
+    # ⚠️ 同一只股票可能在多个数据源（akshare/baostock/tushare）中各有一条记录，
+    #    其中 akshare 源的 industry 字段可能为空字符串。find_one 默认返回第一条，
+    #    可能命中空 industry 记录，导致 sector_name 一直为 None。
+    #    修复：显式过滤掉空 industry 记录，并选择同行业股票数量最多的行业分类。
     try:
-        basic_info = await db["stock_basic_info"].find_one(
-            {"$or": [{"code": code6}, {"symbol": code6}]},
-            {"_id": 0, "industry": 1, "name": 1}
-        )
-        if basic_info and basic_info.get("industry"):
-            sector_name = str(basic_info["industry"])
-            logger.info(f"✅ 从 stock_basic_info 获取行业: {code6} -> {sector_name}")
+        candidates = await db["stock_basic_info"].find(
+            {
+                "$or": [{"code": code6}, {"symbol": code6}],
+                "industry": {"$exists": True, "$nin": ["", None]}
+            },
+            {"_id": 0, "industry": 1, "name": 1, "source": 1}
+        ).to_list(length=10)
+
+        if candidates:
+            # 去重收集所有非空行业名称
+            industries = []
+            seen = set()
+            for c in candidates:
+                ind = c.get("industry")
+                if ind and ind not in seen:
+                    seen.add(ind)
+                    industries.append(str(ind))
+
+            if industries:
+                if len(industries) == 1:
+                    sector_name = industries[0]
+                else:
+                    # 多个数据源给出不同行业名称时，选择同行业股票数量最多的行业
+                    # （通常对应更准确的板块划分，如"专用设备制造业"360只 vs "专用机械"292只）
+                    best_industry = None
+                    best_count = 0
+                    for ind in industries:
+                        try:
+                            cnt = await db["stock_basic_info"].count_documents(
+                                {"industry": ind}
+                            )
+                            if cnt > best_count:
+                                best_count = cnt
+                                best_industry = ind
+                        except Exception:
+                            pass
+                    sector_name = best_industry or industries[0]
+                logger.info(f"✅ 从 stock_basic_info 获取行业: {code6} -> {sector_name} (候选: {industries})")
     except Exception as e:
         logger.warning(f"从 stock_basic_info 获取行业失败: {e}")
 
@@ -1286,92 +1322,119 @@ async def get_sector_info(
         except Exception as e:
             logger.warning(f"从 AKShare 获取个股板块信息失败: {e}")
 
+    # 2.5 如果AKShare也不可用，尝试东方财富API
+    if not sector_name:
+        try:
+            import httpx
+            # 东方财富个股信息接口
+            market_code = "1" if code6.startswith('6') else "0"
+            url = f"https://push2.eastmoney.com/api/qt/stock/get?secid={market_code}.{code6}&fields=f127"  # f127=行业
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(url)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data and data.get("data") and data["data"].get("f127"):
+                        sector_name = str(data["data"]["f127"])
+                        logger.info(f"✅ 从东方财富获取行业: {code6} -> {sector_name}")
+        except Exception as e:
+            logger.warning(f"从东方财富获取行业信息失败: {e}")
+
     # 3. 如果有行业名称，获取同行业股票表现
     if sector_name:
-        # 3.1 优先从 MongoDB 获取同行业股票列表和涨跌幅
+        # 3.1 优先从 MongoDB 获取同行业股票列表
         try:
-            # 获取同行业的股票列表
+            # 获取全部同行业股票（不限制数量，以便计算总板块规模和目标股票排名）
             industry_stocks = await db["stock_basic_info"].find(
                 {"industry": sector_name},
                 {"_id": 0, "code": 1, "symbol": 1, "name": 1}
-            ).to_list(length=100)
+            ).to_list(length=1000)
 
             if industry_stocks:
-                # 收集股票代码
+                # 收集股票代码（去重）
                 stock_codes = []
                 code_to_name = {}
+                seen_codes = set()
                 for s in industry_stocks:
                     sc = s.get("code") or s.get("symbol")
-                    if sc:
+                    if sc and sc not in seen_codes:
+                        seen_codes.add(sc)
                         stock_codes.append(sc)
                         code_to_name[sc] = s.get("name", "")
 
-                # 从 stock_daily_quotes 获取最新交易日的涨跌幅
-                # 先找最新的交易日期
-                latest_quote = await db["stock_daily_quotes"].find_one(
-                    {"code": {"$in": stock_codes[:1]}, "period": "daily"},
-                    {"_id": 0, "trade_date": 1},
-                    sort=[("trade_date", -1)]
-                )
-
-                if latest_quote and latest_quote.get("trade_date"):
-                    latest_date = latest_quote["trade_date"]
-                    logger.info(f"📊 最新交易日期: {latest_date}")
-
-                    # 获取所有同行业股票的最新行情
-                    quotes = await db["stock_daily_quotes"].find(
-                        {"code": {"$in": stock_codes}, "period": "daily", "trade_date": latest_date},
-                        {"_id": 0, "code": 1, "close": 1, "pct_chg": 1, "open": 1, "pre_close": 1}
-                    ).to_list(length=100)
-
-                    # 获取前一个交易日的收盘价来计算涨跌幅
-                    prev_date_quote = await db["stock_daily_quotes"].find_one(
-                        {"code": {"$in": stock_codes[:1]}, "period": "daily", "trade_date": {"$lt": latest_date}},
-                        {"_id": 0, "trade_date": 1, "close": 1},
-                        sort=[("trade_date", -1)]
+                # 兜底：确保目标股票的名称已加载（可能因数据源差异未出现在同行业列表中）
+                if code6 not in code_to_name:
+                    target_info = await db["stock_basic_info"].find_one(
+                        {"$or": [{"code": code6}, {"symbol": code6}], "name": {"$exists": True, "$ne": ""}},
+                        {"_id": 0, "name": 1}
                     )
-                    prev_date = prev_date_quote.get("trade_date") if prev_date_quote else None
+                    if target_info and target_info.get("name"):
+                        code_to_name[code6] = target_info["name"]
+                        if code6 not in stock_codes:
+                            stock_codes.append(code6)
+                    else:
+                        code_to_name[code6] = ""
+                        if code6 not in stock_codes:
+                            stock_codes.append(code6)
 
-                    # 构建涨跌幅映射
-                    quote_map = {}
-                    for q in quotes:
-                        sc = q.get("code", "")
-                        close = q.get("close")
-                        pct_chg = q.get("pct_chg")
-                        pre_close = q.get("pre_close")
+                # ⚠️ market_quotes 存放的是当日实时行情（含 pct_chg），是最鲜活的数据源；
+                #    stock_daily_quotes 历史K线数据可能较为陈旧（trade_date 停留在很久以前），
+                #    且 pct_chg/pre_close 字段可能为 null。
+                #    因此优先从 market_quotes 构建板块股票涨跌幅，避免出现空板块。
+                rt_quotes = await db["market_quotes"].find(
+                    {"code": {"$in": stock_codes}},
+                    {"_id": 0, "code": 1, "close": 1, "pct_chg": 1, "pre_close": 1, "trade_date": 1}
+                ).to_list(length=300)
 
-                        # 如果没有pct_chg但有收盘价和昨收价，计算涨跌幅
-                        if pct_chg is None and close and pre_close and pre_close > 0:
-                            pct_chg = round((close / pre_close - 1) * 100, 2)
+                rt_map = {}
+                rt_trade_date = None
+                for q in rt_quotes:
+                    sc = q.get("code", "")
+                    rt_map[sc] = q
+                    if q.get("trade_date"):
+                        rt_trade_date = q.get("trade_date")
 
-                        quote_map[sc] = {
-                            "close": close,
-                            "pct_chg": pct_chg
-                        }
+                # 构建板块股票列表（以 market_quotes 为主，缺失的用 stock_daily_quotes 兜底）
+                # ⚠️ 确保目标股票本身一定在展示列表中，否则无法计算其板块排名
+                display_codes = list(stock_codes[:29])
+                if code6 not in display_codes and code6 in stock_codes:
+                    display_codes.append(code6)
+                elif code6 not in display_codes:
+                    display_codes.append(code6)
 
-                    # 如果没有pct_chg，从前一天数据计算
-                    if prev_date:
-                        prev_quotes = await db["stock_daily_quotes"].find(
-                            {"code": {"$in": stock_codes}, "period": "daily", "trade_date": prev_date},
-                            {"_id": 0, "code": 1, "close": 1}
-                        ).to_list(length=100)
-                        prev_map = {q.get("code", ""): q.get("close") for q in prev_quotes}
-
-                        for sc in quote_map:
-                            if quote_map[sc]["pct_chg"] is None and quote_map[sc]["close"] and prev_map.get(sc) and prev_map[sc] > 0:
-                                quote_map[sc]["pct_chg"] = round(
-                                    (quote_map[sc]["close"] / prev_map[sc] - 1) * 100, 2
-                                )
-
-                    # 构建板块股票列表
-                    sector_stocks = []
-                    for sc in stock_codes[:20]:
-                        if sc in quote_map:
+                sector_stocks = []
+                for sc in display_codes:
+                    rt = rt_map.get(sc)
+                    if rt and rt.get("close") is not None:
+                        pct = rt.get("pct_chg")
+                        close = rt.get("close")
+                        pre = rt.get("pre_close")
+                        # 如果 pct_chg 缺失但有昨收价，则计算
+                        if pct is None and close and pre and pre > 0:
+                            pct = round((close / pre - 1) * 100, 2)
+                        sector_stocks.append({
+                            "code": sc,
+                            "name": code_to_name.get(sc, ""),
+                            "change_pct": float(pct) if pct is not None else 0,
+                            "price": float(close) if close is not None else 0,
+                        })
+                    else:
+                        # market_quotes 缺失，尝试从 stock_daily_quotes 兜底
+                        dq = await db["stock_daily_quotes"].find_one(
+                            {"code": sc, "period": "daily"},
+                            {"_id": 0, "close": 1, "pct_chg": 1, "pre_close": 1},
+                            sort=[("trade_date", -1)]
+                        )
+                        if dq and dq.get("close") is not None:
+                            pct = dq.get("pct_chg")
+                            close = dq.get("close")
+                            pre = dq.get("pre_close")
+                            if pct is None and close and pre and pre > 0:
+                                pct = round((close / pre - 1) * 100, 2)
                             sector_stocks.append({
                                 "code": sc,
                                 "name": code_to_name.get(sc, ""),
-                                "change_pct": quote_map[sc].get("pct_chg") or 0,
-                                "price": quote_map[sc].get("close") or 0,
+                                "change_pct": float(pct) if pct is not None else 0,
+                                "price": float(close) if close is not None else 0,
                             })
                         else:
                             sector_stocks.append({
@@ -1381,21 +1444,21 @@ async def get_sector_info(
                                 "price": 0,
                             })
 
-                    # 按涨跌幅排序
-                    sector_stocks.sort(key=lambda x: x["change_pct"], reverse=True)
+                # 按涨跌幅排序
+                sector_stocks.sort(key=lambda x: x["change_pct"], reverse=True)
 
-                    # 计算平均涨跌幅
-                    valid_changes = [s["change_pct"] for s in sector_stocks if s["change_pct"] is not None and s["change_pct"] != 0]
-                    if valid_changes:
-                        avg_change = round(sum(valid_changes) / len(valid_changes), 2)
+                # 计算平均涨跌幅
+                valid_changes = [s["change_pct"] for s in sector_stocks if s["change_pct"] is not None]
+                if valid_changes:
+                    avg_change = round(sum(valid_changes) / len(valid_changes), 2)
 
-                    # 计算排名
-                    for i, s in enumerate(sector_stocks):
-                        if s["code"] == code6:
-                            rank = i + 1
-                            break
+                # 计算排名
+                for i, s in enumerate(sector_stocks):
+                    if s["code"] == code6:
+                        rank = i + 1
+                        break
 
-                    logger.info(f"✅ 从 MongoDB 获取板块数据: {sector_name}, {len(sector_stocks)} 只股票")
+                logger.info(f"✅ 从 MongoDB(market_quotes) 获取板块数据: {sector_name}, {len(sector_stocks)} 只股票, trade_date={rt_trade_date}")
 
         except Exception as e:
             logger.warning(f"从 MongoDB 获取板块股票数据失败: {e}")
@@ -1461,7 +1524,8 @@ async def get_sector_info(
         "sector_stocks": sector_stocks[:20],
         "sector_avg_change": round(avg_change, 2) if sector_stocks else 0,
         "sector_rank": rank,
-        "total_in_sector": len(sector_stocks),
+        "total_in_sector": len(stock_codes) if sector_name else 0,
+        "displayed_count": len(sector_stocks),
         "data_source": "mongodb" if sector_stocks else "none"
     }
     return ok(data=data)
@@ -1539,20 +1603,54 @@ async def get_money_flow(
     except Exception as e:
         logger.warning(f"从 AKShare 获取资金流向失败: {e}")
 
-    # 2. 如果AKShare不可用，从MongoDB stock_daily_quotes估算资金流向
+    # 2. 如果AKShare不可用，从MongoDB估算资金流向
     if not realtime_data:
         try:
-            # 获取最近N+1天的K线数据用于计算
+            # 2.1 优先使用 market_quotes（当日实时行情，数据最鲜活）
+            mq = await db["market_quotes"].find_one(
+                {"code": code6},
+                {"_id": 0, "trade_date": 1, "close": 1, "open": 1, "high": 1, "low": 1,
+                 "volume": 1, "amount": 1, "pct_chg": 1, "pre_close": 1}
+            )
+
+            quotes = []
+            if mq and mq.get("close") is not None:
+                # 将 market_quotes 数据规范化为 quotes 列表格式
+                quotes.append({
+                    "trade_date": str(mq.get("trade_date", "")),
+                    "close": float(mq.get("close", 0) or 0),
+                    "open": float(mq.get("open", 0) or 0),
+                    "high": float(mq.get("high", 0) or 0),
+                    "low": float(mq.get("low", 0) or 0),
+                    "volume": float(mq.get("volume", 0) or 0),
+                    "amount": float(mq.get("amount", 0) or 0),  # 万元
+                    "pct_chg": float(mq.get("pct_chg", 0) or 0) if mq.get("pct_chg") is not None else 0,
+                })
+                logger.info(f"📊 从 market_quotes 获取 {code6} 当日行情: close={mq.get('close')}, pct_chg={mq.get('pct_chg')}")
+
+            # 2.2 补充 stock_daily_quotes 历史数据（用于多日历史趋势）
             coll = db["stock_daily_quotes"]
-            quotes = await coll.find(
+            hist_quotes = await coll.find(
                 {"$or": [{"code": code6}, {"symbol": code6}], "period": "daily"},
                 {"_id": 0, "trade_date": 1, "close": 1, "open": 1, "high": 1, "low": 1, "volume": 1, "amount": 1, "pct_chg": 1}
             ).sort("trade_date", -1).limit(days + 1).to_list(length=days + 1)
 
-            if quotes and len(quotes) >= 2:
-                # 反转成正序
-                quotes.reverse()
+            # 合并去重（market_quotes 的 trade_date 格式可能是 "20260724"，daily_quotes 可能是 "2026-07-24"）
+            existing_dates = set()
+            for q in quotes:
+                d = str(q.get("trade_date", "")).replace("-", "")
+                existing_dates.add(d)
+            for q in hist_quotes:
+                d = str(q.get("trade_date", "")).replace("-", "")
+                if d not in existing_dates:
+                    quotes.append(q)
+                    existing_dates.add(d)
 
+            # 按日期排序（正序：旧 -> 新）
+            quotes.sort(key=lambda x: str(x.get("trade_date", "")))
+
+            # 单条数据也允许估算（至少能展示当日资金流向）
+            if quotes:
                 # 估算资金流向：基于收盘价与开盘价的关系，结合成交额
                 # 简化模型：
                 # - 上涨时，假设主力净流入 = 成交额 * (涨跌幅/10) * 系数
