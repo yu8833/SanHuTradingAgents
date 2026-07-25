@@ -772,3 +772,89 @@ async def backtest_convertible_arbitrage(req: RetailStrategyBacktestRequest):
     except Exception as e:
         logger.error(f"[convertible_arbitrage_backtest] 失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"转债博弈回测失败: {str(e)}")
+
+
+# ========== 新策略：技术分析 ==========
+
+@router.post("/ma-crossover/scan", response_model=RetailStrategyScanResponse)
+async def scan_ma_crossover(req: RetailStrategyRequest):
+    """均线交叉策略扫描"""
+    try:
+        from app.services.retail.moving_average_crossover_service import get_moving_average_crossover_service
+        service = get_moving_average_crossover_service()
+        params = req.dict(exclude_none=True)
+        result = await service.scan_moving_average_crossover(params)
+        return RetailStrategyScanResponse(**result)
+    except Exception as e:
+        logger.error(f"[ma_crossover_scan] 失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"均线交叉扫描失败: {str(e)}")
+
+
+@router.post("/ma-crossover/backtest", response_model=RetailStrategyBacktestResponse)
+async def backtest_ma_crossover(req: RetailStrategyBacktestRequest):
+    """均线交叉策略回测"""
+    try:
+        from app.services.retail.moving_average_crossover_service import get_moving_average_crossover_service
+        service = get_moving_average_crossover_service()
+        params = req.dict(exclude_none=True)
+        result = await service.backtest(params)
+        return RetailStrategyBacktestResponse(**result)
+    except Exception as e:
+        logger.error(f"[ma_crossover_backtest] 失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"均线交叉回测失败: {str(e)}")
+
+
+@router.post("/macd-divergence/scan", response_model=RetailStrategyScanResponse)
+async def scan_macd_divergence(req: RetailStrategyRequest):
+    """MACD背离策略扫描"""
+    try:
+        from app.services.retail.macd_divergence_service import get_macd_divergence_service
+        service = get_macd_divergence_service()
+        params = req.dict(exclude_none=True)
+        result = await service.scan_macd_divergence(params)
+        return RetailStrategyScanResponse(**result)
+    except Exception as e:
+        logger.error(f"[macd_divergence_scan] 失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"MACD背离扫描失败: {str(e)}")
+
+
+@router.post("/macd-divergence/backtest", response_model=RetailStrategyBacktestResponse)
+async def backtest_macd_divergence(req: RetailStrategyBacktestRequest):
+    """MACD背离策略回测"""
+    try:
+        from app.services.retail.macd_divergence_service import get_macd_divergence_service
+        service = get_macd_divergence_service()
+        params = req.dict(exclude_none=True)
+        result = await service.backtest(params)
+        return RetailStrategyBacktestResponse(**result)
+    except Exception as e:
+        logger.error(f"[macd_divergence_backtest] 失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"MACD背离回测失败: {str(e)}")
+
+
+@router.post("/volume-price/scan", response_model=RetailStrategyScanResponse)
+async def scan_volume_price(req: RetailStrategyRequest):
+    """量价配合策略扫描"""
+    try:
+        from app.services.retail.volume_price_service import get_volume_price_service
+        service = get_volume_price_service()
+        params = req.dict(exclude_none=True)
+        result = await service.scan_volume_price(params)
+        return RetailStrategyScanResponse(**result)
+    except Exception as e:
+        logger.error(f"[volume_price_scan] 失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"量价配合扫描失败: {str(e)}")
+
+
+@router.post("/volume-price/backtest", response_model=RetailStrategyBacktestResponse)
+async def backtest_volume_price(req: RetailStrategyBacktestRequest):
+    """量价配合策略回测"""
+    try:
+        from app.services.retail.volume_price_service import get_volume_price_service
+        service = get_volume_price_service()
+        params = req.dict(exclude_none=True)
+        result = await service.backtest(params)
+        return RetailStrategyBacktestResponse(**result)
+    except Exception as e:
+        logger.error(f"[volume_price_backtest] 失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"量价配合回测失败: {str(e)}")

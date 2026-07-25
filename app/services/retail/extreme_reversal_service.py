@@ -144,6 +144,7 @@ class ExtremeReversalService(RetailScreeningBase):
 
         closes = np.array([q["close"] for q in quotes], dtype=float)
         pct_chgs = np.array([q.get("pct_chg", 0) for q in quotes], dtype=float)
+        volumes = np.array([q.get("volume", 0) for q in quotes], dtype=float)
 
         # 1. 检测连续下跌
         consecutive_down = 0
@@ -169,6 +170,63 @@ class ExtremeReversalService(RetailScreeningBase):
         high_60 = float(np.max(closes))
         drawdown_from_high = (close - high_60) / high_60
 
+        # ========== 新增：反转确认信号 ==========
+        has_reversal_signal = False
+        reversal_signals = []
+
+        # 5. 地量检测（近20日最低成交量，且低于涨停日成交量的1/3）
+        is_volume_dry = False
+        if len(volumes) >= 20:
+            recent_volumes = volumes[-20:]
+            min_vol = float(np.min(recent_volumes))
+            today_vol = float(volumes[-1]) if len(volumes) > 0 else 0
+            # 如果当天成交量是近20日最低的30%以内，视为地量
+            if today_vol > 0 and today_vol <= min_vol * 1.3:
+                is_volume_dry = True
+                reversal_signals.append("地量")
+
+        # 6. 长下影线检测（下影线长度 ≥ 实体长度的2倍）
+        has_long_lower_shadow = False
+        if len(quotes) >= 1:
+            today = quotes[-1]
+            open_p = today.get("open", close)
+            high_p = today.get("high", close)
+            low_p = today.get("low", close)
+            if open_p > 0 and close > 0 and low_p > 0:
+                body = abs(close - open_p)
+                lower_shadow = min(close, open_p) - low_p
+                if body > 0 and lower_shadow >= body * 2:
+                    has_long_lower_shadow = True
+                    reversal_signals.append("长下影线")
+
+        # 7. 阳线反包检测（今日阳线覆盖昨日阴线）
+        has_bullish_engulfing = False
+        if len(quotes) >= 2:
+            today = quotes[-1]
+            yesterday = quotes[-2]
+            today_open = today.get("open", 0)
+            today_close = today.get("close", 0)
+            yesterday_open = yesterday.get("open", 0)
+            yesterday_close = yesterday.get("close", 0)
+            if (today_close > today_open and yesterday_close < yesterday_open and
+                today_open <= yesterday_close and today_close >= yesterday_open):
+                has_bullish_engulfing = True
+                reversal_signals.append("阳线反包")
+
+        # 8. 5日线拐头（近3天5日线斜率由负变正）
+        has_ma5_turn = False
+        if len(closes) >= 10:
+            ma5 = np.convolve(closes, np.ones(5)/5, mode='valid')
+            if len(ma5) >= 3:
+                slope_prev = ma5[-2] - ma5[-3]
+                slope_curr = ma5[-1] - ma5[-2]
+                if slope_prev < 0 and slope_curr >= 0:
+                    has_ma5_turn = True
+                    reversal_signals.append("5日线拐头")
+
+        # 需要至少满足一个反转确认信号才买入
+        has_reversal_signal = is_volume_dry or has_long_lower_shadow or has_bullish_engulfing or has_ma5_turn
+
         # 5. 估值分位（简化：用PE/PB绝对值判断）
         pe_percentile = 0.5  # 默认中位
         if pe > 0:
@@ -192,14 +250,24 @@ class ExtremeReversalService(RetailScreeningBase):
             else:
                 pb_percentile = 0.8
 
-        # 6. 信号判定
+        # 6. 信号判定（加入反转确认）
         signal_type = "观察"
-        if limit_down_days >= 2 and drawdown_from_high < -0.15:
+        if has_reversal_signal and limit_down_days >= 2 and drawdown_from_high < -0.15:
+            signal_type = "恐慌超跌+反转"
+        elif has_reversal_signal and consecutive_down >= min_consecutive_down and total_drop_pct < -min_total_drop_pct:
+            signal_type = "连续下跌+反转"
+        elif has_reversal_signal and drawdown_from_high < -0.30:
+            signal_type = "高位回撤+反转"
+        elif limit_down_days >= 2 and drawdown_from_high < -0.15:
             signal_type = "恐慌超跌"
         elif consecutive_down >= min_consecutive_down and total_drop_pct < -min_total_drop_pct:
             signal_type = "连续下跌"
         elif drawdown_from_high < -0.30:
             signal_type = "高位回撤"
+
+        # 如果没有反转确认信号，降低评分权重
+        if not has_reversal_signal:
+            signal_type += "（待确认）"
 
         # 7. 评分
         score = 0
@@ -229,6 +297,12 @@ class ExtremeReversalService(RetailScreeningBase):
         score += val_score
         score_details["估值低位"] = val_score
 
+        # 新增：反转确认信号加分（0-15分）
+        reversal_score = len(reversal_signals) * 5
+        reversal_score = min(15, reversal_score)
+        score += reversal_score
+        score_details["反转信号"] = reversal_score
+
         # 回撤评分（0-10分）
         dd_score = min(10, abs(drawdown_from_high) * 20)
         score += dd_score
@@ -256,6 +330,8 @@ class ExtremeReversalService(RetailScreeningBase):
             "score": int(score),
             "score_details": score_details,
             "high_60": round(high_60, 2),
+            "reversal_signals": reversal_signals,
+            "has_reversal_signal": has_reversal_signal,
         }
 
     async def backtest(self, params: Dict[str, Any] = None) -> Dict[str, Any]:

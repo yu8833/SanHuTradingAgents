@@ -387,6 +387,24 @@ export const screeningApi = {
   scanConvertibleArbitrage: (payload: RetailScanReq, options?: { timeout?: number }) =>
     ApiClient.post<RetailScanResp>('/api/screening/convertible-arbitrage/scan', payload, { timeout: options?.timeout ?? 180000 }),
   backtestConvertibleArbitrage: (payload: RetailBacktestReq, options?: { timeout?: number }) =>
-    ApiClient.post<RetailBacktestResp>('/api/screening/convertible-arbitrage/backtest', payload, { timeout: options?.timeout ?? 300000 })
+    ApiClient.post<RetailBacktestResp>('/api/screening/convertible-arbitrage/backtest', payload, { timeout: options?.timeout ?? 300000 }),
+
+  // ===== 均线交叉策略 =====
+  scanMaCrossover: (payload: RetailScanReq, options?: { timeout?: number }) =>
+    ApiClient.post<RetailScanResp>('/api/screening/ma-crossover/scan', payload, { timeout: options?.timeout ?? 180000 }),
+  backtestMaCrossover: (payload: RetailBacktestReq, options?: { timeout?: number }) =>
+    ApiClient.post<RetailBacktestResp>('/api/screening/ma-crossover/backtest', payload, { timeout: options?.timeout ?? 300000 }),
+
+  // ===== MACD背离策略 =====
+  scanMacdDivergence: (payload: RetailScanReq, options?: { timeout?: number }) =>
+    ApiClient.post<RetailScanResp>('/api/screening/macd-divergence/scan', payload, { timeout: options?.timeout ?? 180000 }),
+  backtestMacdDivergence: (payload: RetailBacktestReq, options?: { timeout?: number }) =>
+    ApiClient.post<RetailBacktestResp>('/api/screening/macd-divergence/backtest', payload, { timeout: options?.timeout ?? 300000 }),
+
+  // ===== 量价配合策略 =====
+  scanVolumePrice: (payload: RetailScanReq, options?: { timeout?: number }) =>
+    ApiClient.post<RetailScanResp>('/api/screening/volume-price/scan', payload, { timeout: options?.timeout ?? 180000 }),
+  backtestVolumePrice: (payload: RetailBacktestReq, options?: { timeout?: number }) =>
+    ApiClient.post<RetailBacktestResp>('/api/screening/volume-price/backtest', payload, { timeout: options?.timeout ?? 300000 })
 }
 

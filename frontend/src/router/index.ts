@@ -176,6 +176,36 @@ const routes: RouteRecordRaw[] = [
         }
       },
       {
+        path: 'ma-crossover',
+        name: 'MaCrossover',
+        component: () => import('@/views/Screening/MaCrossover.vue'),
+        meta: {
+          title: '均线交叉',
+          parentTitle: '选股',
+          requiresAuth: true
+        }
+      },
+      {
+        path: 'macd-divergence',
+        name: 'MacdDivergence',
+        component: () => import('@/views/Screening/MacdDivergence.vue'),
+        meta: {
+          title: 'MACD背离',
+          parentTitle: '选股',
+          requiresAuth: true
+        }
+      },
+      {
+        path: 'volume-price',
+        name: 'VolumePrice',
+        component: () => import('@/views/Screening/VolumePrice.vue'),
+        meta: {
+          title: '量价配合',
+          parentTitle: '选股',
+          requiresAuth: true
+        }
+      },
+      {
         path: 'comparison',
         name: 'StrategyComparison',
         component: () => import('@/views/Screening/StrategyComparison.vue'),
@@ -225,7 +255,7 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/layouts/BasicLayout.vue'),
     redirect: '/vibe/review/overview',
     meta: {
-      title: '复盘',
+      title: '市场',
       icon: 'DataAnalysis',
       requiresAuth: true,
       transition: 'slide-up'
@@ -237,7 +267,7 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Vibe/Review/Overview.vue'),
         meta: {
           title: '大盘看板',
-          parentTitle: '复盘',
+          parentTitle: '市场',
           requiresAuth: true
         }
       },
@@ -247,7 +277,7 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Vibe/Review/FundFlow.vue'),
         meta: {
           title: '资金流向',
-          parentTitle: '复盘',
+          parentTitle: '市场',
           requiresAuth: true
         }
       },
@@ -257,7 +287,7 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Vibe/Review/Emotion.vue'),
         meta: {
           title: '短线情绪',
-          parentTitle: '复盘',
+          parentTitle: '市场',
           requiresAuth: true
         }
       },

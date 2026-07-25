@@ -208,7 +208,8 @@ async def get_strategies_performance(user=Depends(get_current_user)):
     from app.services.portfolio_service import portfolio_service
 
     strategies = ["extreme_reversal", "turnaround", "small_cap_value",
-                  "convertible_arbitrage", "default"]
+                  "convertible_arbitrage", "ma_crossover", "macd_divergence",
+                  "volume_price", "default"]
     results = {}
     for s in strategies:
         try:

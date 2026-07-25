@@ -256,7 +256,7 @@ import {
 } from '@element-plus/icons-vue'
 import { screeningApi, type RetailBacktestResp, type LimitUpPullbackBacktestResp, type ThreeBuysThreeSellsBacktestResp } from '@/api/screening'
 
-type StrategyKey = 'extreme_reversal' | 'small_cap_value' | 'turnaround' | 'convertible_arbitrage' | 'limit_up_pullback' | 'three_buys_three_sells'
+type StrategyKey = 'extreme_reversal' | 'small_cap_value' | 'turnaround' | 'convertible_arbitrage' | 'limit_up_pullback' | 'three_buys_three_sells' | 'ma_crossover' | 'macd_divergence' | 'volume_price'
 type BacktestResult = RetailBacktestResp | LimitUpPullbackBacktestResp | ThreeBuysThreeSellsBacktestResp
 
 interface StrategyInfo {
@@ -273,7 +273,10 @@ const strategyList: StrategyInfo[] = [
   { key: 'turnaround', name: '困境反转', description: '基本面拐点反转机会', icon: DataAnalysis, iconClass: 'turnaround' },
   { key: 'convertible_arbitrage', name: '转债下修', description: '可转债下修博弈策略', icon: ShoppingCart, iconClass: 'convertible' },
   { key: 'limit_up_pullback', name: '涨停回调', description: '涨停后缩量回调买入', icon: Histogram, iconClass: 'limitup' },
-  { key: 'three_buys_three_sells', name: '三买三卖', description: '趋势跟踪三买三卖法', icon: Money, iconClass: 'threebuys' }
+  { key: 'three_buys_three_sells', name: '三买三卖', description: '趋势跟踪三买三卖法', icon: Money, iconClass: 'threebuys' },
+  { key: 'ma_crossover', name: '均线交叉', description: '金叉死叉趋势跟踪策略', icon: DataLine, iconClass: 'macrossover' },
+  { key: 'macd_divergence', name: 'MACD背离', description: '顶底背离反转信号识别', icon: TrendCharts, iconClass: 'macd' },
+  { key: 'volume_price', name: '量价配合', description: '量价关系趋势确认', icon: InfoFilled, iconClass: 'volumeprice' }
 ]
 
 const strategyColors: Record<StrategyKey, string> = {
@@ -282,7 +285,10 @@ const strategyColors: Record<StrategyKey, string> = {
   turnaround: '#E6A23C',
   convertible_arbitrage: '#909399',
   limit_up_pullback: '#409EFF',
-  three_buys_three_sells: '#8E44AD'
+  three_buys_three_sells: '#8E44AD',
+  ma_crossover: '#00CED1',
+  macd_divergence: '#FF69B4',
+  volume_price: '#20B2AA'
 }
 
 const selectedStrategies = ref<StrategyKey[]>([])
@@ -484,7 +490,10 @@ function getStrategyScenario(key: string): string {
     turnaround: '行业景气度回升、公司基本面改善阶段',
     convertible_arbitrage: '熊市末期、震荡市，追求稳健收益',
     limit_up_pullback: '牛市及结构性行情中强势股回调',
-    three_buys_three_sells: '趋势明确的单边行情'
+    three_buys_three_sells: '趋势明确的单边行情',
+    ma_crossover: '趋势行情中的金叉买入、死叉卖出',
+    macd_divergence: '趋势末端的反转信号识别',
+    volume_price: '量价配合的趋势确认和追涨'
   }
   return scenarios[key] || '-'
 }
@@ -525,7 +534,7 @@ async function startComparison() {
 // retail策略走retail_screening_base.py，百分比返回的是小数(0.55=55%)
 // 涨停回调/三买三卖走自己的service，百分比已×100(55.0=55%)
 // 这里统一归一化为×100的百分比格式
-const retailStrategyKeys: StrategyKey[] = ['extreme_reversal', 'small_cap_value', 'turnaround', 'convertible_arbitrage']
+const retailStrategyKeys: StrategyKey[] = ['extreme_reversal', 'small_cap_value', 'turnaround', 'convertible_arbitrage', 'ma_crossover', 'macd_divergence', 'volume_price']
 
 function normalizeBacktestResult(key: StrategyKey, result: any): any {
   if (!retailStrategyKeys.includes(key)) return result
@@ -578,6 +587,15 @@ async function runBacktest(key: StrategyKey): Promise<BacktestResult | null> {
         break
       case 'three_buys_three_sells':
         result = await screeningApi.backtestThreeBuysThreeSells(payload)
+        break
+      case 'ma_crossover':
+        result = await screeningApi.backtestMaCrossover(payload)
+        break
+      case 'macd_divergence':
+        result = await screeningApi.backtestMacdDivergence(payload)
+        break
+      case 'volume_price':
+        result = await screeningApi.backtestVolumePrice(payload)
         break
       default:
         return null

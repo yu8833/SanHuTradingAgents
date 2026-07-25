@@ -44,6 +44,9 @@
       <el-menu-item index="/screening/turnaround">困境反转</el-menu-item>
       <el-menu-item index="/screening/small-cap-value">小盘价值</el-menu-item>
       <el-menu-item index="/screening/convertible-arbitrage">转债博弈</el-menu-item>
+      <el-menu-item index="/screening/ma-crossover">均线交叉</el-menu-item>
+      <el-menu-item index="/screening/macd-divergence">MACD背离</el-menu-item>
+      <el-menu-item index="/screening/volume-price">量价配合</el-menu-item>
       <el-menu-item index="/screening/comparison">策略对比</el-menu-item>
       <el-menu-item index="/screening/retail-center">散户策略中心</el-menu-item>
     </el-sub-menu>
@@ -56,7 +59,7 @@
     <el-sub-menu index="/vibe-review">
       <template #title>
         <el-icon><DataAnalysis /></el-icon>
-        <span>复盘</span>
+        <span>市场</span>
       </template>
       <el-menu-item index="/vibe/review/overview">大盘看板</el-menu-item>
       <el-menu-item index="/vibe/review/fundflow">资金流向</el-menu-item>
