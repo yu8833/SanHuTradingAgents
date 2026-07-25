@@ -1548,6 +1548,11 @@ async def get_money_flow(
     - medium_net: 中单净流入
     - small_net: 小单净流入
     - history: 近N天资金流向历史
+
+    数据策略：
+    - 仅返回 AKShare 真实资金流向数据
+    - AKShare 不可用时明确返回 data_source="unavailable"，不再用估算模型伪装
+    - 交易决策类数据绝不能用模拟值
     """
     market, normalized_code = _detect_market_and_code(code)
 
@@ -1555,19 +1560,27 @@ async def get_money_flow(
         return ok(data={"code": normalized_code, "message": "仅支持A股资金流向分析"})
 
     code6 = str(normalized_code).zfill(6)
-    db = get_mongo_db()
     realtime_data = {}
     history = []
     trend = "unknown"
     data_source = "none"
+    error_message = None
 
-    # 1. 优先尝试从 AKShare 获取真实资金流向数据
+    # 从 AKShare 获取真实资金流向数据（不再使用估算模型）
     try:
         import akshare as ak
         import asyncio
 
+        # 修正 market 参数映射：6开头=sh，0/3开头=sz，8/4开头=bj（北交所）
+        if code6.startswith('6'):
+            ak_market = "sh"
+        elif code6.startswith(('8', '4')):
+            ak_market = "bj"
+        else:
+            ak_market = "sz"
+
         df_realtime = await asyncio.wait_for(
-            asyncio.to_thread(ak.stock_individual_fund_flow, stock=code6, market="sh" if code6.startswith('6') else "sz"),
+            asyncio.to_thread(ak.stock_individual_fund_flow, stock=code6, market=ak_market),
             timeout=8.0
         )
         if df_realtime is not None and not df_realtime.empty:
@@ -1586,6 +1599,7 @@ async def get_money_flow(
                 "medium_pct": float(latest.get('中单净流入-净占比', 0) or 0),
                 "small_net": float(latest.get('小单净流入-净额', 0) or 0),
                 "small_pct": float(latest.get('小单净流入-净占比', 0) or 0),
+                "is_estimated": False,
             }
 
             # 历史数据
@@ -1600,125 +1614,19 @@ async def get_money_flow(
 
             data_source = "akshare"
             logger.info(f"✅ 从 AKShare 获取资金流向: {code6}")
+        else:
+            error_message = "AKShare 返回空数据"
+            data_source = "unavailable"
+    except asyncio.TimeoutError:
+        error_message = "AKShare 接口超时"
+        data_source = "unavailable"
+        logger.warning(f"从 AKShare 获取资金流向超时: {code6}")
     except Exception as e:
-        logger.warning(f"从 AKShare 获取资金流向失败: {e}")
+        error_message = f"AKShare 接口异常: {str(e)}"
+        data_source = "unavailable"
+        logger.warning(f"从 AKShare 获取资金流向失败: {code6}, 错误: {e}")
 
-    # 2. 如果AKShare不可用，从MongoDB估算资金流向
-    if not realtime_data:
-        try:
-            # 2.1 优先使用 market_quotes（当日实时行情，数据最鲜活）
-            mq = await db["market_quotes"].find_one(
-                {"code": code6},
-                {"_id": 0, "trade_date": 1, "close": 1, "open": 1, "high": 1, "low": 1,
-                 "volume": 1, "amount": 1, "pct_chg": 1, "pre_close": 1}
-            )
-
-            quotes = []
-            if mq and mq.get("close") is not None:
-                # 将 market_quotes 数据规范化为 quotes 列表格式
-                quotes.append({
-                    "trade_date": str(mq.get("trade_date", "")),
-                    "close": float(mq.get("close", 0) or 0),
-                    "open": float(mq.get("open", 0) or 0),
-                    "high": float(mq.get("high", 0) or 0),
-                    "low": float(mq.get("low", 0) or 0),
-                    "volume": float(mq.get("volume", 0) or 0),
-                    "amount": float(mq.get("amount", 0) or 0),  # 万元
-                    "pct_chg": float(mq.get("pct_chg", 0) or 0) if mq.get("pct_chg") is not None else 0,
-                })
-                logger.info(f"📊 从 market_quotes 获取 {code6} 当日行情: close={mq.get('close')}, pct_chg={mq.get('pct_chg')}")
-
-            # 2.2 补充 stock_daily_quotes 历史数据（用于多日历史趋势）
-            coll = db["stock_daily_quotes"]
-            hist_quotes = await coll.find(
-                {"$or": [{"code": code6}, {"symbol": code6}], "period": "daily"},
-                {"_id": 0, "trade_date": 1, "close": 1, "open": 1, "high": 1, "low": 1, "volume": 1, "amount": 1, "pct_chg": 1}
-            ).sort("trade_date", -1).limit(days + 1).to_list(length=days + 1)
-
-            # 合并去重（market_quotes 的 trade_date 格式可能是 "20260724"，daily_quotes 可能是 "2026-07-24"）
-            existing_dates = set()
-            for q in quotes:
-                d = str(q.get("trade_date", "")).replace("-", "")
-                existing_dates.add(d)
-            for q in hist_quotes:
-                d = str(q.get("trade_date", "")).replace("-", "")
-                if d not in existing_dates:
-                    quotes.append(q)
-                    existing_dates.add(d)
-
-            # 按日期排序（正序：旧 -> 新）
-            quotes.sort(key=lambda x: str(x.get("trade_date", "")))
-
-            # 单条数据也允许估算（至少能展示当日资金流向）
-            if quotes:
-                # 估算资金流向：基于收盘价与开盘价的关系，结合成交额
-                # 简化模型：
-                # - 上涨时，假设主力净流入 = 成交额 * (涨跌幅/10) * 系数
-                # - 下跌时，主力净流入为负
-                # 这只是一个粗略估算，真实数据需要付费数据源
-
-                for i, q in enumerate(quotes[-days:]):
-                    close = float(q.get("close", 0) or 0)
-                    open_price = float(q.get("open", 0) or 0)
-                    amount = float(q.get("amount", 0) or 0)  # 万元
-                    pct_chg = float(q.get("pct_chg", 0) or 0)
-                    trade_date = str(q.get("trade_date", ""))
-
-                    # 如果没有pct_chg，从收盘价计算
-                    if pct_chg == 0 and i > 0 and quotes[-days + i - 1].get("close"):
-                        prev_close = float(quotes[-days + i - 1].get("close", 0))
-                        if prev_close > 0:
-                            pct_chg = round((close / prev_close - 1) * 100, 2)
-
-                    # 估算主力净流入（简化模型）
-                    # 主力资金约占成交额的 30%，根据涨跌幅方向调整
-                    main_ratio = 0.3  # 假设主力资金占成交额30%
-                    direction = 1 if pct_chg >= 0 else -1
-                    strength = min(abs(pct_chg) / 5.0, 1.0)  # 涨跌幅5%以上达到100%强度
-                    main_net_inflow = amount * 10000 * main_ratio * direction * strength  # 万元转元
-
-                    # 进一步拆分（只是估算）
-                    super_large_net = main_net_inflow * 0.4  # 超大单占40%
-                    large_net = main_net_inflow * 0.6  # 大单占60%
-                    medium_net = -main_net_inflow * 0.3  # 中单流出一部分
-                    small_net = -main_net_inflow * 0.7  # 小单流出大部分
-
-                    # 计算净占比
-                    total_amount = amount * 10000  # 万元转元
-                    main_net_inflow_pct = (main_net_inflow / total_amount * 100) if total_amount > 0 else 0
-
-                    history.append({
-                        "date": trade_date,
-                        "change_pct": pct_chg,
-                        "main_net_inflow": round(main_net_inflow, 2),
-                        "main_net_inflow_pct": round(main_net_inflow_pct, 2),
-                    })
-
-                if history:
-                    latest_hist = history[-1]
-                    realtime_data = {
-                        "date": latest_hist["date"],
-                        "close": close,
-                        "change_pct": latest_hist["change_pct"],
-                        "main_net_inflow": latest_hist["main_net_inflow"],
-                        "main_net_inflow_pct": latest_hist["main_net_inflow_pct"],
-                        "super_large_net": round(super_large_net, 2),
-                        "super_large_pct": round(main_net_inflow_pct * 0.4, 2),
-                        "large_net": round(large_net, 2),
-                        "large_pct": round(main_net_inflow_pct * 0.6, 2),
-                        "medium_net": round(medium_net, 2),
-                        "medium_pct": round(-main_net_inflow_pct * 0.3, 2),
-                        "small_net": round(small_net, 2),
-                        "small_pct": round(-main_net_inflow_pct * 0.7, 2),
-                        "is_estimated": True,  # 标记为估算数据
-                    }
-                    data_source = "estimated"
-                    logger.info(f"✅ 从 stock_daily_quotes 估算资金流向: {code6}, {len(history)}天")
-
-        except Exception as e:
-            logger.warning(f"从 MongoDB 估算资金流向失败: {e}")
-
-    # 3. 判断资金趋势
+    # 判断资金趋势（仅基于真实数据）
     if history:
         recent_inflows = [h["main_net_inflow"] for h in history[-3:]]
         positive_days = sum(1 for v in recent_inflows if v > 0)
@@ -1736,8 +1644,13 @@ async def get_money_flow(
         "trend": trend,
         "days": days,
         "data_source": data_source,
-        "is_estimated": data_source == "estimated"
+        "is_estimated": False,  # 不再返回估算数据
     }
+    # 当数据不可用时，附带错误信息供前端展示
+    if data_source == "unavailable":
+        data["error_message"] = error_message or "资金流向数据暂时不可用，请稍后重试"
+        logger.info(f"⚠️ 资金流向数据不可用: {code6}, 原因: {error_message}")
+
     return ok(data=data)
 
 

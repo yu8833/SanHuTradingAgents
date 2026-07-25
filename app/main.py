@@ -325,13 +325,32 @@ async def lifespan(app: FastAPI):
         if settings.QUOTES_INGEST_ENABLED:
             quotes_ingestion = QuotesIngestionService()
             await quotes_ingestion.ensure_indexes()
+
+            # 付费 Tushare 用户自动切换到高频采集，免费用户使用配置值
+            ingest_interval = settings.QUOTES_INGEST_INTERVAL_SECONDS
+            if settings.QUOTES_AUTO_DETECT_TUSHARE_PERMISSION:
+                try:
+                    is_premium = quotes_ingestion._check_tushare_permission()
+                    if is_premium:
+                        # premium/vip 用户：有 rt_k 权限，使用 30 秒高频采集
+                        ingest_interval = min(settings.QUOTES_INGEST_INTERVAL_SECONDS, 30)
+                        logger.info(f"✅ 检测到 Tushare rt_k 权限（premium/vip），实时行情采集间隔调整为 {ingest_interval}s")
+                    elif settings.TUSHARE_ENABLED and settings.TUSHARE_TIER.lower() not in ("free", ""):
+                        # standard/basic 付费用户：无 rt_k 权限，但走 AKShare 可用更短间隔（60秒）
+                        ingest_interval = min(settings.QUOTES_INGEST_INTERVAL_SECONDS, 60)
+                        logger.info(f"✅ Tushare {settings.TUSHARE_TIER} 付费用户（无 rt_k），走 AKShare 采集间隔调整为 {ingest_interval}s")
+                    else:
+                        logger.info(f"ℹ️ Tushare 免费用户，保持配置的采集间隔 {ingest_interval}s")
+                except Exception as e:
+                    logger.warning(f"Tushare 权限检测失败，使用配置间隔 {ingest_interval}s: {e}")
+
             scheduler.add_job(
                 quotes_ingestion.run_once,  # coroutine function; AsyncIOScheduler will await it
-                IntervalTrigger(seconds=settings.QUOTES_INGEST_INTERVAL_SECONDS, timezone=settings.TIMEZONE),
+                IntervalTrigger(seconds=ingest_interval, timezone=settings.TIMEZONE),
                 id="quotes_ingestion_service",
                 name="实时行情入库服务"
             )
-            logger.info(f"⏱ 实时行情入库任务已启动: 每 {settings.QUOTES_INGEST_INTERVAL_SECONDS}s")
+            logger.info(f"⏱ 实时行情入库任务已启动: 每 {ingest_interval}s")
 
         # Tushare统一数据同步任务配置
         logger.info("🔄 配置Tushare统一数据同步任务...")

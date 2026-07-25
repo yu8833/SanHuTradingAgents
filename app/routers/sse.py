@@ -1,18 +1,51 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Header
 from fastapi.responses import StreamingResponse
 import asyncio
 import json
 import logging
 import time
+from typing import Optional
 
 from app.routers.auth_db import get_current_user
 from app.core.database import get_redis_client
 from app.core.config import settings
+from app.services.auth_service import AuthService
+from app.services.user_service import user_service
 
 from app.services.queue_service import get_queue_service, QueueService
 
 router = APIRouter()
 logger = logging.getLogger("webapi.sse")
+
+
+async def get_current_user_for_sse(
+    authorization: Optional[str] = None,
+    token: Optional[str] = None
+) -> dict:
+    """
+    SSE 专用认证：支持 Authorization header 或 ?token= query 参数。
+
+    EventSource 原生不支持自定义 header，因此 SSE 端点需要支持 query token。
+    优先使用 header，其次 query 参数。
+    """
+    raw_token = None
+    if authorization and authorization.lower().startswith("bearer "):
+        raw_token = authorization.split(" ", 1)[1]
+    elif token:
+        raw_token = token
+
+    if not raw_token:
+        raise HTTPException(status_code=401, detail="No token provided")
+
+    token_data = AuthService.verify_token(raw_token)
+    if not token_data:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    user = await user_service.get_user_by_username(token_data.sub)
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="User not found or inactive")
+
+    return {"id": str(user.id), "username": user.username, "role": user.role}
 
 
 async def task_progress_generator(task_id: str, user_id: str):
@@ -75,7 +108,7 @@ async def task_progress_generator(task_id: str, user_id: str):
                     idle_elapsed += poll_timeout
                     now = time.monotonic()
                     if now - last_hb >= heartbeat_every:
-                        yield f"event: heartbeat\ndata: {{\"timestamp\": \"{asyncio.get_event_loop().time()}\"}}\n\n"
+                        yield f"event: heartbeat\ndata: {{\"timestamp\": \"{time.time()}\"}}\n\n"
                         last_hb = now
 
             except asyncio.TimeoutError:
@@ -197,7 +230,7 @@ async def batch_progress_generator(batch_id: str, user_id: str):
                     "completed": completed_count,
                     "failed": failed_count,
                     "processing": processing_count,
-                    "timestamp": asyncio.get_event_loop().time()
+                    "timestamp": time.time()
                 }
 
                 yield f"event: progress\ndata: {json.dumps(progress_data, ensure_ascii=False)}\n\n"
@@ -250,6 +283,119 @@ async def stream_batch_progress(batch_id: str, user: dict = Depends(get_current_
 
     return StreamingResponse(
         batch_progress_generator(batch_id, user["id"]),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
+
+async def quotes_update_generator(user_id: str):
+    """
+    生成实时行情更新信号 SSE 流。
+
+    订阅 Redis 频道 `quotes_update`，当 quotes_ingestion_service 入库完成后会发布信号。
+    前端收到信号后主动调用 /api/stocks/{code}/quote 拉取最新行情，
+    避免 5000 只股票全量推送，实现"服务端 poke + 客户端 pull"。
+
+    与前端 30 秒轮询互补：
+    - SSE 信号到达后立即拉取（延迟约 0-2 秒）
+    - 30 秒轮询作为兜底，防止 SSE 断连
+    """
+    r = get_redis_client()
+    pubsub = None
+    channel = "quotes_update"
+
+    try:
+        # 动态加载 SSE 设置
+        try:
+            from app.services.config_provider import provider as config_provider
+            eff = await config_provider.get_effective_system_settings()
+            poll_timeout = float(eff.get("sse_poll_timeout_seconds", 1.0))
+            heartbeat_every = int(eff.get("sse_heartbeat_interval_seconds", 10))
+            # 行情流允许更长的空闲时间（30分钟），避免盘中短暂无更新时断连
+            max_idle_seconds = int(eff.get("sse_quotes_max_idle_seconds", 1800))
+        except Exception:
+            poll_timeout = float(getattr(settings, "SSE_POLL_TIMEOUT_SECONDS", 1.0))
+            heartbeat_every = int(getattr(settings, "SSE_HEARTBEAT_INTERVAL_SECONDS", 10))
+            max_idle_seconds = int(getattr(settings, "SSE_QUOTES_MAX_IDLE_SECONDS", 1800))
+
+        pubsub = r.pubsub()
+        try:
+            await pubsub.subscribe(channel)
+            yield f"event: connected\ndata: {{\"message\": \"已连接实时行情信号流\"}}\n\n"
+        except Exception as subscribe_error:
+            logger.error(f"❌ [SSE-Quotes] 订阅频道失败: {subscribe_error}")
+            try:
+                await pubsub.close()
+            except Exception:
+                pass
+            raise
+
+        idle_elapsed = 0.0
+        last_hb = time.monotonic()
+
+        while idle_elapsed < max_idle_seconds:
+            try:
+                message = await asyncio.wait_for(
+                    pubsub.get_message(ignore_subscribe_messages=True),
+                    timeout=poll_timeout
+                )
+                if message and message['type'] == 'message':
+                    idle_elapsed = 0.0
+                    try:
+                        data = json.loads(message['data'])
+                        yield f"event: quotes_update\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+                    except json.JSONDecodeError:
+                        logger.warning(f"Invalid JSON in quotes_update message: {message['data']}")
+                else:
+                    idle_elapsed += poll_timeout
+                    now = time.monotonic()
+                    if now - last_hb >= heartbeat_every:
+                        # 用 time.time() 返回 Unix 时间戳，而非事件循环单调时间
+                        yield f"event: heartbeat\ndata: {{\"timestamp\": {time.time()}}}\n\n"
+                        last_hb = now
+            except asyncio.TimeoutError:
+                idle_elapsed += poll_timeout
+                continue
+
+    except Exception as e:
+        logger.exception(f"SSE quotes error: {e}")
+        yield f"event: error\ndata: {{\"error\": \"连接异常: {str(e)}\"}}\n\n"
+    finally:
+        if pubsub:
+            logger.info(f"🧹 [SSE-Quotes] 清理 PubSub 连接")
+            try:
+                await pubsub.unsubscribe(channel)
+            except Exception as e:
+                logger.warning(f"⚠️ [SSE-Quotes] 取消订阅失败: {e}")
+            try:
+                await pubsub.close()
+            except Exception as e:
+                logger.error(f"❌ [SSE-Quotes] 关闭连接失败: {e}")
+
+
+@router.get("/quotes")
+async def stream_quotes_update(
+    token: Optional[str] = Query(default=None, description="SSE 认证 token（EventSource 不支持自定义 header）"),
+    authorization: Optional[str] = Header(default=None),
+):
+    """
+    实时行情更新信号 SSE 端点。
+
+    当后端 quotes_ingestion_service 完成行情入库后，会通过 Redis publish 通知。
+    前端订阅本端点后，收到 `quotes_update` 事件即主动拉取最新行情。
+
+    与前端 30 秒轮询互补，实现近实时（延迟约 0-2 秒）的行情刷新。
+
+    认证方式：支持 `?token=xxx` query 参数（EventSource 兼容）或 Authorization header。
+    """
+    user = await get_current_user_for_sse(authorization=authorization, token=token)
+
+    return StreamingResponse(
+        quotes_update_generator(user["id"]),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

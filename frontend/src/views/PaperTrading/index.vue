@@ -257,7 +257,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { CreditCard, Refresh, Plus, Delete } from '@element-plus/icons-vue'
@@ -265,6 +265,7 @@ import { paperApi } from '@/api/paper'
 import { analysisApi } from '@/api/analysis'
 import { stocksApi } from '@/api/stocks'
 import { formatDateTime } from '@/utils/datetime'
+import { subscribeQuotesUpdate } from '@/utils/quotesSSE'
 
 // 路由与初始化
 const route = useRoute()
@@ -465,6 +466,19 @@ async function refreshAll() {
   await Promise.all([fetchAccount(), fetchPositions(), fetchOrders()])
 }
 
+// 盘中持仓自动刷新：SSE 信号触发 + 15秒轮询兜底
+let positionTimer: any = null
+let sseUnsubscribe: (() => void) | null = null
+
+async function refreshPositionsOnly() {
+  // 仅刷新持仓（获取最新价和浮盈），避免频繁拉取账户和订单
+  try {
+    await fetchPositions()
+  } catch (e) {
+    console.warn('刷新持仓失败', e)
+  }
+}
+
 // 查看报告详情（跳转到报告详情页）
 function viewReport(analysisId: string) {
   if (!analysisId) return
@@ -585,6 +599,24 @@ onMounted(() => {
     orderDialog.value = true
   }
   refreshAll()
+
+  // 盘中持仓自动刷新：15 秒轮询兜底 + SSE 信号触发
+  positionTimer = setInterval(refreshPositionsOnly, 15000)
+  sseUnsubscribe = subscribeQuotesUpdate(() => {
+    // 收到行情更新信号，立即刷新持仓最新价
+    refreshPositionsOnly()
+  })
+})
+
+onUnmounted(() => {
+  if (positionTimer) {
+    clearInterval(positionTimer)
+    positionTimer = null
+  }
+  if (sseUnsubscribe) {
+    sseUnsubscribe()
+    sseUnsubscribe = null
+  }
 })
 </script>
 

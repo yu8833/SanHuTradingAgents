@@ -315,20 +315,30 @@
                 </el-tooltip>
               </div>
               <div style="display: flex; gap: 6px; align-items: center;">
-                <el-tag v-if="moneyFlowData?.is_estimated" type="warning" size="small" effect="light">估算数据</el-tag>
                 <el-tag v-if="moneyFlowData?.trend" :type="moneyFlowData.trend === 'inflow' ? 'danger' : moneyFlowData.trend === 'outflow' ? 'success' : 'info'" size="small">
                   {{ moneyFlowData.trend === 'inflow' ? '资金流入' : moneyFlowData.trend === 'outflow' ? '资金流出' : '资金均衡' }}
                 </el-tag>
               </div>
             </div>
           </template>
-          <el-empty v-if="!moneyFlowData || !moneyFlowData.realtime || Object.keys(moneyFlowData.realtime).length === 0" description="暂无资金流向数据" :image-size="60" />
+          <!-- 数据不可用：展示明确的错误信息，不再用估算数据伪装 -->
+          <el-alert
+            v-if="moneyFlowData?.data_source === 'unavailable'"
+            type="warning"
+            :closable="false"
+            :title="moneyFlowData.error_message || '资金流向数据暂时不可用，请稍后重试'"
+          >
+            <template #default>
+              <div style="font-size: 12px; line-height: 1.6;">
+                {{ moneyFlowData.error_message || '资金流向数据暂时不可用' }}
+                <div style="margin-top: 4px; color: var(--el-text-color-secondary);">
+                  数据源（AKShare）可能临时不可用。真实资金流向数据对交易决策至关重要，系统不会用估算值替代。
+                </div>
+              </div>
+            </template>
+          </el-alert>
+          <el-empty v-else-if="!moneyFlowData || !moneyFlowData.realtime || Object.keys(moneyFlowData.realtime).length === 0" description="暂无资金流向数据" :image-size="60" />
           <div v-else>
-            <el-alert v-if="moneyFlowData.is_estimated" type="warning" :closable="false" size="small" style="margin-bottom: 12px;">
-              <template #title>
-                数据为基于成交额和涨跌幅的估算，仅供参考
-              </template>
-            </el-alert>
             <!-- 实时资金流向 -->
             <el-descriptions :column="2" border size="small" style="margin-bottom: 12px;">
               <el-descriptions-item label="主力净流入">
@@ -595,6 +605,7 @@ import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
 import type { EChartsOption } from 'echarts'
 import { favoritesApi } from '@/api/favorites'
+import { subscribeQuotesUpdate } from '@/utils/quotesSSE'
 
 
 echartsUse([CandlestickChart, GridComponent, TooltipComponent, DataZoomComponent, LegendComponent, TitleComponent, CanvasRenderer])
@@ -988,6 +999,7 @@ async function fetchSyncStatus() {
 }
 
 let timer: any = null
+let sseUnsubscribe: (() => void) | null = null
 async function checkFavorite() {
   try {
     const res: any = await favoritesApi.check(code.value)
@@ -1030,10 +1042,21 @@ function resetPageState() {
 onMounted(async () => {
   // 首次加载：打通后端（并行）
   await loadPageData()
-  // 每30秒刷新一次报价
+  // 每30秒刷新一次报价（兜底机制）
   timer = setInterval(fetchQuote, 30000)
+  // 订阅实时行情 SSE 信号（后端入库后立即推送，延迟约 0-2 秒）
+  sseUnsubscribe = subscribeQuotesUpdate((signal) => {
+    // 收到行情更新信号，立即拉取最新报价（SSE 优先，轮询兜底）
+    fetchQuote(false)
+  })
 })
-onUnmounted(() => { if (timer) clearInterval(timer) })
+onUnmounted(() => {
+  if (timer) clearInterval(timer)
+  if (sseUnsubscribe) {
+    sseUnsubscribe()
+    sseUnsubscribe = null
+  }
+})
 
 watch(() => route.params.code, async (newCode, oldCode) => {
   if (!newCode || newCode === oldCode) {

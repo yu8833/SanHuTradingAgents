@@ -1,4 +1,5 @@
 import logging
+import time
 from datetime import datetime, time as dtime, timedelta
 from typing import Dict, Optional, Tuple, List
 from zoneinfo import ZoneInfo
@@ -208,39 +209,46 @@ class QuotesIngestionService:
         """
         检测 Tushare rt_k 接口权限
 
+        直接用 tushare 库测试 rt_k 接口，不依赖 adapter.is_available()，
+        因为 is_available() 调用的 trade_cal 接口容易限流，导致权限检测被跳过。
+
         Returns:
-            True: 有付费权限（可高频调用）
-            False: 免费用户（每小时最多2次）
+            True: 有 rt_k 权限（premium/vip 用户，可高频调用）
+            False: 无 rt_k 权限（free/basic/standard 用户）
         """
         if self._tushare_permission_checked:
             return self._tushare_has_premium or False
 
         try:
-            from app.services.data_sources.tushare_adapter import TushareAdapter
-            adapter = TushareAdapter()
+            import os
+            import tushare as ts
 
-            if not adapter.is_available():
-                logger.info("Tushare 不可用，跳过权限检测")
+            token = os.getenv('TUSHARE_TOKEN', '').strip().strip('"').strip("'")
+            if not token:
+                logger.info("Tushare: 未配置 token，跳过 rt_k 权限检测")
                 self._tushare_has_premium = False
                 self._tushare_permission_checked = True
                 return False
 
-            # 尝试调用 rt_k 接口测试权限
+            ts.set_token(token)
+            pro = ts.pro_api()
+
+            # 直接测试 rt_k 接口权限
             try:
-                df = adapter._provider.api.rt_k(ts_code='000001.SZ')
+                df = pro.rt_k(ts_code='000001.SZ')
                 if df is not None and not getattr(df, 'empty', True):
-                    logger.info("✅ 检测到 Tushare rt_k 接口权限（付费用户）")
+                    logger.info("✅ 检测到 Tushare rt_k 接口权限（premium/vip 用户）")
                     self._tushare_has_premium = True
                 else:
-                    logger.info("⚠️ Tushare rt_k 接口返回空数据（可能是免费用户或接口限制）")
+                    logger.info("⚠️ Tushare rt_k 接口返回空数据（可能无权限或接口限制）")
                     self._tushare_has_premium = False
             except Exception as e:
-                error_msg = str(e).lower()
+                error_msg = str(e)
                 if "权限" in error_msg or "permission" in error_msg or "没有访问" in error_msg:
-                    logger.info("⚠️ Tushare rt_k 接口无权限（免费用户）")
+                    logger.info(f"⚠️ Tushare rt_k 接口无权限: {error_msg}")
                     self._tushare_has_premium = False
                 else:
-                    logger.warning(f"⚠️ Tushare rt_k 接口测试失败: {e}")
+                    logger.warning(f"⚠️ Tushare rt_k 接口测试失败: {error_msg}")
                     self._tushare_has_premium = False
 
             self._tushare_permission_checked = True
@@ -409,6 +417,35 @@ class QuotesIngestionService:
         logger.info(
             f"✅ 行情入库完成 source={source}, matched={result.matched_count}, upserted={len(result.upserted_ids) if result.upserted_ids else 0}, modified={result.modified_count}"
         )
+
+        # 通知 SSE 订阅者行情已更新（前端通过 EventSource 接收信号后主动拉取最新行情）
+        await self._publish_quotes_update_signal(trade_date, source, len(ops))
+
+    async def _publish_quotes_update_signal(self, trade_date: str, source: str, count: int) -> None:
+        """
+        发布行情更新信号到 Redis 频道 quotes_update。
+
+        前端通过 EventSource 订阅 /api/sse/quotes 接收信号，
+        收到后主动调用 /api/stocks/{code}/quote 拉取最新行情。
+        这样避免全量推送 5000 只股票数据，仅做"服务端 poke"。
+        """
+        try:
+            from app.core.database import get_redis_client
+            import json
+            r = get_redis_client()
+            if r is None:
+                return
+            payload = {
+                "type": "quotes_update",
+                "trade_date": trade_date,
+                "source": source,
+                "count": count,
+                # 用 time.time() 而非事件循环时间，确保前端能正确解析为 Unix 时间戳
+                "timestamp": time.time(),
+            }
+            await r.publish("quotes_update", json.dumps(payload, ensure_ascii=False))
+        except Exception as e:
+            logger.warning(f"发布行情更新信号失败（不影响主流程）: {e}")
 
     async def backfill_from_historical_data(self) -> None:
         """
