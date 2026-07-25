@@ -15,33 +15,98 @@
     <el-tabs v-model="activeTab" class="retail-tabs" type="border-card">
       <!-- ============ Tab 1: 策略说明 ============ -->
       <el-tab-pane label="策略说明" name="strategies">
-        <div v-loading="strategyLoading">
-          <el-row :gutter="16">
-            <el-col :span="12" v-for="(info, key) in strategyList" :key="key" style="margin-bottom: 16px;">
-              <el-card shadow="hover" class="strategy-card">
-                <template #header>
-                  <div class="strategy-card-header">
-                    <span class="strategy-name">{{ info.name }}</span>
-                    <el-tag :type="getStrategyTagType(key)" size="small">{{ key }}</el-tag>
+        <div v-loading="strategyLoading" class="dashboard-container">
+          <!-- 1. 市场环境概览卡片 -->
+          <el-card shadow="never" class="dashboard-card market-overview-card">
+            <template #header>
+              <div class="card-header">
+                <el-icon><TrendCharts /></el-icon>
+                <span class="panel-title">市场环境概览</span>
+                <span class="header-hint">实时掌握市场状态，辅助策略选择</span>
+                <el-button type="success" size="small" :loading="autoRegimeLoading" @click="detectRegimeAuto" style="margin-left:auto;">
+                  <el-icon><Aim /></el-icon> 一键检测市场环境
+                </el-button>
+              </div>
+            </template>
+            <el-row :gutter="16">
+              <el-col :span="6">
+                <div class="metric-card">
+                  <div class="metric-label">趋势</div>
+                  <div class="metric-value" v-if="regimeResult">
+                    <el-tag :type="getTrendType(regimeResult.trend)" size="large" effect="dark">
+                      {{ getTrendLabel(regimeResult.trend) }}
+                    </el-tag>
                   </div>
-                </template>
-                <div class="strategy-info-body">
-                  <div class="info-row"><span class="info-label">散户优势：</span>{{ info.edge }}</div>
-                  <div class="info-row"><span class="info-label">持有周期：</span>{{ info.hold_days }}</div>
-                  <div class="info-row"><span class="info-label">盈利条件：</span>{{ info.win_condition }}</div>
-                  <el-divider content-position="left" style="margin: 12px 0;">风控参数</el-divider>
-                  <div class="risk-params" v-if="riskParams[key]">
-                    <el-tag type="warning" size="small">单只≤{{ (riskParams[key].max_single_position * 100).toFixed(0) }}%</el-tag>
-                    <el-tag type="warning" size="small">总仓≤{{ (riskParams[key].max_total_position * 100).toFixed(0) }}%</el-tag>
-                    <el-tag type="danger" size="small">止损≤{{ (riskParams[key].max_single_loss * 100).toFixed(0) }}%</el-tag>
-                  </div>
+                  <div class="metric-empty" v-else>点击右侧一键检测</div>
                 </div>
-              </el-card>
-            </el-col>
-          </el-row>
+              </el-col>
+              <el-col :span="6">
+                <div class="metric-card">
+                  <div class="metric-label">波动率</div>
+                  <div class="metric-value" v-if="regimeResult">
+                    <el-tag :type="getVolType(regimeResult.volatility)" size="large" effect="dark">
+                      {{ getVolLabel(regimeResult.volatility) }}
+                    </el-tag>
+                  </div>
+                  <div class="metric-empty" v-else>点击右侧一键检测</div>
+                </div>
+              </el-col>
+              <el-col :span="6">
+                <div class="metric-card">
+                  <div class="metric-label">市场宽度</div>
+                  <div class="metric-value" v-if="regimeResult">
+                    <el-tag :type="getBreadthType(regimeResult.breadth)" size="large" effect="dark">
+                      {{ getBreadthLabel(regimeResult.breadth) }}
+                    </el-tag>
+                  </div>
+                  <div class="metric-empty" v-else>点击右侧一键检测</div>
+                </div>
+              </el-col>
+              <el-col :span="6">
+                <div class="metric-card">
+                  <div class="metric-label">情绪</div>
+                  <div class="metric-value" v-if="regimeResult">
+                    <el-tag :type="getSentimentType(regimeResult.sentiment)" size="large" effect="dark">
+                      {{ getSentimentLabel(regimeResult.sentiment) }}
+                    </el-tag>
+                  </div>
+                  <div class="metric-empty" v-else>点击右侧一键检测</div>
+                </div>
+              </el-col>
+            </el-row>
+            <div v-if="regimeResult" class="market-summary">
+              <el-icon><InfoFilled /></el-icon>
+              <span>{{ regimeResult.summary }}</span>
+            </div>
+          </el-card>
 
-          <!-- 策略表现统计 -->
-          <el-card shadow="never" style="margin-top: 16px;">
+          <!-- 2. 策略快速入口 -->
+          <el-card shadow="never" class="dashboard-card">
+            <template #header>
+              <div class="card-header">
+                <el-icon><Aim /></el-icon>
+                <span class="panel-title">策略快速入口</span>
+                <span class="header-hint">六大精选策略，点击直达筛选页面</span>
+              </div>
+            </template>
+            <el-row :gutter="16">
+              <el-col :span="8" v-for="strategy in strategyQuickEntries" :key="strategy.key" style="margin-bottom: 16px;">
+                <div class="strategy-quick-card" :style="{ borderTopColor: strategy.borderColor }">
+                  <div class="strategy-quick-header">
+                    <span class="strategy-quick-name">{{ strategy.name }}</span>
+                    <el-tag :type="strategy.tagType" size="small" effect="plain">{{ strategy.marketTag }}</el-tag>
+                  </div>
+                  <div class="strategy-quick-desc">{{ strategy.description }}</div>
+                  <el-button type="primary" size="small" @click="goToStrategy(strategy.route)" class="strategy-quick-btn">
+                    立即查看 <el-icon><ArrowRight /></el-icon>
+                  </el-button>
+                </div>
+              </el-col>
+            </el-row>
+          </el-card>
+
+          <!-- 3. 策略表现统计 -->
+          <el-card shadow="never" class="dashboard-card">
             <template #header>
               <div class="card-header">
                 <el-icon><DataLine /></el-icon>
@@ -51,7 +116,6 @@
               </div>
             </template>
             <div v-if="perfData">
-              <!-- 汇总 -->
               <el-descriptions :column="5" border size="small" style="margin-bottom: 12px;">
                 <el-descriptions-item label="总交易次数">{{ perfData.overall.total_trades }}</el-descriptions-item>
                 <el-descriptions-item label="总体胜率">
@@ -64,7 +128,6 @@
                 <el-descriptions-item label="平均亏损">{{ (perfData.overall.avg_loss * 100).toFixed(2) }}%</el-descriptions-item>
               </el-descriptions>
 
-              <!-- 各策略明细 -->
               <el-table :data="perfTableData" size="small" border>
                 <el-table-column label="策略" width="140">
                   <template #default="{ row }">{{ getStrategyLabel(row.strategy) }}</template>
@@ -109,6 +172,45 @@
               </div>
             </div>
             <el-empty v-else description="暂无已平仓持仓数据，平仓后将自动生成策略表现统计" />
+          </el-card>
+
+          <!-- 4. 策略详细说明（可折叠） -->
+          <el-card shadow="never" class="dashboard-card">
+            <template #header>
+              <div class="card-header" style="cursor: pointer;" @click="strategyDetailVisible = !strategyDetailVisible">
+                <el-icon><Aim /></el-icon>
+                <span class="panel-title">策略详细说明</span>
+                <span class="header-hint">点击展开/收起各策略的详细参数说明</span>
+                <el-icon style="margin-left:auto; transition: transform 0.3s;" :style="{ transform: strategyDetailVisible ? 'rotate(180deg)' : 'rotate(0)' }">
+                  <ArrowDown />
+                </el-icon>
+              </div>
+            </template>
+            <div v-show="strategyDetailVisible">
+              <el-row :gutter="16">
+                <el-col :span="12" v-for="(info, key) in strategyList" :key="key" style="margin-bottom: 16px;">
+                  <el-card shadow="hover" class="strategy-card">
+                    <template #header>
+                      <div class="strategy-card-header">
+                        <span class="strategy-name">{{ info.name }}</span>
+                        <el-tag :type="getStrategyTagType(key)" size="small">{{ key }}</el-tag>
+                      </div>
+                    </template>
+                    <div class="strategy-info-body">
+                      <div class="info-row"><span class="info-label">散户优势：</span>{{ info.edge }}</div>
+                      <div class="info-row"><span class="info-label">持有周期：</span>{{ info.hold_days }}</div>
+                      <div class="info-row"><span class="info-label">盈利条件：</span>{{ info.win_condition }}</div>
+                      <el-divider content-position="left" style="margin: 12px 0;">风控参数</el-divider>
+                      <div class="risk-params" v-if="riskParams[key]">
+                        <el-tag type="warning" size="small">单只≤{{ (riskParams[key].max_single_position * 100).toFixed(0) }}%</el-tag>
+                        <el-tag type="warning" size="small">总仓≤{{ (riskParams[key].max_total_position * 100).toFixed(0) }}%</el-tag>
+                        <el-tag type="danger" size="small">止损≤{{ (riskParams[key].max_single_loss * 100).toFixed(0) }}%</el-tag>
+                      </div>
+                    </div>
+                  </el-card>
+                </el-col>
+              </el-row>
+            </div>
           </el-card>
         </div>
       </el-tab-pane>
@@ -474,13 +576,17 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   Aim, Wallet, DataLine, Warning,
-  Clock, TrendCharts, Odometer, InfoFilled, MagicStick
+  Clock, TrendCharts, Odometer, InfoFilled, MagicStick,
+  ArrowRight, ArrowDown
 } from '@element-plus/icons-vue'
 import { retailApi, type PositionAdvice, type ExitResp, type MarketRegime, type RegimeRawData, type StrategiesResp, type StrategiesPerformanceResp, type StrategyPerformance } from '@/api/retail'
 import { paperApi } from '@/api/paper'
+
+const router = useRouter()
 
 const activeTab = ref('strategies')
 
@@ -488,6 +594,68 @@ const activeTab = ref('strategies')
 const strategyLoading = ref(false)
 const strategyList = ref<Record<string, any>>({})
 const riskParams = ref<Record<string, any>>({})
+const strategyDetailVisible = ref(false)
+
+const strategyQuickEntries = [
+  {
+    key: 'extreme_reversal',
+    name: '极端反转',
+    description: '市场情绪极端恐慌时抄底，高胜率短线策略',
+    marketTag: '熊市/震荡市',
+    tagType: 'danger',
+    borderColor: '#e6232a',
+    route: '/screening/extreme-reversal'
+  },
+  {
+    key: 'small_cap_value',
+    name: '小盘价值',
+    description: '低估值小盘股价值投资，中长期持有策略',
+    marketTag: '震荡市/牛市',
+    tagType: 'success',
+    borderColor: '#19a519',
+    route: '/screening/small-cap-value'
+  },
+  {
+    key: 'turnaround',
+    name: '困境反转',
+    description: '基本面拐点型公司，困境反转超额收益',
+    marketTag: '熊市末期/牛市',
+    tagType: 'warning',
+    borderColor: '#e6a23c',
+    route: '/screening/turnaround'
+  },
+  {
+    key: 'convertible_arbitrage',
+    name: '转债下修',
+    description: '可转债下修博弈，低风险套利策略',
+    marketTag: '全市场',
+    tagType: 'primary',
+    borderColor: '#409eff',
+    route: '/screening/convertible-arbitrage'
+  },
+  {
+    key: 'limit_up_pullback',
+    name: '涨停回调',
+    description: '强势股涨停后回调买入，短线波段策略',
+    marketTag: '牛市/震荡市',
+    tagType: 'danger',
+    borderColor: '#f56c6c',
+    route: '/screening/limit-up-pullback'
+  },
+  {
+    key: 'three_buys_three_sells',
+    name: '三买三卖',
+    description: '缠论三买三卖策略，技术面趋势跟踪',
+    marketTag: '趋势市',
+    tagType: 'warning',
+    borderColor: '#e6a23c',
+    route: '/screening/three-buys-three-sells'
+  }
+]
+
+const goToStrategy = (route: string) => {
+  router.push(route)
+}
 
 const loadStrategies = async () => {
   strategyLoading.value = true
@@ -744,4 +912,86 @@ onMounted(() => {
 .regime-label { font-size: 13px; color: #909399; margin-bottom: 10px; }
 .regime-summary { font-size: 14px; line-height: 1.8; color: #606266; display: flex; align-items: flex-start; gap: 8px; }
 .active-strategies { display: flex; flex-wrap: wrap; gap: 4px; }
+
+/* 仪表盘样式 */
+.dashboard-container { display: flex; flex-direction: column; gap: 16px; }
+.dashboard-card { border-radius: 8px; }
+
+/* 市场环境概览 */
+.market-overview-card .metric-card {
+  text-align: center;
+  padding: 20px 16px;
+  background: linear-gradient(135deg, #f5f7fa 0%, #eef1f6 100%);
+  border-radius: 8px;
+  transition: all 0.3s ease;
+}
+.market-overview-card .metric-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+.metric-label {
+  font-size: 13px;
+  color: #909399;
+  margin-bottom: 12px;
+  font-weight: 500;
+}
+.metric-value {
+  display: flex;
+  justify-content: center;
+}
+.metric-empty {
+  font-size: 12px;
+  color: #c0c4cc;
+  font-style: italic;
+}
+.market-summary {
+  margin-top: 16px;
+  padding: 12px 16px;
+  background: #ecf5ff;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #409eff;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+/* 策略快速入口卡片 */
+.strategy-quick-card {
+  background: #fff;
+  border: 1px solid #e4e7ed;
+  border-top: 3px solid;
+  border-radius: 8px;
+  padding: 16px;
+  transition: all 0.3s ease;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.strategy-quick-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.1);
+}
+.strategy-quick-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.strategy-quick-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: #303133;
+}
+.strategy-quick-desc {
+  font-size: 13px;
+  color: #606266;
+  line-height: 1.6;
+  margin-bottom: 16px;
+  flex: 1;
+}
+.strategy-quick-btn {
+  align-self: flex-end;
+}
 </style>

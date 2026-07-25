@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   TrendCharts,
@@ -13,8 +13,14 @@ import {
   PieChart,
   Histogram,
   DataAnalysis,
+  DataLine,
   QuestionFilled
 } from '@element-plus/icons-vue'
+import { use as echartsUse } from 'echarts/core'
+import { RadarChart, LineChart } from 'echarts/charts'
+import { TitleComponent, TooltipComponent, LegendComponent, GridComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+import VChart from 'vue-echarts'
 import { screeningApi } from '@/api/screening'
 import type {
   ThreeBuysThreeSellsScanReq,
@@ -22,6 +28,9 @@ import type {
   ThreeBuysThreeSellsBacktestReq,
   ThreeBuysThreeSellsBacktestResp
 } from '@/api/screening'
+import RetailBuyDialog from './components/RetailBuyDialog.vue'
+
+echartsUse([RadarChart, LineChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent, CanvasRenderer])
 
 const STORAGE_KEY = 'three_buys_three_sells_scan_result'
 const BACKTEST_STORAGE_KEY = 'three_buys_three_sells_backtest_result'
@@ -34,6 +43,7 @@ const results = ref<ThreeBuysThreeSellsItem[]>([])
 const tookMs = ref<number>(0)
 const scannedCount = ref<number>(0)
 const marketTrend = ref<string>('')
+const introCollapsed = ref<string[]>([])
 
 function saveScanResult() {
   const data = {
@@ -259,6 +269,51 @@ const sellReasonStatsList = computed(() => {
   }))
 })
 
+const equityCurveOption = computed(() => {
+  if (!backtestResult.value?.daily_results?.length) return {}
+  const initial = backtestResult.value.initial_capital || backtestResult.value.daily_results[0]?.total_value || 1
+  const dates = backtestResult.value.daily_results.map((d: any) => d.date)
+  const values = backtestResult.value.daily_results.map((d: any) => {
+    return ((d.total_value - initial) / initial * 100).toFixed(2)
+  })
+  return {
+    tooltip: {
+      trigger: 'axis',
+      formatter: (params: any) => {
+        const p = params[0]
+        return `${p.name}<br/>收益率: <strong>${p.value}%</strong>`
+      }
+    },
+    grid: { left: 50, right: 20, top: 20, bottom: 30 },
+    xAxis: {
+      type: 'category',
+      data: dates,
+      axisLabel: { fontSize: 10, rotate: 30 }
+    },
+    yAxis: {
+      type: 'value',
+      axisLabel: { formatter: '{value}%', fontSize: 10 }
+    },
+    series: [{
+      type: 'line',
+      data: values,
+      smooth: true,
+      lineStyle: { color: '#409eff', width: 2 },
+      areaStyle: {
+        color: {
+          type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+          colorStops: [
+            { offset: 0, color: 'rgba(64, 158, 255, 0.3)' },
+            { offset: 1, color: 'rgba(64, 158, 255, 0.02)' }
+          ]
+        }
+      },
+      itemStyle: { color: '#409eff' },
+      symbol: 'none'
+    }]
+  }
+})
+
 function getSignalTypeTag(type: string): string {
   if (type.includes('B1')) return 'success'
   if (type.includes('B2')) return 'warning'
@@ -349,6 +404,26 @@ function addToFavorites(row: ThreeBuysThreeSellsItem) {
   ElMessage.success(`${row.name} 已加入自选`)
 }
 
+const buyDialogVisible = ref(false)
+const buyTarget = reactive({
+  code: '',
+  stockName: '',
+  price: 0,
+  strategy: 'three_buys_three_sells',
+})
+
+const openBuyDialog = (row: any) => {
+  buyTarget.code = row.code
+  buyTarget.stockName = row.name || ''
+  buyTarget.price = row.close || row.price || 0
+  buyTarget.strategy = 'three_buys_three_sells'
+  buyDialogVisible.value = true
+}
+
+const onBuySuccess = () => {
+  ElMessage.info('持仓已更新，可在模拟交易或持仓监控中查看')
+}
+
 function formatMoney(val: number): string {
   if (val >= 100000000) return (val / 100000000).toFixed(2) + '亿'
   if (val >= 10000) return (val / 10000).toFixed(2) + '万'
@@ -365,6 +440,80 @@ const tableHeight = computed(() => {
   // 表格高度 = 视口高度 - 顶部空间（页眉+标题+参数区）
   const headerOffset = 380
   return Math.max(400, windowHeight.value - headerOffset)
+})
+
+const avgScoreDetails = computed(() => {
+  if (!results.value.length) return {}
+  const allKeys: string[] = []
+  const allValues: Record<string, number[]> = {}
+  
+  results.value.forEach(item => {
+    if (!item.score_details || !Array.isArray(item.score_details)) return
+    item.score_details.forEach((detail: string) => {
+      const match = detail.match(/^(.+?)[:：]\s*(\d+(?:\.\d+)?)\/(\d+)/)
+      if (match) {
+        const key = match[1].trim()
+        const score = (parseFloat(match[2]) / parseFloat(match[3])) * 100
+        if (!allKeys.includes(key)) {
+          allKeys.push(key)
+          allValues[key] = []
+        }
+        allValues[key].push(score)
+      }
+    })
+  })
+  
+  const avg: Record<string, number> = {}
+  allKeys.forEach(key => {
+    const values = allValues[key]
+    avg[key] = values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0
+  })
+  return avg
+})
+
+const radarOption = computed(() => {
+  const details = avgScoreDetails.value
+  const indicators = Object.keys(details).map(key => ({
+    name: key,
+    max: 100
+  }))
+  return {
+    tooltip: {},
+    radar: {
+      indicator: indicators.length ? indicators : [{ name: '暂无数据', max: 100 }],
+      radius: '65%',
+      center: ['50%', '55%'],
+      axisName: {
+        fontSize: 11,
+        color: '#606266'
+      }
+    },
+    series: [{
+      type: 'radar',
+      data: [{
+        value: indicators.length ? Object.values(details) : [0],
+        name: '平均得分',
+        areaStyle: {
+          color: 'rgba(64, 158, 255, 0.2)'
+        },
+        lineStyle: {
+          color: '#409eff'
+        },
+        itemStyle: {
+          color: '#409eff'
+        }
+      }]
+    }]
+  }
+})
+
+const avgScore = computed(() => {
+  if (!results.value.length) return 0
+  return results.value.reduce((sum, r) => sum + (r.score || 0), 0) / results.value.length
+})
+
+const highScoreCount = computed(() => {
+  return results.value.filter(r => r.score >= 70).length
 })
 
 const backtestTableHeight = computed(() => {
@@ -396,66 +545,78 @@ onUnmounted(() => {
     </div>
 
     <!-- 策略原理卡片 -->
-    <el-row :gutter="16" class="strategy-cards">
-      <el-col :span="4" v-for="card in strategyCards" :key="card.type">
-        <el-card shadow="hover" class="strategy-card">
-          <div class="strategy-card-header" :style="{ borderColor: card.color }">
-            <span class="strategy-icon">{{ card.icon }}</span>
-            <span class="strategy-type" :style="{ color: card.color }">{{ card.type }}</span>
+    <el-collapse class="strategy-intro-collapse" v-model="introCollapsed">
+      <el-collapse-item name="intro">
+        <template #title>
+          <div class="collapse-title">
+            <el-icon><InfoFilled /></el-icon>
+            <span>策略原理</span>
+            <el-tag type="primary" size="small" effect="plain">趋势跟随/多级买卖</el-tag>
           </div>
-          <div class="strategy-card-title">{{ card.label }}</div>
-          <div class="strategy-card-desc">{{ card.desc }}</div>
-        </el-card>
-      </el-col>
-    </el-row>
+        </template>
 
-    <!-- 信号演化路径 - 改为垂直时间轴避免文字重叠 -->
-    <el-card class="evolution-panel" shadow="never">
-      <template #header>
-        <div class="card-header">
-          <div style="display: flex; align-items: center; gap: 12px;">
-            <el-icon :size="20"><TrendCharts /></el-icon>
-            <span class="panel-title">信号演化路径（按时间顺序）</span>
-          </div>
-          <el-tag type="info" size="small" effect="plain">从下跌到反转的完整交易周期</el-tag>
-        </div>
-      </template>
+        <div class="strategy-detail">
+          <el-row :gutter="16" class="strategy-cards">
+            <el-col :span="4" v-for="card in strategyCards" :key="card.type">
+              <el-card shadow="hover" class="strategy-card">
+                <div class="strategy-card-header" :style="{ borderColor: card.color }">
+                  <span class="strategy-icon">{{ card.icon }}</span>
+                  <span class="strategy-type" :style="{ color: card.color }">{{ card.type }}</span>
+                </div>
+                <div class="strategy-card-title">{{ card.label }}</div>
+                <div class="strategy-card-desc">{{ card.desc }}</div>
+              </el-card>
+            </el-col>
+          </el-row>
 
-      <div class="evolution-timeline">
-        <div v-for="(step, idx) in evolutionSteps" :key="idx" class="evolution-step">
-          <div class="step-marker">
-            <div class="step-dot" :class="'phase-' + (idx + 1)">{{ idx + 1 }}</div>
-            <div v-if="idx < evolutionSteps.length - 1" class="step-line"></div>
-          </div>
-          <div class="step-content">
-            <div class="step-phase-row">
-              <span class="step-phase">{{ step.phase }}</span>
-              <div class="step-signals">
-                <el-tag
-                  v-for="sig in step.signals"
-                  :key="sig"
-                  :type="getSignalTypeTag(sig) as any"
-                  size="small"
-                  effect="dark"
-                  class="step-signal-tag"
-                >
-                  {{ sig }}
-                </el-tag>
+          <!-- 信号演化路径 - 改为垂直时间轴避免文字重叠 -->
+          <div class="evolution-panel" style="margin-top: 16px;">
+            <div class="card-header" style="margin-bottom: 12px;">
+              <div style="display: flex; align-items: center; gap: 12px;">
+                <el-icon :size="20"><TrendCharts /></el-icon>
+                <span class="panel-title">信号演化路径（按时间顺序）</span>
+              </div>
+              <el-tag type="info" size="small" effect="plain">从下跌到反转的完整交易周期</el-tag>
+            </div>
+
+            <div class="evolution-timeline">
+              <div v-for="(step, idx) in evolutionSteps" :key="idx" class="evolution-step">
+                <div class="step-marker">
+                  <div class="step-dot" :class="'phase-' + (idx + 1)">{{ idx + 1 }}</div>
+                  <div v-if="idx < evolutionSteps.length - 1" class="step-line"></div>
+                </div>
+                <div class="step-content">
+                  <div class="step-phase-row">
+                    <span class="step-phase">{{ step.phase }}</span>
+                    <div class="step-signals">
+                      <el-tag
+                        v-for="sig in step.signals"
+                        :key="sig"
+                        :type="getSignalTypeTag(sig) as any"
+                        size="small"
+                        effect="dark"
+                        class="step-signal-tag"
+                      >
+                        {{ sig }}
+                      </el-tag>
+                    </div>
+                  </div>
+                  <div class="step-desc">{{ step.desc }}</div>
+                  <div class="step-action">
+                    <el-icon size="14" color="#409eff"><Position /></el-icon>
+                    <span class="step-action-text"><strong>操作指南：</strong>{{ step.action }}</span>
+                  </div>
+                  <div class="step-meta">
+                    <el-tag size="small" type="warning" effect="plain" class="step-meta-tag">{{ step.risk }}</el-tag>
+                    <el-tag size="small" type="primary" effect="plain" class="step-meta-tag">{{ step.position }}</el-tag>
+                  </div>
+                </div>
               </div>
             </div>
-            <div class="step-desc">{{ step.desc }}</div>
-            <div class="step-action">
-              <el-icon size="14" color="#409eff"><Position /></el-icon>
-              <span class="step-action-text"><strong>操作指南：</strong>{{ step.action }}</span>
-            </div>
-            <div class="step-meta">
-              <el-tag size="small" type="warning" effect="plain" class="step-meta-tag">{{ step.risk }}</el-tag>
-              <el-tag size="small" type="primary" effect="plain" class="step-meta-tag">{{ step.position }}</el-tag>
-            </div>
           </div>
         </div>
-      </div>
-    </el-card>
+      </el-collapse-item>
+    </el-collapse>
 
     <!-- 参数配置 -->
     <el-card class="params-panel" shadow="never" style="margin-top: 16px;">
@@ -539,6 +700,61 @@ onUnmounted(() => {
               </div>
             </div>
           </template>
+
+          <!-- 评分分析 -->
+          <el-row v-if="results.length > 0" :gutter="16" style="margin-bottom: 16px;">
+            <el-col :span="8">
+              <el-card shadow="never" class="radar-card">
+                <template #header>
+                  <div class="card-header">
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                      <el-icon><DataAnalysis /></el-icon>
+                      <span class="panel-title">评分维度雷达图</span>
+                    </div>
+                  </div>
+                </template>
+                <v-chart :option="radarOption" style="height: 280px;" autoresize />
+              </el-card>
+            </el-col>
+            <el-col :span="16">
+              <el-card shadow="never" class="score-stats-card">
+                <template #header>
+                  <div class="card-header">
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                      <el-icon><DataLine /></el-icon>
+                      <span class="panel-title">扫描结果统计</span>
+                    </div>
+                  </div>
+                </template>
+                <el-row :gutter="16">
+                  <el-col :span="6">
+                    <div class="stat-item">
+                      <div class="stat-value">{{ results.length }}</div>
+                      <div class="stat-label">符合条件股票</div>
+                    </div>
+                  </el-col>
+                  <el-col :span="6">
+                    <div class="stat-item">
+                      <div class="stat-value">{{ avgScore.toFixed(1) }}</div>
+                      <div class="stat-label">平均综合评分</div>
+                    </div>
+                  </el-col>
+                  <el-col :span="6">
+                    <div class="stat-item">
+                      <div class="stat-value">{{ highScoreCount }}</div>
+                      <div class="stat-label">高分股(≥70分)</div>
+                    </div>
+                  </el-col>
+                  <el-col :span="6">
+                    <div class="stat-item">
+                      <div class="stat-value">{{ (tookMs / 1000).toFixed(1) }}s</div>
+                      <div class="stat-label">扫描耗时</div>
+                    </div>
+                  </el-col>
+                </el-row>
+              </el-card>
+            </el-col>
+          </el-row>
 
           <div v-if="!loading && results.length === 0 && !hasSearched" class="empty-state">
             <el-empty description="调整参数后点击开始扫描">
@@ -653,10 +869,11 @@ onUnmounted(() => {
                 </el-tooltip>
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="140" fixed="right">
+            <el-table-column label="操作" width="200" fixed="right">
               <template #default="{ row }">
                 <router-link :to="{ path: '/analysis/single', query: { stock: row.code } }" class="table-link">分析</router-link>
                 <el-button type="success" link @click="addToFavorites(row)">自选</el-button>
+                <el-button type="primary" link @click="openBuyDialog(row)">买入</el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -964,6 +1181,18 @@ onUnmounted(() => {
             </el-col>
           </el-row>
 
+          <el-card shadow="never" style="margin-top: 16px;">
+            <template #header>
+              <div class="card-header">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                  <el-icon><TrendCharts /></el-icon>
+                  <span class="panel-title">收益曲线</span>
+                </div>
+              </div>
+            </template>
+            <v-chart :option="equityCurveOption" style="height: 300px;" autoresize />
+          </el-card>
+
           <el-row :gutter="16" style="margin-top: 16px;">
             <el-col :span="12">
               <el-card shadow="never">
@@ -1112,6 +1341,15 @@ onUnmounted(() => {
         </div>
       </el-tab-pane>
     </el-tabs>
+
+    <RetailBuyDialog
+      v-model:visible="buyDialogVisible"
+      :code="buyTarget.code"
+      :stock-name="buyTarget.stockName"
+      :price="buyTarget.price"
+      :strategy="buyTarget.strategy"
+      @success="onBuySuccess"
+    />
   </div>
 </template>
 
@@ -1140,8 +1378,23 @@ onUnmounted(() => {
   }
 }
 
-.strategy-cards {
-  margin-bottom: 16px;
+.strategy-intro-collapse {
+  margin-bottom: 0;
+  :deep(.el-collapse-item__header) {
+    height: 50px;
+    font-weight: 500;
+  }
+  .collapse-title {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 14px;
+  }
+  .strategy-cards {
+    margin-bottom: 0;
+  }
+  .evolution-panel {
+    border-radius: 8px;
+    padding: 0;
+  }
 }
 
 .strategy-card {
@@ -1481,6 +1734,25 @@ onUnmounted(() => {
 
   &:hover {
     color: var(--el-color-primary);
+  }
+}
+
+.radar-card, .score-stats-card {
+  height: 100%;
+}
+
+.stat-item {
+  text-align: center;
+  padding: 16px 0;
+  .stat-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--el-color-primary);
+    margin-bottom: 4px;
+  }
+  .stat-label {
+    font-size: 12px;
+    color: #909399;
   }
 }
 </style>

@@ -12,128 +12,128 @@
     </div>
 
     <!-- 策略说明卡片 -->
-    <el-card class="strategy-intro" shadow="never">
-      <template #header>
-        <div class="card-header">
-          <div style="display: flex; align-items: center; gap: 12px;">
+    <el-collapse class="strategy-intro-collapse" v-model="introCollapsed">
+      <el-collapse-item name="intro">
+        <template #title>
+          <div class="collapse-title">
             <el-icon><InfoFilled /></el-icon>
-            <span class="panel-title">策略原理</span>
+            <span>策略原理</span>
             <el-tag type="warning" size="small" effect="plain">龙回头/N字反包</el-tag>
           </div>
-        </div>
-      </template>
+        </template>
 
-      <div class="strategy-detail">
-        <p class="strategy-overview">
-          <strong>核心逻辑：</strong>主力用涨停板快速建仓或拉升后，会进行3-5天的缩量洗盘，清洗浮筹、测试支撑。
-          当洗盘末端出现<strong>地量+长下影线</strong>（抛压衰竭）或<strong>放量突破5日线</strong>（洗盘结束）时，
-          就是最佳介入时机，博弈主升浪启动。
-        </p>
-        
-        <el-row :gutter="16" style="margin-top: 16px;">
-          <el-col :span="4">
-            <div class="step-item">
-              <div class="step-number">1</div>
-              <div class="step-content">
-                <h4>涨停建仓</h4>
-                <p>涨停板是主力信号：快速吸筹或启动，表明有市场地位和资金关注。筛选近期涨停股作为候选池。</p>
+        <div class="strategy-detail">
+          <p class="strategy-overview">
+            <strong>核心逻辑：</strong>主力用涨停板快速建仓或拉升后，会进行3-5天的缩量洗盘，清洗浮筹、测试支撑。
+            当洗盘末端出现<strong>地量+长下影线</strong>（抛压衰竭）或<strong>放量突破5日线</strong>（洗盘结束）时，
+            就是最佳介入时机，博弈主升浪启动。
+          </p>
+          
+          <el-row :gutter="16" style="margin-top: 16px;">
+            <el-col :span="4">
+              <div class="step-item">
+                <div class="step-number">1</div>
+                <div class="step-content">
+                  <h4>涨停建仓</h4>
+                  <p>涨停板是主力信号：快速吸筹或启动，表明有市场地位和资金关注。筛选近期涨停股作为候选池。</p>
+                </div>
               </div>
-            </div>
-          </el-col>
-          <el-col :span="4">
-            <div class="step-item">
-              <div class="step-number">2</div>
-              <div class="step-content">
-                <h4>缩量洗盘</h4>
-                <p>涨停后3-8天缩量回调，成交量萎缩至涨停日的1/3以下，主力锁仓不动，散户恐慌抛售。回调期间收盘价基本在10日线上方。</p>
+            </el-col>
+            <el-col :span="4">
+              <div class="step-item">
+                <div class="step-number">2</div>
+                <div class="step-content">
+                  <h4>缩量洗盘</h4>
+                  <p>涨停后3-8天缩量回调，成交量萎缩至涨停日的1/3以下，主力锁仓不动，散户恐慌抛售。回调期间收盘价基本在10日线上方。</p>
+                </div>
               </div>
-            </div>
-          </el-col>
-          <el-col :span="4">
-            <div class="step-item">
-              <div class="step-number">3</div>
-              <div class="step-content">
-                <h4>地量止跌</h4>
-                <p>洗盘末端第3-5天出现地量（近20日最低且涨停日1/3以下）+长下影线（实体比≥2倍），抛压衰竭，左侧潜伏买点。</p>
+            </el-col>
+            <el-col :span="4">
+              <div class="step-item">
+                <div class="step-number">3</div>
+                <div class="step-content">
+                  <h4>地量止跌</h4>
+                  <p>洗盘末端第3-5天出现地量（近20日最低且涨停日1/3以下）+长下影线（实体比≥2倍），抛压衰竭，左侧潜伏买点。</p>
+                </div>
               </div>
-            </div>
-          </el-col>
-          <el-col :span="4">
-            <div class="step-item">
-              <div class="step-number">4</div>
-              <div class="step-content">
-                <h4>放量突破</h4>
-                <p>放量（≥1.5倍均量）站上5日线和回调前高，5日线走平上翘且上穿10日线，上影线≤2.5%，洗盘确认结束，右侧确认买点。</p>
+            </el-col>
+            <el-col :span="4">
+              <div class="step-item">
+                <div class="step-number">4</div>
+                <div class="step-content">
+                  <h4>放量突破</h4>
+                  <p>放量（≥1.5倍均量）站上5日线和回调前高，5日线走平上翘且上穿10日线，上影线≤2.5%，洗盘确认结束，右侧确认买点。</p>
+                </div>
               </div>
-            </div>
-          </el-col>
-          <el-col :span="4">
-            <div class="step-item">
-              <div class="step-number" style="background: #f56c6c;">5</div>
-              <div class="step-content">
-                <h4>动态止盈止损</h4>
-                <p>ATR止损（优先）：买入价下方0.4倍ATR；10日线止损（备选）；8天时间止盈；放量滞涨高位止盈；盈利后5日线/ATR移动止盈（取较高者）。</p>
+            </el-col>
+            <el-col :span="4">
+              <div class="step-item">
+                <div class="step-number" style="background: #f56c6c;">5</div>
+                <div class="step-content">
+                  <h4>动态止盈止损</h4>
+                  <p>ATR止损（优先）：买入价下方0.4倍ATR；10日线止损（备选）；8天时间止盈；放量滞涨高位止盈；盈利后5日线/ATR移动止盈（取较高者）。</p>
+                </div>
               </div>
-            </div>
-          </el-col>
-          <el-col :span="4">
-            <div class="step-item">
-              <div class="step-number" style="background: #409eff;">6</div>
-              <div class="step-content">
-                <h4>大盘环境过滤</h4>
-                <p>市场上涨比例低于30%时空仓回避，极端熊市不交易，只在市场环境较好时操作，大幅降低系统性风险。</p>
+            </el-col>
+            <el-col :span="4">
+              <div class="step-item">
+                <div class="step-number" style="background: #409eff;">6</div>
+                <div class="step-content">
+                  <h4>大盘环境过滤</h4>
+                  <p>市场上涨比例低于30%时空仓回避，极端熊市不交易，只在市场环境较好时操作，大幅降低系统性风险。</p>
+                </div>
               </div>
-            </div>
-          </el-col>
-        </el-row>
+            </el-col>
+          </el-row>
 
-        <!-- 信号演化路径 - 垂直时间轴布局，与三买三卖统一 -->
-        <div class="evolution-panel" style="margin-top: 16px;">
-          <div class="card-header" style="margin-bottom: 12px;">
-            <div style="display: flex; align-items: center; gap: 12px;">
-              <el-icon :size="20"><TrendCharts /></el-icon>
-              <span class="panel-title">信号演化路径（按时间顺序）</span>
-            </div>
-            <el-tag type="info" size="small" effect="plain">从涨停到止盈止损的完整交易周期</el-tag>
-          </div>
-
-          <div class="evolution-timeline">
-            <div v-for="(step, idx) in evolutionSteps" :key="idx" class="evolution-step">
-              <div class="step-marker">
-                <div class="step-dot" :class="'phase-' + (idx + 1)">{{ idx + 1 }}</div>
-                <div v-if="idx < evolutionSteps.length - 1" class="step-line"></div>
+          <!-- 信号演化路径 - 垂直时间轴布局，与三买三卖统一 -->
+          <div class="evolution-panel" style="margin-top: 16px;">
+            <div class="card-header" style="margin-bottom: 12px;">
+              <div style="display: flex; align-items: center; gap: 12px;">
+                <el-icon :size="20"><TrendCharts /></el-icon>
+                <span class="panel-title">信号演化路径（按时间顺序）</span>
               </div>
-              <div class="step-content">
-                <div class="step-phase-row">
-                  <span class="step-phase">{{ step.phase }}</span>
-                  <div class="step-signals">
-                    <el-tag
-                      v-for="sig in step.signals"
-                      :key="sig"
-                      :type="getEvolutionSignalTag(sig) as any"
-                      size="small"
-                      effect="dark"
-                      class="step-signal-tag"
-                    >
-                      {{ sig }}
-                    </el-tag>
+              <el-tag type="info" size="small" effect="plain">从涨停到止盈止损的完整交易周期</el-tag>
+            </div>
+
+            <div class="evolution-timeline">
+              <div v-for="(step, idx) in evolutionSteps" :key="idx" class="evolution-step">
+                <div class="step-marker">
+                  <div class="step-dot" :class="'phase-' + (idx + 1)">{{ idx + 1 }}</div>
+                  <div v-if="idx < evolutionSteps.length - 1" class="step-line"></div>
+                </div>
+                <div class="step-content">
+                  <div class="step-phase-row">
+                    <span class="step-phase">{{ step.phase }}</span>
+                    <div class="step-signals">
+                      <el-tag
+                        v-for="sig in step.signals"
+                        :key="sig"
+                        :type="getEvolutionSignalTag(sig) as any"
+                        size="small"
+                        effect="dark"
+                        class="step-signal-tag"
+                      >
+                        {{ sig }}
+                      </el-tag>
+                    </div>
+                  </div>
+                  <div class="step-desc">{{ step.desc }}</div>
+                  <div class="step-action">
+                    <el-icon size="14" color="#409eff"><Position /></el-icon>
+                    <span class="step-action-text"><strong>操作指南：</strong>{{ step.action }}</span>
+                  </div>
+                  <div class="step-meta">
+                    <el-tag size="small" type="warning" effect="plain" class="step-meta-tag">{{ step.risk }}</el-tag>
+                    <el-tag size="small" type="primary" effect="plain" class="step-meta-tag">{{ step.position }}</el-tag>
                   </div>
                 </div>
-                <div class="step-desc">{{ step.desc }}</div>
-                <div class="step-action">
-                  <el-icon size="14" color="#409eff"><Position /></el-icon>
-                  <span class="step-action-text"><strong>操作指南：</strong>{{ step.action }}</span>
-                </div>
-                <div class="step-meta">
-                  <el-tag size="small" type="warning" effect="plain" class="step-meta-tag">{{ step.risk }}</el-tag>
-                  <el-tag size="small" type="primary" effect="plain" class="step-meta-tag">{{ step.position }}</el-tag>
-                </div>
               </div>
             </div>
           </div>
         </div>
-      </div>
-    </el-card>
+      </el-collapse-item>
+    </el-collapse>
 
     <!-- 参数配置 -->
     <el-card class="params-panel" shadow="never" style="margin-top: 16px;">
@@ -211,6 +211,61 @@
               </div>
             </div>
           </template>
+
+          <!-- 评分分析 -->
+          <el-row v-if="results.length > 0" :gutter="16" style="margin-bottom: 16px;">
+            <el-col :span="8">
+              <el-card shadow="never" class="radar-card">
+                <template #header>
+                  <div class="card-header">
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                      <el-icon><DataAnalysis /></el-icon>
+                      <span class="panel-title">评分维度雷达图</span>
+                    </div>
+                  </div>
+                </template>
+                <v-chart :option="radarOption" style="height: 280px;" autoresize />
+              </el-card>
+            </el-col>
+            <el-col :span="16">
+              <el-card shadow="never" class="score-stats-card">
+                <template #header>
+                  <div class="card-header">
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                      <el-icon><DataLine /></el-icon>
+                      <span class="panel-title">扫描结果统计</span>
+                    </div>
+                  </div>
+                </template>
+                <el-row :gutter="16">
+                  <el-col :span="6">
+                    <div class="stat-item">
+                      <div class="stat-value">{{ results.length }}</div>
+                      <div class="stat-label">符合条件股票</div>
+                    </div>
+                  </el-col>
+                  <el-col :span="6">
+                    <div class="stat-item">
+                      <div class="stat-value">{{ avgScore.toFixed(1) }}</div>
+                      <div class="stat-label">平均综合评分</div>
+                    </div>
+                  </el-col>
+                  <el-col :span="6">
+                    <div class="stat-item">
+                      <div class="stat-value">{{ highScoreCount }}</div>
+                      <div class="stat-label">高分股(≥70分)</div>
+                    </div>
+                  </el-col>
+                  <el-col :span="6">
+                    <div class="stat-item">
+                      <div class="stat-value">{{ (tookMs / 1000).toFixed(1) }}s</div>
+                      <div class="stat-label">扫描耗时</div>
+                    </div>
+                  </el-col>
+                </el-row>
+              </el-card>
+            </el-col>
+          </el-row>
 
           <!-- 空状态 -->
           <div v-if="!loading && results.length === 0 && !hasSearched" class="empty-state">
@@ -335,10 +390,11 @@
                 </el-tooltip>
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="140" fixed="right">
+            <el-table-column label="操作" width="200" fixed="right">
               <template #default="{ row }">
                 <router-link :to="{ path: '/analysis/single', query: { stock: row.code } }" class="table-link">分析</router-link>
                 <el-button type="success" link @click="addToFavorites(row)">自选</el-button>
+                <el-button type="primary" link @click="openBuyDialog(row)">买入</el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -617,6 +673,18 @@
             </el-col>
           </el-row>
 
+          <el-card shadow="never" style="margin-top: 16px;">
+            <template #header>
+              <div class="card-header">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                  <el-icon><TrendCharts /></el-icon>
+                  <span class="panel-title">收益曲线</span>
+                </div>
+              </div>
+            </template>
+            <v-chart :option="equityCurveOption" style="height: 300px;" autoresize />
+          </el-card>
+
           <!-- 信号类型统计 + 卖出原因统计 -->
           <el-row :gutter="16" style="margin-top: 16px;">
             <el-col :span="12">
@@ -836,6 +904,15 @@
         </div>
       </el-tab-pane>
     </el-tabs>
+
+    <RetailBuyDialog
+      v-model:visible="buyDialogVisible"
+      :code="buyTarget.code"
+      :stock-name="buyTarget.stockName"
+      :price="buyTarget.price"
+      :strategy="buyTarget.strategy"
+      @success="onBuySuccess"
+    />
   </div>
 </template>
 
@@ -850,9 +927,15 @@ import {
   Search,
   List,
   DataLine,
+  DataAnalysis,
   QuestionFilled,
   Position
 } from '@element-plus/icons-vue'
+import { use as echartsUse } from 'echarts/core'
+import { RadarChart, LineChart } from 'echarts/charts'
+import { TitleComponent, TooltipComponent, LegendComponent, GridComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+import VChart from 'vue-echarts'
 import {
   screeningApi,
   type LimitUpPullbackItem,
@@ -861,6 +944,9 @@ import {
   type LimitUpPullbackBacktestResp
 } from '@/api/screening'
 import { favoritesApi } from '@/api/favorites'
+import RetailBuyDialog from './components/RetailBuyDialog.vue'
+
+echartsUse([RadarChart, LineChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent, CanvasRenderer])
 
 const router = useRouter()
 
@@ -873,6 +959,7 @@ const loading = ref(false)
 const results = ref<LimitUpPullbackItem[]>([])
 const tookMs = ref(0)
 const hasSearched = ref(false)
+const introCollapsed = ref<string[]>([])
 
 function saveScanResult() {
   const data = {
@@ -1048,6 +1135,51 @@ const sellReasonStatsList = computed(() => {
   }))
 })
 
+const equityCurveOption = computed(() => {
+  if (!backtestResult.value?.daily_results?.length) return {}
+  const initial = backtestResult.value.initial_capital || backtestResult.value.daily_results[0]?.total_value || 1
+  const dates = backtestResult.value.daily_results.map((d: any) => d.date)
+  const values = backtestResult.value.daily_results.map((d: any) => {
+    return ((d.total_value - initial) / initial * 100).toFixed(2)
+  })
+  return {
+    tooltip: {
+      trigger: 'axis',
+      formatter: (params: any) => {
+        const p = params[0]
+        return `${p.name}<br/>收益率: <strong>${p.value}%</strong>`
+      }
+    },
+    grid: { left: 50, right: 20, top: 20, bottom: 30 },
+    xAxis: {
+      type: 'category',
+      data: dates,
+      axisLabel: { fontSize: 10, rotate: 30 }
+    },
+    yAxis: {
+      type: 'value',
+      axisLabel: { formatter: '{value}%', fontSize: 10 }
+    },
+    series: [{
+      type: 'line',
+      data: values,
+      smooth: true,
+      lineStyle: { color: '#409eff', width: 2 },
+      areaStyle: {
+        color: {
+          type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+          colorStops: [
+            { offset: 0, color: 'rgba(64, 158, 255, 0.3)' },
+            { offset: 1, color: 'rgba(64, 158, 255, 0.02)' }
+          ]
+        }
+      },
+      itemStyle: { color: '#409eff' },
+      symbol: 'none'
+    }]
+  }
+})
+
 const defaultParams = {
   min_score: 40,
   limit: 50
@@ -1108,6 +1240,26 @@ const addToFavorites = async (row: LimitUpPullbackItem) => {
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || e?.message || '添加自选失败')
   }
+}
+
+const buyDialogVisible = ref(false)
+const buyTarget = reactive({
+  code: '',
+  stockName: '',
+  price: 0,
+  strategy: 'limit_up_pullback',
+})
+
+const openBuyDialog = (row: any) => {
+  buyTarget.code = row.code
+  buyTarget.stockName = row.name || ''
+  buyTarget.price = row.close || row.price || 0
+  buyTarget.strategy = 'limit_up_pullback'
+  buyDialogVisible.value = true
+}
+
+const onBuySuccess = () => {
+  ElMessage.info('持仓已更新，可在模拟交易或持仓监控中查看')
 }
 
 const doBacktest = async () => {
@@ -1187,6 +1339,80 @@ const tableHeight = computed(() => {
   return Math.max(400, windowHeight.value - headerOffset)
 })
 
+const avgScoreDetails = computed(() => {
+  if (!results.value.length) return {}
+  const allKeys: string[] = []
+  const allValues: Record<string, number[]> = {}
+  
+  results.value.forEach(item => {
+    if (!item.score_details || !Array.isArray(item.score_details)) return
+    item.score_details.forEach((detail: string) => {
+      const match = detail.match(/^(.+?)[:：]\s*(\d+(?:\.\d+)?)\/(\d+)/)
+      if (match) {
+        const key = match[1].trim()
+        const score = (parseFloat(match[2]) / parseFloat(match[3])) * 100
+        if (!allKeys.includes(key)) {
+          allKeys.push(key)
+          allValues[key] = []
+        }
+        allValues[key].push(score)
+      }
+    })
+  })
+  
+  const avg: Record<string, number> = {}
+  allKeys.forEach(key => {
+    const values = allValues[key]
+    avg[key] = values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0
+  })
+  return avg
+})
+
+const radarOption = computed(() => {
+  const details = avgScoreDetails.value
+  const indicators = Object.keys(details).map(key => ({
+    name: key,
+    max: 100
+  }))
+  return {
+    tooltip: {},
+    radar: {
+      indicator: indicators.length ? indicators : [{ name: '暂无数据', max: 100 }],
+      radius: '65%',
+      center: ['50%', '55%'],
+      axisName: {
+        fontSize: 11,
+        color: '#606266'
+      }
+    },
+    series: [{
+      type: 'radar',
+      data: [{
+        value: indicators.length ? Object.values(details) : [0],
+        name: '平均得分',
+        areaStyle: {
+          color: 'rgba(64, 158, 255, 0.2)'
+        },
+        lineStyle: {
+          color: '#409eff'
+        },
+        itemStyle: {
+          color: '#409eff'
+        }
+      }]
+    }]
+  }
+})
+
+const avgScore = computed(() => {
+  if (!results.value.length) return 0
+  return results.value.reduce((sum, r) => sum + (r.score || 0), 0) / results.value.length
+})
+
+const highScoreCount = computed(() => {
+  return results.value.filter(r => r.score >= 70).length
+})
+
 const backtestTableHeight = computed(() => {
   return Math.min(500, Math.max(300, windowHeight.value - 500))
 })
@@ -1245,7 +1471,16 @@ onUnmounted(() => {
   }
 }
 
-.strategy-intro {
+.strategy-intro-collapse {
+  margin-bottom: 0;
+  :deep(.el-collapse-item__header) {
+    height: 50px;
+    font-weight: 500;
+  }
+  .collapse-title {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 14px;
+  }
   .step-item {
     display: flex;
     gap: 12px;
@@ -1672,6 +1907,25 @@ onUnmounted(() => {
     &.down {
       color: var(--el-color-success);
     }
+  }
+}
+
+.radar-card, .score-stats-card {
+  height: 100%;
+}
+
+.stat-item {
+  text-align: center;
+  padding: 16px 0;
+  .stat-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--el-color-primary);
+    margin-bottom: 4px;
+  }
+  .stat-label {
+    font-size: 12px;
+    color: #909399;
   }
 }
 </style>

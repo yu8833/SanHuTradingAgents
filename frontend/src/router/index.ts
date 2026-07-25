@@ -176,6 +176,16 @@ const routes: RouteRecordRaw[] = [
         }
       },
       {
+        path: 'comparison',
+        name: 'StrategyComparison',
+        component: () => import('@/views/Screening/StrategyComparison.vue'),
+        meta: {
+          title: '策略对比',
+          parentTitle: '选股',
+          requiresAuth: true
+        }
+      },
+      {
         path: 'retail-center',
         name: 'RetailCenter',
         component: () => import('@/views/Screening/RetailCenter.vue'),

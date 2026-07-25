@@ -12,32 +12,32 @@
     </div>
 
     <!-- 策略原理卡片 -->
-    <el-card class="strategy-intro" shadow="never">
-      <template #header>
-        <div class="card-header">
-          <div style="display: flex; align-items: center; gap: 12px;">
+    <el-collapse class="strategy-intro-collapse" v-model="introCollapsed">
+      <el-collapse-item name="intro">
+        <template #title>
+          <div class="collapse-title">
             <el-icon><InfoFilled /></el-icon>
-            <span class="panel-title">策略原理</span>
+            <span>策略原理</span>
             <el-tag type="danger" size="small" effect="plain">超跌反弹/恐慌反转</el-tag>
           </div>
+        </template>
+        <div class="strategy-detail">
+          <p class="strategy-overview">
+            <strong>核心逻辑：</strong>当股票因突发利空或市场恐慌出现<strong>连续跌停</strong>，价格短期内大幅下挫，
+            但公司基本面并未发生实质性恶化时，恐慌盘出尽后往往出现技术性反弹。
+            本策略在跌停打开、抛压衰竭的关键位置博弈超跌反弹。
+          </p>
+          <p class="strategy-overview" style="margin-top: 12px;">
+            <strong>关键信号：</strong>连续跌停天数≥2、累计跌幅≥15%、PE/PB分位处于历史低位（&lt;30%）、
+            量能萎缩显示抛压减弱、信号类型分为左侧潜伏与右侧确认两种。
+          </p>
+          <p class="strategy-overview" style="margin-top: 12px;">
+            <strong>风险提示：</strong>极端反转属于逆向博弈，反弹幅度不确定，需严格设置止损（跌破买入价5%立即止损），
+            不追高、不重仓、不留隔夜重仓，避免遇到基本面真实恶化的"假反转"。
+          </p>
         </div>
-      </template>
-      <div class="strategy-detail">
-        <p class="strategy-overview">
-          <strong>核心逻辑：</strong>当股票因突发利空或市场恐慌出现<strong>连续跌停</strong>，价格短期内大幅下挫，
-          但公司基本面并未发生实质性恶化时，恐慌盘出尽后往往出现技术性反弹。
-          本策略在跌停打开、抛压衰竭的关键位置博弈超跌反弹。
-        </p>
-        <p class="strategy-overview" style="margin-top: 12px;">
-          <strong>关键信号：</strong>连续跌停天数≥2、累计跌幅≥15%、PE/PB分位处于历史低位（&lt;30%）、
-          量能萎缩显示抛压减弱、信号类型分为左侧潜伏与右侧确认两种。
-        </p>
-        <p class="strategy-overview" style="margin-top: 12px;">
-          <strong>风险提示：</strong>极端反转属于逆向博弈，反弹幅度不确定，需严格设置止损（跌破买入价5%立即止损），
-          不追高、不重仓、不留隔夜重仓，避免遇到基本面真实恶化的"假反转"。
-        </p>
-      </div>
-    </el-card>
+      </el-collapse-item>
+    </el-collapse>
 
     <!-- 参数配置 -->
     <el-card class="params-panel" shadow="never" style="margin-top: 16px;">
@@ -96,6 +96,61 @@
               </div>
             </div>
           </template>
+
+          <!-- 评分分析 -->
+          <el-row v-if="results.length > 0" :gutter="16" style="margin-bottom: 16px;">
+            <el-col :span="8">
+              <el-card shadow="never" class="radar-card">
+                <template #header>
+                  <div class="card-header">
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                      <el-icon><DataAnalysis /></el-icon>
+                      <span class="panel-title">评分维度雷达图</span>
+                    </div>
+                  </div>
+                </template>
+                <v-chart :option="radarOption" style="height: 280px;" autoresize />
+              </el-card>
+            </el-col>
+            <el-col :span="16">
+              <el-card shadow="never" class="score-stats-card">
+                <template #header>
+                  <div class="card-header">
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                      <el-icon><DataLine /></el-icon>
+                      <span class="panel-title">扫描结果统计</span>
+                    </div>
+                  </div>
+                </template>
+                <el-row :gutter="16">
+                  <el-col :span="6">
+                    <div class="stat-item">
+                      <div class="stat-value">{{ results.length }}</div>
+                      <div class="stat-label">符合条件股票</div>
+                    </div>
+                  </el-col>
+                  <el-col :span="6">
+                    <div class="stat-item">
+                      <div class="stat-value">{{ avgScore.toFixed(1) }}</div>
+                      <div class="stat-label">平均综合评分</div>
+                    </div>
+                  </el-col>
+                  <el-col :span="6">
+                    <div class="stat-item">
+                      <div class="stat-value">{{ highScoreCount }}</div>
+                      <div class="stat-label">高分股(≥70分)</div>
+                    </div>
+                  </el-col>
+                  <el-col :span="6">
+                    <div class="stat-item">
+                      <div class="stat-value">{{ (tookMs / 1000).toFixed(1) }}s</div>
+                      <div class="stat-label">扫描耗时</div>
+                    </div>
+                  </el-col>
+                </el-row>
+              </el-card>
+            </el-col>
+          </el-row>
 
           <div v-if="!loading && results.length === 0 && !hasSearched" class="empty-state">
             <el-empty description="调整参数后点击开始扫描">
@@ -157,9 +212,29 @@
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="score" label="综合评分" width="120" sortable fixed="right">
+            <el-table-column prop="score" label="综合评分" width="130" sortable fixed="right">
               <template #default="{ row }">
-                <el-progress :percentage="row.score" :color="getScoreColor(row.score)" :stroke-width="12" />
+                <el-popover placement="left" :width="240" trigger="click">
+                  <template #reference>
+                    <div class="score-cell">
+                      <el-progress :percentage="row.score" :color="getScoreColor(row.score)" :stroke-width="12" />
+                      <span class="score-hint">点击查看明细</span>
+                    </div>
+                  </template>
+                  <div class="score-detail-popover">
+                    <div class="score-detail-title">评分明细</div>
+                    <div v-if="row.score_details && Object.keys(row.score_details).length" class="score-detail-list">
+                      <div v-for="(val, key) in row.score_details" :key="key" class="score-detail-item">
+                        <span class="score-detail-label">{{ key }}</span>
+                        <div class="score-detail-bar-wrap">
+                          <el-progress :percentage="typeof val === 'number' ? Math.min(100, val) : 0" :stroke-width="8" :show-text="false" :color="getScoreColor(val as number)" />
+                        </div>
+                        <span class="score-detail-val">{{ typeof val === 'number' ? val.toFixed(1) : val }}分</span>
+                      </div>
+                    </div>
+                    <div v-else class="score-detail-empty">暂无评分明细</div>
+                  </div>
+                </el-popover>
               </template>
             </el-table-column>
             <el-table-column label="风险" width="100" fixed="right">
@@ -255,6 +330,18 @@
             <el-col :span="6"><el-card shadow="never" class="metric-card"><div class="metric-label">年化收益</div><div class="metric-value" :class="backtestResult.annualized_return >= 0 ? 'up' : 'down'">{{ backtestResult.annualized_return >= 0 ? '+' : '' }}{{ backtestResult.annualized_return.toFixed(2) }}%</div></el-card></el-col>
           </el-row>
 
+          <el-card shadow="never" style="margin-top: 16px;">
+            <template #header>
+              <div class="card-header">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                  <el-icon><TrendCharts /></el-icon>
+                  <span class="panel-title">收益曲线</span>
+                </div>
+              </div>
+            </template>
+            <v-chart :option="equityCurveOption" style="height: 300px;" autoresize />
+          </el-card>
+
           <!-- 卖出原因统计 -->
           <el-card shadow="never" style="margin-top: 16px;">
             <template #header><div class="card-header"><span>卖出原因统计</span></div></template>
@@ -338,10 +425,17 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { TrendCharts, InfoFilled, Refresh, Search, List, DataLine } from '@element-plus/icons-vue'
+import { TrendCharts, InfoFilled, Refresh, Search, List, DataLine, DataAnalysis } from '@element-plus/icons-vue'
+import { use as echartsUse } from 'echarts/core'
+import { RadarChart, LineChart } from 'echarts/charts'
+import { TitleComponent, TooltipComponent, LegendComponent, GridComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+import VChart from 'vue-echarts'
 import { screeningApi, type RetailScanReq, type RetailBacktestReq, type RetailScanResp, type RetailBacktestResp } from '@/api/screening'
 import { favoritesApi } from '@/api/favorites'
 import RetailBuyDialog from './components/RetailBuyDialog.vue'
+
+echartsUse([RadarChart, LineChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent, CanvasRenderer])
 
 const STORAGE_KEY = 'extreme_reversal_scan_result'
 const BACKTEST_STORAGE_KEY = 'extreme_reversal_backtest_result'
@@ -352,6 +446,7 @@ const loading = ref(false)
 const results = ref<RetailScanResp['items']>([])
 const tookMs = ref(0)
 const hasSearched = ref(false)
+const introCollapsed = ref<string[]>([])
 
 function saveScanResult() {
   const data = {
@@ -480,6 +575,51 @@ const sellReasonStatsList = computed(() => {
   }))
 })
 
+const equityCurveOption = computed(() => {
+  if (!backtestResult.value?.daily_results?.length) return {}
+  const initial = backtestResult.value.initial_capital || backtestResult.value.daily_results[0]?.total_value || 1
+  const dates = backtestResult.value.daily_results.map((d: any) => d.date)
+  const values = backtestResult.value.daily_results.map((d: any) => {
+    return ((d.total_value - initial) / initial * 100).toFixed(2)
+  })
+  return {
+    tooltip: {
+      trigger: 'axis',
+      formatter: (params: any) => {
+        const p = params[0]
+        return `${p.name}<br/>收益率: <strong>${p.value}%</strong>`
+      }
+    },
+    grid: { left: 50, right: 20, top: 20, bottom: 30 },
+    xAxis: {
+      type: 'category',
+      data: dates,
+      axisLabel: { fontSize: 10, rotate: 30 }
+    },
+    yAxis: {
+      type: 'value',
+      axisLabel: { formatter: '{value}%', fontSize: 10 }
+    },
+    series: [{
+      type: 'line',
+      data: values,
+      smooth: true,
+      lineStyle: { color: '#409eff', width: 2 },
+      areaStyle: {
+        color: {
+          type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+          colorStops: [
+            { offset: 0, color: 'rgba(64, 158, 255, 0.3)' },
+            { offset: 1, color: 'rgba(64, 158, 255, 0.02)' }
+          ]
+        }
+      },
+      itemStyle: { color: '#409eff' },
+      symbol: 'none'
+    }]
+  }
+})
+
 const doBacktest = async () => {
   if (!backtestParams.start_date || !backtestParams.end_date) {
     ElMessage.warning('请选择回测开始和结束日期')
@@ -568,6 +708,74 @@ const getRiskLabel = (riskInfo: any) => {
 
 const formatNum = (n: any) => (typeof n === 'number' ? n.toFixed(2) : '-')
 
+const avgScoreDetails = computed(() => {
+  if (!results.value.length) return {}
+  const first = results.value[0]
+  if (!first?.score_details) return {}
+  const keys = Object.keys(first.score_details)
+  const avg: Record<string, number> = {}
+  keys.forEach(key => {
+    const values = results.value
+      .map(r => {
+        const v = r.score_details?.[key]
+        if (typeof v === 'number') return v
+        if (typeof v === 'string') {
+          const match = v.match(/(\d+(?:\.\d+)?)\/(\d+)/)
+          if (match) return (parseFloat(match[1]) / parseFloat(match[2])) * 100
+        }
+        return 0
+      })
+      .filter(v => typeof v === 'number' && !isNaN(v))
+    avg[key] = values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0
+  })
+  return avg
+})
+
+const radarOption = computed(() => {
+  const details = avgScoreDetails.value
+  const indicators = Object.keys(details).map(key => ({
+    name: key,
+    max: 100
+  }))
+  return {
+    tooltip: {},
+    radar: {
+      indicator: indicators.length ? indicators : [{ name: '暂无数据', max: 100 }],
+      radius: '65%',
+      center: ['50%', '55%'],
+      axisName: {
+        fontSize: 11,
+        color: '#606266'
+      }
+    },
+    series: [{
+      type: 'radar',
+      data: [{
+        value: indicators.length ? Object.values(details) : [0],
+        name: '平均得分',
+        areaStyle: {
+          color: 'rgba(64, 158, 255, 0.2)'
+        },
+        lineStyle: {
+          color: '#409eff'
+        },
+        itemStyle: {
+          color: '#409eff'
+        }
+      }]
+    }]
+  }
+})
+
+const avgScore = computed(() => {
+  if (!results.value.length) return 0
+  return results.value.reduce((sum, r) => sum + (r.score || 0), 0) / results.value.length
+})
+
+const highScoreCount = computed(() => {
+  return results.value.filter(r => r.score >= 70).length
+})
+
 const windowHeight = ref(window.innerHeight)
 function handleResize() { windowHeight.value = window.innerHeight }
 const tableHeight = computed(() => Math.max(400, windowHeight.value - 420))
@@ -597,6 +805,18 @@ onUnmounted(() => { window.removeEventListener('resize', handleResize) })
 
 .card-header {
   display: flex; justify-content: space-between; align-items: center; width: 100%;
+}
+
+.strategy-intro-collapse {
+  margin-bottom: 0;
+  :deep(.el-collapse-item__header) {
+    height: 50px;
+    font-weight: 500;
+  }
+  .collapse-title {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 14px;
+  }
 }
 
 .strategy-detail .strategy-overview {
@@ -645,6 +865,79 @@ onUnmounted(() => { window.removeEventListener('resize', handleResize) })
     color: var(--el-text-color-primary); line-height: 1.2;
     &.up { color: var(--el-color-danger); }
     &.down { color: var(--el-color-success); }
+  }
+}
+
+.score-cell {
+  cursor: pointer;
+  .score-hint {
+    display: block;
+    font-size: 10px;
+    color: #909399;
+    margin-top: 2px;
+    text-align: center;
+  }
+}
+.score-detail-popover {
+  .score-detail-title {
+    font-weight: 600;
+    font-size: 13px;
+    margin-bottom: 8px;
+    color: var(--el-text-color-primary);
+  }
+  .score-detail-list {
+    max-height: 240px;
+    overflow-y: auto;
+  }
+  .score-detail-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+    &:last-child { margin-bottom: 0; }
+  }
+  .score-detail-label {
+    font-size: 12px;
+    color: var(--el-text-color-regular);
+    white-space: nowrap;
+    width: 70px;
+    flex-shrink: 0;
+  }
+  .score-detail-bar-wrap {
+    flex: 1;
+  }
+  .score-detail-val {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--el-text-color-primary);
+    width: 40px;
+    text-align: right;
+    flex-shrink: 0;
+  }
+  .score-detail-empty {
+    font-size: 12px;
+    color: #909399;
+    text-align: center;
+    padding: 8px 0;
+  }
+}
+
+.radar-card, .score-stats-card {
+  height: 100%;
+}
+
+.stat-item {
+  text-align: center;
+  padding: 16px 0;
+  .stat-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--el-color-primary);
+    margin-bottom: 4px;
+  }
+  .stat-label {
+    font-size: 12px;
+    color: #909399;
   }
 }
 </style>
