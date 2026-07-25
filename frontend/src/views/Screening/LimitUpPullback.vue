@@ -214,20 +214,7 @@
 
           <!-- 评分分析 -->
           <el-row v-if="results.length > 0" :gutter="16" style="margin-bottom: 16px;">
-            <el-col :span="8">
-              <el-card shadow="never" class="radar-card">
-                <template #header>
-                  <div class="card-header">
-                    <div style="display: flex; align-items: center; gap: 12px;">
-                      <el-icon><DataAnalysis /></el-icon>
-                      <span class="panel-title">评分维度雷达图</span>
-                    </div>
-                  </div>
-                </template>
-                <v-chart :option="radarOption" style="height: 280px;" autoresize />
-              </el-card>
-            </el-col>
-            <el-col :span="16">
+            <el-col :span="24">
               <el-card shadow="never" class="score-stats-card">
                 <template #header>
                   <div class="card-header">
@@ -360,34 +347,28 @@
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="score" label="综合评分" width="100" sortable fixed="right">
+            <el-table-column prop="score" label="综合评分" width="120" sortable fixed="right">
               <template #default="{ row }">
-                <el-tooltip effect="dark" placement="top">
-                  <template #content>
-                    <div class="tooltip-detail">
-                      <p><strong>评分说明：</strong>综合评分采用100分制，从以下维度评估信号质量：</p>
-                      <p style="margin-top: 6px;">• 缩量评分（20分）：缩量越明显分数越高</p>
-                      <p>• 回调幅度（15分）：回调5-15%最佳</p>
-                      <p>• 地量评分（15分）：地量出现且为20日最低量得高分</p>
-                      <p>• 下影线评分（15分）：下影线越长，支撑越强</p>
-                      <p>• 空间位置（10分）：未破涨停实体一半得满分</p>
-                      <p>• 站上10日线（10分）：价格站上10日线得满分</p>
-                      <p>• 小阴小阳（5分）：K线实体小说明抛压轻</p>
-                      <p>• 突破5日线（25分）：放量突破5日线确认右侧</p>
-                      <p style="margin-top: 6px;"><strong>当前评分：</strong>{{ row.score }}分</p>
-                      <div v-if="row.score_details?.length" style="margin-top: 6px; font-size: 12px; color: #666;">
-                        <p style="margin-bottom: 4px;"><strong>评分明细：</strong></p>
-                        <p v-for="(detail, idx) in row.score_details" :key="idx">{{ detail }}</p>
-                      </div>
+                <el-popover placement="left" :width="400" trigger="click">
+                  <template #reference>
+                    <div class="score-cell">
+                      <el-progress :percentage="row.score" :color="getScoreColor(row.score)" :show-text="true" :stroke-width="12" />
+                      <span class="score-hint">点击查看明细</span>
                     </div>
                   </template>
-                  <el-progress
-                    :percentage="row.score"
-                    :color="getScoreColor(row.score)"
-                    :show-text="true"
-                    :stroke-width="12"
-                  />
-                </el-tooltip>
+                  <div class="score-detail-popover">
+                    <div class="score-detail-title">评分明细</div>
+                    <div v-if="getScoreRadarOption(row)" class="score-radar-wrap">
+                      <v-chart :option="getScoreRadarOption(row)" style="height: 220px;" autoresize />
+                    </div>
+                    <div v-if="row.score_details && row.score_details.length" class="score-detail-list">
+                      <div v-for="(detail, idx) in row.score_details" :key="idx" class="score-detail-text-item">
+                        {{ detail }}
+                      </div>
+                    </div>
+                    <div v-else class="score-detail-empty">暂无评分明细</div>
+                  </div>
+                </el-popover>
               </template>
             </el-table-column>
             <el-table-column label="操作" width="200" fixed="right">
@@ -1339,70 +1320,84 @@ const tableHeight = computed(() => {
   return Math.max(400, windowHeight.value - headerOffset)
 })
 
-const avgScoreDetails = computed(() => {
-  if (!results.value.length) return {}
-  const allKeys: string[] = []
-  const allValues: Record<string, number[]> = {}
-  
-  results.value.forEach(item => {
-    if (!item.score_details || !Array.isArray(item.score_details)) return
-    item.score_details.forEach((detail: string) => {
-      const match = detail.match(/^(.+?)[:：]\s*(\d+(?:\.\d+)?)\/(\d+)/)
-      if (match) {
-        const key = match[1].trim()
-        const score = (parseFloat(match[2]) / parseFloat(match[3])) * 100
-        if (!allKeys.includes(key)) {
-          allKeys.push(key)
-          allValues[key] = []
+const scoreDimMax: Record<string, number> = {
+  '缩量评分': 20,
+  '回调幅度': 15,
+  '地量评分': 15,
+  '下影线评分': 15,
+  '空间位置': 10,
+  '站上10日线': 10,
+  '小阴小阳': 5,
+  '突破5日线': 25,
+}
+
+function getScoreRadarOption(row: any) {
+  const details = row.score_details
+  if (!details || (Array.isArray(details) ? details.length === 0 : Object.keys(details).length === 0)) return null
+
+  const dims: { name: string; value: number; max: number }[] = []
+
+  if (Array.isArray(details)) {
+    details.forEach((d: any) => {
+      if (typeof d === 'string') {
+        const match = d.match(/^(.+?)[:：]\s*(\d+(?:\.\d+)?)(?:\/(\d+))?/)
+        if (match) {
+          const name = match[1].trim()
+          const value = parseFloat(match[2])
+          const max = match[3] ? parseFloat(match[3]) : (scoreDimMax[name] || 100)
+          dims.push({ name, value: (value / max) * 100, max: 100 })
         }
-        allValues[key].push(score)
       }
     })
-  })
-  
-  const avg: Record<string, number> = {}
-  allKeys.forEach(key => {
-    const values = allValues[key]
-    avg[key] = values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0
-  })
-  return avg
-})
+  } else {
+    Object.entries(details).forEach(([key, val]: [string, any]) => {
+      let value = 0
+      const max = scoreDimMax[key] || 100
+      if (typeof val === 'number') {
+        value = val
+      } else if (typeof val === 'string') {
+        const match = val.match(/(\d+(?:\.\d+)?)\/(\d+)/)
+        if (match) {
+          value = parseFloat(match[1])
+          dims.push({ name: key, value: (value / parseFloat(match[2])) * 100, max: 100 })
+          return
+        }
+      }
+      dims.push({ name: key, value: (value / max) * 100, max: 100 })
+    })
+  }
 
-const radarOption = computed(() => {
-  const details = avgScoreDetails.value
-  const indicators = Object.keys(details).map(key => ({
-    name: key,
-    max: 100
-  }))
+  if (!dims.length) return null
+
   return {
-    tooltip: {},
+    tooltip: {
+      formatter: (params: any) => {
+        const data = params.value
+        return dims.map((d, i) => `${d.name}: ${data[i].toFixed(0)}%`).join('<br/>')
+      }
+    },
     radar: {
-      indicator: indicators.length ? indicators : [{ name: '暂无数据', max: 100 }],
-      radius: '65%',
+      indicator: dims.map(d => ({ name: d.name, max: 100 })),
+      radius: '60%',
       center: ['50%', '55%'],
-      axisName: {
-        fontSize: 11,
-        color: '#606266'
+      axisName: { fontSize: 11, color: '#606266' },
+      splitArea: {
+        areaStyle: {
+          color: ['rgba(64, 158, 255, 0.02)', 'rgba(64, 158, 255, 0.05)', 'rgba(64, 158, 255, 0.08)', 'rgba(64, 158, 255, 0.12)']
+        }
       }
     },
     series: [{
       type: 'radar',
       data: [{
-        value: indicators.length ? Object.values(details) : [0],
-        name: '平均得分',
-        areaStyle: {
-          color: 'rgba(64, 158, 255, 0.2)'
-        },
-        lineStyle: {
-          color: '#409eff'
-        },
-        itemStyle: {
-          color: '#409eff'
-        }
+        value: dims.map(d => d.value),
+        areaStyle: { color: 'rgba(64, 158, 255, 0.2)' },
+        lineStyle: { color: '#409eff', width: 2 },
+        itemStyle: { color: '#409eff' }
       }]
     }]
   }
-})
+}
 
 const avgScore = computed(() => {
   if (!results.value.length) return 0
@@ -1912,6 +1907,47 @@ onUnmounted(() => {
 
 .radar-card, .score-stats-card {
   height: 100%;
+}
+
+.score-cell {
+  cursor: pointer;
+  .score-hint {
+    display: block;
+    font-size: 10px;
+    color: #909399;
+    margin-top: 2px;
+    text-align: center;
+  }
+}
+
+.score-detail-popover {
+  .score-detail-title {
+    font-weight: 600;
+    font-size: 13px;
+    margin-bottom: 8px;
+    color: var(--el-text-color-primary);
+  }
+  .score-radar-wrap {
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--el-border-color-lighter);
+    padding-bottom: 8px;
+  }
+  .score-detail-list {
+    max-height: 240px;
+    overflow-y: auto;
+  }
+  .score-detail-text-item {
+    font-size: 12px;
+    color: var(--el-text-color-regular);
+    margin-bottom: 4px;
+    line-height: 1.5;
+  }
+  .score-detail-empty {
+    font-size: 12px;
+    color: #909399;
+    text-align: center;
+    padding: 8px 0;
+  }
 }
 
 .stat-item {

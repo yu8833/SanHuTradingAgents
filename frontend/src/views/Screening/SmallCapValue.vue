@@ -98,20 +98,7 @@
 
           <!-- 评分分析 -->
           <el-row v-if="results.length > 0" :gutter="16" style="margin-bottom: 16px;">
-            <el-col :span="8">
-              <el-card shadow="never" class="radar-card">
-                <template #header>
-                  <div class="card-header">
-                    <div style="display: flex; align-items: center; gap: 12px;">
-                      <el-icon><DataAnalysis /></el-icon>
-                      <span class="panel-title">评分维度雷达图</span>
-                    </div>
-                  </div>
-                </template>
-                <v-chart :option="radarOption" style="height: 280px;" autoresize />
-              </el-card>
-            </el-col>
-            <el-col :span="16">
+            <el-col :span="24">
               <el-card shadow="never" class="score-stats-card">
                 <template #header>
                   <div class="card-header">
@@ -211,7 +198,7 @@
             </el-table-column>
             <el-table-column prop="score" label="综合评分" width="130" sortable fixed="right">
               <template #default="{ row }">
-                <el-popover placement="left" :width="240" trigger="click">
+                <el-popover placement="left" :width="400" trigger="click">
                   <template #reference>
                     <div class="score-cell">
                       <el-progress :percentage="row.score" :color="getScoreColor(row.score)" :stroke-width="12" />
@@ -220,6 +207,9 @@
                   </template>
                   <div class="score-detail-popover">
                     <div class="score-detail-title">评分明细</div>
+                    <div v-if="getScoreRadarOption(row)" class="score-radar-wrap">
+                      <v-chart :option="getScoreRadarOption(row)" style="height: 220px;" autoresize />
+                    </div>
                     <div v-if="row.score_details && Object.keys(row.score_details).length" class="score-detail-list">
                       <div v-for="(val, key) in row.score_details" :key="key" class="score-detail-item">
                         <span class="score-detail-label">{{ key }}</span>
@@ -315,15 +305,15 @@
         <div v-if="backtestResult">
           <el-row :gutter="16">
             <el-col :span="6"><el-card shadow="never" class="metric-card"><div class="metric-label">总交易次数</div><div class="metric-value">{{ backtestResult.total_trades }}</div></el-card></el-col>
-            <el-col :span="6"><el-card shadow="never" class="metric-card"><div class="metric-label">胜率</div><div class="metric-value" :class="backtestResult.win_rate >= 50 ? 'up' : 'down'">{{ backtestResult.win_rate.toFixed(2) }}%</div></el-card></el-col>
-            <el-col :span="6"><el-card shadow="never" class="metric-card"><div class="metric-label">平均收益</div><div class="metric-value" :class="backtestResult.avg_return >= 0 ? 'up' : 'down'">{{ backtestResult.avg_return >= 0 ? '+' : '' }}{{ backtestResult.avg_return.toFixed(2) }}%</div></el-card></el-col>
-            <el-col :span="6"><el-card shadow="never" class="metric-card"><div class="metric-label">最大回撤</div><div class="metric-value down">{{ backtestResult.max_drawdown.toFixed(2) }}%</div></el-card></el-col>
+            <el-col :span="6"><el-card shadow="never" class="metric-card"><div class="metric-label">胜率</div><div class="metric-value" :class="backtestResult.win_rate >= 0.5 ? 'up' : 'down'">{{ (backtestResult.win_rate * 100).toFixed(2) }}%</div></el-card></el-col>
+            <el-col :span="6"><el-card shadow="never" class="metric-card"><div class="metric-label">平均收益</div><div class="metric-value" :class="backtestResult.avg_return >= 0 ? 'up' : 'down'">{{ backtestResult.avg_return >= 0 ? '+' : '' }}{{ (backtestResult.avg_return * 100).toFixed(2) }}%</div></el-card></el-col>
+            <el-col :span="6"><el-card shadow="never" class="metric-card"><div class="metric-label">最大回撤</div><div class="metric-value down">{{ (backtestResult.max_drawdown * 100).toFixed(2) }}%</div></el-card></el-col>
           </el-row>
           <el-row :gutter="16" style="margin-top: 16px;">
-            <el-col :span="6"><el-card shadow="never" class="metric-card"><div class="metric-label">总收益</div><div class="metric-value" :class="backtestResult.total_return >= 0 ? 'up' : 'down'">{{ backtestResult.total_return >= 0 ? '+' : '' }}{{ backtestResult.total_return.toFixed(2) }}%</div></el-card></el-col>
+            <el-col :span="6"><el-card shadow="never" class="metric-card"><div class="metric-label">总收益</div><div class="metric-value" :class="backtestResult.total_return >= 0 ? 'up' : 'down'">{{ backtestResult.total_return >= 0 ? '+' : '' }}{{ (backtestResult.total_return * 100).toFixed(2) }}%</div></el-card></el-col>
             <el-col :span="6"><el-card shadow="never" class="metric-card"><div class="metric-label">盈亏比</div><div class="metric-value" :class="backtestResult.profit_loss_ratio >= 1 ? 'up' : 'down'">{{ backtestResult.profit_loss_ratio.toFixed(2) }}</div></el-card></el-col>
             <el-col :span="6"><el-card shadow="never" class="metric-card"><div class="metric-label">夏普比率</div><div class="metric-value" :class="backtestResult.sharpe_ratio >= 1 ? 'up' : 'down'">{{ backtestResult.sharpe_ratio.toFixed(2) }}</div></el-card></el-col>
-            <el-col :span="6"><el-card shadow="never" class="metric-card"><div class="metric-label">年化收益</div><div class="metric-value" :class="backtestResult.annualized_return >= 0 ? 'up' : 'down'">{{ backtestResult.annualized_return >= 0 ? '+' : '' }}{{ backtestResult.annualized_return.toFixed(2) }}%</div></el-card></el-col>
+            <el-col :span="6"><el-card shadow="never" class="metric-card"><div class="metric-label">年化收益</div><div class="metric-value" :class="backtestResult.annualized_return >= 0 ? 'up' : 'down'">{{ backtestResult.annualized_return >= 0 ? '+' : '' }}{{ (backtestResult.annualized_return * 100).toFixed(2) }}%</div></el-card></el-col>
           </el-row>
 
           <el-card shadow="never" style="margin-top: 16px;">
@@ -345,12 +335,12 @@
               <el-table-column prop="count" label="交易次数" width="120" />
               <el-table-column prop="win_rate" label="胜率" width="120">
                 <template #default="{ row }">
-                  <span :class="['pct', row.win_rate >= 50 ? 'up' : 'down']">{{ row.win_rate.toFixed(2) }}%</span>
+                  <span :class="['pct', row.win_rate >= 0.5 ? 'up' : 'down']">{{ (row.win_rate * 100).toFixed(2) }}%</span>
                 </template>
               </el-table-column>
               <el-table-column prop="avg_return" label="平均收益">
                 <template #default="{ row }">
-                  <span :class="['pct', row.avg_return >= 0 ? 'up' : 'down']">{{ row.avg_return >= 0 ? '+' : '' }}{{ row.avg_return.toFixed(2) }}%</span>
+                  <span :class="['pct', row.avg_return >= 0 ? 'up' : 'down']">{{ row.avg_return >= 0 ? '+' : '' }}{{ (row.avg_return * 100).toFixed(2) }}%</span>
                 </template>
               </el-table-column>
             </el-table>
@@ -371,7 +361,7 @@
               </el-table-column>
               <el-table-column prop="return_pct" label="收益率" width="110" sortable>
                 <template #default="{ row }">
-                  <span :class="['pct', row.return_pct >= 0 ? 'up' : 'down']">{{ row.return_pct >= 0 ? '+' : '' }}{{ row.return_pct.toFixed(2) }}%</span>
+                  <span :class="['pct', row.return_pct >= 0 ? 'up' : 'down']">{{ row.return_pct >= 0 ? '+' : '' }}{{ (row.return_pct * 100).toFixed(2) }}%</span>
                 </template>
               </el-table-column>
               <el-table-column prop="sell_reason" label="卖出原因" width="120" />
@@ -393,7 +383,7 @@
               </el-table-column>
               <el-table-column prop="return_pct" label="收益率" width="110" sortable>
                 <template #default="{ row }">
-                  <span :class="['pct', row.return_pct >= 0 ? 'up' : 'down']">{{ row.return_pct >= 0 ? '+' : '' }}{{ row.return_pct.toFixed(2) }}%</span>
+                  <span :class="['pct', row.return_pct >= 0 ? 'up' : 'down']">{{ row.return_pct >= 0 ? '+' : '' }}{{ (row.return_pct * 100).toFixed(2) }}%</span>
                 </template>
               </el-table-column>
               <el-table-column prop="sell_reason" label="卖出原因" width="120" />
@@ -631,7 +621,7 @@ const doBacktest = async () => {
     backtestResult.value = resp
     saveBacktestResult()
     if (resp.total_trades > 0) {
-      ElMessage.success(`回测完成，共 ${resp.total_trades} 笔交易，胜率 ${resp.win_rate.toFixed(2)}%`)
+      ElMessage.success(`回测完成，共 ${resp.total_trades} 笔交易，胜率 ${(resp.win_rate * 100).toFixed(2)}%`)
     } else {
       ElMessage.warning('回测完成，但未产生交易，请调整参数或日期范围')
     }
@@ -701,64 +691,81 @@ const getRiskLabel = (riskInfo: any) => {
 
 const formatNum = (n: any) => (typeof n === 'number' ? n.toFixed(2) : '-')
 
-const avgScoreDetails = computed(() => {
-  if (!results.value.length) return {}
-  const first = results.value[0]
-  if (!first?.score_details) return {}
-  const keys = Object.keys(first.score_details)
-  const avg: Record<string, number> = {}
-  keys.forEach(key => {
-    const values = results.value
-      .map(r => {
-        const v = r.score_details?.[key]
-        if (typeof v === 'number') return v
-        if (typeof v === 'string') {
-          const match = v.match(/(\d+(?:\.\d+)?)\/(\d+)/)
-          if (match) return (parseFloat(match[1]) / parseFloat(match[2])) * 100
-        }
-        return 0
-      })
-      .filter(v => typeof v === 'number' && !isNaN(v))
-    avg[key] = values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0
-  })
-  return avg
-})
+const scoreDimMax: Record<string, number> = {
+  'PE评分': 30,
+  'PB评分': 25,
+  '市值评分': 15,
+  '流动性': 15,
+  '价格动能': 15,
+}
 
-const radarOption = computed(() => {
-  const details = avgScoreDetails.value
-  const indicators = Object.keys(details).map(key => ({
-    name: key,
-    max: 100
-  }))
+function getScoreRadarOption(row: any) {
+  const details = row.score_details
+  if (!details || (Array.isArray(details) ? details.length === 0 : Object.keys(details).length === 0)) return null
+
+  const dims: { name: string; value: number; max: number }[] = []
+
+  if (Array.isArray(details)) {
+    details.forEach((d: any) => {
+      if (typeof d === 'string') {
+        const match = d.match(/^(.+?)[:：]\s*(\d+(?:\.\d+)?)(?:\/(\d+))?/)
+        if (match) {
+          const name = match[1].trim()
+          const value = parseFloat(match[2])
+          const max = match[3] ? parseFloat(match[3]) : (scoreDimMax[name] || 100)
+          dims.push({ name, value: (value / max) * 100, max: 100 })
+        }
+      }
+    })
+  } else {
+    Object.entries(details).forEach(([key, val]: [string, any]) => {
+      let value = 0
+      const max = scoreDimMax[key] || 100
+      if (typeof val === 'number') {
+        value = val
+      } else if (typeof val === 'string') {
+        const match = val.match(/(\d+(?:\.\d+)?)\/(\d+)/)
+        if (match) {
+          value = parseFloat(match[1])
+          dims.push({ name: key, value: (value / parseFloat(match[2])) * 100, max: 100 })
+          return
+        }
+      }
+      dims.push({ name: key, value: (value / max) * 100, max: 100 })
+    })
+  }
+
+  if (!dims.length) return null
+
   return {
-    tooltip: {},
+    tooltip: {
+      formatter: (params: any) => {
+        const data = params.value
+        return dims.map((d, i) => `${d.name}: ${data[i].toFixed(0)}%`).join('<br/>')
+      }
+    },
     radar: {
-      indicator: indicators.length ? indicators : [{ name: '暂无数据', max: 100 }],
-      radius: '65%',
+      indicator: dims.map(d => ({ name: d.name, max: 100 })),
+      radius: '60%',
       center: ['50%', '55%'],
-      axisName: {
-        fontSize: 11,
-        color: '#606266'
+      axisName: { fontSize: 11, color: '#606266' },
+      splitArea: {
+        areaStyle: {
+          color: ['rgba(64, 158, 255, 0.02)', 'rgba(64, 158, 255, 0.05)', 'rgba(64, 158, 255, 0.08)', 'rgba(64, 158, 255, 0.12)']
+        }
       }
     },
     series: [{
       type: 'radar',
       data: [{
-        value: indicators.length ? Object.values(details) : [0],
-        name: '平均得分',
-        areaStyle: {
-          color: 'rgba(64, 158, 255, 0.2)'
-        },
-        lineStyle: {
-          color: '#409eff'
-        },
-        itemStyle: {
-          color: '#409eff'
-        }
+        value: dims.map(d => d.value),
+        areaStyle: { color: 'rgba(64, 158, 255, 0.2)' },
+        lineStyle: { color: '#409eff', width: 2 },
+        itemStyle: { color: '#409eff' }
       }]
     }]
   }
-})
+}
 
 const avgScore = computed(() => {
   if (!results.value.length) return 0
@@ -877,6 +884,11 @@ onUnmounted(() => { window.removeEventListener('resize', handleResize) })
     font-size: 13px;
     margin-bottom: 8px;
     color: var(--el-text-color-primary);
+  }
+  .score-radar-wrap {
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--el-border-color-lighter);
+    padding-bottom: 8px;
   }
   .score-detail-list {
     max-height: 240px;

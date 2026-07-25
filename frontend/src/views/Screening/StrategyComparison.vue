@@ -522,26 +522,67 @@ async function startComparison() {
   }
 }
 
+// retail策略走retail_screening_base.py，百分比返回的是小数(0.55=55%)
+// 涨停回调/三买三卖走自己的service，百分比已×100(55.0=55%)
+// 这里统一归一化为×100的百分比格式
+const retailStrategyKeys: StrategyKey[] = ['extreme_reversal', 'small_cap_value', 'turnaround', 'convertible_arbitrage']
+
+function normalizeBacktestResult(key: StrategyKey, result: any): any {
+  if (!retailStrategyKeys.includes(key)) return result
+  // 对retail策略的百分比值×100
+  const percentFields = ['win_rate', 'avg_return', 'avg_win', 'avg_loss', 'total_return', 'max_drawdown', 'annualized_return']
+  const normalized = { ...result }
+  percentFields.forEach(field => {
+    if (typeof normalized[field] === 'number') {
+      normalized[field] = normalized[field] * 100
+    }
+  })
+  // 交易记录里的return_pct也×100
+  if (normalized.top_trades) {
+    normalized.top_trades = normalized.top_trades.map((t: any) => ({ ...t, return_pct: t.return_pct * 100 }))
+  }
+  if (normalized.worst_trades) {
+    normalized.worst_trades = normalized.worst_trades.map((t: any) => ({ ...t, return_pct: t.return_pct * 100 }))
+  }
+  // sell_reason_stats里的win_rate和avg_return也×100
+  if (normalized.sell_reason_stats) {
+    const stats: any = {}
+    Object.entries(normalized.sell_reason_stats).forEach(([reason, v]: [string, any]) => {
+      stats[reason] = { ...v, win_rate: v.win_rate * 100, avg_return: v.avg_return * 100 }
+    })
+    normalized.sell_reason_stats = stats
+  }
+  return normalized
+}
+
 async function runBacktest(key: StrategyKey): Promise<BacktestResult | null> {
   try {
     const payload = { ...params }
     
+    let result: any = null
     switch (key) {
       case 'extreme_reversal':
-        return await screeningApi.backtestExtremeReversal(payload)
+        result = await screeningApi.backtestExtremeReversal(payload)
+        break
       case 'small_cap_value':
-        return await screeningApi.backtestSmallCapValue(payload)
+        result = await screeningApi.backtestSmallCapValue(payload)
+        break
       case 'turnaround':
-        return await screeningApi.backtestTurnaround(payload)
+        result = await screeningApi.backtestTurnaround(payload)
+        break
       case 'convertible_arbitrage':
-        return await screeningApi.backtestConvertibleArbitrage(payload)
+        result = await screeningApi.backtestConvertibleArbitrage(payload)
+        break
       case 'limit_up_pullback':
-        return await screeningApi.backtestLimitUpPullback(payload)
+        result = await screeningApi.backtestLimitUpPullback(payload)
+        break
       case 'three_buys_three_sells':
-        return await screeningApi.backtestThreeBuysThreeSells(payload)
+        result = await screeningApi.backtestThreeBuysThreeSells(payload)
+        break
       default:
         return null
     }
+    return normalizeBacktestResult(key, result) as BacktestResult
   } catch (e: any) {
     console.error(`策略 ${key} 回测失败:`, e)
     ElMessage.error(`${getStrategyName(key)} 回测失败: ${e?.message || '未知错误'}`)
