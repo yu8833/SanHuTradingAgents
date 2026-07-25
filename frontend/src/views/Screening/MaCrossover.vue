@@ -24,7 +24,7 @@
             <strong>核心逻辑：</strong>移动平均线是反映股价趋势的重要指标。当短期均线从下方上穿长期均线时形成<strong>金叉</strong>，是看涨信号；当短期均线从上方下穿长期均线时形成<strong>死叉</strong>，是看跌信号。
           </p>
           <p class="strategy-overview" style="margin-top: 12px;">
-            <strong>关键信号：</strong>金叉（MA5上穿MA10、MA10上穿MA20）、死叉、多头排列（MA5>MA10>MA20）、空头排列（MA5<MA10<MA20）。
+            <strong>关键信号：</strong>金叉（MA5上穿MA10、MA10上穿MA20）、死叉、多头排列（MA5&gt;MA10&gt;MA20）、空头排列（MA5&lt;MA10&lt;MA20）。
           </p>
           <p class="strategy-overview" style="margin-top: 12px;">
             <strong>风险提示：</strong>均线交叉信号存在滞后性，需结合成交量和MACD等指标综合判断，避免在震荡行情中频繁发出错误信号。

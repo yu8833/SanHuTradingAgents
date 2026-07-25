@@ -29,7 +29,14 @@
           </p>
           <p class="strategy-overview" style="margin-top: 12px;">
             <strong>关键信号：</strong>连续跌停天数≥2、累计跌幅≥15%、PE/PB分位处于历史低位（&lt;30%）、
-            量能萎缩显示抛压减弱、信号类型分为左侧潜伏与右侧确认两种。
+            <strong>必须满足至少一个反转确认信号</strong>（地量、长下影线、阳线反包、5日线拐头）才触发买入。
+          </p>
+          <p class="strategy-overview" style="margin-top: 12px;">
+            <strong>反转确认信号：</strong>
+            <br/>① <el-tag size="small" type="success" effect="plain">地量</el-tag> 近20日最低成交量，抛压衰竭
+            <br/>② <el-tag size="small" type="success" effect="plain">长下影线</el-tag> 下影线≥实体2倍，盘中探底回升
+            <br/>③ <el-tag size="small" type="success" effect="plain">阳线反包</el-tag> 今日阳线完全覆盖昨日阴线
+            <br/>④ <el-tag size="small" type="success" effect="plain">5日线拐头</el-tag> MA5斜率由负转正
           </p>
           <p class="strategy-overview" style="margin-top: 12px;">
             <strong>风险提示：</strong>极端反转属于逆向博弈，反弹幅度不确定，需严格设置止损（跌破买入价5%立即止损），
@@ -192,11 +199,21 @@
             <el-table-column prop="pb_percentile" label="PB分位" width="100" sortable>
               <template #default="{ row }">{{ formatNum(row.pb_percentile) }}%</template>
             </el-table-column>
-            <el-table-column prop="signal_type" label="信号类型" width="110">
+            <el-table-column prop="signal_type" label="信号类型" width="140">
               <template #default="{ row }">
                 <el-tag :type="getSignalTypeTag(row.signal_type)" size="small">
                   {{ row.signal_type || '-' }}
                 </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="reversal_signals" label="反转信号" width="200">
+              <template #default="{ row }">
+                <div v-if="row.reversal_signals && row.reversal_signals.length > 0" class="reversal-tags">
+                  <el-tag v-for="sig in row.reversal_signals" :key="sig" type="success" size="small" effect="plain" style="margin-right: 4px; margin-bottom: 4px;">
+                    {{ sig }}
+                  </el-tag>
+                </div>
+                <span v-else class="text-muted">暂无</span>
               </template>
             </el-table-column>
             <el-table-column prop="score" label="综合评分" width="130" sortable fixed="right">
@@ -671,8 +688,8 @@ const onBuySuccess = () => {
 
 const getSignalTypeTag = (type?: string) => {
   if (!type) return ''
-  if (type.includes('右侧') || type.includes('确认')) return 'success'
-  if (type.includes('左侧') || type.includes('潜伏')) return 'warning'
+  if (type.includes('反转') || type.includes('右侧') || type.includes('确认')) return 'success'
+  if (type.includes('待确认') || type.includes('左侧') || type.includes('潜伏')) return 'warning'
   if (type.includes('观察')) return 'info'
   return ''
 }
