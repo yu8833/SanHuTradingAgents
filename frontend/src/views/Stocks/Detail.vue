@@ -176,23 +176,7 @@
 
     <el-row :gutter="16" class="body">
       <el-col :span="18">
-        <!-- K线蜡烛图 -->
-        <el-card shadow="hover">
-          <template #header>
-            <div class="card-hd">
-              <div>价格K线</div>
-              <div class="periods">
-                <el-segmented v-model="period" :options="periodOptions" size="small" />
-              </div>
-            </div>
-          </template>
-          <div class="kline-container">
-            <v-chart class="k-chart" :option="kOption" autoresize />
-            <div class="legend">当前周期：{{ period }} · 数据源：{{ klineSource || '-' }} · 最近：{{ lastKTime || '-' }} · 收：{{ fmtPrice(lastKClose) }}</div>
-          </div>
-        </el-card>
-
-        <!-- 详细分析结果：超链接到分析报告 -->
+        <!-- 详细分析结果：超链接到分析报告（移到K线上方） -->
         <el-card v-if="analysisStatus==='running' || lastAnalysis" shadow="hover" class="analysis-detail-card" id="analysis-detail">
           <template #header><div class="card-hd">详细分析结果</div></template>
           <div v-if="analysisStatus==='running'" class="running">
@@ -222,9 +206,106 @@
           </div>
         </el-card>
 
+        <!-- K线蜡烛图 -->
+        <el-card shadow="hover" class="kline-card" style="margin-top: 16px;">
+          <template #header>
+            <div class="card-hd">
+              <div>价格K线</div>
+              <div class="periods">
+                <el-segmented v-model="period" :options="periodOptions" size="small" />
+              </div>
+            </div>
+          </template>
+          <div class="kline-container">
+            <v-chart class="k-chart" :option="kOption" autoresize />
+            <div class="legend">当前周期：{{ period }} · 数据源：{{ klineSource || '-' }} · 最近：{{ lastKTime || '-' }} · 收：{{ fmtPrice(lastKClose) }}</div>
+          </div>
+        </el-card>
 
-        <!-- 新闻与公告：位于详细分析结果下方 -->
-        <el-card shadow="hover" class="news-card">
+        <!-- 🔥 通达信风险扫描（放在K线下方） -->
+        <el-card shadow="hover" class="risk-scan-card" style="margin-top: 16px;">
+          <template #header>
+            <div class="card-hd">
+              <div>
+                通达信风险扫描
+                <el-tooltip content="数据来源：通达信，包含财务风险、经营风险、市场风险等多个维度的扫描结果。" placement="top">
+                  <el-icon class="help-icon-inline"><QuestionFilled /></el-icon>
+                </el-tooltip>
+              </div>
+              <div v-if="riskAnalysisData" style="display: flex; gap: 8px; align-items: center;">
+                <span class="risk-score" :style="{color: getRiskScoreColor(riskAnalysisData.score)}">
+                  风险评分: {{ riskAnalysisData.score }}分
+                </span>
+                <el-tag :type="getRiskLevelTagType(riskAnalysisData.score)" size="small">
+                  {{ getRiskLevelText(riskAnalysisData.score) }}
+                </el-tag>
+              </div>
+            </div>
+          </template>
+          <el-empty v-if="riskAnalysisLoading" description="加载中..." :image-size="60" />
+          <el-alert
+            v-else-if="!riskAnalysisData"
+            type="info"
+            :closable="false"
+            title="风险分析数据暂不可用"
+          >
+            仅A股支持风险扫描，或通达信接口临时不可用。
+          </el-alert>
+          <div v-else>
+            <!-- 风险概览 -->
+            <el-descriptions :column="4" border size="small" style="margin-bottom: 16px;">
+              <el-descriptions-item label="总检查项">
+                <span class="risk-stat">{{ riskAnalysisData.total }}</span>
+              </el-descriptions-item>
+              <el-descriptions-item label="风险项">
+                <span class="risk-stat risk">{{ riskAnalysisData.risk_count }}</span>
+              </el-descriptions-item>
+              <el-descriptions-item label="安全项">
+                <span class="risk-stat safe">{{ riskAnalysisData.safe_count }}</span>
+              </el-descriptions-item>
+              <el-descriptions-item label="数据来源">
+                <el-tag type="success" size="small">{{ riskAnalysisData.source }}</el-tag>
+              </el-descriptions-item>
+            </el-descriptions>
+
+            <!-- 风险分类详情 -->
+            <div v-for="(cat, idx) in riskAnalysisData.categories" :key="idx" class="risk-category">
+              <div class="risk-category-header">
+                <span class="risk-category-name">{{ cat.name }}</span>
+                <span class="risk-category-count">
+                  <span v-if="cat.risk_count > 0" class="risk-badge">{{ cat.risk_count }}风险</span>
+                  <span v-if="cat.safe_count > 0" class="safe-badge">{{ cat.safe_count }}安全</span>
+                </span>
+              </div>
+              <div v-if="cat.risk_items && cat.risk_items.length > 0" class="risk-items">
+                <div v-for="(item, i) in cat.risk_items" :key="i" class="risk-item">
+                  <el-icon class="risk-icon"><Warning /></el-icon>
+                  <div class="risk-item-content">
+                    <div class="risk-item-name">{{ item.name }}</div>
+                    <div v-if="item.reason" class="risk-item-reason">{{ item.reason }}</div>
+                    <div v-if="item.sub_items && item.sub_items.length > 0" class="risk-sub-items">
+                      <div v-for="(sub, si) in item.sub_items" :key="si" class="risk-sub-item">
+                        <el-icon :class="sub.trig ? 'sub-risk-icon' : 'sub-safe-icon'">
+                          <Warning v-if="sub.trig" />
+                          <CircleCheckFilled v-else />
+                        </el-icon>
+                        <span>{{ sub.name }}</span>
+                        <span v-if="sub.reason" class="sub-reason">{{ sub.reason }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div v-else class="risk-no-items">
+                <el-icon class="safe-icon"><CircleCheckFilled /></el-icon>
+                <span>该分类暂无风险项</span>
+              </div>
+            </div>
+          </div>
+        </el-card>
+
+        <!-- 新闻与公告 -->
+        <el-card shadow="hover" class="news-card" style="margin-top: 16px;">
           <template #header>
             <div class="card-hd">
               <div>近期新闻与公告</div>
@@ -392,7 +473,7 @@
 
       <el-col :span="6">
         <!-- 基本面快照 -->
-        <el-card shadow="hover">
+        <el-card shadow="hover" style="margin-top: 16px;">
           <template #header><div class="card-hd">基本面快照</div></template>
           <div class="facts">
             <div class="fact"><span>行业</span><b>{{ basics.industry }}</b></div>
@@ -419,7 +500,7 @@
         </el-card>
 
         <!-- 主要财务指标 -->
-        <el-card v-if="financialDetail" shadow="hover" class="financial-card">
+        <el-card v-if="financialDetail" shadow="hover" class="financial-card" style="margin-top: 16px;">
           <template #header>
             <div class="card-hd">
               <span>主要财务指标</span>
@@ -500,7 +581,7 @@
 
 
         <!-- 快捷操作 -->
-        <el-card shadow="hover" class="actions-card">
+        <el-card shadow="hover" class="actions-card" style="margin-top: 16px;">
           <template #header><div class="card-hd">快捷操作</div></template>
           <div class="quick-actions">
             <el-button type="primary" @click="onAnalyze" :icon="TrendCharts" plain>发起分析</el-button>
@@ -1011,17 +1092,18 @@ async function checkFavorite() {
 }
 
 async function loadPageData() {
-  await Promise.all([
-    fetchQuote(),
-    fetchFundamentals(),
+  await Promise.allSettled([
     fetchKline(),
     fetchNews(),
     checkFavorite(),
-    fetchLatestAnalysis(),  // 获取最新的历史分析报告
-    fetchSyncStatus(),  // 获取同步状态
-    fetchSectorInfo(),  // 🔥 板块联动
-    fetchMoneyFlow()    // 🔥 主力资金
+    fetchLatestAnalysis(),
+    fetchSyncStatus(),
+    fetchSectorInfo(),
+    fetchMoneyFlow(),
+    fetchQuote(),
+    fetchFundamentals()
   ])
+  await fetchRiskAnalysis()
 }
 
 function resetPageState() {
@@ -1199,6 +1281,22 @@ async function fetchMoneyFlow() {
     moneyFlowData.value = (res as any)?.data || null
   } catch (e) {
     console.error('获取资金流向失败', e)
+  }
+}
+
+// 🔥 通达信风险分析数据
+const riskAnalysisData = ref<any>(null)
+const riskAnalysisLoading = ref(false)
+async function fetchRiskAnalysis() {
+  riskAnalysisLoading.value = true
+  try {
+    const res = await stocksApi.getRiskAnalysis(code.value)
+    riskAnalysisData.value = (res as any)?.data || null
+  } catch (e) {
+    console.error('获取风险分析失败', e)
+    riskAnalysisData.value = null
+  } finally {
+    riskAnalysisLoading.value = false
   }
 }
 
@@ -1389,6 +1487,28 @@ function getChangeClass(v: any): string {
   if (n > 0) return 'up'
   if (n < 0) return 'down'
   return ''
+}
+
+// 风险评分颜色
+function getRiskScoreColor(score: number): string {
+  if (score >= 80) return '#10b981'
+  if (score >= 60) return '#f59e0b'
+  if (score >= 40) return '#ef4444'
+  return '#ef4444'
+}
+
+// 风险等级标签类型
+function getRiskLevelTagType(score: number): string {
+  if (score >= 80) return 'success'
+  if (score >= 60) return 'warning'
+  return 'danger'
+}
+
+// 风险等级文本
+function getRiskLevelText(score: number): string {
+  if (score >= 80) return '低风险'
+  if (score >= 60) return '中风险'
+  return '高风险'
 }
 // 🔥 新增：格式化同步时间（添加时区标识）
 function formatSyncTime(timeStr: string | null | undefined): string {
@@ -1591,43 +1711,142 @@ function exportReport() {
 
 <style scoped lang="scss">
 .stock-detail {
-  display: flex; flex-direction: column; gap: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 100vh;
+  background: linear-gradient(135deg, var(--el-bg-color-page) 0%, var(--el-fill-color-lighter) 100%);
 }
 
-.header { display: flex; justify-content: space-between; align-items: center; }
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  background: var(--el-bg-color);
+  border-radius: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
 .title { display: flex; align-items: center; gap: 12px; }
-.code { font-size: 22px; font-weight: 700; }
-.name { font-size: 18px; color: var(--el-text-color-regular); }
+.code { font-size: 24px; font-weight: 700; color: var(--el-text-color-primary); }
+.name { font-size: 20px; color: var(--el-text-color-regular); }
 .actions { display: flex; gap: 8px; }
 
-.quote-card { border-radius: 12px; }
-.quote { display: flex; flex-direction: column; gap: 8px; }
-.price-row { display: flex; align-items: center; gap: 12px; }
-.price { font-size: 32px; font-weight: 800; }
-.change { font-size: 16px; font-weight: 700; }
-.up { color: #e53935; }
-.down { color: #16a34a; }
-.stats { display: grid; grid-template-columns: repeat(8, 1fr); gap: 10px; margin-top: 6px; }
-.stats .item { display: flex; flex-direction: column; font-size: 12px; color: var(--el-text-color-secondary); }
-.stats .item b { color: var(--el-text-color-primary); font-size: 14px; }
-.stats .item span { display: flex; align-items: center; gap: 2px; }
+.quote-card {
+  border-radius: 16px;
+  border: 1px solid var(--el-border-color-light);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+}
+
+.quote {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.price-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 20px;
+  background: linear-gradient(90deg, var(--el-fill-color-light) 0%, transparent 100%);
+}
+
+.price { font-size: 36px; font-weight: 800; letter-spacing: -1px; }
+.change { font-size: 18px; font-weight: 700; }
+.up { color: #ef4444; }
+.down { color: #10b981; }
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 12px;
+  padding: 0 20px 16px;
+}
+
+.stats .item {
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  padding: 8px;
+  background: var(--el-fill-color-lighter);
+  border-radius: 8px;
+  text-align: center;
+}
+
+.stats .item b {
+  color: var(--el-text-color-primary);
+  font-size: 14px;
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+.stats .item span { display: flex; align-items: center; justify-content: center; gap: 2px; }
 .help-icon-inline { font-size: 12px; color: var(--el-text-color-placeholder); cursor: help; }
 .help-icon-inline:hover { color: var(--el-color-primary); }
 
 .body { margin-top: 4px; }
-.card-hd { display: flex; align-items: center; justify-content: space-between; }
-.k-chart { height: 320px; }
-.legend { margin-top: 8px; font-size: 12px; color: var(--el-text-color-secondary); }
+
+.card-hd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px;
+}
+
+.kline-card {
+  border-radius: 16px;
+  border: 1px solid var(--el-border-color-light);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+
+.k-chart { height: 340px; }
+
+.legend {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  padding: 0 8px;
+}
+
+.news-card {
+  border-radius: 16px;
+  border: 1px solid var(--el-border-color-light);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
 
 .news-card .news-list { display: flex; flex-direction: column; }
-.flow-history-item { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--el-border-color-lighter); font-size: 12px; }
+
+.flow-history-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  font-size: 12px;
+}
+
 .flow-history-item:last-child { border-bottom: none; }
 .flow-date { color: var(--el-text-color-secondary); width: 100px; }
 .flow-change { font-weight: bold; width: 80px; text-align: right; }
 .flow-inflow { width: 120px; text-align: right; }
-.news-item { padding: 10px 12px; border-bottom: 1px solid var(--el-border-color-lighter); transition: background-color .2s ease; }
+
+.news-item {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  transition: all .2s ease;
+}
+
 .news-item:last-child { border-bottom: none; }
-.news-item:hover { background: var(--el-fill-color-light); border-radius: 8px; }
+.news-item:hover {
+  background: var(--el-fill-color-light);
+  border-radius: 8px;
+  transform: translateX(4px);
+}
+
 .news-item .row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .news-item .left { display: flex; align-items: flex-start; gap: 8px; flex: 1 1 auto; min-width: 0; }
 .news-item .tag { flex: 0 0 auto; }
@@ -1644,11 +1863,224 @@ function exportReport() {
 .sentiment.neu { color: #64748b; }
 .sentiment.neg { color: #10b981; }
 
-.facts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.fact { display: flex; flex-direction: column; font-size: 12px; }
-.fact b { font-size: 14px; color: var(--el-text-color-primary); }
+.facts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
 
-.quick-actions { display: flex; flex-direction: column; gap: 8px; }
+.fact {
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  padding: 10px;
+  background: var(--el-fill-color-lighter);
+  border-radius: 8px;
+}
+
+.fact b {
+  font-size: 14px;
+  color: var(--el-text-color-primary);
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+.quick-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* 右侧栏卡片美化 */
+.el-col:last-child .el-card {
+  border-radius: 16px;
+  border: 1px solid var(--el-border-color-light);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+
+/* 分析详情卡片美化 */
+.analysis-detail-card {
+  border-radius: 16px;
+  border: 1px solid var(--el-border-color-light);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+
+.analysis-meta {
+  display: flex;
+  gap: 24px;
+  margin-bottom: 16px;
+  padding: 12px;
+  background: var(--el-fill-color-lighter);
+  border-radius: 8px;
+}
+
+.analysis-time, .confidence {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
+
+.report-link-section {
+  display: flex;
+  justify-content: flex-start;
+}
+
+/* 板块联动卡片美化 */
+.sector-card {
+  border-radius: 16px;
+  border: 1px solid var(--el-border-color-light);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+
+/* 资金流向卡片美化 */
+.money-flow-card {
+  border-radius: 16px;
+  border: 1px solid var(--el-border-color-light);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+
+/* 风险扫描样式 */
+.risk-scan-card {
+  border-radius: 16px;
+  border: 1px solid var(--el-border-color-light);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+
+.risk-score {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.risk-stat {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+  &.risk { color: #ef4444; }
+  &.safe { color: #10b981; }
+}
+
+.risk-category {
+  margin-bottom: 16px;
+  padding: 12px;
+  background: var(--el-fill-color-lighter);
+  border-radius: 8px;
+  &:last-child { margin-bottom: 0; }
+}
+
+.risk-category-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+.risk-category-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--el-text-color-primary);
+}
+
+.risk-category-count {
+  display: flex;
+  gap: 8px;
+}
+
+.risk-badge {
+  padding: 2px 8px;
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.safe-badge {
+  padding: 2px 8px;
+  background: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.risk-items {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.risk-item {
+  display: flex;
+  gap: 10px;
+  padding: 10px;
+  background: rgba(239, 68, 68, 0.05);
+  border-radius: 6px;
+}
+
+.risk-icon {
+  color: #ef4444;
+  font-size: 16px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.risk-item-content {
+  flex: 1;
+}
+
+.risk-item-name {
+  font-weight: 600;
+  font-size: 13px;
+  color: #ef4444;
+  margin-bottom: 4px;
+}
+
+.risk-item-reason {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.5;
+}
+
+.risk-sub-items {
+  margin-top: 8px;
+  padding-left: 8px;
+  border-left: 2px solid var(--el-border-color-lighter);
+}
+
+.risk-sub-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin-bottom: 4px;
+  &:last-child { margin-bottom: 0; }
+}
+
+.sub-risk-icon { color: #ef4444; font-size: 12px; }
+.sub-safe-icon { color: #10b981; font-size: 12px; }
+
+.sub-reason {
+  margin-left: 4px;
+  color: var(--el-text-color-placeholder);
+}
+
+.risk-no-items {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #10b981;
+}
+
+.safe-icon {
+  color: #10b981;
+  font-size: 16px;
+}
 
 @media (max-width: 1024px) {
   .stats { grid-template-columns: repeat(4, 1fr); }

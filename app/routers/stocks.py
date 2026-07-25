@@ -1787,9 +1787,17 @@ async def get_risk_analysis(
         url = f"http://page1.tdx.com.cn:7615/site/pcwebcall_static/bxb/json/{normalized_code}.json"
 
         async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(url)
+            response = await client.get(url, headers={"Accept-Encoding": "gzip, deflate"})
             response.raise_for_status()
-            raw_data = response.json()
+
+            try:
+                raw_data = response.json()
+            except Exception:
+                try:
+                    import gzip
+                    raw_data = json.loads(gzip.decompress(response.content))
+                except Exception:
+                    raw_data = json.loads(response.content)
 
         total = raw_data.get("total", 0)
         num = raw_data.get("num", 0)
