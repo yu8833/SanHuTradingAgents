@@ -530,6 +530,23 @@ class RetailScreeningBase:
         scan_interval = 5  # 每5个交易日扫描一次
         scan_dates = trade_dates[::scan_interval]
 
+        # ========== 预计算市场环境（每天的上涨股票比例）==========
+        logger.info(f"📊 预计算市场环境数据...")
+        market_rise_ratio: Dict[str, float] = {}
+        for dt in trade_dates:
+            try:
+                screening_data = await self._get_screening_view_for_date(dt)
+                if screening_data:
+                    total = len(screening_data)
+                    rising = sum(1 for d in screening_data.values() if d.get("pct_chg", 0) > 0)
+                    market_rise_ratio[dt] = rising / total if total > 0 else 0.5
+                else:
+                    market_rise_ratio[dt] = 0.5
+            except Exception as e:
+                logger.warning(f"计算 {dt} 市场环境失败: {e}")
+                market_rise_ratio[dt] = 0.5
+        logger.info(f"✅ 市场环境预计算完成")
+
         for i, date_str in enumerate(trade_dates):
             # 1. 检查持仓是否触发卖出
             # 性能优化：单次批量查询所有持仓当日行情，替代逐持仓 N 次查询
@@ -593,50 +610,64 @@ class RetailScreeningBase:
 
             # 2. 在扫描日选股买入
             if date_str in scan_dates and capital > initial_capital * 0.1:
-                try:
-                    scan_results = await scan_func(date_str)
-                except Exception as e:
-                    logger.warning(f"回测扫描 {date_str} 失败: {e}")
-                    scan_results = []
+                # ========== 市场环境过滤 ==========
+                rise_ratio = market_rise_ratio.get(date_str, 0.5)
+                
+                # 极端熊市（上涨比例<20%）不交易
+                if rise_ratio < 0.2:
+                    logger.debug(f"📉 {date_str} 市场环境恶劣（上涨比例 {rise_ratio:.1%}），跳过买入")
+                    pass  # 不买入，但继续处理卖出
+                
+                else:
+                    try:
+                        scan_results = await scan_func(date_str)
+                    except Exception as e:
+                        logger.warning(f"回测扫描 {date_str} 失败: {e}")
+                        scan_results = []
 
-                # 过滤评分、排序、取top_n
-                candidates = [
-                    s for s in scan_results if s.get("score", 0) >= min_score
-                ]
-                candidates.sort(key=lambda x: x.get("score", 0), reverse=True)
-                candidates = candidates[:top_n]
+                    # 过滤评分、排序、取top_n
+                    candidates = [
+                        s for s in scan_results if s.get("score", 0) >= min_score
+                    ]
+                    candidates.sort(key=lambda x: x.get("score", 0), reverse=True)
+                    
+                    # 弱势环境减半
+                    if rise_ratio < 0.4:
+                        candidates = candidates[:max(1, int(len(candidates) * 0.5))]
+                    
+                    candidates = candidates[:top_n]
 
-                # 买入（每只不超过 max_position_pct 比例）
-                for c in candidates:
-                    if len(holdings) >= 30:
-                        break
-                    code = c.get("code")
-                    price = c.get("close") or c.get("price")
-                    if not code or not price or price <= 0:
-                        continue
-                    # 已持有则跳过
-                    if any(h["code"] == code for h in holdings):
-                        continue
+                    # 买入（每只不超过 max_position_pct 比例）
+                    for c in candidates:
+                        if len(holdings) >= 30:
+                            break
+                        code = c.get("code")
+                        price = c.get("close") or c.get("price")
+                        if not code or not price or price <= 0:
+                            continue
+                        # 已持有则跳过
+                        if any(h["code"] == code for h in holdings):
+                            continue
 
-                    max_amount = capital * max_position_pct
-                    shares = int(max_amount / price / 100) * 100
-                    if shares <= 0:
-                        continue
+                        max_amount = capital * max_position_pct
+                        shares = int(max_amount / price / 100) * 100
+                        if shares <= 0:
+                            continue
 
-                    buy_amount = shares * price
-                    cost = self._calc_trade_cost(buy_amount, is_buy=True)
-                    if buy_amount + cost > capital:
-                        continue
+                        buy_amount = shares * price
+                        cost = self._calc_trade_cost(buy_amount, is_buy=True)
+                        if buy_amount + cost > capital:
+                            continue
 
-                    capital -= buy_amount + cost
-                    holdings.append({
-                        "code": code,
-                        "buy_price": price,
-                        "buy_date": date_str,
-                        "shares": shares,
-                        "amount": buy_amount,
-                        "score": c.get("score", 0),
-                    })
+                        capital -= buy_amount + cost
+                        holdings.append({
+                            "code": code,
+                            "buy_price": price,
+                            "buy_date": date_str,
+                            "shares": shares,
+                            "amount": buy_amount,
+                            "score": c.get("score", 0),
+                        })
 
             # 3. 记录每日净值
             holding_value = sum(
