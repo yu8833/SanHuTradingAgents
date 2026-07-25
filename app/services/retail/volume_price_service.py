@@ -142,10 +142,12 @@ class VolumePriceService(RetailScreeningBase):
 
         # 量价配合度评分（0-30分）
         correlation_score = 0
+        correlation_value = 0.0
         if len(price_changes) >= 20 and len(volume_changes) >= 20:
             recent_price_changes = price_changes[-20:]
             recent_volume_changes = volume_changes[-20:]
             correlation = self._calc_correlation(recent_price_changes, recent_volume_changes)
+            correlation_value = correlation
             if correlation > 0:
                 correlation_score = min(30, correlation * 50)
 
@@ -284,6 +286,8 @@ class VolumePriceService(RetailScreeningBase):
             "score": int(total_score),
             "score_details": score_details,
             "volume_ratio": round(vol_ratio_final, 2),
+            "volume_multiple": round(vol_ratio_final, 2),
+            "price_volume_correlation": round(correlation_value, 4),
             "consecutive_up_days": consecutive_up,
             "volume": volume,
             "market": market,
