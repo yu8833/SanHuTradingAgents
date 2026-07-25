@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from datetime import datetime
 import asyncio  # 🔥 添加 asyncio 导入
 import logging
+import os
 import re
 
 from app.routers.auth_db import get_current_user
@@ -1566,65 +1567,163 @@ async def get_money_flow(
     data_source = "none"
     error_message = None
 
-    # 从 AKShare 获取真实资金流向数据（不再使用估算模型）
+    # 数据源优先级：Tushare moneyflow（付费用户稳定） → AKShare（容器内常被东方财富风控）
+    # Tushare 返回金额单位为万元，统一 ×10000 转为元，与 AKShare 口径一致
+    tushare_ok = False
     try:
-        import akshare as ak
         import asyncio
+        import tushare as ts
 
-        # 修正 market 参数映射：6开头=sh，0/3开头=sz，8/4开头=bj（北交所）
-        if code6.startswith('6'):
-            ak_market = "sh"
-        elif code6.startswith(('8', '4')):
-            ak_market = "bj"
-        else:
-            ak_market = "sz"
+        token = os.getenv('TUSHARE_TOKEN', '').strip().strip('"').strip("'")
+        if token:
+            ts.set_token(token)
+            pro = ts.pro_api()
 
-        df_realtime = await asyncio.wait_for(
-            asyncio.to_thread(ak.stock_individual_fund_flow, stock=code6, market=ak_market),
-            timeout=8.0
-        )
-        if df_realtime is not None and not df_realtime.empty:
-            latest = df_realtime.tail(1).iloc[0]
-            realtime_data = {
-                "date": str(latest.get('日期', '')),
-                "close": float(latest.get('收盘价', 0) or 0),
-                "change_pct": float(latest.get('涨跌幅', 0) or 0),
-                "main_net_inflow": float(latest.get('主力净流入-净额', 0) or 0),
-                "main_net_inflow_pct": float(latest.get('主力净流入-净占比', 0) or 0),
-                "super_large_net": float(latest.get('超大单净流入-净额', 0) or 0),
-                "super_large_pct": float(latest.get('超大单净流入-净占比', 0) or 0),
-                "large_net": float(latest.get('大单净流入-净额', 0) or 0),
-                "large_pct": float(latest.get('大单净流入-净占比', 0) or 0),
-                "medium_net": float(latest.get('中单净流入-净额', 0) or 0),
-                "medium_pct": float(latest.get('中单净流入-净占比', 0) or 0),
-                "small_net": float(latest.get('小单净流入-净额', 0) or 0),
-                "small_pct": float(latest.get('小单净流入-净占比', 0) or 0),
-                "is_estimated": False,
-            }
+            # ts_code 映射：6/9开头=SH，8开头=BJ，其余=SZ
+            if code6.startswith(('6', '9')):
+                ts_code = f"{code6}.SH"
+            elif code6.startswith('8'):
+                ts_code = f"{code6}.BJ"
+            else:
+                ts_code = f"{code6}.SZ"
 
-            # 历史数据
-            df_hist = df_realtime.tail(days)
-            for _, row in df_hist.iterrows():
-                history.append({
-                    "date": str(row.get('日期', '')),
-                    "change_pct": float(row.get('涨跌幅', 0) or 0),
-                    "main_net_inflow": float(row.get('主力净流入-净额', 0) or 0),
-                    "main_net_inflow_pct": float(row.get('主力净流入-净占比', 0) or 0),
-                })
+            df_ts = await asyncio.wait_for(
+                asyncio.to_thread(pro.moneyflow, ts_code=ts_code, limit=days + 2),
+                timeout=8.0
+            )
+            if df_ts is not None and not df_ts.empty:
+                # 按交易日期升序排序
+                df_ts = df_ts.sort_values('trade_date').reset_index(drop=True)
+                df_hist = df_ts.tail(days)
 
-            data_source = "akshare"
-            logger.info(f"✅ 从 AKShare 获取资金流向: {code6}")
-        else:
-            error_message = "AKShare 返回空数据"
-            data_source = "unavailable"
+                def _safe_float(v):
+                    try:
+                        return float(v) if v is not None else 0.0
+                    except Exception:
+                        return 0.0
+
+                def _row_to_item(row):
+                    # Tushare moneyflow 字段单位为万元，统一转元
+                    buy_sm = _safe_float(row.get('buy_sm_amount'))
+                    sell_sm = _safe_float(row.get('sell_sm_amount'))
+                    buy_md = _safe_float(row.get('buy_md_amount'))
+                    sell_md = _safe_float(row.get('sell_md_amount'))
+                    buy_lg = _safe_float(row.get('buy_lg_amount'))
+                    sell_lg = _safe_float(row.get('sell_lg_amount'))
+                    buy_elg = _safe_float(row.get('buy_elg_amount'))
+                    sell_elg = _safe_float(row.get('sell_elg_amount'))
+
+                    super_large_net = (buy_elg - sell_elg) * 10000  # 万元 → 元
+                    large_net = (buy_lg - sell_lg) * 10000
+                    medium_net = (buy_md - sell_md) * 10000
+                    small_net = (buy_sm - sell_sm) * 10000
+                    main_net_inflow = super_large_net + large_net  # 主力 = 超大单 + 大单
+
+                    # 净占比 = 主力净额 / 总成交额 × 100
+                    total_amount = (buy_sm + sell_sm + buy_md + sell_md + buy_lg + sell_lg + buy_elg + sell_elg) * 10000
+                    main_net_inflow_pct = round(main_net_inflow / total_amount * 100, 2) if total_amount > 0 else 0.0
+
+                    return {
+                        "super_large_net": round(super_large_net, 2),
+                        "large_net": round(large_net, 2),
+                        "medium_net": round(medium_net, 2),
+                        "small_net": round(small_net, 2),
+                        "main_net_inflow": round(main_net_inflow, 2),
+                        "main_net_inflow_pct": main_net_inflow_pct,
+                    }
+
+                latest = df_ts.iloc[-1]
+                latest_item = _row_to_item(latest)
+                realtime_data = {
+                    "date": str(latest.get('trade_date', '')),
+                    "change_pct": 0.0,  # Tushare moneyflow 不含涨跌幅，前端从行情区获取
+                    **latest_item,
+                    "is_estimated": False,
+                }
+
+                for _, row in df_hist.iterrows():
+                    item = _row_to_item(row)
+                    history.append({
+                        "date": str(row.get('trade_date', '')),
+                        **item,
+                    })
+
+                data_source = "tushare"
+                tushare_ok = True
+                logger.info(f"✅ 从 Tushare moneyflow 获取资金流向: {code6}, {len(history)} 条")
+            else:
+                logger.warning(f"Tushare moneyflow 返回空数据: {code6}")
     except asyncio.TimeoutError:
-        error_message = "AKShare 接口超时"
-        data_source = "unavailable"
-        logger.warning(f"从 AKShare 获取资金流向超时: {code6}")
+        logger.warning(f"Tushare moneyflow 超时: {code6}")
     except Exception as e:
-        error_message = f"AKShare 接口异常: {str(e)}"
-        data_source = "unavailable"
-        logger.warning(f"从 AKShare 获取资金流向失败: {code6}, 错误: {e}")
+        logger.warning(f"Tushare moneyflow 失败: {code6}, 错误: {e}")
+        err_str = str(e)
+        if "权限" in err_str or "permission" in err_str:
+            error_message = f"Tushare moneyflow 无权限: {err_str}"
+
+    # Tushare 失败时尝试 AKShare 备选（容器内常被东方财富风控，但保留作为非容器环境兜底）
+    if not tushare_ok:
+        try:
+            import akshare as ak
+            import asyncio
+
+            # 修正 market 参数映射：6开头=sh，0/3开头=sz，8/4开头=bj（北交所）
+            if code6.startswith('6'):
+                ak_market = "sh"
+            elif code6.startswith(('8', '4')):
+                ak_market = "bj"
+            else:
+                ak_market = "sz"
+
+            df_realtime = await asyncio.wait_for(
+                asyncio.to_thread(ak.stock_individual_fund_flow, stock=code6, market=ak_market),
+                timeout=8.0
+            )
+            if df_realtime is not None and not df_realtime.empty:
+                latest = df_realtime.tail(1).iloc[0]
+                realtime_data = {
+                    "date": str(latest.get('日期', '')),
+                    "close": float(latest.get('收盘价', 0) or 0),
+                    "change_pct": float(latest.get('涨跌幅', 0) or 0),
+                    "main_net_inflow": float(latest.get('主力净流入-净额', 0) or 0),
+                    "main_net_inflow_pct": float(latest.get('主力净流入-净占比', 0) or 0),
+                    "super_large_net": float(latest.get('超大单净流入-净额', 0) or 0),
+                    "super_large_pct": float(latest.get('超大单净流入-净占比', 0) or 0),
+                    "large_net": float(latest.get('大单净流入-净额', 0) or 0),
+                    "large_pct": float(latest.get('大单净流入-净占比', 0) or 0),
+                    "medium_net": float(latest.get('中单净流入-净额', 0) or 0),
+                    "medium_pct": float(latest.get('中单净流入-净占比', 0) or 0),
+                    "small_net": float(latest.get('小单净流入-净额', 0) or 0),
+                    "small_pct": float(latest.get('小单净流入-净占比', 0) or 0),
+                    "is_estimated": False,
+                }
+
+                # 历史数据
+                df_hist = df_realtime.tail(days)
+                for _, row in df_hist.iterrows():
+                    history.append({
+                        "date": str(row.get('日期', '')),
+                        "change_pct": float(row.get('涨跌幅', 0) or 0),
+                        "main_net_inflow": float(row.get('主力净流入-净额', 0) or 0),
+                        "main_net_inflow_pct": float(row.get('主力净流入-净占比', 0) or 0),
+                    })
+
+                data_source = "akshare"
+                logger.info(f"✅ 从 AKShare 获取资金流向: {code6}")
+            else:
+                if not error_message:
+                    error_message = "Tushare 与 AKShare 均返回空数据"
+                data_source = "unavailable"
+        except asyncio.TimeoutError:
+            if not error_message:
+                error_message = "Tushare 失败且 AKShare 接口超时"
+            data_source = "unavailable"
+            logger.warning(f"AKShare 获取资金流向超时: {code6}")
+        except Exception as e:
+            if not error_message:
+                error_message = f"Tushare 失败且 AKShare 异常: {str(e)}"
+            data_source = "unavailable"
+            logger.warning(f"AKShare 获取资金流向失败: {code6}, 错误: {e}")
 
     # 判断资金趋势（仅基于真实数据）
     if history:
