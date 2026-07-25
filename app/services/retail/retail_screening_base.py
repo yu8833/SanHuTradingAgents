@@ -107,6 +107,104 @@ class RetailScreeningBase:
         docs = await cursor.to_list(length=None)
         return {d["code"]: d for d in docs if d.get("code")}
 
+    async def _get_screening_view_for_date(
+        self, date_str: str, codes: Optional[List[str]] = None
+    ) -> Dict[str, dict]:
+        """
+        从 stock_daily_quotes 获取指定日期的历史行情数据，模拟当时的筛选视图
+        用于回测，避免未来函数
+
+        Args:
+            date_str: 查询日期 YYYY-MM-DD
+            codes: 股票代码列表，None 表示全部
+
+        Returns:
+            {code: {pe, pb, total_mv, close, pct_chg, ...}}
+        """
+        db = await self._get_db()
+
+        # 1. 获取指定日期的历史行情
+        query = {
+            "trade_date": date_str,
+            "period": "daily",
+        }
+        if codes:
+            query["code"] = {"$in": codes}
+
+        cursor = db["stock_daily_quotes"].find(
+            query,
+            {
+                "code": 1,
+                "close": 1,
+                "open": 1,
+                "high": 1,
+                "low": 1,
+                "pct_chg": 1,
+                "volume": 1,
+                "amount": 1,
+                "pe": 1,
+                "pb": 1,
+                "total_mv": 1,
+                "circ_mv": 1,
+                "turnover_rate": 1,
+                "trade_date": 1,
+                "_id": 0,
+            },
+        )
+        quotes_docs = await cursor.to_list(length=None)
+
+        # 2. 获取股票基础信息（含静态字段：name, industry, market）
+        basic_query = {}
+        if codes:
+            basic_query["code"] = {"$in": codes}
+        basic_cursor = db["stock_basic_info"].find(
+            basic_query,
+            {
+                "code": 1,
+                "name": 1,
+                "industry": 1,
+                "market": 1,
+                "pe": 1,
+                "pb": 1,
+                "total_mv": 1,
+                "circ_mv": 1,
+                "_id": 0,
+            },
+        )
+        basic_docs = await basic_cursor.to_list(length=None)
+        basic_map = {d["code"]: d for d in basic_docs if d.get("code")}
+
+        # 3. 合并：行情为主，基础信息补全 name/industry/market/pe/pb/total_mv
+        result = {}
+        for qd in quotes_docs:
+            code = qd.get("code")
+            if not code:
+                continue
+            basic = basic_map.get(code, {})
+            item = {
+                "code": code,
+                "name": basic.get("name", ""),
+                "industry": basic.get("industry", ""),
+                "market": basic.get("market", "主板"),
+                "close": qd.get("close"),
+                "open": qd.get("open"),
+                "high": qd.get("high"),
+                "low": qd.get("low"),
+                "pct_chg": qd.get("pct_chg"),
+                "volume": qd.get("volume"),
+                "amount": qd.get("amount"),
+                "trade_date": qd.get("trade_date"),
+                # 优先取行情中的估值，其次取基础信息中的估值
+                "pe": qd.get("pe") or basic.get("pe"),
+                "pb": qd.get("pb") or basic.get("pb"),
+                "total_mv": qd.get("total_mv") or basic.get("total_mv"),
+                "circ_mv": qd.get("circ_mv") or basic.get("circ_mv"),
+                "turnover_rate": qd.get("turnover_rate"),
+            }
+            result[code] = item
+
+        return result
+
     async def _get_daily_quotes(
         self,
         code: str,

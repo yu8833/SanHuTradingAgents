@@ -263,10 +263,13 @@ class ExtremeReversalService(RetailScreeningBase):
         params = params or {}
 
         async def scan_func(date_str: str) -> List[dict]:
-            """回测扫描函数：在指定日期扫描"""
-            # 获取该日期之前的所有股票行情
-            screening_data = await self._get_screening_view_batch()
+            """回测扫描函数：在指定日期扫描（使用历史数据，避免未来函数）"""
+            # 使用指定日期的历史行情数据，而非最新数据
+            screening_data = await self._get_screening_view_for_date(date_str)
             candidates = list(screening_data.keys())[:300]
+
+            if not candidates:
+                return []
 
             quotes_map = await self._batch_get_quotes(
                 candidates, date_str, days=60, concurrency=50

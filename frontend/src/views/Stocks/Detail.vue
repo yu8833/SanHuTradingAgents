@@ -377,8 +377,8 @@
               <div style="font-size: 12px; color: var(--el-text-color-secondary); margin-bottom: 8px;">近{{ moneyFlowData.days }}日资金流向</div>
               <div v-for="(h, i) in moneyFlowData.history" :key="i" class="flow-history-item">
                 <span class="flow-date">{{ h.date }}</span>
-                <span class="flow-change" :style="{color: h.change_pct >= 0 ? '#e53935' : '#16a34a'}">
-                  {{ h.change_pct >= 0 ? '+' : '' }}{{ h.change_pct?.toFixed(2) || '0.00' }}%
+                <span class="flow-change" :style="{color: h.main_net_inflow_pct >= 0 ? '#e53935' : '#16a34a'}">
+                  {{ h.main_net_inflow_pct >= 0 ? '+' : '' }}{{ h.main_net_inflow_pct?.toFixed(2) || '0.00' }}%
                 </span>
                 <span class="flow-inflow" :style="{color: h.main_net_inflow >= 0 ? '#e53935' : '#16a34a'}">
                   {{ h.main_net_inflow >= 0 ? '+' : '' }}{{ fmtAmount(h.main_net_inflow) }}

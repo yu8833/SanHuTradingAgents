@@ -244,12 +244,15 @@ class TurnaroundService(RetailScreeningBase):
         from datetime import datetime
 
         async def scan_func(date_str: str) -> List[dict]:
-            screening_data = await self._get_screening_view_batch()
+            """回测扫描函数：使用历史数据，避免未来函数"""
+            screening_data = await self._get_screening_view_for_date(date_str)
             candidates = [
                 code
                 for code, data in screening_data.items()
                 if data.get("pe", 0) and data["pe"] > 0
             ][:300]
+            if not candidates:
+                return []
             quotes_map = await self._batch_get_quotes(
                 candidates, date_str, days=60, concurrency=50
             )

@@ -343,12 +343,83 @@ import { screeningApi, type RetailScanReq, type RetailBacktestReq, type RetailSc
 import { favoritesApi } from '@/api/favorites'
 import RetailBuyDialog from './components/RetailBuyDialog.vue'
 
+const STORAGE_KEY = 'extreme_reversal_scan_result'
+const BACKTEST_STORAGE_KEY = 'extreme_reversal_backtest_result'
+
 const activeTab = ref<'scan' | 'backtest'>('scan')
 
 const loading = ref(false)
 const results = ref<RetailScanResp['items']>([])
 const tookMs = ref(0)
 const hasSearched = ref(false)
+
+function saveScanResult() {
+  const data = {
+    results: results.value,
+    tookMs: tookMs.value,
+    scanParams: { ...params },
+    timestamp: Date.now()
+  }
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+  } catch (e) {
+    console.warn('Failed to save scan result to localStorage', e)
+  }
+}
+
+function loadScanResult() {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY)
+    if (stored) {
+      const data = JSON.parse(stored)
+      if (data.results && data.results.length > 0) {
+        results.value = data.results
+        tookMs.value = data.tookMs || 0
+        if (data.scanParams) {
+          Object.assign(params, defaultParams, data.scanParams)
+        }
+        hasSearched.value = true
+        return true
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to load scan result from localStorage', e)
+  }
+  return false
+}
+
+function saveBacktestResult() {
+  if (!backtestResult.value) return
+  const data = {
+    backtestResult: backtestResult.value,
+    backtestParams: { ...backtestParams },
+    timestamp: Date.now()
+  }
+  try {
+    localStorage.setItem(BACKTEST_STORAGE_KEY, JSON.stringify(data))
+  } catch (e) {
+    console.warn('Failed to save backtest result to localStorage', e)
+  }
+}
+
+function loadBacktestResult() {
+  try {
+    const stored = localStorage.getItem(BACKTEST_STORAGE_KEY)
+    if (stored) {
+      const data = JSON.parse(stored)
+      if (data.backtestResult) {
+        backtestResult.value = data.backtestResult
+        if (data.backtestParams) {
+          Object.assign(backtestParams, defaultBacktestParams, data.backtestParams)
+        }
+        return true
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to load backtest result from localStorage', e)
+  }
+  return false
+}
 
 const defaultParams = { min_score: 40, limit: 50 }
 const params = reactive<RetailScanReq>({ ...defaultParams })
@@ -367,6 +438,7 @@ const doScan = async () => {
     const resp = await screeningApi.scanExtremeReversal(params)
     results.value = resp.items
     tookMs.value = resp.took_ms || 0
+    saveScanResult()
     if (resp.items.length > 0) {
       ElMessage.success(`找到 ${resp.items.length} 只符合条件的股票`)
     } else {
@@ -424,6 +496,7 @@ const doBacktest = async () => {
     }
     const resp = await screeningApi.backtestExtremeReversal(payload)
     backtestResult.value = resp
+    saveBacktestResult()
     if (resp.total_trades > 0) {
       ElMessage.success(`回测完成，共 ${resp.total_trades} 笔交易，胜率 ${resp.win_rate.toFixed(2)}%`)
     } else {
@@ -499,7 +572,11 @@ const windowHeight = ref(window.innerHeight)
 function handleResize() { windowHeight.value = window.innerHeight }
 const tableHeight = computed(() => Math.max(400, windowHeight.value - 420))
 
-onMounted(() => { window.addEventListener('resize', handleResize) })
+onMounted(() => {
+  window.addEventListener('resize', handleResize)
+  loadScanResult()
+  loadBacktestResult()
+})
 onUnmounted(() => { window.removeEventListener('resize', handleResize) })
 </script>
 
