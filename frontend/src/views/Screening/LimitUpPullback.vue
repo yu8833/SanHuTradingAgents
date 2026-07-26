@@ -135,35 +135,6 @@
       </el-collapse-item>
     </el-collapse>
 
-    <!-- 参数配置 -->
-    <el-card class="params-panel" shadow="never" style="margin-top: 16px;">
-      <template #header>
-        <div class="card-header">
-          <div style="display: flex; align-items: center; gap: 12px;">
-            <el-icon><Search /></el-icon>
-            <span class="panel-title">参数配置</span>
-          </div>
-        </div>
-      </template>
-
-      <el-form :model="params" label-position="top" size="default" class="params-form">
-        <el-row :gutter="32" justify="center">
-          <el-col :span="6">
-            <el-form-item label="返回数量限制">
-              <el-input-number v-model="params.limit" :min="10" :max="200" :step="10" style="width: 100%;" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-
-        <div class="form-actions">
-          <el-button type="primary" :loading="loading" @click="doScan" size="large">
-            <el-icon><Search /></el-icon>
-            开始扫描
-          </el-button>
-        </div>
-      </el-form>
-    </el-card>
-
     <!-- Tab切换 -->
     <el-tabs v-model="activeTab" style="margin-top: 16px;">
       <!-- 扫描结果Tab -->
@@ -171,15 +142,26 @@
         <el-card class="result-panel" shadow="never">
           <template #header>
             <div class="card-header">
-              <div style="display: flex; align-items: center; gap: 12px;">
-                <el-icon><List /></el-icon>
-                <span class="panel-title">扫描结果</span>
-                <el-tag v-if="results.length > 0" type="success" size="small" effect="plain">
-                  找到 {{ results.length }} 只符合条件的股票
-                </el-tag>
-                <el-tag v-if="tookMs" type="info" size="small" effect="plain">
-                  耗时 {{ (tookMs / 1000).toFixed(1) }}s
-                </el-tag>
+              <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                  <el-icon><List /></el-icon>
+                  <span class="panel-title">扫描结果</span>
+                  <el-tag v-if="results.length > 0" type="success" size="small" effect="plain">
+                    找到 {{ results.length }} 只
+                  </el-tag>
+                  <el-tag v-if="tookMs" type="info" size="small" effect="plain">
+                    耗时 {{ (tookMs / 1000).toFixed(1) }}s
+                  </el-tag>
+                </div>
+                <div style="display: flex; align-items: center; gap: 12px;">
+                  <el-form-item label="返回数量" label-width="70px" style="margin-bottom: 0;">
+                    <el-input-number v-model="params.limit" :min="10" :max="200" :step="10" size="default" style="width: 130px;" />
+                  </el-form-item>
+                  <el-button type="primary" :loading="loading" @click="doScan" size="default">
+                    <el-icon><Search /></el-icon>
+                    开始扫描
+                  </el-button>
+                </div>
               </div>
             </div>
           </template>
