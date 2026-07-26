@@ -46,7 +46,7 @@ class TurnaroundService(RetailScreeningBase):
         # 1. 获取行情+估值
         screening_data = await self._get_screening_view_batch()
 
-        # 2. 筛选候选：PE>0 的股票（排除亏损股，后续用价量判断拐点），按成交额降序取前1500
+        # 2. 筛选候选：PE>0 的股票（排除亏损股，后续用价量判断拐点），按成交额降序（全市场覆盖）
         pe_positive_codes = [
             code
             for code, data in screening_data.items()
@@ -57,7 +57,7 @@ class TurnaroundService(RetailScreeningBase):
             key=lambda c: screening_data[c].get("amount", 0) or 0,
             reverse=True
         )
-        candidates = sorted_codes[:1500]
+        candidates = sorted_codes
 
         logger.info(f"困境反转扫描: {len(candidates)} 个候选股")
 
@@ -69,7 +69,7 @@ class TurnaroundService(RetailScreeningBase):
         )
 
         # 4. 分析
-        semaphore = asyncio.Semaphore(50)
+        semaphore = asyncio.Semaphore(200)
         items = []
 
         async def analyze_one(code: str):

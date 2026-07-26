@@ -371,11 +371,6 @@ async function doScan() {
   }
 }
 
-function resetParams() {
-  scanParams.value = { ...defaultScanParams }
-  ElMessage.info('参数已重置')
-}
-
 async function doBacktest() {
   backtestLoading.value = true
   backtestResult.value = null
@@ -656,10 +651,6 @@ onUnmounted(() => {
           <el-button type="primary" :loading="loading" @click="doScan" size="large">
             <el-icon><Search /></el-icon>
             开始扫描
-          </el-button>
-          <el-button :loading="loading" @click="resetParams" size="large">
-            <el-icon><Refresh /></el-icon>
-            重置参数
           </el-button>
         </div>
       </el-form>

@@ -58,7 +58,7 @@ class ExtremeReversalService(RetailScreeningBase):
             if pct_chg < -5:
                 candidates.append(code)
 
-        # 如果候选太少，放宽条件：取所有PE>0的股票，按成交额降序取前1500
+        # 如果候选太少，放宽条件：取所有PE>0的股票，按成交额降序（全市场覆盖）
         if len(candidates) < 50:
             pe_positive_codes = [
                 code
@@ -70,7 +70,7 @@ class ExtremeReversalService(RetailScreeningBase):
                 key=lambda c: screening_data[c].get("amount", 0) or 0,
                 reverse=True
             )
-            candidates = sorted_codes[:1500]
+            candidates = sorted_codes
 
         logger.info(
             f"极端反转扫描: {len(candidates)} 个候选股, 开始获取历史数据"
@@ -83,7 +83,7 @@ class ExtremeReversalService(RetailScreeningBase):
         )
 
         # 4. 逐个分析
-        semaphore = asyncio.Semaphore(50)
+        semaphore = asyncio.Semaphore(200)
         items = []
 
         async def analyze_one(code: str):

@@ -95,10 +95,6 @@
             <el-icon><Search /></el-icon>
             开始扫描
           </el-button>
-          <el-button :loading="loading" @click="resetParams" size="large">
-            <el-icon><Refresh /></el-icon>
-            重置参数
-          </el-button>
         </div>
       </el-form>
     </el-card>
@@ -592,11 +588,6 @@ function loadBacktestResult() {
 
 const defaultParams = { max_bond_price: 110, max_stock_vs_conversion: 0.7, min_issue_size: 1.0, limit: 50 }
 const params = reactive<RetailScanReq>({ ...defaultParams })
-
-const resetParams = () => {
-  Object.assign(params, defaultParams)
-  ElMessage.info('参数已重置')
-}
 
 const doScan = async () => {
   loading.value = true

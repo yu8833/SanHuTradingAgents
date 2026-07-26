@@ -54,7 +54,7 @@ class VolumePriceService(RetailScreeningBase):
             key=lambda c: screening_data[c].get("amount", 0) or 0,
             reverse=True
         )
-        candidates = sorted_codes[:1500]
+        candidates = sorted_codes
 
         logger.info(
             f"量价配合扫描: {len(candidates)} 个候选股, 开始获取历史数据"
@@ -65,7 +65,7 @@ class VolumePriceService(RetailScreeningBase):
             candidates, today, days=lookback_days, concurrency=100
         )
 
-        semaphore = asyncio.Semaphore(50)
+        semaphore = asyncio.Semaphore(200)
         items = []
 
         async def analyze_one(code: str):

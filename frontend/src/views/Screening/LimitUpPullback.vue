@@ -160,10 +160,6 @@
             <el-icon><Search /></el-icon>
             开始扫描
           </el-button>
-          <el-button :loading="loading" @click="resetParams" size="large">
-            <el-icon><Refresh /></el-icon>
-            重置参数
-          </el-button>
         </div>
       </el-form>
     </el-card>
@@ -1141,11 +1137,6 @@ const defaultParams = {
 }
 
 const params = reactive<LimitUpPullbackScanReq>({ ...defaultParams })
-
-const resetParams = () => {
-  Object.assign(params, defaultParams)
-  ElMessage.info('参数已重置')
-}
 
 const resetBacktestParams = () => {
   Object.assign(backtestParams, defaultBacktestParams)
