@@ -44,13 +44,17 @@ class MacdDivergenceService(RetailScreeningBase):
         """
         start_time = time.time()
         params = params or {}
-        min_score = params.get("min_score", 40)
         limit = params.get("limit", 50)
         lookback_days = params.get("lookback_days", 120)
 
         screening_data = await self._get_screening_view_batch()
 
-        candidates = list(screening_data.keys())[:800]
+        sorted_codes = sorted(
+            screening_data.keys(),
+            key=lambda c: screening_data[c].get("amount", 0) or 0,
+            reverse=True
+        )
+        candidates = sorted_codes[:1500]
 
         logger.info(
             f"MACD背离扫描: {len(candidates)} 个候选股, 开始获取历史数据"
@@ -72,9 +76,7 @@ class MacdDivergenceService(RetailScreeningBase):
                     return None
 
                 result = self._analyze_stock(code, sv, quotes)
-                if result and result["score"] >= min_score:
-                    return result
-                return None
+                return result
 
         tasks = [analyze_one(c) for c in candidates]
         results = await asyncio.gather(*tasks)
@@ -153,10 +155,10 @@ class MacdDivergenceService(RetailScreeningBase):
         if len(recent_window) < window or len(macd_recent) < window:
             return None
 
-        recent_low = np.min(recent_window)
-        recent_high = np.max(recent_window)
-        recent_low_idx = np.argmin(recent_window)
-        recent_high_idx = np.argmax(recent_window)
+        recent_low = float(np.min(recent_window))
+        recent_high = float(np.max(recent_window))
+        recent_low_idx = int(np.argmin(recent_window))
+        recent_high_idx = int(np.argmax(recent_window))
 
         prev_window = closes[-window*2:-window]
         macd_prev = macd_histogram[-window*2:-window]
@@ -164,10 +166,10 @@ class MacdDivergenceService(RetailScreeningBase):
         if len(prev_window) < window or len(macd_prev) < window:
             return None
 
-        prev_low = np.min(prev_window)
-        prev_high = np.max(prev_window)
-        prev_low_idx = np.argmin(prev_window)
-        prev_high_idx = np.argmax(prev_window)
+        prev_low = float(np.min(prev_window))
+        prev_high = float(np.max(prev_window))
+        prev_low_idx = int(np.argmin(prev_window))
+        prev_high_idx = int(np.argmax(prev_window))
 
         result = None
 
@@ -177,19 +179,19 @@ class MacdDivergenceService(RetailScreeningBase):
             prev_macd_at_low = macd_prev[prev_low_idx]
 
             if recent_macd_at_low > prev_macd_at_low:
-                strength = abs(recent_macd_at_low - prev_macd_at_low) / max(abs(prev_macd_at_low), 0.01)
-                duration = len(recent_window) - recent_low_idx
+                strength = float(abs(recent_macd_at_low - prev_macd_at_low) / max(abs(prev_macd_at_low), 0.01))
+                duration = int(len(recent_window) - recent_low_idx)
 
                 result = {
                     'type': 'bottom',
                     'strength': strength,
                     'duration_days': duration,
                     'price_extreme': recent_low,
-                    'macd_extreme': recent_macd_at_low,
+                    'macd_extreme': float(recent_macd_at_low),
                     'prev_price_extreme': prev_low,
-                    'prev_macd_extreme': prev_macd_at_low,
-                    'recent_price': closes[-1],
-                    'recent_macd': macd_recent[-1],
+                    'prev_macd_extreme': float(prev_macd_at_low),
+                    'recent_price': float(closes[-1]),
+                    'recent_macd': float(macd_recent[-1]),
                 }
 
         # 顶背离检测：股价创新高，MACD不创新高
@@ -198,19 +200,19 @@ class MacdDivergenceService(RetailScreeningBase):
             prev_macd_at_high = macd_prev[prev_high_idx]
 
             if recent_macd_at_high < prev_macd_at_high:
-                strength = abs(prev_macd_at_high - recent_macd_at_high) / max(abs(prev_macd_at_high), 0.01)
-                duration = len(recent_window) - recent_high_idx
+                strength = float(abs(prev_macd_at_high - recent_macd_at_high) / max(abs(prev_macd_at_high), 0.01))
+                duration = int(len(recent_window) - recent_high_idx)
 
                 result = {
                     'type': 'top',
                     'strength': strength,
                     'duration_days': duration,
                     'price_extreme': recent_high,
-                    'macd_extreme': recent_macd_at_high,
+                    'macd_extreme': float(recent_macd_at_high),
                     'prev_price_extreme': prev_high,
-                    'prev_macd_extreme': prev_macd_at_high,
-                    'recent_price': closes[-1],
-                    'recent_macd': macd_recent[-1],
+                    'prev_macd_extreme': float(prev_macd_at_high),
+                    'recent_price': float(closes[-1]),
+                    'recent_macd': float(macd_recent[-1]),
                 }
 
         return result
@@ -254,6 +256,10 @@ class MacdDivergenceService(RetailScreeningBase):
         if ma60 is None or len(ma60) < 5:
             return None
 
+        # MA60大趋势过滤：只做上升趋势中的股票（收盘价 > MA60）
+        if close <= ma60[-1]:
+            return None
+
         divergence = self._find_divergence(closes, histogram, window=30)
 
         if not divergence:
@@ -262,7 +268,7 @@ class MacdDivergenceService(RetailScreeningBase):
         signal_type = "底背离" if divergence["type"] == "bottom" else "顶背离"
 
         # 背离强度评分（0-30分）
-        strength_score = min(30, divergence["strength"] * 100)
+        strength_score = float(min(30, divergence["strength"] * 100))
 
         # 背离持续时间评分（0-20分）
         duration_score = 0
@@ -279,10 +285,10 @@ class MacdDivergenceService(RetailScreeningBase):
         # 成交量确认评分（0-25分）
         volume_score = 0
         if len(volumes) >= 40:
-            vol_ma20 = np.mean(volumes[-20:])
-            vol_ma40 = np.mean(volumes[-40:])
+            vol_ma20 = float(np.mean(volumes[-20:]))
+            vol_ma40 = float(np.mean(volumes[-40:]))
             if vol_ma20 > 0 and vol_ma40 > 0:
-                vol_ratio = vol_ma20 / vol_ma40
+                vol_ratio = float(vol_ma20 / vol_ma40)
                 if divergence["type"] == "bottom":
                     if vol_ratio <= 0.6:
                         volume_score = 25
@@ -304,8 +310,9 @@ class MacdDivergenceService(RetailScreeningBase):
 
         # 均线位置评分（0-15分）
         ma_position_score = 0
+        ma60_last = float(ma60[-1])
         if divergence["type"] == "bottom":
-            price_to_ma60_ratio = close / ma60[-1]
+            price_to_ma60_ratio = float(close / ma60_last)
             if price_to_ma60_ratio >= 0.95 and price_to_ma60_ratio <= 1.05:
                 ma_position_score = 15
             elif price_to_ma60_ratio >= 0.90 and price_to_ma60_ratio <= 1.10:
@@ -313,7 +320,7 @@ class MacdDivergenceService(RetailScreeningBase):
             elif price_to_ma60_ratio >= 0.85 and price_to_ma60_ratio <= 1.15:
                 ma_position_score = 5
         else:
-            price_to_ma60_ratio = close / ma60[-1]
+            price_to_ma60_ratio = float(close / ma60_last)
             if price_to_ma60_ratio >= 0.95 and price_to_ma60_ratio <= 1.05:
                 ma_position_score = 15
             elif price_to_ma60_ratio >= 0.90 and price_to_ma60_ratio <= 1.10:
@@ -341,12 +348,22 @@ class MacdDivergenceService(RetailScreeningBase):
                 elif today_close < yesterday_close:
                     trend_conf_score = 3
 
+        # 趋势强度评分（0-10分）：收盘价在MA60上方的比例
+        trend_strength_score = 0
+        if len(ma60) > 0 and len(closes) >= len(ma60):
+            close_aligned = closes[-len(ma60):]
+            above_ma60 = int(np.sum(close_aligned > ma60))
+            trend_strength_ratio = float(above_ma60 / len(ma60)) if len(ma60) > 0 else 0.0
+            trend_strength_score = min(10, trend_strength_ratio * 10)
+        trend_strength_score = round(float(trend_strength_score), 1)
+
         total_score = (
             strength_score +
             duration_score +
             volume_score +
             ma_position_score +
-            trend_conf_score
+            trend_conf_score +
+            trend_strength_score
         )
 
         score_details = {
@@ -355,6 +372,7 @@ class MacdDivergenceService(RetailScreeningBase):
             "成交量确认": volume_score,
             "均线位置": ma_position_score,
             "趋势确认": trend_conf_score,
+            "趋势强度": trend_strength_score,
         }
 
         if total_score < 20:
@@ -390,7 +408,12 @@ class MacdDivergenceService(RetailScreeningBase):
 
         async def scan_func(date_str: str) -> List[dict]:
             screening_data = await self._get_screening_view_for_date(date_str)
-            candidates = list(screening_data.keys())[:500]
+            sorted_codes = sorted(
+                screening_data.keys(),
+                key=lambda c: screening_data[c].get("amount", 0) or 0,
+                reverse=True
+            )
+            candidates = sorted_codes[:1500]
 
             if not candidates:
                 return []

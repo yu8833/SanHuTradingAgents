@@ -44,13 +44,8 @@
       </template>
 
       <el-form :model="params" label-position="top" size="default" class="params-form">
-        <el-row :gutter="32">
-          <el-col :span="8">
-            <el-form-item label="最低评分(100分制)">
-              <el-slider v-model="params.min_score" :min="0" :max="100" :step="5" show-stops />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
+        <el-row :gutter="32" justify="center">
+          <el-col :span="6">
             <el-form-item label="返回数量限制">
               <el-input-number v-model="params.limit" :min="10" :max="200" :step="10" style="width: 100%;" />
             </el-form-item>
@@ -61,10 +56,6 @@
           <el-button type="primary" :loading="loading" @click="doScan" size="large">
             <el-icon><Search /></el-icon>
             开始扫描
-          </el-button>
-          <el-button :loading="loading" @click="resetParams" size="large">
-            <el-icon><Refresh /></el-icon>
-            重置参数
           </el-button>
         </div>
       </el-form>
@@ -477,13 +468,8 @@ function loadBacktestResult() {
   return false
 }
 
-const defaultParams = { min_score: 40, limit: 50 }
+const defaultParams = { limit: 50 }
 const params = reactive<RetailScanReq>({ ...defaultParams })
-
-const resetParams = () => {
-  Object.assign(params, defaultParams)
-  ElMessage.info('参数已重置')
-}
 
 const doScan = async () => {
   loading.value = true
@@ -515,7 +501,6 @@ const defaultBacktestParams = {
   end_date: '',
   hold_days: 10,
   top_n: 10,
-  min_score: 40,
   limit: 50
 }
 const backtestParams = reactive<RetailBacktestReq>({ ...defaultBacktestParams })
@@ -591,7 +576,6 @@ const doBacktest = async () => {
   try {
     const payload: RetailBacktestReq = {
       ...backtestParams,
-      min_score: params.min_score,
       limit: params.limit
     }
     const resp = await screeningApi.backtestMaCrossover(payload)

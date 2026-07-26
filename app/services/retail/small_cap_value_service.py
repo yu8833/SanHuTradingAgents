@@ -50,7 +50,6 @@ class SmallCapValueService(RetailScreeningBase):
         max_market_cap = params.get("max_market_cap", 30)
         max_pe = params.get("max_pe", 15)
         max_pb = params.get("max_pb", 2)
-        min_score = params.get("min_score", 40)
         limit = params.get("limit", 50)
 
         # 1. 获取全部行情+估值
@@ -83,6 +82,20 @@ class SmallCapValueService(RetailScreeningBase):
 
         logger.info(f"小盘价值扫描: {len(candidates)} 个候选股（硬性筛选后）")
 
+        # 2.5 计算行业PE/PB统计值（用于行业中性化评分）
+        industry_stats: Dict[str, Dict[str, List[float]]] = {}
+        for code in candidates:
+            sv = screening_data.get(code, {})
+            industry = sv.get("industry", "") or "未知"
+            pe = sv.get("pe", 0) or 0
+            pb = sv.get("pb", 0) or 0
+            if industry not in industry_stats:
+                industry_stats[industry] = {"pe": [], "pb": []}
+            if pe > 0:
+                industry_stats[industry]["pe"].append(pe)
+            if pb > 0:
+                industry_stats[industry]["pb"].append(pb)
+
         # 3. 批量获取30日K线（用于评分）
         from datetime import datetime
         today = datetime.now().strftime("%Y-%m-%d")
@@ -98,10 +111,8 @@ class SmallCapValueService(RetailScreeningBase):
             async with semaphore:
                 sv = screening_data.get(code, {})
                 quotes = quotes_map.get(code, [])
-                result = self._analyze_stock(code, sv, quotes, max_pe, max_pb)
-                if result and result["score"] >= min_score:
-                    return result
-                return None
+                result = self._analyze_stock(code, sv, quotes, max_pe, max_pb, industry_stats)
+                return result
 
         tasks = [analyze_one(c) for c in candidates]
         results = await asyncio.gather(*tasks)
@@ -125,11 +136,12 @@ class SmallCapValueService(RetailScreeningBase):
         }
 
     def _analyze_stock(
-        self, code: str, sv: dict, quotes: List[dict], max_pe: float, max_pb: float
+        self, code: str, sv: dict, quotes: List[dict], max_pe: float, max_pb: float,
+        industry_stats: Optional[Dict[str, Dict[str, List[float]]]] = None
     ) -> Optional[dict]:
         """分析单只股票"""
         name = sv.get("name", "")
-        industry = sv.get("industry", "")
+        industry = sv.get("industry", "") or "未知"
         pe = sv.get("pe", 0) or 0
         pb = sv.get("pb", 0) or 0
         total_mv = sv.get("total_mv", 0) or 0
@@ -169,21 +181,39 @@ class SmallCapValueService(RetailScreeningBase):
         score = 0
         score_details = {}
 
-        # PE评分（0-30分）：PE越低分越高
-        if pe > 0:
+        # PE评分（0-30分）：按行业内分位，分位越低分越高
+        pe_percentile = 0.5
+        if industry_stats and industry in industry_stats and pe > 0:
+            industry_pes = industry_stats[industry]["pe"]
+            if len(industry_pes) > 0:
+                pe_percentile = sum(1 for p in industry_pes if p <= pe) / len(industry_pes)
+                pe_score = max(0, min(30, (1 - pe_percentile) * 30))
+            else:
+                pe_score = max(0, min(30, (max_pe - pe) / max_pe * 30))
+        elif pe > 0:
             pe_score = max(0, min(30, (max_pe - pe) / max_pe * 30))
         else:
             pe_score = 0
         score += pe_score
         score_details["PE评分"] = round(pe_score, 1)
+        score_details["PE行业分位"] = round(pe_percentile, 2)
 
-        # PB评分（0-25分）
-        if pb > 0:
+        # PB评分（0-25分）：按行业内分位，分位越低分越高
+        pb_percentile = 0.5
+        if industry_stats and industry in industry_stats and pb > 0:
+            industry_pbs = industry_stats[industry]["pb"]
+            if len(industry_pbs) > 0:
+                pb_percentile = sum(1 for p in industry_pbs if p <= pb) / len(industry_pbs)
+                pb_score = max(0, min(25, (1 - pb_percentile) * 25))
+            else:
+                pb_score = max(0, min(25, (max_pb - pb) / max_pb * 25))
+        elif pb > 0:
             pb_score = max(0, min(25, (max_pb - pb) / max_pb * 25))
         else:
             pb_score = 0
         score += pb_score
         score_details["PB评分"] = round(pb_score, 1)
+        score_details["PB行业分位"] = round(pb_percentile, 2)
 
         # 市值评分（0-15分）：市值越小分越高（越靠近10亿越好）
         if total_mv > 0:
@@ -265,6 +295,20 @@ class SmallCapValueService(RetailScreeningBase):
             if not candidates:
                 return []
 
+            # 计算行业PE/PB统计值（用于行业中性化评分）
+            industry_stats: Dict[str, Dict[str, List[float]]] = {}
+            for code in candidates:
+                sv = screening_data.get(code, {})
+                industry = sv.get("industry", "") or "未知"
+                pe = sv.get("pe", 0) or 0
+                pb = sv.get("pb", 0) or 0
+                if industry not in industry_stats:
+                    industry_stats[industry] = {"pe": [], "pb": []}
+                if pe > 0:
+                    industry_stats[industry]["pe"].append(pe)
+                if pb > 0:
+                    industry_stats[industry]["pb"].append(pb)
+
             quotes_map = await self._batch_get_quotes(
                 candidates, date_str, days=30, concurrency=50
             )
@@ -272,7 +316,7 @@ class SmallCapValueService(RetailScreeningBase):
             for code in candidates:
                 sv = screening_data.get(code, {})
                 quotes = quotes_map.get(code, [])
-                result = self._analyze_stock(code, sv, quotes, max_pe, max_pb)
+                result = self._analyze_stock(code, sv, quotes, max_pe, max_pb, industry_stats)
                 if result:
                     items.append(result)
             return items

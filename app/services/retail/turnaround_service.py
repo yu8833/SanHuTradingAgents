@@ -41,20 +41,23 @@ class TurnaroundService(RetailScreeningBase):
         """
         start_time = time.time()
         params = params or {}
-        min_score = params.get("min_score", 40)
         limit = params.get("limit", 50)
 
         # 1. 获取行情+估值
         screening_data = await self._get_screening_view_batch()
 
-        # 2. 筛选候选：PE>0 的股票（排除亏损股，后续用价量判断拐点）
-        candidates = [
+        # 2. 筛选候选：PE>0 的股票（排除亏损股，后续用价量判断拐点），按成交额降序取前1500
+        pe_positive_codes = [
             code
             for code, data in screening_data.items()
             if data.get("pe", 0) and data["pe"] > 0 and data.get("close", 0) > 0
         ]
-        # 限制数量避免扫描太慢
-        candidates = candidates[:800]
+        sorted_codes = sorted(
+            pe_positive_codes,
+            key=lambda c: screening_data[c].get("amount", 0) or 0,
+            reverse=True
+        )
+        candidates = sorted_codes[:1500]
 
         logger.info(f"困境反转扫描: {len(candidates)} 个候选股")
 
@@ -76,9 +79,7 @@ class TurnaroundService(RetailScreeningBase):
                 if len(quotes) < 30:
                     return None
                 result = self._analyze_stock(code, sv, quotes)
-                if result and result["score"] >= min_score:
-                    return result
-                return None
+                return result
 
         tasks = [analyze_one(c) for c in candidates]
         results = await asyncio.gather(*tasks)
@@ -246,11 +247,17 @@ class TurnaroundService(RetailScreeningBase):
         async def scan_func(date_str: str) -> List[dict]:
             """回测扫描函数：使用历史数据，避免未来函数"""
             screening_data = await self._get_screening_view_for_date(date_str)
-            candidates = [
+            pe_positive_codes = [
                 code
                 for code, data in screening_data.items()
                 if data.get("pe", 0) and data["pe"] > 0
-            ][:300]
+            ]
+            sorted_codes = sorted(
+                pe_positive_codes,
+                key=lambda c: screening_data[c].get("amount", 0) or 0,
+                reverse=True
+            )
+            candidates = sorted_codes[:1500]
             if not candidates:
                 return []
             quotes_map = await self._batch_get_quotes(

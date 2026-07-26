@@ -46,7 +46,6 @@ class ConvertibleArbitrageService(RetailScreeningBase):
         min_issue_size = params.get("min_issue_size")
         if min_issue_size is None:
             min_issue_size = 1.0
-        min_score = params.get("min_score", 40)
         limit = params.get("limit", 50)
 
         try:
@@ -74,7 +73,6 @@ class ConvertibleArbitrageService(RetailScreeningBase):
                 max_bond_price=max_bond_price,
                 max_stock_vs_conversion=max_stock_vs_conversion,
                 min_issue_size=min_issue_size,
-                min_score=min_score,
                 limit=limit,
             )
 
@@ -102,14 +100,29 @@ class ConvertibleArbitrageService(RetailScreeningBase):
 
     async def backtest(self, params: Dict[str, Any] = None) -> Dict[str, Any]:
         """回测"""
-        params = params or {}
-
-        # 数据接入后使用通用回测引擎
-        async def scan_func(date_str: str) -> List[dict]:
-            results = await self.scan_convertible_arbitrage(params)
-            return results.get("items", [])
-
-        return await self.run_backtest("convertible_arbitrage", scan_func, params)
+        return {
+            "message": "可转债策略暂不支持历史回测（缺少历史转债价格与转股价数据）",
+            "total_trades": 0,
+            "win_rate": 0,
+            "avg_return": 0,
+            "avg_win": 0,
+            "avg_loss": 0,
+            "max_drawdown": 0,
+            "total_return": 0,
+            "final_capital": 0,
+            "initial_capital": 0,
+            "backtest_days": 0,
+            "sharpe_ratio": 0,
+            "calmar_ratio": 0,
+            "annualized_return": 0,
+            "profit_loss_ratio": 0,
+            "max_consecutive_losses": 0,
+            "total_fees_est": 0,
+            "daily_results": [],
+            "top_trades": [],
+            "worst_trades": [],
+            "sell_reason_stats": {},
+        }
 
 
 _service: Optional[ConvertibleArbitrageService] = None

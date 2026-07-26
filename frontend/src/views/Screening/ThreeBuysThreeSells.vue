@@ -134,7 +134,6 @@ function clearBacktestResult() {
 }
 
 const defaultScanParams: Required<ThreeBuysThreeSellsScanReq> = {
-  min_score: 50,
   top_n: 10,
   hold_days: 60,
   initial_capital: 1000000,
@@ -645,32 +644,8 @@ onUnmounted(() => {
       </template>
 
       <el-form :model="scanParams" label-position="top" size="default" class="params-form">
-        <el-row :gutter="32">
-          <el-col :span="8">
-            <el-form-item>
-              <template #label>
-                <span style="display: flex; align-items: center; gap: 4px;">
-                  最低评分(100分制)
-                  <el-tooltip effect="dark" placement="top">
-                    <template #content>
-                      <div class="tooltip-detail">
-                        <p><strong>评分说明：</strong>综合评分采用100分制，从成交量、K线涨幅、均线形态、大盘配合、MACD等多维度评估信号质量。</p>
-                        <p style="margin-top: 6px;"><strong>分数含义：</strong></p>
-                        <p>• 80-100分：优质标的，各项指标优秀，强烈推荐</p>
-                        <p>• 60-79分：良好标的，趋势明确，值得关注</p>
-                        <p>• 40-59分：一般标的，存在一定瑕疵，谨慎参与</p>
-                        <p>• 0-39分：较差标的，风险较高，不建议参与</p>
-                        <p style="margin-top: 6px;"><strong>设置建议：</strong>建议设置为50分，筛选中等以上质量的股票。追求稳健可设为60-70分，追求高收益可降低至30-40分。</p>
-                      </div>
-                    </template>
-                    <el-icon class="help-icon"><QuestionFilled /></el-icon>
-                  </el-tooltip>
-                </span>
-              </template>
-              <el-slider v-model="scanParams.min_score" :min="0" :max="100" :step="5" show-stops />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
+        <el-row :gutter="32" justify="center">
+          <el-col :span="6">
             <el-form-item label="返回数量限制">
               <el-input-number v-model="scanParams.limit" :min="1" :max="200" :step="10" style="width: 100%;" />
             </el-form-item>
@@ -924,30 +899,6 @@ onUnmounted(() => {
               <el-col :span="8">
                 <el-form-item label="单股最大仓位">
                   <el-input-number v-model="backtestParams.max_position_pct" :min="0.01" :max="1" :step="0.05" style="width: 100%;" />
-                </el-form-item>
-              </el-col>
-              <el-col :span="8">
-                <el-form-item>
-                  <template #label>
-                    <span style="display: flex; align-items: center; gap: 4px;">
-                      最低评分(100分制)
-                      <el-tooltip effect="dark" placement="top">
-                        <template #content>
-                          <div class="tooltip-detail">
-                            <p><strong>评分说明：</strong>综合评分采用100分制，从成交量、K线涨幅、均线形态、大盘配合、MACD等多维度评估信号质量。</p>
-                            <p style="margin-top: 6px;"><strong>分数含义：</strong></p>
-                            <p>• 80-100分：优质标的，各项指标优秀，强烈推荐</p>
-                            <p>• 60-79分：良好标的，趋势明确，值得关注</p>
-                            <p>• 40-59分：一般标的，存在一定瑕疵，谨慎参与</p>
-                            <p>• 0-39分：较差标的，风险较高，不建议参与</p>
-                            <p style="margin-top: 6px;"><strong>设置建议：</strong>建议设置为50分，筛选中等以上质量的股票。追求稳健可设为60-70分，追求高收益可降低至30-40分。</p>
-                          </div>
-                        </template>
-                        <el-icon class="help-icon"><QuestionFilled /></el-icon>
-                      </el-tooltip>
-                    </span>
-                  </template>
-                  <el-slider v-model="backtestParams.min_score" :min="0" :max="100" :step="5" show-stops />
                 </el-form-item>
               </el-col>
             </el-row>

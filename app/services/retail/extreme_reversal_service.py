@@ -45,7 +45,6 @@ class ExtremeReversalService(RetailScreeningBase):
         params = params or {}
         min_consecutive_down = params.get("min_consecutive_down", 2)
         min_total_drop_pct = params.get("min_total_drop_pct", 0.15)
-        min_score = params.get("min_score", 40)
         limit = params.get("limit", 50)
 
         # 1. 获取全部股票的当前行情+估值
@@ -59,13 +58,19 @@ class ExtremeReversalService(RetailScreeningBase):
             if pct_chg < -5:
                 candidates.append(code)
 
-        # 如果候选太少，放宽条件：取所有PE>0的股票
+        # 如果候选太少，放宽条件：取所有PE>0的股票，按成交额降序取前1500
         if len(candidates) < 50:
-            candidates = [
+            pe_positive_codes = [
                 code
                 for code, data in screening_data.items()
                 if data.get("pe", 0) and data["pe"] > 0
-            ][:500]
+            ]
+            sorted_codes = sorted(
+                pe_positive_codes,
+                key=lambda c: screening_data[c].get("amount", 0) or 0,
+                reverse=True
+            )
+            candidates = sorted_codes[:1500]
 
         logger.info(
             f"极端反转扫描: {len(candidates)} 个候选股, 开始获取历史数据"
@@ -91,9 +96,7 @@ class ExtremeReversalService(RetailScreeningBase):
                 result = self._analyze_stock(
                     code, sv, quotes, min_consecutive_down, min_total_drop_pct
                 )
-                if result and result["score"] >= min_score:
-                    return result
-                return None
+                return result
 
         tasks = [analyze_one(c) for c in candidates]
         results = await asyncio.gather(*tasks)
@@ -342,7 +345,12 @@ class ExtremeReversalService(RetailScreeningBase):
             """回测扫描函数：在指定日期扫描（使用历史数据，避免未来函数）"""
             # 使用指定日期的历史行情数据，而非最新数据
             screening_data = await self._get_screening_view_for_date(date_str)
-            candidates = list(screening_data.keys())[:300]
+            sorted_codes = sorted(
+                screening_data.keys(),
+                key=lambda c: screening_data[c].get("amount", 0) or 0,
+                reverse=True
+            )
+            candidates = sorted_codes[:1500]
 
             if not candidates:
                 return []

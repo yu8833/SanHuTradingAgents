@@ -84,13 +84,6 @@
             </el-form-item>
           </el-col>
           <el-col :span="6">
-            <el-form-item label="最低评分(100分制)">
-              <el-slider v-model="params.min_score" :min="0" :max="100" :step="5" show-stops />
-            </el-form-item>
-          </el-col>
-        </el-row>
-        <el-row :gutter="24">
-          <el-col :span="6">
             <el-form-item label="返回数量限制">
               <el-input-number v-model="params.limit" :min="10" :max="200" :step="10" style="width: 100%;" />
             </el-form-item>
@@ -180,7 +173,7 @@
 
           <!-- 扫描后无结果的提示 -->
           <div v-if="!loading && results.length === 0 && hasSearched" class="data-source-tip">
-            <el-result icon="info" title="未找到符合条件的转债" sub-title="可尝试调低最低评分或放宽筛选参数后重试">
+            <el-result icon="info" title="未找到符合条件的转债" sub-title="可尝试放宽筛选参数后重试">
               <template #extra>
                 <el-button type="primary" @click="doScan">重新扫描</el-button>
               </template>
@@ -326,7 +319,23 @@
       </el-tab-pane>
 
       <!-- 回测分析Tab -->
-      <el-tab-pane label="回测分析" name="backtest">
+      <el-tab-pane name="backtest" disabled>
+        <template #label>
+          <el-tooltip content="暂不支持历史回测（缺少历史转债数据）" placement="top">
+            <span>回测分析</span>
+          </el-tooltip>
+        </template>
+        <el-alert
+          title="可转债策略暂不支持历史回测"
+          type="warning"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 16px;"
+        >
+          <template #default>
+            原因：缺少历史转债价格与转股价数据
+          </template>
+        </el-alert>
         <el-card shadow="never" style="margin-bottom: 16px;">
           <template #header>
             <div class="card-header">
@@ -581,7 +590,7 @@ function loadBacktestResult() {
   return false
 }
 
-const defaultParams = { max_bond_price: 110, max_stock_vs_conversion: 0.7, min_issue_size: 1.0, min_score: 40, limit: 50 }
+const defaultParams = { max_bond_price: 110, max_stock_vs_conversion: 0.7, min_issue_size: 1.0, limit: 50 }
 const params = reactive<RetailScanReq>({ ...defaultParams })
 
 const resetParams = () => {
@@ -602,7 +611,7 @@ const doScan = async () => {
     if (resp.items.length > 0) {
       ElMessage.success(`扫描完成：共扫描 ${resp.scanned_count || 0} 只转债，找到 ${resp.items.length} 只下修博弈候选`)
     } else {
-      ElMessage.warning('未找到符合条件的转债，可尝试调低最低评分或放宽筛选参数')
+      ElMessage.warning('未找到符合条件的转债，可尝试放宽筛选参数')
     }
   } catch (e: any) {
     ElMessage.error(e?.message || '扫描失败，请稍后重试')
@@ -620,7 +629,6 @@ const defaultBacktestParams = {
   end_date: '',
   hold_days: 30,
   top_n: 10,
-  min_score: 40,
   limit: 50
 }
 const backtestParams = reactive<RetailBacktestReq>({ ...defaultBacktestParams })
@@ -696,7 +704,6 @@ const doBacktest = async () => {
   try {
     const payload: RetailBacktestReq = {
       ...backtestParams,
-      min_score: params.min_score,
       limit: params.limit
     }
     const resp = await screeningApi.backtestConvertibleArbitrage(payload)

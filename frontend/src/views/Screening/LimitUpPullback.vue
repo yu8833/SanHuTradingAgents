@@ -147,32 +147,8 @@
       </template>
 
       <el-form :model="params" label-position="top" size="default" class="params-form">
-        <el-row :gutter="32">
-          <el-col :span="8">
-            <el-form-item>
-              <template #label>
-                <span style="display: flex; align-items: center; gap: 4px;">
-                  最低评分(100分制)
-                  <el-tooltip effect="dark" placement="top">
-                    <template #content>
-                      <div class="tooltip-detail">
-                        <p><strong>评分说明：</strong>综合评分采用100分制，从涨停强度、缩量程度、支撑有效性、量价配合、技术形态等多维度评估股票质量。</p>
-                        <p style="margin-top: 6px;"><strong>分数含义：</strong></p>
-                        <p>• 80-100分：优质标的，各项指标优秀，强烈推荐</p>
-                        <p>• 60-79分：良好标的，形态标准，值得关注</p>
-                        <p>• 40-59分：一般标的，存在一定瑕疵，谨慎参与</p>
-                        <p>• 0-39分：较差标的，形态不标准，不建议参与</p>
-                        <p style="margin-top: 6px;"><strong>设置建议：</strong>建议设置为40分，筛选中等以上质量的股票。追求稳健可设为60-70分，追求高收益可降低至20-30分。</p>
-                      </div>
-                    </template>
-                    <el-icon class="help-icon"><QuestionFilled /></el-icon>
-                  </el-tooltip>
-                </span>
-              </template>
-              <el-slider v-model="params.min_score" :min="0" :max="100" :step="5" show-stops />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
+        <el-row :gutter="32" justify="center">
+          <el-col :span="6">
             <el-form-item label="返回数量限制">
               <el-input-number v-model="params.limit" :min="10" :max="200" :step="10" style="width: 100%;" />
             </el-form-item>
@@ -1088,7 +1064,6 @@ const defaultBacktestParams = {
   end_date: '',
   hold_days: 20,
   top_n: 10,
-  min_score: 40,
   limit: 50
 }
 
@@ -1162,7 +1137,6 @@ const equityCurveOption = computed(() => {
 })
 
 const defaultParams = {
-  min_score: 40,
   limit: 50
 }
 
@@ -1258,7 +1232,6 @@ const doBacktest = async () => {
     // 合并扫描参数到回测请求
     const payload: LimitUpPullbackBacktestReq = {
       ...backtestParams,
-      min_score: params.min_score,
       limit: params.limit
     }
 

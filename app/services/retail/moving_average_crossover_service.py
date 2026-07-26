@@ -43,13 +43,17 @@ class MovingAverageCrossoverService(RetailScreeningBase):
         """
         start_time = time.time()
         params = params or {}
-        min_score = params.get("min_score", 40)
         limit = params.get("limit", 50)
         lookback_days = params.get("lookback_days", 60)
 
         screening_data = await self._get_screening_view_batch()
 
-        candidates = list(screening_data.keys())[:800]
+        sorted_codes = sorted(
+            screening_data.keys(),
+            key=lambda c: screening_data[c].get("amount", 0) or 0,
+            reverse=True
+        )
+        candidates = sorted_codes[:1500]
 
         logger.info(
             f"均线交叉扫描: {len(candidates)} 个候选股, 开始获取历史数据"
@@ -71,9 +75,7 @@ class MovingAverageCrossoverService(RetailScreeningBase):
                     return None
 
                 result = self._analyze_stock(code, sv, quotes)
-                if result and result["score"] >= min_score:
-                    return result
-                return None
+                return result
 
         tasks = [analyze_one(c) for c in candidates]
         results = await asyncio.gather(*tasks)
@@ -163,6 +165,10 @@ class MovingAverageCrossoverService(RetailScreeningBase):
         if len(ma5) < 3 or len(ma10) < 3 or len(ma20) < 3 or len(ma60) < 3:
             return None
 
+        # MA60大趋势过滤：只做上升趋势中的股票（收盘价 > MA60）
+        if close <= ma60[-1]:
+            return None
+
         signal_type = "无信号"
         crossover_type = None
 
@@ -193,32 +199,38 @@ class MovingAverageCrossoverService(RetailScreeningBase):
 
         # 金叉强度评分（0-30分）
         cross_strength_score = 0
+        ma5_last = float(ma5[-1])
+        ma5_prev = float(ma5[-2])
+        ma10_last = float(ma10[-1])
+        ma10_prev = float(ma10[-2])
+        ma20_last = float(ma20[-1])
+        ma20_prev = float(ma20[-2])
         if signal_type == "金叉":
             if ma5_cross_ma10_prev:
-                diff_change = (ma5[-1] - ma10[-1]) - (ma5[-2] - ma10[-2])
-                diff_ratio = abs(diff_change) / max(ma10[-1], 0.01)
+                diff_change = (ma5_last - ma10_last) - (ma5_prev - ma10_prev)
+                diff_ratio = abs(diff_change) / max(ma10_last, 0.01)
                 cross_strength_score = min(30, diff_ratio * 5000)
             else:
-                diff_change = (ma10[-1] - ma20[-1]) - (ma10[-2] - ma20[-2])
-                diff_ratio = abs(diff_change) / max(ma20[-1], 0.01)
+                diff_change = (ma10_last - ma20_last) - (ma10_prev - ma20_prev)
+                diff_ratio = abs(diff_change) / max(ma20_last, 0.01)
                 cross_strength_score = min(30, diff_ratio * 3000)
         elif signal_type == "死叉":
             if ma5_cross_ma10_below:
-                diff_change = (ma10[-1] - ma5[-1]) - (ma10[-2] - ma5[-2])
-                diff_ratio = abs(diff_change) / max(ma10[-1], 0.01)
+                diff_change = (ma10_last - ma5_last) - (ma10_prev - ma5_prev)
+                diff_ratio = abs(diff_change) / max(ma10_last, 0.01)
                 cross_strength_score = min(30, diff_ratio * 5000)
             else:
-                diff_change = (ma20[-1] - ma10[-1]) - (ma20[-2] - ma10[-2])
-                diff_ratio = abs(diff_change) / max(ma20[-1], 0.01)
+                diff_change = (ma20_last - ma10_last) - (ma20_prev - ma10_prev)
+                diff_ratio = abs(diff_change) / max(ma20_last, 0.01)
                 cross_strength_score = min(30, diff_ratio * 3000)
-        cross_strength_score = round(cross_strength_score, 1)
+        cross_strength_score = round(float(cross_strength_score), 1)
 
         # 成交量配合评分（0-25分）
         volume_score = 0
         if len(volumes) >= 20:
-            vol_ma20 = np.mean(volumes[-20:])
+            vol_ma20 = float(np.mean(volumes[-20:]))
             if vol_ma20 > 0:
-                vol_ratio = volumes[-1] / vol_ma20
+                vol_ratio = float(volumes[-1] / vol_ma20)
                 if signal_type == "金叉":
                     if vol_ratio >= 1.5:
                         volume_score = 25
@@ -243,11 +255,12 @@ class MovingAverageCrossoverService(RetailScreeningBase):
 
         # 趋势方向评分（0-20分）
         trend_score = 0
-        if close > ma60[-1]:
+        ma60_last = float(ma60[-1])
+        if close > ma60_last:
             trend_score = 20
-        elif close > ma60[-1] * 0.98:
+        elif close > ma60_last * 0.98:
             trend_score = 15
-        elif close > ma60[-1] * 0.95:
+        elif close > ma60_last * 0.95:
             trend_score = 10
         else:
             trend_score = 0
@@ -258,28 +271,31 @@ class MovingAverageCrossoverService(RetailScreeningBase):
         if macd_result:
             macd_line, signal_line, histogram = macd_result
             if len(histogram) >= 2:
+                macd_line_last = float(macd_line[-1])
+                hist_last = float(histogram[-1])
+                hist_prev = float(histogram[-2])
                 if signal_type == "金叉":
-                    if macd_line[-1] > 0 and histogram[-1] > histogram[-2] and histogram[-1] > 0:
+                    if macd_line_last > 0 and hist_last > hist_prev and hist_last > 0:
                         macd_score = 15
-                    elif macd_line[-1] > 0 and histogram[-1] > 0:
+                    elif macd_line_last > 0 and hist_last > 0:
                         macd_score = 10
-                    elif macd_line[-1] > 0:
+                    elif macd_line_last > 0:
                         macd_score = 5
                 elif signal_type == "死叉":
-                    if macd_line[-1] < 0 and histogram[-1] < histogram[-2] and histogram[-1] < 0:
+                    if macd_line_last < 0 and hist_last < hist_prev and hist_last < 0:
                         macd_score = 15
-                    elif macd_line[-1] < 0 and histogram[-1] < 0:
+                    elif macd_line_last < 0 and hist_last < 0:
                         macd_score = 10
-                    elif macd_line[-1] < 0:
+                    elif macd_line_last < 0:
                         macd_score = 5
 
         # 位置评分（0-10分）
         position_score = 0
         if len(closes) >= 60:
-            low_60 = np.min(closes[-60:])
-            high_60 = np.max(closes[-60:])
+            low_60 = float(np.min(closes[-60:]))
+            high_60 = float(np.max(closes[-60:]))
             if high_60 > low_60:
-                position = (close - low_60) / (high_60 - low_60)
+                position = float((close - low_60) / (high_60 - low_60))
                 if signal_type == "金叉":
                     if position <= 0.3:
                         position_score = 10
@@ -299,12 +315,22 @@ class MovingAverageCrossoverService(RetailScreeningBase):
                     else:
                         position_score = 0
 
+        # 趋势强度评分（0-10分）：收盘价在MA60上方的比例
+        trend_strength_score = 0
+        if len(ma60) > 0 and len(closes) >= len(ma60):
+            close_aligned = closes[-len(ma60):]
+            above_ma60 = int(np.sum(close_aligned > ma60))
+            trend_strength_ratio = float(above_ma60 / len(ma60)) if len(ma60) > 0 else 0.0
+            trend_strength_score = min(10, trend_strength_ratio * 10)
+        trend_strength_score = round(float(trend_strength_score), 1)
+
         total_score = (
             cross_strength_score +
             volume_score +
             trend_score +
             macd_score +
-            position_score
+            position_score +
+            trend_strength_score
         )
 
         score_details = {
@@ -313,6 +339,7 @@ class MovingAverageCrossoverService(RetailScreeningBase):
             "趋势方向": trend_score,
             "MACD辅助": macd_score,
             "位置": position_score,
+            "趋势强度": trend_strength_score,
         }
 
         if total_score < 20:
@@ -345,7 +372,12 @@ class MovingAverageCrossoverService(RetailScreeningBase):
 
         async def scan_func(date_str: str) -> List[dict]:
             screening_data = await self._get_screening_view_for_date(date_str)
-            candidates = list(screening_data.keys())[:500]
+            sorted_codes = sorted(
+                screening_data.keys(),
+                key=lambda c: screening_data[c].get("amount", 0) or 0,
+                reverse=True
+            )
+            candidates = sorted_codes[:1500]
 
             if not candidates:
                 return []

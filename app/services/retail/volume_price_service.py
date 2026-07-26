@@ -44,13 +44,17 @@ class VolumePriceService(RetailScreeningBase):
         """
         start_time = time.time()
         params = params or {}
-        min_score = params.get("min_score", 40)
         limit = params.get("limit", 50)
         lookback_days = params.get("lookback_days", 60)
 
         screening_data = await self._get_screening_view_batch()
 
-        candidates = list(screening_data.keys())[:800]
+        sorted_codes = sorted(
+            screening_data.keys(),
+            key=lambda c: screening_data[c].get("amount", 0) or 0,
+            reverse=True
+        )
+        candidates = sorted_codes[:1500]
 
         logger.info(
             f"量价配合扫描: {len(candidates)} 个候选股, 开始获取历史数据"
@@ -72,9 +76,7 @@ class VolumePriceService(RetailScreeningBase):
                     return None
 
                 result = self._analyze_stock(code, sv, quotes)
-                if result and result["score"] >= min_score:
-                    return result
-                return None
+                return result
 
         tasks = [analyze_one(c) for c in candidates]
         results = await asyncio.gather(*tasks)
@@ -133,7 +135,17 @@ class VolumePriceService(RetailScreeningBase):
         closes = np.array([q["close"] for q in quotes], dtype=float)
         volumes = np.array([q.get("volume", 0) for q in quotes], dtype=float)
 
-        if len(closes) < 30 or len(volumes) < 30:
+        if len(closes) < 60 or len(volumes) < 60:
+            return None
+
+        # 计算MA60
+        ma60 = np.convolve(closes, np.ones(60)/60, mode='valid')
+        if len(ma60) < 1:
+            return None
+
+        # MA60大趋势过滤：只做上升趋势中的股票（收盘价 > MA60）
+        ma60_last = float(ma60[-1])
+        if close <= ma60_last:
             return None
 
         # 计算价格变化和成交量变化
@@ -141,22 +153,22 @@ class VolumePriceService(RetailScreeningBase):
         volume_changes = np.diff(volumes) / np.maximum(volumes[:-1], 1)
 
         # 量价配合度评分（0-30分）
-        correlation_score = 0
+        correlation_score = 0.0
         correlation_value = 0.0
         if len(price_changes) >= 20 and len(volume_changes) >= 20:
             recent_price_changes = price_changes[-20:]
             recent_volume_changes = volume_changes[-20:]
             correlation = self._calc_correlation(recent_price_changes, recent_volume_changes)
-            correlation_value = correlation
+            correlation_value = float(correlation)
             if correlation > 0:
-                correlation_score = min(30, correlation * 50)
+                correlation_score = float(min(30, correlation * 50))
 
         # 量能等级评分（0-25分）
         volume_score = 0
         if len(volumes) >= 20:
-            vol_ma20 = np.mean(volumes[-20:])
+            vol_ma20 = float(np.mean(volumes[-20:]))
             if vol_ma20 > 0:
-                vol_ratio = volumes[-1] / vol_ma20
+                vol_ratio = float(volumes[-1] / vol_ma20)
                 if vol_ratio >= 2.0:
                     volume_score = 25
                 elif vol_ratio >= 1.5:
@@ -204,10 +216,10 @@ class VolumePriceService(RetailScreeningBase):
         position_score = 0
         if len(closes) >= 20:
             recent_closes = closes[-20:]
-            low_20 = np.min(recent_closes)
-            high_20 = np.max(recent_closes)
+            low_20 = float(np.min(recent_closes))
+            high_20 = float(np.max(recent_closes))
             if high_20 > low_20:
-                position = (close - low_20) / (high_20 - low_20)
+                position = float((close - low_20) / (high_20 - low_20))
                 if position >= 0.7 and position <= 0.95:
                     position_score = 15
                 elif position >= 0.5 and position <= 0.7:
@@ -237,6 +249,15 @@ class VolumePriceService(RetailScreeningBase):
         elif consecutive_up >= 1:
             trend_score = 2
 
+        # 趋势强度评分（0-10分）：收盘价在MA60上方的比例
+        trend_strength_score = 0
+        if len(ma60) > 0 and len(closes) >= len(ma60):
+            close_aligned = closes[-len(ma60):]
+            above_ma60 = int(np.sum(close_aligned > ma60))
+            trend_strength_ratio = float(above_ma60 / len(ma60)) if len(ma60) > 0 else 0.0
+            trend_strength_score = min(10, trend_strength_ratio * 10)
+        trend_strength_score = round(float(trend_strength_score), 1)
+
         # 信号类型判定
         signal_type = "无信号"
         if pct_chg > 0 and volume_score >= 15:
@@ -255,7 +276,8 @@ class VolumePriceService(RetailScreeningBase):
             volume_score +
             pattern_score +
             position_score +
-            trend_score
+            trend_score +
+            trend_strength_score
         )
 
         score_details = {
@@ -264,14 +286,15 @@ class VolumePriceService(RetailScreeningBase):
             "价格形态": pattern_score,
             "相对位置": position_score,
             "趋势延续": trend_score,
+            "趋势强度": trend_strength_score,
         }
 
         if total_score < 20:
             return None
 
         # 计算近20日成交量倍数
-        vol_ma20_final = np.mean(volumes[-20:]) if len(volumes) >= 20 else 0
-        vol_ratio_final = volumes[-1] / vol_ma20_final if vol_ma20_final > 0 else 0
+        vol_ma20_final = float(np.mean(volumes[-20:])) if len(volumes) >= 20 else 0.0
+        vol_ratio_final = float(volumes[-1] / vol_ma20_final) if vol_ma20_final > 0 else 0.0
 
         return {
             "code": code,
@@ -289,6 +312,7 @@ class VolumePriceService(RetailScreeningBase):
             "volume_multiple": round(vol_ratio_final, 2),
             "price_volume_correlation": round(correlation_value, 4),
             "consecutive_up_days": consecutive_up,
+            "ma60": round(float(ma60[-1]), 2),
             "volume": volume,
             "market": market,
         }
@@ -299,7 +323,12 @@ class VolumePriceService(RetailScreeningBase):
 
         async def scan_func(date_str: str) -> List[dict]:
             screening_data = await self._get_screening_view_for_date(date_str)
-            candidates = list(screening_data.keys())[:500]
+            sorted_codes = sorted(
+                screening_data.keys(),
+                key=lambda c: screening_data[c].get("amount", 0) or 0,
+                reverse=True
+            )
+            candidates = sorted_codes[:1500]
 
             if not candidates:
                 return []

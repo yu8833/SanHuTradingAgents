@@ -208,7 +208,6 @@ def filter_down_revision_candidates(
     max_bond_price: float = 110,
     max_stock_vs_conversion: float = 0.7,
     min_issue_size: float = 1.0,
-    min_score: int = 40,
     limit: int = 50,
 ) -> List[Dict[str, Any]]:
     """
@@ -231,7 +230,6 @@ def filter_down_revision_candidates(
         max_bond_price: 转债价格上限
         max_stock_vs_conversion: 正股/转股价最大比值（低于此值有下修动力）
         min_issue_size: 最小发行规模（亿元）
-        min_score: 最低评分
         limit: 返回条数上限
 
     Returns:
@@ -337,7 +335,6 @@ def filter_down_revision_candidates(
             "signal_type": "下修博弈",
         })
 
-    # 过滤最低评分并按评分降序
-    filtered = [c for c in candidates if c["score"] >= min_score]
-    filtered.sort(key=lambda x: x["score"], reverse=True)
-    return filtered[:limit]
+    # 按评分降序排序（保留评分用于排序，不再用min_score过滤）
+    candidates.sort(key=lambda x: x["score"], reverse=True)
+    return candidates[:limit]

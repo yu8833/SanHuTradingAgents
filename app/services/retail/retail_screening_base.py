@@ -499,7 +499,6 @@ class RetailScreeningBase:
         top_n = params.get("top_n", 10)
         initial_capital = params.get("initial_capital", 1000000)
         max_position_pct = params.get("max_position_pct", 0.1)
-        min_score = params.get("min_score", 0)
 
         if not start_date or not end_date:
             # 默认回测最近1年
@@ -625,11 +624,8 @@ class RetailScreeningBase:
                         logger.warning(f"回测扫描 {date_str} 失败: {e}")
                         scan_results = []
 
-                    # 过滤评分、排序、取top_n
-                    candidates = [
-                        s for s in scan_results if s.get("score", 0) >= min_score
-                    ]
-                    candidates.sort(key=lambda x: x.get("score", 0), reverse=True)
+                    # 排序、取top_n（保留评分用于排序，不再用min_score过滤）
+                    candidates = sorted(scan_results, key=lambda x: x.get("score", 0), reverse=True)
                     
                     # 弱势环境减半
                     if rise_ratio < 0.4:
