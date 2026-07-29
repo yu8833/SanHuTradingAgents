@@ -57,15 +57,16 @@ class TurnaroundService(RetailScreeningBase):
             key=lambda c: screening_data[c].get("amount", 0) or 0,
             reverse=True
         )
-        candidates = sorted_codes
+        # 限制候选股数量，避免全市场查询导致内存压力和超时
+        MAX_CANDIDATES = 2000
+        candidates = sorted_codes[:MAX_CANDIDATES]
 
-        logger.info(f"困境反转扫描: {len(candidates)} 个候选股")
+        logger.info(f"困境反转扫描: {len(candidates)} 个候选股 (从 {len(sorted_codes)} 只中筛选)")
 
-        # 3. 批量获取60日K线
+        # 3. 批量获取60日K线（分片并发查询，默认每批500只）
         today = datetime.now().strftime("%Y-%m-%d")
-        from datetime import datetime as dt
         quotes_map = await self._batch_get_quotes(
-            candidates, today, days=60, concurrency=100
+            candidates, today, days=60, concurrency=5, batch_size=500
         )
 
         # 4. 分析

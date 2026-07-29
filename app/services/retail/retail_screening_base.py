@@ -269,78 +269,91 @@ class RetailScreeningBase:
         end_date: str,
         days: int = 60,
         concurrency: int = 100,
+        batch_size: int = 500,
     ) -> Dict[str, List[dict]]:
         """
-        批量获取多只股票的日线数据（单次 $in 查询，替代 N 次单股查询）
+        批量获取多只股票的日线数据（分片并发 $in 查询）
 
-        性能优化：将 N 次 _get_daily_quotes 单股查询合并为 1 次 $in 批量查询，
-        消除回测/扫描时的 N×M 查询风暴。
+        性能优化：
+        1. 将大量 codes 按 batch_size 分片，并发执行多个子查询，
+           避免单次超大 $in 查询导致 MongoDB 游标阻塞和内存压力。
+        2. 每片内部利用 $in 批量查询，消除 N 次单股查询。
 
         Args:
             codes: 股票代码列表
             end_date: 截止日期 YYYY-MM-DD
             days: 每只股票获取的最近天数
-            concurrency: 保留参数兼容旧调用（单次查询无需限流）
+            concurrency: 并发分片数上限
+            batch_size: 每片包含的股票数量
         """
         if not codes:
             return {}
-        db = await self._get_db()
 
         # 计算日期下界：交易日 days 天约需 days*2 个自然日（含周末），加 30 天缓冲
-        # 避免全表扫描，同时保证足够数据量
         try:
             end_dt = datetime.strptime(end_date, "%Y-%m-%d")
         except Exception:
             end_dt = datetime.now()
         start_lower = (end_dt - timedelta(days=days * 2 + 30)).strftime("%Y-%m-%d")
 
-        cursor = db["stock_daily_quotes"].find(
-            {
-                "code": {"$in": codes},
-                "trade_date": {"$lte": end_date, "$gte": start_lower},
-                "period": "daily",
-            },
-            {
-                "trade_date": 1,
-                "code": 1,
-                "open": 1,
-                "close": 1,
-                "high": 1,
-                "low": 1,
-                "volume": 1,
-                "amount": 1,
-                "pct_chg": 1,
-                "pre_close": 1,
-                "data_source": 1,
-                "_id": 0,
-            },
-        ).sort("trade_date", -1)
-
-        docs = await cursor.to_list(length=None)
-
-        # 按 code 分组，按 data_source 优先级去重，每只取最近 days 天
+        # 分片
+        chunks = [codes[i:i + batch_size] for i in range(0, len(codes), batch_size)]
+        semaphore = asyncio.Semaphore(max(1, concurrency))
         source_priority = {"tushare": 4, "sina": 3, "baostock": 2, "akshare": 1}
-        by_code: Dict[str, Dict[str, dict]] = {}
-        for d in docs:
-            code = d.get("code")
-            if not code:
-                continue
-            bucket = by_code.setdefault(code, {})
-            dt = d.get("trade_date")
-            src = d.get("data_source", "")
-            if dt not in bucket or source_priority.get(
-                src, 0
-            ) > source_priority.get(bucket[dt].get("data_source", ""), 0):
-                bucket[dt] = d
 
-        result: Dict[str, List[dict]] = {}
-        for code, bucket in by_code.items():
-            # 取最近 days 天，按日期正序返回（与 _get_daily_quotes 一致）
-            sorted_quotes = sorted(
-                bucket.values(), key=lambda x: x["trade_date"], reverse=True
-            )[:days]
-            result[code] = sorted(sorted_quotes, key=lambda x: x["trade_date"])
-        return result
+        async def _query_chunk(chunk: List[str]) -> Dict[str, List[dict]]:
+            async with semaphore:
+                db = await self._get_db()
+                cursor = db["stock_daily_quotes"].find(
+                    {
+                        "code": {"$in": chunk},
+                        "trade_date": {"$lte": end_date, "$gte": start_lower},
+                        "period": "daily",
+                    },
+                    {
+                        "trade_date": 1,
+                        "code": 1,
+                        "open": 1,
+                        "close": 1,
+                        "high": 1,
+                        "low": 1,
+                        "volume": 1,
+                        "amount": 1,
+                        "pct_chg": 1,
+                        "pre_close": 1,
+                        "data_source": 1,
+                        "_id": 0,
+                    },
+                ).sort("trade_date", -1)
+
+                docs = await cursor.to_list(length=None)
+
+                by_code: Dict[str, Dict[str, dict]] = {}
+                for d in docs:
+                    code = d.get("code")
+                    if not code:
+                        continue
+                    bucket = by_code.setdefault(code, {})
+                    dt = d.get("trade_date")
+                    src = d.get("data_source", "")
+                    if dt not in bucket or source_priority.get(
+                        src, 0
+                    ) > source_priority.get(bucket[dt].get("data_source", ""), 0):
+                        bucket[dt] = d
+
+                result: Dict[str, List[dict]] = {}
+                for code, bucket in by_code.items():
+                    sorted_quotes = sorted(
+                        bucket.values(), key=lambda x: x["trade_date"], reverse=True
+                    )[:days]
+                    result[code] = sorted(sorted_quotes, key=lambda x: x["trade_date"])
+                return result
+
+        chunk_results = await asyncio.gather(*[_query_chunk(c) for c in chunks])
+        merged: Dict[str, List[dict]] = {}
+        for r in chunk_results:
+            merged.update(r)
+        return merged
 
     # ---- 通用工具 ----
 

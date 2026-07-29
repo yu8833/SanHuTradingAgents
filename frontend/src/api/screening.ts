@@ -360,51 +360,51 @@ export const screeningApi = {
   getFields: () => ApiClient.get<FieldConfigResponse>('/api/screening/fields'),
   getIndustries: () => ApiClient.get<IndustriesResponse>('/api/screening/industries'),
   scanLimitUpPullback: (payload: LimitUpPullbackScanReq, options?: { timeout?: number }) =>
-    ApiClient.post<LimitUpPullbackScanResp>('/api/screening/limit-up-pullback/scan', payload, { timeout: options?.timeout ?? 180000 }),
+    ApiClient.post<LimitUpPullbackScanResp>('/api/screening/limit-up-pullback/scan', payload, { timeout: options?.timeout ?? 420000 }),
   backtestLimitUpPullback: (payload: LimitUpPullbackBacktestReq, options?: { timeout?: number }) =>
-    ApiClient.post<LimitUpPullbackBacktestResp>('/api/screening/limit-up-pullback/backtest', payload, { timeout: options?.timeout ?? 300000 }),
+    ApiClient.post<LimitUpPullbackBacktestResp>('/api/screening/limit-up-pullback/backtest', payload, { timeout: options?.timeout ?? 600000 }),
   scanThreeBuysThreeSells: (payload: ThreeBuysThreeSellsScanReq, options?: { timeout?: number }) =>
-    ApiClient.post<ThreeBuysThreeSellsScanResp>('/api/screening/three-buys-three-sells/scan', payload, { timeout: options?.timeout ?? 180000 }),
+    ApiClient.post<ThreeBuysThreeSellsScanResp>('/api/screening/three-buys-three-sells/scan', payload, { timeout: options?.timeout ?? 420000 }),
   backtestThreeBuysThreeSells: (payload: ThreeBuysThreeSellsBacktestReq, options?: { timeout?: number }) =>
     ApiClient.post<ThreeBuysThreeSellsBacktestResp>('/api/screening/three-buys-three-sells/backtest', payload, { timeout: options?.timeout ?? 600000 }),
 
   // ===== 散户策略：极端反转 / 困境反转 / 小盘价值 / 转债下修博弈 =====
   scanExtremeReversal: (payload: RetailScanReq, options?: { timeout?: number }) =>
-    ApiClient.post<RetailScanResp>('/api/screening/extreme-reversal/scan', payload, { timeout: options?.timeout ?? 180000 }),
+    ApiClient.post<RetailScanResp>('/api/screening/extreme-reversal/scan', payload, { timeout: options?.timeout ?? 420000 }),
   backtestExtremeReversal: (payload: RetailBacktestReq, options?: { timeout?: number }) =>
-    ApiClient.post<RetailBacktestResp>('/api/screening/extreme-reversal/backtest', payload, { timeout: options?.timeout ?? 300000 }),
+    ApiClient.post<RetailBacktestResp>('/api/screening/extreme-reversal/backtest', payload, { timeout: options?.timeout ?? 600000 }),
 
   scanTurnaround: (payload: RetailScanReq, options?: { timeout?: number }) =>
-    ApiClient.post<RetailScanResp>('/api/screening/turnaround/scan', payload, { timeout: options?.timeout ?? 180000 }),
+    ApiClient.post<RetailScanResp>('/api/screening/turnaround/scan', payload, { timeout: options?.timeout ?? 420000 }),
   backtestTurnaround: (payload: RetailBacktestReq, options?: { timeout?: number }) =>
-    ApiClient.post<RetailBacktestResp>('/api/screening/turnaround/backtest', payload, { timeout: options?.timeout ?? 300000 }),
+    ApiClient.post<RetailBacktestResp>('/api/screening/turnaround/backtest', payload, { timeout: options?.timeout ?? 600000 }),
 
   scanSmallCapValue: (payload: RetailScanReq, options?: { timeout?: number }) =>
-    ApiClient.post<RetailScanResp>('/api/screening/small-cap-value/scan', payload, { timeout: options?.timeout ?? 180000 }),
+    ApiClient.post<RetailScanResp>('/api/screening/small-cap-value/scan', payload, { timeout: options?.timeout ?? 420000 }),
   backtestSmallCapValue: (payload: RetailBacktestReq, options?: { timeout?: number }) =>
-    ApiClient.post<RetailBacktestResp>('/api/screening/small-cap-value/backtest', payload, { timeout: options?.timeout ?? 300000 }),
+    ApiClient.post<RetailBacktestResp>('/api/screening/small-cap-value/backtest', payload, { timeout: options?.timeout ?? 600000 }),
 
   scanConvertibleArbitrage: (payload: RetailScanReq, options?: { timeout?: number }) =>
-    ApiClient.post<RetailScanResp>('/api/screening/convertible-arbitrage/scan', payload, { timeout: options?.timeout ?? 180000 }),
+    ApiClient.post<RetailScanResp>('/api/screening/convertible-arbitrage/scan', payload, { timeout: options?.timeout ?? 420000 }),
   backtestConvertibleArbitrage: (payload: RetailBacktestReq, options?: { timeout?: number }) =>
-    ApiClient.post<RetailBacktestResp>('/api/screening/convertible-arbitrage/backtest', payload, { timeout: options?.timeout ?? 300000 }),
+    ApiClient.post<RetailBacktestResp>('/api/screening/convertible-arbitrage/backtest', payload, { timeout: options?.timeout ?? 600000 }),
 
   // ===== 均线交叉策略 =====
   scanMaCrossover: (payload: RetailScanReq, options?: { timeout?: number }) =>
-    ApiClient.post<RetailScanResp>('/api/screening/ma-crossover/scan', payload, { timeout: options?.timeout ?? 180000 }),
+    ApiClient.post<RetailScanResp>('/api/screening/ma-crossover/scan', payload, { timeout: options?.timeout ?? 420000 }),
   backtestMaCrossover: (payload: RetailBacktestReq, options?: { timeout?: number }) =>
-    ApiClient.post<RetailBacktestResp>('/api/screening/ma-crossover/backtest', payload, { timeout: options?.timeout ?? 300000 }),
+    ApiClient.post<RetailBacktestResp>('/api/screening/ma-crossover/backtest', payload, { timeout: options?.timeout ?? 600000 }),
 
   // ===== MACD背离策略 =====
   scanMacdDivergence: (payload: RetailScanReq, options?: { timeout?: number }) =>
-    ApiClient.post<RetailScanResp>('/api/screening/macd-divergence/scan', payload, { timeout: options?.timeout ?? 180000 }),
+    ApiClient.post<RetailScanResp>('/api/screening/macd-divergence/scan', payload, { timeout: options?.timeout ?? 420000 }),
   backtestMacdDivergence: (payload: RetailBacktestReq, options?: { timeout?: number }) =>
-    ApiClient.post<RetailBacktestResp>('/api/screening/macd-divergence/backtest', payload, { timeout: options?.timeout ?? 300000 }),
+    ApiClient.post<RetailBacktestResp>('/api/screening/macd-divergence/backtest', payload, { timeout: options?.timeout ?? 600000 }),
 
   // ===== 量价配合策略 =====
   scanVolumePrice: (payload: RetailScanReq, options?: { timeout?: number }) =>
-    ApiClient.post<RetailScanResp>('/api/screening/volume-price/scan', payload, { timeout: options?.timeout ?? 180000 }),
+    ApiClient.post<RetailScanResp>('/api/screening/volume-price/scan', payload, { timeout: options?.timeout ?? 420000 }),
   backtestVolumePrice: (payload: RetailBacktestReq, options?: { timeout?: number }) =>
-    ApiClient.post<RetailBacktestResp>('/api/screening/volume-price/backtest', payload, { timeout: options?.timeout ?? 300000 })
+    ApiClient.post<RetailBacktestResp>('/api/screening/volume-price/backtest', payload, { timeout: options?.timeout ?? 600000 })
 }
 

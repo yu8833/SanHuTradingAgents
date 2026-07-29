@@ -547,6 +547,44 @@ async def lifespan(app: FastAPI):
         else:
             logger.info(f"🔍 BaoStock状态检查已配置: {settings.BAOSTOCK_STATUS_CHECK_CRON}")
 
+        # ==================== 数据完整性检查定时任务 ====================
+        logger.info("🔄 配置数据完整性检查任务...")
+
+        async def run_data_integrity_check():
+            """APScheduler任务：数据完整性检查与自动补数"""
+            try:
+                from app.services.data_integrity_service import get_data_integrity_service
+                service = await get_data_integrity_service()
+                result = await service.check_historical_completeness(
+                    auto_remediate=settings.DATA_INTEGRITY_AUTO_REMEDIATE,
+                    remediate_source=settings.DATA_INTEGRITY_REMEDIATE_SOURCE,
+                )
+                logger.info(
+                    f"🔍 [APScheduler] 数据完整性检查完成: "
+                    f"状态={result.get('status')}, "
+                    f"交易日期={result.get('trade_date')}, "
+                    f"期望={result.get('expected_count')}, "
+                    f"实际={result.get('actual_count')}, "
+                    f"缺失={result.get('missing_count')}, "
+                    f"补数={result.get('remediated_count')}"
+                )
+                return result
+            except Exception as e:
+                logger.error(f"❌ [APScheduler] 数据完整性检查失败: {e}")
+                raise
+
+        scheduler.add_job(
+            run_data_integrity_check,
+            CronTrigger.from_crontab(settings.DATA_INTEGRITY_CHECK_CRON, timezone=settings.TIMEZONE),
+            id="data_integrity_check",
+            name="数据完整性检查与自动补数",
+        )
+        if not settings.DATA_INTEGRITY_CHECK_ENABLED:
+            scheduler.pause_job("data_integrity_check")
+            logger.info(f"⏸️ 数据完整性检查已添加但暂停: {settings.DATA_INTEGRITY_CHECK_CRON}")
+        else:
+            logger.info(f"🔍 数据完整性检查已配置: {settings.DATA_INTEGRITY_CHECK_CRON}")
+
         # 新闻数据同步任务配置
         logger.info("🔄 配置新闻数据同步任务...")
 

@@ -461,6 +461,20 @@ async def create_database_indexes(db):
         if await _safe_create_index(usage_records, [("timestamp", -1)]):
             index_count += 1
 
+        # stock_daily_quotes 的索引（日线数据 - 策略扫描高频查询）
+        daily_quotes = db["stock_daily_quotes"]
+        if await _safe_create_index(daily_quotes, [("code", 1), ("trade_date", -1), ("period", 1)], background=True):
+            index_count += 1
+        if await _safe_create_index(daily_quotes, [("trade_date", 1), ("period", 1)], background=True):
+            index_count += 1
+
+        # stock_screening_view 的索引（筛选视图 - 全表扫描频繁）
+        screening_view = db["stock_screening_view"]
+        if await _safe_create_index(screening_view, [("code", 1)], unique=True, background=True):
+            index_count += 1
+        if await _safe_create_index(screening_view, [("amount", -1)], background=True):
+            index_count += 1
+
         # stock_financial_data 的索引（财务数据）
         stock_financial_data = db["stock_financial_data"]
         if await _safe_create_index(stock_financial_data, [("code", 1), ("data_source", 1), ("report_period", -1)]):

@@ -1319,6 +1319,23 @@ async def run_tushare_historical_sync(incremental: bool = True):
         logger.info(f"✅ [APScheduler] Tushare 同步服务已初始化")
         result = await service.sync_historical_data(incremental=incremental, job_id="tushare_historical_sync")
         logger.info(f"✅ [APScheduler] Tushare历史数据同步完成: {result}")
+
+        # 同步完成后自动执行完整性检查和补数
+        try:
+            from app.services.data_integrity_service import get_data_integrity_service
+            integrity_service = await get_data_integrity_service()
+            integrity_result = await integrity_service.check_historical_completeness(
+                auto_remediate=True,
+                remediate_source="akshare",
+            )
+            logger.info(f"🔍 [完整性检查] Tushare同步后检查结果: {integrity_result.get('status')} "
+                       f"(期望: {integrity_result.get('expected_count')}, "
+                       f"实际: {integrity_result.get('actual_count')}, "
+                       f"缺失: {integrity_result.get('missing_count')}, "
+                       f"补数: {integrity_result.get('remediated_count')})")
+        except Exception as ie:
+            logger.warning(f"⚠️ 同步后完整性检查失败（不影响同步结果）: {ie}")
+
         return result
     except Exception as e:
         logger.error(f"❌ [APScheduler] Tushare历史数据同步失败: {e}")

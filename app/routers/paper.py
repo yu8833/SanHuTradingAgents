@@ -576,6 +576,47 @@ async def place_order(payload: PlaceOrderRequest, current_user: dict = Depends(g
         trade_doc["analysis_id"] = analysis_id
     await db["paper_trades"].insert_one(trade_doc)
 
+    # 自动管理止损预警：买入时创建，清仓时删除
+    try:
+        from app.services.stock_alert_service import stock_alert_service, AlertRuleCreate, ALERT_TYPE_PRICE_BELOW
+        stock_name = payload.stock_name or (pos.get("stock_name") if pos else "") or ""
+
+        if side == "buy":
+            effective_stop_loss = payload.stop_loss_price
+            # 已有持仓加仓时，若未传新止损价，沿用已有止损价
+            if effective_stop_loss is None and pos and pos.get("stop_loss_price") is not None:
+                effective_stop_loss = pos.get("stop_loss_price")
+            if effective_stop_loss is not None and effective_stop_loss > 0:
+                await db["stock_alerts"].delete_many({
+                    "user_id": current_user["id"],
+                    "code": normalized_code,
+                    "alert_type": ALERT_TYPE_PRICE_BELOW,
+                    "note": {"$regex": "^自动止损"},
+                })
+                await stock_alert_service.create_alert(
+                    current_user["id"],
+                    AlertRuleCreate(
+                        code=normalized_code,
+                        stock_name=stock_name,
+                        alert_type=ALERT_TYPE_PRICE_BELOW,
+                        threshold=float(effective_stop_loss),
+                        note=f"自动止损预警（持仓成本监控）",
+                    ),
+                )
+                logger.info(f"🔔 已为 {normalized_code} 创建止损预警，阈值 {effective_stop_loss}")
+        elif side == "sell":
+            cur_qty_after = (int(pos.get("quantity", 0)) - qty) if pos else 0
+            if cur_qty_after <= 0:
+                await db["stock_alerts"].delete_many({
+                    "user_id": current_user["id"],
+                    "code": normalized_code,
+                    "alert_type": ALERT_TYPE_PRICE_BELOW,
+                    "note": {"$regex": "^自动止损"},
+                })
+                logger.info(f"🔔 已清除 {normalized_code} 的自动止损预警（持仓已清空）")
+    except Exception as alert_err:
+        logger.warning(f"⚠️ 自动止损预警管理失败（不影响交易）: {alert_err}")
+
     return ok({"order": {k: v for k, v in order_doc.items() if k != "_id"}})
 
 

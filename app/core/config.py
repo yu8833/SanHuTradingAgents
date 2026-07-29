@@ -250,6 +250,12 @@ class Settings(BaseSettings):
     TUSHARE_STATUS_CHECK_ENABLED: bool = Field(default=True)
     TUSHARE_STATUS_CHECK_CRON: str = Field(default="0 * * * *")  # 每小时
 
+    # 数据完整性检查配置
+    DATA_INTEGRITY_CHECK_ENABLED: bool = Field(default=True, description="启用数据完整性检查")
+    DATA_INTEGRITY_CHECK_CRON: str = Field(default="0 19 * * 1-5", description="数据完整性检查CRON（工作日19点）")
+    DATA_INTEGRITY_AUTO_REMEDIATE: bool = Field(default=True, description="自动补数")
+    DATA_INTEGRITY_REMEDIATE_SOURCE: str = Field(default="akshare", description="补数数据源")
+
     # Tushare数据初始化配置
     TUSHARE_INIT_HISTORICAL_DAYS: int = Field(default=365, ge=1, le=3650, description="初始化历史数据天数")
     TUSHARE_INIT_BATCH_SIZE: int = Field(default=100, ge=10, le=1000, description="初始化批处理大小")

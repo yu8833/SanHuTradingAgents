@@ -775,3 +775,54 @@ async def list_jobs_with_metadata(
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取任务列表失败: {str(e)}")
+
+
+# ==================== 数据完整性检查 ====================
+
+@router.post("/data-integrity/check")
+async def trigger_data_integrity_check(
+    trade_date: Optional[str] = Query(None, description="指定交易日期 (YYYY-MM-DD)，留空自动检测"),
+    auto_remediate: bool = Query(True, description="是否自动补数"),
+    remediate_source: str = Query("akshare", description="补数数据源"),
+    user: dict = Depends(get_current_user),
+):
+    """
+    手动触发数据完整性检查
+
+    - 检查 stock_daily_quotes 中最新交易日的数据完整性
+    - 识别缺失股票并用备用数据源自动补数
+    - 返回检查结果
+    """
+    try:
+        from app.services.data_integrity_service import get_data_integrity_service
+        service = await get_data_integrity_service()
+        result = await service.check_historical_completeness(
+            trade_date=trade_date,
+            auto_remediate=auto_remediate,
+            remediate_source=remediate_source,
+        )
+        return ok(
+            data=result,
+            message=f"完整性检查完成: {result.get('status')} "
+                   f"(期望 {result.get('expected_count')}, 实际 {result.get('actual_count')}, "
+                   f"缺失 {result.get('missing_count')}, 补数 {result.get('remediated_count')})"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"完整性检查失败: {str(e)}")
+
+
+@router.get("/data-integrity/latest")
+async def get_latest_integrity_check(
+    user: dict = Depends(get_current_user),
+):
+    """获取最近一次数据完整性检查结果"""
+    try:
+        from app.services.data_integrity_service import get_data_integrity_service
+        service = await get_data_integrity_service()
+        result = await service.get_latest_check_result()
+        if result:
+            return ok(data=result, message="获取完整性检查结果成功")
+        else:
+            return ok(data=None, message="尚未执行过完整性检查")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取检查结果失败: {str(e)}")

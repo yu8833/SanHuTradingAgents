@@ -376,7 +376,8 @@ const strategyKeys = ['extreme_reversal', 'turnaround', 'small_cap_value', 'conv
 const loadPositions = async () => {
   loading.value = true
   try {
-    const data = await portfolioApi.getSummary()
+    const res = await portfolioApi.getSummary()
+    const data = res.data
     summary.value = data
     positions.value = data.positions || []
   } catch (e: any) {
@@ -392,7 +393,8 @@ const loadPerformance = async () => {
     const results: Record<string, StrategyPerformance> = {}
     for (const s of strategyKeys) {
       try {
-        results[s] = await portfolioApi.getStrategyPerformance(s)
+        const res = await portfolioApi.getStrategyPerformance(s)
+        results[s] = res.data
       } catch {
         // 忽略单个策略加载失败
       }
@@ -598,7 +600,8 @@ const confirmImport = async () => {
   importing.value = true
   try {
     const res: any = await portfolioApi.importCsv(importFile.value, importStrategy.value)
-    ElMessage.success(`导入成功：${res.success_count} 条` + (res.skipped > 0 ? `（跳过 ${res.skipped} 行）` : ''))
+    const importResult = res.data || res
+    ElMessage.success(`导入成功：${importResult.success_count} 条` + (importResult.skipped > 0 ? `（跳过 ${importResult.skipped} 行）` : ''))
     importDialogVisible.value = false
     await loadPositions()
   } catch (e: any) {

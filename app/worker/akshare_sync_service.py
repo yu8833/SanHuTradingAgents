@@ -1191,6 +1191,23 @@ async def run_akshare_historical_sync(incremental: bool = True):
         service = await get_akshare_sync_service()
         result = await service.sync_historical_data(incremental=incremental)
         logger.info(f"✅ AKShare历史数据同步完成: {result}")
+
+        # 同步完成后自动执行完整性检查（用Tushare补数）
+        try:
+            from app.services.data_integrity_service import get_data_integrity_service
+            integrity_service = await get_data_integrity_service()
+            integrity_result = await integrity_service.check_historical_completeness(
+                auto_remediate=True,
+                remediate_source="tushare",
+            )
+            logger.info(f"🔍 [完整性检查] AKShare同步后检查结果: {integrity_result.get('status')} "
+                       f"(期望: {integrity_result.get('expected_count')}, "
+                       f"实际: {integrity_result.get('actual_count')}, "
+                       f"缺失: {integrity_result.get('missing_count')}, "
+                       f"补数: {integrity_result.get('remediated_count')})")
+        except Exception as ie:
+            logger.warning(f"⚠️ 同步后完整性检查失败（不影响同步结果）: {ie}")
+
         return result
     except Exception as e:
         logger.error(f"❌ AKShare历史数据同步失败: {e}")

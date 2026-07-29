@@ -176,6 +176,6 @@ export const portfolioApi = {
   // 获取已平仓交易记录（用于交易复盘）
   async getClosedTrades() {
     const res = await ApiClient.get<{ items: ClosedTrade[] }>('/api/paper/positions?status=closed')
-    return res?.items || []
+    return res?.data?.items || []
   },
 }
