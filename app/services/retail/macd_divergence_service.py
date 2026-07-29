@@ -256,8 +256,9 @@ class MacdDivergenceService(RetailScreeningBase):
         if ma60 is None or len(ma60) < 5:
             return None
 
-        # MA60趋势参考：底背离通常发生在价格低于MA60时，不过滤
-        # 顶背离时价格通常在MA60上方，此处不做硬性过滤
+        # MA60大趋势过滤：只做上升趋势中的股票（收盘价 > MA60）
+        if close <= ma60[-1]:
+            return None
 
         divergence = self._find_divergence(closes, histogram, window=30)
 
