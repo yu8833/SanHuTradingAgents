@@ -904,17 +904,23 @@ function saveScanResult() {
     timestamp: Date.now()
   }
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+    const jsonStr = JSON.stringify(data)
+    console.log(`[${STORAGE_KEY}] saveScanResult:`, jsonStr.length, 'chars')
+    localStorage.setItem(STORAGE_KEY, jsonStr)
+    console.log(`[${STORAGE_KEY}] saveScanResult: saved successfully`)
   } catch (e) {
-    console.warn('Failed to save scan result to localStorage', e)
+    console.warn(`[${STORAGE_KEY}] Failed to save scan result to localStorage`, e)
   }
 }
 
 function loadScanResult() {
+  console.log(`[${STORAGE_KEY}] loadScanResult called`)
   try {
     const stored = localStorage.getItem(STORAGE_KEY)
+    console.log(`[${STORAGE_KEY}] loadScanResult: stored=${stored ? 'found (' + stored.length + ' chars)' : 'null'}`)
     if (stored) {
       const data = JSON.parse(stored)
+      console.log(`[${STORAGE_KEY}] loadScanResult: parsed, results=${data.results?.length}`)
       if (data.results && data.results.length > 0) {
         results.value = data.results
         tookMs.value = data.tookMs || 0
@@ -922,11 +928,14 @@ function loadScanResult() {
           Object.assign(params, defaultParams, data.scanParams)
         }
         hasSearched.value = true
+        console.log(`[${STORAGE_KEY}] loadScanResult: loaded successfully, ${data.results.length} items`)
         return true
+      } else {
+        console.log(`[${STORAGE_KEY}] loadScanResult: empty results`)
       }
     }
   } catch (e) {
-    console.warn('Failed to load scan result from localStorage', e)
+    console.warn(`[${STORAGE_KEY}] Failed to load scan result from localStorage`, e)
   }
   return false
 }
