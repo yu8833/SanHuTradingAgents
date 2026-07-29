@@ -802,7 +802,7 @@ class LimitUpPullbackService:
             "lower_shadow_ratio": 0.015,
             "breakout_ma5": True,
             "breakout_volume_ratio": 1.5,
-            "min_score": 40,
+            "min_score": 30,
             "limit": 50,
             "initial_capital": 1000000,
             "top_n": 10,
@@ -1574,7 +1574,7 @@ class LimitUpPullbackService:
             "end_date": None,
             "hold_days": 20,
             "top_n": 10,
-            "min_score": 40,
+            "min_score": 30,
             "initial_capital": 1000000,
             "max_position_pct": 0.1,
             # 以下为内部固定参数

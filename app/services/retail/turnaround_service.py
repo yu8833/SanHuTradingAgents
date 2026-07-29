@@ -152,13 +152,13 @@ class TurnaroundService(RetailScreeningBase):
 
         # 6. 信号判定
         signal_type = "观察"
-        if drawdown_from_high < -0.20 and price_stabilize > -0.02 and vol_change > 0.2:
+        if drawdown_from_high < -0.15 and price_stabilize > -0.02 and vol_change > 0.2:
             signal_type = "放量企稳"
-        elif drawdown_from_high < -0.20 and price_stabilize > -0.01:
+        elif drawdown_from_high < -0.15 and price_stabilize > -0.01:
             signal_type = "价格企稳"
-        elif rebound_from_low > 0.05 and recent_5_pct > 0:
+        elif rebound_from_low > 0.03 and recent_5_pct > -0.01:
             signal_type = "底部反弹"
-        elif drawdown_from_high < -0.30:
+        elif drawdown_from_high < -0.25:
             signal_type = "深度回调"
 
         # 7. 评分
@@ -204,7 +204,7 @@ class TurnaroundService(RetailScreeningBase):
         score += mom_score
         score_details["短期动能"] = round(mom_score, 1)
 
-        if score < 20:
+        if score < 15:
             return None
 
         # 估值水平描述

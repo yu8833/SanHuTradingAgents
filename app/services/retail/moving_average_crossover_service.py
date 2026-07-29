@@ -165,8 +165,9 @@ class MovingAverageCrossoverService(RetailScreeningBase):
         if len(ma5) < 3 or len(ma10) < 3 or len(ma20) < 3 or len(ma60) < 3:
             return None
 
-        # MA60大趋势过滤：只做上升趋势中的股票（收盘价 > MA60）
-        if close <= ma60[-1]:
+        # MA60趋势参考：允许接近MA60的股票也参与评分（放宽过滤）
+        ma60_last = float(ma60[-1])
+        if close <= ma60_last * 0.95:
             return None
 
         signal_type = "无信号"

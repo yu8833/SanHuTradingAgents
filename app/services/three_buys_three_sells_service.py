@@ -346,12 +346,12 @@ class ThreeBuysThreeSellsService:
         if idx < 63:
             return None
         bias = ind["bias60"][idx]
-        bias_min = params.get("bias_b1_min", -30.0)
-        bias_max = params.get("bias_b1_max", -20.0)
+        bias_min = params.get("bias_b1_min", -35.0)
+        bias_max = params.get("bias_b1_max", -15.0)
         if bias < bias_min or bias > bias_max:
             return None
 
-        enable_strict_b1 = params.get("enable_strict_b1", True)
+        enable_strict_b1 = params.get("enable_strict_b1", False)
         market_trend = params.get("_market_trend", "neutral")
 
         if enable_strict_b1:
@@ -413,7 +413,7 @@ class ThreeBuysThreeSellsService:
         if above_count < 2:
             return None
 
-        # 前一天不在中期均线上方（刚突破）—— 用前一天的MA值判断
+        # 前一天不在中期均线上方（刚突破）—— 放宽为前一天不超过1条在上方
         if idx < 1:
             return None
         prev_close = ind["closes"][idx - 1]
@@ -422,7 +422,7 @@ class ThreeBuysThreeSellsService:
             prev_close > ind["ma60"][idx - 1],
             prev_close > ind["ma65"][idx - 1]
         ])
-        if prev_above >= 2:
+        if prev_above >= 3:
             return None
 
         return {
@@ -445,10 +445,10 @@ class ThreeBuysThreeSellsService:
         if abs(bias) > pullback_range:
             return None
 
-        # 前提1: 30日内曾有较大正乖离
+        # 前提1: 30日内曾有较大正乖离（放宽到10%）
         lookback = min(30, idx)
         max_bias_30 = float(np.max(ind["bias60"][idx - lookback:idx]))
-        if max_bias_30 < 15.0:
+        if max_bias_30 < 10.0:
             return None
 
         # 前提2: MA13 仍在 MA55 上方（中期趋势未坏）
@@ -1279,8 +1279,8 @@ class ThreeBuysThreeSellsService:
             "min_score": 5,
             "max_position_pct": 0.15,
             # 以下为内部固定参数，不再暴露给用户
-            "bias_b1_min": -30.0,
-            "bias_b1_max": -20.0,
+            "bias_b1_min": -35.0,
+            "bias_b1_max": -15.0,
             "breakout_volume_ratio": 1.5,
             "zhongyang_threshold": 0.05,
             "pullback_bias_range": 5.0,

@@ -46,10 +46,10 @@ class SmallCapValueService(RetailScreeningBase):
         """
         start_time = time.time()
         params = params or {}
-        min_market_cap = params.get("min_market_cap", 10)
-        max_market_cap = params.get("max_market_cap", 30)
-        max_pe = params.get("max_pe", 15)
-        max_pb = params.get("max_pb", 2)
+        min_market_cap = params.get("min_market_cap", 5)
+        max_market_cap = params.get("max_market_cap", 50)
+        max_pe = params.get("max_pe", 30)
+        max_pb = params.get("max_pb", 3)
         limit = params.get("limit", 50)
 
         # 1. 获取全部行情+估值
@@ -288,7 +288,7 @@ class SmallCapValueService(RetailScreeningBase):
                     continue
                 if pb <= 0 or pb > max_pb:
                     continue
-                if total_mv < 10 or total_mv > 30:
+                if total_mv < 5 or total_mv > 50:
                     continue
                 candidates.append(code)
 
