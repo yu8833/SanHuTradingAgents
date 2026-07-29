@@ -46,6 +46,10 @@ const marketTrend = ref<string>('')
 const introCollapsed = ref<string[]>([])
 
 function saveScanResult() {
+  if (!results.value || results.value.length === 0) {
+    console.log(`[${STORAGE_KEY}] saveScanResult: skipped (empty results)`)
+    return
+  }
   const data = {
     results: results.value,
     tookMs: tookMs.value,
