@@ -405,6 +405,10 @@ export const screeningApi = {
   scanVolumePrice: (payload: RetailScanReq, options?: { timeout?: number }) =>
     ApiClient.post<RetailScanResp>('/api/screening/volume-price/scan', payload, { timeout: options?.timeout ?? 420000 }),
   backtestVolumePrice: (payload: RetailBacktestReq, options?: { timeout?: number }) =>
-    ApiClient.post<RetailBacktestResp>('/api/screening/volume-price/backtest', payload, { timeout: options?.timeout ?? 600000 })
+    ApiClient.post<RetailBacktestResp>('/api/screening/volume-price/backtest', payload, { timeout: options?.timeout ?? 600000 }),
+
+  // ===== 数据新鲜度检查 =====
+  checkDataFreshness: () =>
+    ApiClient.get<{ latest_data_date: string | null; expected_date: string; is_fresh: boolean; stale_days: number; total_stocks: number; expected_total: number; message: string }>('/api/screening/data-freshness'),
 }
 

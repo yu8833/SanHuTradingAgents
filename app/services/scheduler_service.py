@@ -735,6 +735,15 @@ class SchedulerService:
         )
         logger.info("✅ 僵尸任务检测定时任务已添加")
 
+    # 历史数据同步类任务需要长时间运行，排除在僵尸检测之外
+    LONG_RUNNING_JOBS = {
+        "tushare_historical_sync",
+        "akshare_historical_sync",
+        "baostock_historical_sync",
+        "tushare_financial_sync",
+        "akshare_financial_sync",
+    }
+
     async def _check_zombie_tasks(self):
         """检测僵尸任务（长时间处于running状态的任务）"""
         try:
@@ -745,7 +754,9 @@ class SchedulerService:
 
             zombie_tasks = await db.scheduler_executions.find({
                 "status": "running",
-                "timestamp": {"$lt": threshold_time}
+                "timestamp": {"$lt": threshold_time},
+                # 排除历史同步等长时间运行的任务
+                "job_id": {"$nin": list(self.LONG_RUNNING_JOBS)}
             }).to_list(length=100)
 
             for task in zombie_tasks:

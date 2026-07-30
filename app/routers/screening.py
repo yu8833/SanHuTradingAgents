@@ -858,3 +858,116 @@ async def backtest_volume_price(req: RetailStrategyBacktestRequest):
     except Exception as e:
         logger.error(f"[volume_price_backtest] 失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"量价配合回测失败: {str(e)}")
+
+
+# ==================== 数据新鲜度检查 ====================
+
+@router.get("/data-freshness")
+async def check_data_freshness(user: dict = Depends(get_current_user)):
+    """
+    检查选股数据的新鲜度
+
+    返回:
+    - latest_data_date: stock_daily_quotes 中的最新交易日期
+    - expected_date: 预期最新交易日（今天或最近的交易日）
+    - is_fresh: 数据是否最新
+    - stale_days: 数据过期天数
+    - total_stocks: 有最新日期数据的股票数量
+    - expected_total: stock_basic_info 中的A股总数
+    """
+    try:
+        from app.core.database import get_mongo_db
+        from datetime import datetime, timedelta
+
+        db = get_mongo_db()
+
+        # 1. 获取 stock_daily_quotes 中的最新交易日
+        pipeline = [
+            {"$match": {"period": "daily"}},
+            {"$group": {"_id": "$trade_date", "count": {"$sum": 1}}},
+            {"$sort": {"_id": -1}},
+            {"$limit": 1},
+        ]
+        cursor = db.stock_daily_quotes.aggregate(pipeline)
+        docs = await cursor.to_list(length=1)
+
+        if not docs:
+            return {
+                "success": True,
+                "data": {
+                    "latest_data_date": None,
+                    "expected_date": datetime.now().strftime("%Y-%m-%d"),
+                    "is_fresh": False,
+                    "stale_days": 999,
+                    "total_stocks": 0,
+                    "expected_total": 0,
+                    "message": "数据库中无历史K线数据",
+                }
+            }
+
+        latest_data_date = docs[0]["_id"]
+        total_stocks = docs[0]["count"]
+
+        # 2. 获取期望的A股总数
+        expected_total = await db.stock_basic_info.count_documents({
+            "$or": [
+                {"category": "stock_cn"},
+                {"market": {"$in": ["主板", "创业板", "科创板", "北交所"]}},
+            ]
+        })
+
+        # 3. 判断数据是否新鲜
+        today = datetime.now()
+        # 判断今天是否为交易日（周末不是）
+        weekday = today.weekday()
+        if weekday == 5:  # 周六
+            expected_date = (today - timedelta(days=1)).strftime("%Y-%m-%d")
+        elif weekday == 6:  # 周日
+            expected_date = (today - timedelta(days=2)).strftime("%Y-%m-%d")
+        else:
+            expected_date = today.strftime("%Y-%m-%d")
+
+        # 计算过期天数
+        try:
+            latest_dt = datetime.strptime(latest_data_date, "%Y-%m-%d")
+            expected_dt = datetime.strptime(expected_date, "%Y-%m-%d")
+            stale_days = (expected_dt - latest_dt).days
+        except Exception:
+            stale_days = 999
+
+        # 如果今天是交易日但还没到收盘（15:30之前），允许数据是昨天的
+        is_trading_day = weekday < 5
+        current_hour = today.hour
+        if is_trading_day and current_hour < 16:
+            # 交易时段或收盘前，昨天数据即可
+            yesterday = (today - timedelta(days=1)).strftime("%Y-%m-%d")
+            try:
+                latest_dt = datetime.strptime(latest_data_date, "%Y-%m-%d")
+                yesterday_dt = datetime.strptime(yesterday, "%Y-%m-%d")
+                is_fresh = latest_dt >= yesterday_dt
+            except Exception:
+                is_fresh = False
+        else:
+            is_fresh = stale_days <= 0
+
+        # 4. 生成提示信息
+        if is_fresh:
+            message = f"数据最新（{latest_data_date}）"
+        else:
+            message = f"数据已过期 {stale_days} 天（最新数据：{latest_data_date}，预期：{expected_date}）"
+
+        return {
+            "success": True,
+            "data": {
+                "latest_data_date": latest_data_date,
+                "expected_date": expected_date,
+                "is_fresh": is_fresh,
+                "stale_days": stale_days,
+                "total_stocks": total_stocks,
+                "expected_total": expected_total,
+                "message": message,
+            }
+        }
+    except Exception as e:
+        logger.error(f"数据新鲜度检查失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"检查失败: {str(e)}")

@@ -148,10 +148,29 @@ class RetailScreeningBase:
                 "circ_mv": 1,
                 "turnover_rate": 1,
                 "trade_date": 1,
+                "data_source": 1,  # 用于多数据源优先级去重
                 "_id": 0,
             },
         )
         quotes_docs = await cursor.to_list(length=None)
+
+        # 1.5 按 data_source 优先级去重（tushare > sina > baostock > akshare）
+        # 同一只股票同一天可能存在多个数据源的记录，只保留优先级最高的一份
+        source_priority = {"tushare": 4, "sina": 3, "baostock": 2, "akshare": 1}
+        deduped_quotes: Dict[str, dict] = {}
+        for qd in quotes_docs:
+            code = qd.get("code")
+            if not code:
+                continue
+            existing = deduped_quotes.get(code)
+            if existing is None:
+                deduped_quotes[code] = qd
+                continue
+            # 比较数据源优先级
+            cur_src = qd.get("data_source", "")
+            existing_src = existing.get("data_source", "")
+            if source_priority.get(cur_src, 0) > source_priority.get(existing_src, 0):
+                deduped_quotes[code] = qd
 
         # 2. 获取股票基础信息（含静态字段：name, industry, market）
         basic_query = {}
@@ -176,10 +195,8 @@ class RetailScreeningBase:
 
         # 3. 合并：行情为主，基础信息补全 name/industry/market/pe/pb/total_mv
         result = {}
-        for qd in quotes_docs:
+        for qd in deduped_quotes.values():
             code = qd.get("code")
-            if not code:
-                continue
             basic = basic_map.get(code, {})
             item = {
                 "code": code,
