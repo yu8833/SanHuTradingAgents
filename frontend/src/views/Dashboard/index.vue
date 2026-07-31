@@ -390,9 +390,12 @@
         />
         <div class="progress-meta">
           <div>状态：<b>{{ syncStatusMessage }}</b></div>
-          <div v-if="syncTotal > 0">
-            进度：{{ syncDone }} / {{ syncTotal }}
+          <div v-if="syncPhase === 1 && syncTotal > 0">
+            阶段1进度：{{ syncDone }} / {{ syncTotal }}
             （新增 {{ syncInserted }}，更新 {{ syncUpdated }}，错误 {{ syncErrors }}）
+          </div>
+          <div v-if="syncPhase === 2" class="phase-hint">
+            阶段2正在同步历史K线数据，耗时较长（约10-30分钟），覆盖率将在全部完成后恢复。
           </div>
         </div>
       </div>
@@ -570,22 +573,26 @@ const stopSyncTimer = () => {
   }
 }
 
+// 同步阶段：1=基础信息同步 2=历史K线同步
+const syncPhase = ref(1)
+
 const doSync = async () => {
   syncStarting.value = true
+  syncPhase.value = 1
   try {
-    // 先触发基础数据同步
+    // 阶段1：触发基础数据同步
     await syncApi.runStockBasicsSync({ force: true })
     syncRunning.value = true
     syncProgress.value = 5
-    syncStatusMessage.value = '任务已提交，等待调度器执行...'
-
-    // 轮询同步状态 + 同时触发历史数据同步和完整定时任务
-    try {
-      await schedulerApi.triggerJob('tushare_historical_sync', true)
-    } catch (_) { /* 静默忽略，基础同步成功即可 */ }
+    syncStatusMessage.value = '阶段1/2：同步股票基础信息...'
+    syncTotal.value = 0
+    syncDone.value = 0
+    syncInserted.value = 0
+    syncUpdated.value = 0
+    syncErrors.value = 0
 
     let pollCount = 0
-    const MAX_POLL = 600 // 最多轮询 50 分钟（5秒/次）
+    const MAX_POLL = 600
     stopSyncPoll()
     closeSyncPoll.value = setInterval(async () => {
       pollCount++
@@ -594,44 +601,96 @@ const doSync = async () => {
         syncStatusMessage.value = '轮询超时，任务可能仍在后台执行，请在任务中心查看'
         syncProgress.value = 90
         syncFinished.value = true
-        syncConfirmVisible.value = false
         return
       }
       try {
-        const res = await syncApi.getSyncStatus()
-        const status = (res as any)?.data?.data || (res as any)?.data || {}
-        syncTotal.value = status.total || 0
-        syncInserted.value = status.inserted || 0
-        syncUpdated.value = status.updated || 0
-        syncErrors.value = status.errors || 0
-        syncDone.value = (status.inserted || 0) + (status.updated || 0)
+        // 阶段1：轮询基础信息同步状态
+        if (syncPhase.value === 1) {
+          const res = await syncApi.getSyncStatus()
+          const status = (res as any)?.data?.data || (res as any)?.data || {}
+          syncTotal.value = status.total || 0
+          syncInserted.value = status.inserted || 0
+          syncUpdated.value = status.updated || 0
+          syncErrors.value = status.errors || 0
+          syncDone.value = (status.inserted || 0) + (status.updated || 0)
 
-        if (status.status === 'running') {
-          syncStatusMessage.value = '同步中'
-          if (syncTotal.value > 0) {
-            syncProgress.value = Math.min(95, Math.round((syncDone.value / syncTotal.value) * 100))
-          } else {
-            syncProgress.value = Math.min(95, syncProgress.value + 1)
+          if (status.status === 'running') {
+            syncStatusMessage.value = '阶段1/2：同步股票基础信息...'
+            if (syncTotal.value > 0) {
+              syncProgress.value = Math.min(45, Math.round((syncDone.value / syncTotal.value) * 45))
+            } else {
+              syncProgress.value = Math.min(45, syncProgress.value + 1)
+            }
+          } else if (status.status === 'success' || status.status === 'success_with_errors') {
+            // 基础信息同步完成，进入阶段2
+            syncPhase.value = 2
+            syncProgress.value = 50
+            syncStatusMessage.value = '阶段1完成 ✅，阶段2/2：同步历史K线数据（耗时较长）...'
+            // 触发历史K线同步
+            try {
+              await schedulerApi.triggerJob('tushare_historical_sync', true)
+            } catch (_) { /* 可能已在运行 */ }
+          } else if (status.status === 'failed') {
+            stopSyncPoll()
+            syncError.value = true
+            syncProgress.value = 100
+            syncStatusMessage.value = `基础信息同步失败：${status.message || '未知错误'}`
+            syncFinished.value = true
+            ElMessage.error('基础信息同步失败')
           }
-        } else if (status.status === 'success' || status.status === 'success_with_errors') {
-          stopSyncPoll()
-          syncProgress.value = 100
-          syncStatusMessage.value = status.status === 'success' ? '同步完成 ✅' : '同步完成（部分有错误）'
-          syncFinished.value = true
-          ElMessage.success(syncStatusMessage.value)
-          await loadFreshness()
-          // 延迟自动关闭，让用户看到完成状态
-          closeSyncTimer.value = setTimeout(() => {
-            syncConfirmVisible.value = false
-          }, 2500)
-        } else if (status.status === 'failed') {
-          stopSyncPoll()
-          syncError.value = true
-          syncProgress.value = 100
-          syncStatusMessage.value = `同步失败：${status.message || '未知错误'}`
-          syncFinished.value = true
-          ElMessage.error('同步失败，请检查日志')
-          // 失败时不自动关闭，让用户查看错误信息
+        } else if (syncPhase.value === 2) {
+          // 阶段2：轮询历史K线同步状态
+          const res = await schedulerApi.getJobExecutions({
+            job_id: 'tushare_historical_sync',
+            status: 'running',
+            limit: 1,
+          })
+          const running = (res as any)?.data?.data?.items || (res as any)?.data?.items || []
+          if (running.length > 0) {
+            syncStatusMessage.value = '阶段2/2：同步历史K线数据中...'
+            syncProgress.value = Math.min(95, 50 + (running[0].progress || 0) * 0.45)
+          } else {
+            // 没有 running 记录，检查是否已完成
+            const res2 = await schedulerApi.getJobExecutions({
+              job_id: 'tushare_historical_sync',
+              status: 'completed',
+              limit: 1,
+            })
+            const completed = (res2 as any)?.data?.data?.items || (res2 as any)?.data?.items || []
+            if (completed.length > 0) {
+              stopSyncPoll()
+              syncProgress.value = 100
+              syncStatusMessage.value = '全部同步完成 ✅'
+              syncFinished.value = true
+              ElMessage.success('数据同步全部完成')
+              await loadFreshness()
+              closeSyncTimer.value = setTimeout(() => {
+                syncConfirmVisible.value = false
+              }, 2500)
+              return
+            }
+            // 检查是否失败
+            const res3 = await schedulerApi.getJobExecutions({
+              job_id: 'tushare_historical_sync',
+              status: 'failed',
+              limit: 1,
+            })
+            const failed = (res3 as any)?.data?.data?.items || (res3 as any)?.data?.items || []
+            if (failed.length > 0) {
+              stopSyncPoll()
+              syncProgress.value = 100
+              syncStatusMessage.value = '历史K线同步失败，基础信息已更新。可在任务中心查看详情。'
+              syncFinished.value = true
+              await loadFreshness()
+              closeSyncTimer.value = setTimeout(() => {
+                syncConfirmVisible.value = false
+              }, 4000)
+              return
+            }
+            // 既没有 running 也没有 completed/failed，可能在排队
+            syncProgress.value = Math.min(95, syncProgress.value + 1)
+            syncStatusMessage.value = '阶段2/2：等待历史K线同步任务调度...'
+          }
         }
       } catch (_e) {
         // 轮询失败不终止
@@ -1580,6 +1639,15 @@ onMounted(async () => {
       gap: 6px;
       font-size: 13px;
       color: var(--el-text-color-regular);
+    }
+
+    .phase-hint {
+      color: var(--el-color-warning);
+      font-size: 12px;
+      line-height: 1.5;
+      padding: 8px 12px;
+      background: var(--el-color-warning-light-9);
+      border-radius: 4px;
     }
   }
 }
