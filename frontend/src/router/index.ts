@@ -403,25 +403,6 @@ const routes: RouteRecordRaw[] = [
   { path: '/queue', redirect: '/tasks' },
   { path: '/analysis/history', redirect: '/tasks?tab=completed' },
   {
-    path: '/data',
-    name: 'DataCenter',
-    component: () => import('@/layouts/BasicLayout.vue'),
-    meta: {
-      title: '数据',
-      icon: 'DataAnalysis',
-      requiresAuth: true,
-      transition: 'slide-up'
-    },
-    children: [
-      {
-        path: '',
-        name: 'DataCenterHome',
-        component: () => import('@/views/Data/DataView.vue'),
-        meta: { title: '数据', requiresAuth: true }
-      }
-    ]
-  },
-  {
     path: '/reports',
     name: 'Reports',
     component: () => import('@/layouts/BasicLayout.vue'),

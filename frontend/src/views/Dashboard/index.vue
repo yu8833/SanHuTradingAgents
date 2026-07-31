@@ -284,17 +284,180 @@
           </div>
         </el-card>
 
+        <!-- 数据新鲜度 -->
+        <el-card class="freshness-card" shadow="hover" style="margin-top: 24px;">
+          <template #header>
+            <div class="card-header">
+              <span><el-icon style="margin-right:6px;"><Refresh /></el-icon>数据新鲜度</span>
+              <el-button v-if="!freshness.is_fresh && freshness.latest_data_date" type="warning" size="small" @click="openSyncConfirm">
+                <el-icon><Refresh /></el-icon> 更新数据
+              </el-button>
+            </div>
+          </template>
+          <div class="freshness-body">
+            <div v-if="freshnessLoading" class="freshness-loading">
+              <el-icon class="loading-icon"><Loading /></el-icon> 加载中...
+            </div>
+            <div v-else-if="!freshness.latest_data_date" class="empty-state">
+              <el-icon class="empty-icon"><Warning /></el-icon>
+              <p>暂无数据</p>
+              <el-button type="primary" size="small" @click="openSyncConfirm">初始化数据</el-button>
+            </div>
+            <div v-else class="freshness-info">
+              <div class="freshness-status">
+                <div :class="['freshness-badge', freshness.is_fresh ? 'fresh' : 'stale']">
+                  {{ freshness.is_fresh ? '✅ 最新' : freshness.stale_days > 0 ? `⚠️ 过期 ${freshness.stale_days} 天` : '⏳ 待更新' }}
+                </div>
+                <div class="freshness-label">
+                  数据日期：{{ freshness.latest_data_date }}
+                </div>
+              </div>
+              <div class="freshness-meta">
+                <div>预期：{{ freshness.expected_date || '-' }}</div>
+                <div>{{ freshness.message || '' }}</div>
+              </div>
+            </div>
+          </div>
+        </el-card>
+
+        <!-- 数据覆盖率 -->
+        <el-card class="coverage-card" shadow="hover" style="margin-top: 24px;">
+          <template #header>
+            <div class="card-header">
+              <span><el-icon style="margin-right:6px;"><CircleCheck /></el-icon>数据覆盖率</span>
+              <el-button v-if="coveragePercent < 95 && freshness.total_stocks > 0" type="warning" size="small" @click="openIntegrityConfirm">
+                <el-icon><MagicStick /></el-icon> 检查并补数
+              </el-button>
+            </div>
+          </template>
+          <div class="coverage-body">
+            <div v-if="!freshness.latest_data_date" class="empty-state coverage-empty">
+              <el-icon class="empty-icon"><Warning /></el-icon>
+              <p>暂无数据</p>
+            </div>
+            <div v-else>
+              <el-progress
+                :percentage="coveragePercent"
+                :status="coverageStatus"
+                :stroke-width="16"
+                :text-inside="true"
+              />
+              <div class="coverage-meta">
+                <div>有数据：{{ freshness.total_stocks || 0 }} 只</div>
+                <div>预期：{{ freshness.expected_total || 0 }} 只</div>
+                <div v-if="freshness.total_stocks > 0 && freshness.expected_total > 0 && (freshness.expected_total - freshness.total_stocks) > 0" class="coverage-gap">
+                  缺失：{{ freshness.expected_total - freshness.total_stocks }} 只
+                </div>
+              </div>
+            </div>
+          </div>
+        </el-card>
+
         <!-- 多数据源同步 -->
         <MultiSourceSyncCard style="margin-top: 24px;" />
       </el-col>
     </el-row>
+    <!-- 同步确认对话框 -->
+    <el-dialog
+      v-model="syncConfirmVisible"
+      title="确认更新数据"
+      width="480px"
+      :close-on-click-modal="false"
+    >
+      <div v-if="!syncRunning" class="confirm-body">
+        <el-alert
+          :title="freshness.is_fresh ? '建议不要频繁同步，系统已设置自动同步任务' : '数据已过期，建议立即同步'"
+          :type="freshness.is_fresh ? 'info' : 'warning'"
+          :closable="false"
+          show-icon
+        />
+        <div class="confirm-tip" style="margin-top: 16px;">
+          <div>⏱️ 预估耗时：5 ~ 15 分钟</div>
+          <div>📦 同步范围：股票基础信息、实时行情、历史K线</div>
+          <div>🔄 同步完成后会自动刷新页面数据</div>
+        </div>
+      </div>
+      <div v-else class="progress-body">
+        <div class="progress-title">
+          <el-icon style="color: var(--el-color-primary); margin-right:8px;"><Loading /></el-icon>
+          正在同步数据，请勿关闭页面...
+        </div>
+        <el-progress
+          :percentage="syncProgress"
+          :status="syncError ? 'exception' : undefined"
+          :stroke-width="16"
+          :text-inside="false"
+        />
+        <div class="progress-meta">
+          <div>状态：<b>{{ syncStatusMessage }}</b></div>
+          <div v-if="syncTotal > 0">
+            进度：{{ syncDone }} / {{ syncTotal }}
+            （新增 {{ syncInserted }}，更新 {{ syncUpdated }}，错误 {{ syncErrors }}）
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button v-if="!syncRunning" @click="syncConfirmVisible = false">取消</el-button>
+        <el-button v-if="!syncRunning" type="primary" :loading="syncStarting" @click="doSync">
+          确认同步
+        </el-button>
+        <el-button v-if="syncRunning" :disabled="!syncFinished" @click="syncConfirmVisible = false">
+          {{ syncFinished ? '关闭' : '同步中...' }}
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 完整性检查对话框 -->
+    <el-dialog
+      v-model="integrityConfirmVisible"
+      title="确认执行完整性检查与补数"
+      width="520px"
+      :close-on-click-modal="false"
+    >
+      <div v-if="!integrityRunning" class="confirm-body">
+        <el-alert
+          title="系统将扫描最新交易日的数据缺失，并自动使用备用数据源补数"
+          type="warning"
+          :closable="false"
+          show-icon
+        />
+        <div class="confirm-tip" style="margin-top: 16px;">
+          <div>📊 当前覆盖率：<b>{{ coveragePercent }}%</b>（{{ freshness.total_stocks || 0 }} / {{ freshness.expected_total || 0 }} 只）</div>
+          <div>🧩 补数降级链：AKShare → BaoStock → Tushare</div>
+          <div>⏱️ 预估耗时：3 ~ 10 分钟</div>
+        </div>
+      </div>
+      <div v-else class="progress-body">
+        <div class="progress-title">
+          <el-icon style="color: var(--el-color-primary); margin-right:8px;"><Loading /></el-icon>
+          正在检查数据完整性并补数...
+        </div>
+        <el-progress
+          :percentage="integrityProgress"
+          :status="integrityError ? 'exception' : undefined"
+          :stroke-width="16"
+        />
+        <div class="progress-meta">
+          <div>状态：<b>{{ integrityStatusMessage }}</b></div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button v-if="!integrityRunning" @click="integrityConfirmVisible = false">取消</el-button>
+        <el-button v-if="!integrityRunning" type="primary" :loading="integrityStarting" @click="doIntegrityCheck">
+          确认执行
+        </el-button>
+        <el-button v-if="integrityRunning" :disabled="!integrityFinished" @click="onIntegrityClose">
+          {{ integrityFinished ? '关闭' : '执行中...' }}
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 // 显式声明组件名，供 <keep-alive :include> 匹配
 defineOptions({ name: 'DashboardHome' })
-import { ref, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import {
@@ -305,15 +468,23 @@ import {
   List,
   ArrowRight,
   InfoFilled,
-  Reading
+  Reading,
+  Loading,
+  Warning,
+  Refresh,
+  CircleCheck,
+  MagicStick
 } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import type { AnalysisTask, AnalysisStatus } from '@/types/analysis'
 import MultiSourceSyncCard from '@/components/Dashboard/MultiSourceSyncCard.vue'
 import { favoritesApi } from '@/api/favorites'
 import { analysisApi } from '@/api/analysis'
 import { newsApi } from '@/api/news'
 import { paperApi, type PaperAccountSummary } from '@/api/paper'
+import * as syncApi from '@/api/sync'
+import * as schedulerApi from '@/api/scheduler'
+import { screeningApi } from '@/api/screening'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -338,6 +509,288 @@ const marketNews = ref<any[]>([])
 // 模拟交易账户数据
 const paperAccount = ref<PaperAccountSummary | null>(null)
 
+// ---------- 数据新鲜度 + 覆盖率 ----------
+const freshnessLoading = ref(true)
+const freshness = reactive({
+  latest_data_date: '' as string,
+  expected_date: '' as string,
+  is_fresh: false,
+  stale_days: 0,
+  total_stocks: 0,
+  expected_total: 0,
+  message: '' as string,
+})
+
+const coveragePercent = computed(() => {
+  if (!freshness.expected_total) return 0
+  return Math.min(100, Math.round((freshness.total_stocks / freshness.expected_total) * 100))
+})
+
+const coverageStatus = computed(() => {
+  if (coveragePercent.value >= 95) return 'success' as const
+  if (coveragePercent.value >= 70) return 'warning' as const
+  return 'exception' as const
+})
+
+// ---------- 同步对话框 ----------
+const syncConfirmVisible = ref(false)
+const syncStarting = ref(false)
+const syncRunning = ref(false)
+const syncFinished = ref(false)
+const syncError = ref(false)
+const syncProgress = ref(0)
+const syncStatusMessage = ref('准备开始同步')
+const syncTotal = ref(0)
+const syncDone = ref(0)
+const syncInserted = ref(0)
+const syncUpdated = ref(0)
+const syncErrors = ref(0)
+
+const openSyncConfirm = () => {
+  syncRunning.value = false
+  syncFinished.value = false
+  syncError.value = false
+  syncProgress.value = 0
+  syncStatusMessage.value = '准备开始同步'
+  syncConfirmVisible.value = true
+}
+
+const closeSyncPoll = ref<any>(null)
+const closeSyncTimer = ref<any>(null)
+const stopSyncPoll = () => {
+  if (closeSyncPoll.value) {
+    clearInterval(closeSyncPoll.value)
+    closeSyncPoll.value = null
+  }
+}
+const stopSyncTimer = () => {
+  if (closeSyncTimer.value) {
+    clearTimeout(closeSyncTimer.value)
+    closeSyncTimer.value = null
+  }
+}
+
+const doSync = async () => {
+  syncStarting.value = true
+  try {
+    // 先触发基础数据同步
+    await syncApi.runStockBasicsSync({ force: true })
+    syncRunning.value = true
+    syncProgress.value = 5
+    syncStatusMessage.value = '任务已提交，等待调度器执行...'
+
+    // 轮询同步状态 + 同时触发历史数据同步和完整定时任务
+    try {
+      await schedulerApi.triggerJob('tushare_historical_sync', true)
+    } catch (_) { /* 静默忽略，基础同步成功即可 */ }
+
+    let pollCount = 0
+    const MAX_POLL = 600 // 最多轮询 50 分钟（5秒/次）
+    stopSyncPoll()
+    closeSyncPoll.value = setInterval(async () => {
+      pollCount++
+      if (pollCount >= MAX_POLL) {
+        stopSyncPoll()
+        syncStatusMessage.value = '轮询超时，任务可能仍在后台执行，请在任务中心查看'
+        syncProgress.value = 90
+        syncFinished.value = true
+        syncConfirmVisible.value = false
+        return
+      }
+      try {
+        const res = await syncApi.getSyncStatus()
+        const status = (res as any)?.data?.data || (res as any)?.data || {}
+        syncTotal.value = status.total || 0
+        syncInserted.value = status.inserted || 0
+        syncUpdated.value = status.updated || 0
+        syncErrors.value = status.errors || 0
+        syncDone.value = (status.inserted || 0) + (status.updated || 0)
+
+        if (status.status === 'running') {
+          syncStatusMessage.value = '同步中'
+          if (syncTotal.value > 0) {
+            syncProgress.value = Math.min(95, Math.round((syncDone.value / syncTotal.value) * 100))
+          } else {
+            syncProgress.value = Math.min(95, syncProgress.value + 1)
+          }
+        } else if (status.status === 'success' || status.status === 'success_with_errors') {
+          stopSyncPoll()
+          syncProgress.value = 100
+          syncStatusMessage.value = status.status === 'success' ? '同步完成 ✅' : '同步完成（部分有错误）'
+          syncFinished.value = true
+          ElMessage.success(syncStatusMessage.value)
+          await loadFreshness()
+          // 延迟自动关闭，让用户看到完成状态
+          closeSyncTimer.value = setTimeout(() => {
+            syncConfirmVisible.value = false
+          }, 2500)
+        } else if (status.status === 'failed') {
+          stopSyncPoll()
+          syncError.value = true
+          syncProgress.value = 100
+          syncStatusMessage.value = `同步失败：${status.message || '未知错误'}`
+          syncFinished.value = true
+          ElMessage.error('同步失败，请检查日志')
+          // 失败时不自动关闭，让用户查看错误信息
+        }
+      } catch (_e) {
+        // 轮询失败不终止
+      }
+    }, 5000)
+
+    syncStarting.value = false
+    syncConfirmVisible.value = true
+  } catch (e: any) {
+    syncError.value = true
+    syncFinished.value = true
+    syncStatusMessage.value = `启动失败：${e?.message || '未知错误'}`
+    ElMessage.error('启动同步失败：' + (e?.message || '未知错误'))
+  } finally {
+    syncStarting.value = false
+  }
+}
+
+// ---------- 完整性检查对话框 ----------
+const integrityConfirmVisible = ref(false)
+const integrityStarting = ref(false)
+const integrityRunning = ref(false)
+const integrityFinished = ref(false)
+const integrityError = ref(false)
+const integrityProgress = ref(0)
+const integrityStatusMessage = ref('准备执行')
+
+const openIntegrityConfirm = () => {
+  integrityRunning.value = false
+  integrityFinished.value = false
+  integrityError.value = false
+  integrityProgress.value = 0
+  integrityStatusMessage.value = '准备执行完整性检查'
+  integrityConfirmVisible.value = true
+}
+
+const integrityPollTimer = ref<any>(null)
+const integrityCloseTimer = ref<any>(null)
+const stopIntegrityPoll = () => {
+  if (integrityPollTimer.value) {
+    clearInterval(integrityPollTimer.value)
+    integrityPollTimer.value = null
+  }
+}
+const stopIntegrityTimer = () => {
+  if (integrityCloseTimer.value) {
+    clearTimeout(integrityCloseTimer.value)
+    integrityCloseTimer.value = null
+  }
+}
+
+const doIntegrityCheck = async () => {
+  integrityStarting.value = true
+  try {
+    // 触发 data_integrity_check 定时任务（包含补数）
+    await schedulerApi.triggerJob('data_integrity_check', true)
+    integrityRunning.value = true
+    integrityProgress.value = 10
+    integrityStatusMessage.value = '任务已提交，正在执行完整性检查与补数...'
+
+    let pollCount = 0
+    const MAX_POLL = 240 // 最多 20 分钟
+    stopIntegrityPoll()
+    integrityPollTimer.value = setInterval(async () => {
+      pollCount++
+      if (pollCount >= MAX_POLL) {
+        stopIntegrityPoll()
+        integrityStatusMessage.value = '轮询超时，任务仍在后台执行'
+        integrityProgress.value = 85
+        integrityFinished.value = true
+        return
+      }
+      try {
+        // 通过 executions 接口查看任务状态
+        const res = await schedulerApi.getJobExecutions({
+          job_id: 'data_integrity_check',
+          status: 'running',
+          limit: 1,
+        })
+        const items = (res as any)?.data?.data?.items || (res as any)?.data?.items || []
+        if (items.length > 0) {
+          const exec = items[0]
+          integrityProgress.value = Math.min(85, 15 + (exec.progress || 0))
+          integrityStatusMessage.value = exec.message || '检查与补数中...'
+        } else {
+          // 没有 running 记录，检查是否已有 completed 记录或重新加载数据
+          const res2 = await schedulerApi.getJobExecutions({
+            job_id: 'data_integrity_check',
+            status: 'completed',
+            limit: 1,
+          })
+          const completed = (res2 as any)?.data?.data?.items || (res2 as any)?.data?.items || []
+          if (completed.length > 0) {
+            stopIntegrityPoll()
+            integrityProgress.value = 100
+            integrityStatusMessage.value = '检查与补数完成 ✅'
+            integrityFinished.value = true
+            ElMessage.success('完整性检查与补数完成')
+            await loadFreshness()
+            // 延迟自动关闭
+            integrityCloseTimer.value = setTimeout(() => {
+              integrityConfirmVisible.value = false
+            }, 2500)
+            return
+          }
+          const res3 = await schedulerApi.getJobExecutions({
+            job_id: 'data_integrity_check',
+            status: 'failed',
+            limit: 1,
+          })
+          const failed = (res3 as any)?.data?.data?.items || (res3 as any)?.data?.items || []
+          if (failed.length > 0) {
+            stopIntegrityPoll()
+            integrityError.value = true
+            integrityProgress.value = 100
+            integrityStatusMessage.value = `执行失败：${failed[0].error_message || failed[0].message || '未知'}`
+            integrityFinished.value = true
+            ElMessage.warning('完整性检查执行失败')
+            // 失败时不自动关闭，让用户查看错误
+            return
+          }
+          integrityProgress.value = Math.min(85, integrityProgress.value + 2)
+          integrityStatusMessage.value = '检查与补数中...'
+        }
+      } catch (_e) {
+        // 静默
+      }
+    }, 5000)
+
+    integrityStarting.value = false
+  } catch (e: any) {
+    integrityError.value = true
+    integrityFinished.value = true
+    integrityStatusMessage.value = `启动失败：${e?.message || '未知错误'}`
+    ElMessage.error('启动完整性检查失败：' + (e?.message || '未知错误'))
+  } finally {
+    integrityStarting.value = false
+  }
+}
+
+const onIntegrityClose = () => {
+  if (!integrityRunning.value) integrityConfirmVisible.value = false
+  else if (integrityFinished.value) integrityConfirmVisible.value = false
+}
+
+const loadFreshness = async () => {
+  freshnessLoading.value = true
+  try {
+    const res = await screeningApi.checkDataFreshness()
+    const data = (res as any)?.data?.data || (res as any)?.data || {}
+    Object.assign(freshness, data)
+  } catch (e) {
+    console.warn('加载数据新鲜度失败', e)
+  } finally {
+    freshnessLoading.value = false
+  }
+}
+
+// ---------- 通用 ----------
 const getCurrencyAmount = (
   amount: number | { CNY: number; HKD: number; USD: number } | undefined,
   currency: 'CNY' | 'HKD' | 'USD',
@@ -346,6 +799,13 @@ const getCurrencyAmount = (
   if (typeof amount === 'number') return amount
   return amount?.[currency] ?? fallback
 }
+
+onBeforeUnmount(() => {
+  stopSyncPoll()
+  stopSyncTimer()
+  stopIntegrityPoll()
+  stopIntegrityTimer()
+})
 
 
 
@@ -576,6 +1036,8 @@ onMounted(async () => {
   await loadMarketNews()
   // 加载模拟交易账户
   await loadPaperAccount()
+  // 加载数据新鲜度和覆盖率
+  await loadFreshness()
 })
 </script>
 
@@ -991,6 +1453,140 @@ onMounted(async () => {
       }
     }
   }
+
+  .freshness-card,
+  .coverage-card {
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+  }
+
+  .freshness-card {
+    .freshness-body {
+      min-height: 80px;
+    }
+
+    .freshness-loading {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--el-text-color-secondary);
+
+      .loading-icon {
+        animation: spin 1s linear infinite;
+        color: var(--el-color-primary);
+      }
+    }
+
+    .freshness-info {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .freshness-status {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+
+      .freshness-badge {
+        padding: 4px 12px;
+        border-radius: 16px;
+        font-size: 13px;
+        font-weight: 600;
+
+        &.fresh {
+          background: var(--el-color-success-light-9);
+          color: var(--el-color-success);
+        }
+
+        &.stale {
+          background: var(--el-color-warning-light-9);
+          color: var(--el-color-warning);
+        }
+      }
+
+      .freshness-label {
+        color: var(--el-text-color-regular);
+        font-size: 14px;
+      }
+    }
+
+    .freshness-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 12px;
+      color: var(--el-text-color-secondary);
+    }
+  }
+
+  .coverage-card {
+    .coverage-body {
+      min-height: 80px;
+    }
+
+    .coverage-meta {
+      margin-top: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 13px;
+      color: var(--el-text-color-regular);
+    }
+
+    .coverage-gap {
+      color: var(--el-color-warning);
+      font-weight: 600;
+    }
+
+    .coverage-empty {
+      padding: 16px 0;
+    }
+  }
+
+  .confirm-body {
+    .confirm-tip {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      color: var(--el-text-color-regular);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+  }
+
+  .progress-body {
+    .progress-title {
+      font-weight: 600;
+      margin-bottom: 16px;
+      color: var(--el-text-color-primary);
+      display: flex;
+      align-items: center;
+      font-size: 14px;
+
+      .el-icon {
+        animation: spin 1s linear infinite;
+      }
+    }
+
+    .progress-meta {
+      margin-top: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--el-text-color-regular);
+    }
+  }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 // 响应式设计
