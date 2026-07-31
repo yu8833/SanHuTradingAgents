@@ -32,6 +32,11 @@
       <template #title>任务</template>
     </el-menu-item>
 
+    <el-menu-item index="/data">
+      <el-icon><DataAnalysis /></el-icon>
+      <template #title>数据</template>
+    </el-menu-item>
+
     <el-sub-menu index="/screening">
       <template #title>
         <el-icon><Search /></el-icon>

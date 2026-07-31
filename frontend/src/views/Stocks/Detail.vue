@@ -497,6 +497,14 @@
             <div class="fact"><span>ROE</span><b>{{ fmtPercent(basics.roe) }}</b></div>
             <div class="fact"><span>负债率</span><b>{{ fmtPercent(basics.debtRatio) }}</b></div>
           </div>
+          <div class="data-source-footer" v-if="basics.peSource || basics.peUpdatedAt">
+            <el-icon><InfoFilled /></el-icon>
+            <span class="source-text">
+              <span v-if="basics.peSource">数据源: {{ basics.peSource }}</span>
+              <span v-if="basics.peUpdatedAt" class="source-sep">·</span>
+              <span v-if="basics.peUpdatedAt">更新: {{ formatQuoteUpdateTime(basics.peUpdatedAt) }}</span>
+            </span>
+          </div>
         </el-card>
 
         <!-- 主要财务指标 -->
@@ -670,7 +678,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { TrendCharts, Star, Refresh, Link, Document, Clock, Reading, CreditCard, Delete, Warning, WarningFilled, CircleCheckFilled, CaretBottom, CaretTop, QuestionFilled } from '@element-plus/icons-vue'
+import { TrendCharts, Star, Refresh, Link, Document, Clock, Reading, CreditCard, Delete, Warning, WarningFilled, CircleCheckFilled, CaretBottom, CaretTop, QuestionFilled, InfoFilled } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 import { sanitizeHtml } from '@/utils/sanitize'
 import { stocksApi } from '@/api/stocks'
@@ -1883,6 +1891,18 @@ function exportReport() {
   color: var(--el-text-color-primary);
   font-weight: 600;
   margin-top: 4px;
+}
+
+.data-source-footer {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--el-border-color-lighter);
+  font-size: 11px;
+  color: var(--el-text-color-placeholder);
+  .source-sep { margin: 0 4px; }
 }
 
 .quick-actions {

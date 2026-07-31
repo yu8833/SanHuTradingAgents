@@ -149,6 +149,9 @@
                   <el-tag v-if="results.length > 0" type="success" size="small" effect="plain">
                     找到 {{ results.length }} 只
                   </el-tag>
+                  <el-tag v-if="scannedCount > 0" type="warning" size="small" effect="plain">
+                    覆盖 {{ scannedCount }} 只
+                  </el-tag>
                   <el-tag v-if="tookMs" type="info" size="small" effect="plain">
                     耗时 {{ (tookMs / 1000).toFixed(1) }}s
                   </el-tag>
@@ -909,6 +912,7 @@ const activeTab = ref<'scan' | 'backtest'>('scan')
 const loading = ref(false)
 const results = ref<LimitUpPullbackItem[]>([])
 const tookMs = ref(0)
+const scannedCount = ref(0)
 const hasSearched = ref(false)
 const introCollapsed = ref<string[]>([])
 
@@ -920,6 +924,7 @@ function saveScanResult() {
   const data = {
     results: results.value,
     tookMs: tookMs.value,
+    scannedCount: scannedCount.value,
     scanParams: { ...params },
     timestamp: Date.now()
   }
@@ -944,6 +949,7 @@ function loadScanResult() {
       if (data.results && data.results.length > 0) {
         results.value = data.results
         tookMs.value = data.tookMs || 0
+        scannedCount.value = data.scannedCount || 0
         if (data.scanParams) {
           Object.assign(params, defaultParams, data.scanParams)
         }
@@ -1159,11 +1165,13 @@ const doScan = async () => {
   hasSearched.value = true
   results.value = []
   tookMs.value = 0
+  scannedCount.value = 0
 
   try {
     const resp = await screeningApi.scanLimitUpPullback(params)
     results.value = resp.items
     tookMs.value = resp.took_ms || 0
+    scannedCount.value = resp.scanned_count || 0
     saveScanResult()
 
     if (resp.items.length > 0) {

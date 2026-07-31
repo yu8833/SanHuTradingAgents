@@ -1,0 +1,153 @@
+{
+  "_comment": "板块·环节骨架（开源版单一来源）。零具体标的：nodes 只有产业链环节名。verified=true 者环节已核实（来自做透的板块）；false 者为占位，待实时核实补全（禁止靠模型记忆编）。用户可在本地 my-watchlist.json 挂自己的标的，不进仓库。",
+  "indices": {
+    "aShare": ["上证指数", "深证成指", "创业板指", "沪深300"],
+    "us": ["道琼斯", "纳斯达克", "标普500"]
+  },
+  "sectors": [
+    {
+      "key": "humanoid",
+      "label": "人形机器人",
+      "tagline": "从减速器到灵巧手，AI 具身智能的物理载体",
+      "hot": true,
+      "verified": true,
+      "nodes": ["谐波减速器", "行星滚柱丝杠", "无框力矩电机", "灵巧手", "六维力传感器", "具身大模型"],
+      "summary": "人形机器人产业的核心矛盾已从「单点功能可行」转向「全链协同推进」：高精度传动部件的降本与可靠性验证、无框力矩电机与微型传感器在狭小空间内的集成、以及具身大模型对物理交互动作的泛化理解，三者构成相互制约的三角地带；只有执行器-传感器-大模型三角地带同步成熟，才能推动人形机器人从实验室原型迈向规模量产。",
+      "layers": [
+        {
+          "name": "核心传动层",
+          "desc": "关节运动的精密传动核心",
+          "nodes": [
+            { "name": "谐波减速器", "role": "提供高精度减速与力矩放大，是关节运动的核心部件", "focus": "转矩容量提升、精度保持性、轻量化设计、向头部本体企业小批量导入", "bottleneck": "high" },
+            { "name": "行星滚柱丝杠", "role": "实现线性关节高推力密度运动，支撑下肢负载需求", "focus": "反向式方案迭代、微小导程/低噪音、螺纹磨削与装配工艺攻关", "bottleneck": "high" }
+          ]
+        },
+        {
+          "name": "动力执行层",
+          "desc": "关节驱动与动力输出",
+          "nodes": [
+            { "name": "无框力矩电机", "role": "直接驱动关节运动，决定扭矩密度与温升控制", "focus": "高扭矩密度、低温升、新型磁路设计、与伺服驱动/编码器一体化集成", "bottleneck": "mid" }
+          ]
+        },
+        {
+          "name": "感知交互层",
+          "desc": "触觉感知与精细操作",
+          "nodes": [
+            { "name": "灵巧手", "role": "实现多指抓取与精细操作，是人机交互的核心接口", "focus": "触觉传感器融合、微型电机推杆+腱绳方案、12+自由度、指尖力控", "bottleneck": "high" },
+            { "name": "六维力传感器", "role": "提供力/力矩反馈，支撑力控算法闭环", "focus": "微型化、标定精度、抗串扰能力、自动化标定与温度补偿产线", "bottleneck": "mid" }
+          ]
+        },
+        {
+          "name": "大脑决策层",
+          "desc": "AI 具身智能的决策核心",
+          "nodes": [
+            { "name": "具身大模型", "role": "实现视觉-语言-动作多模态理解与端到端控制", "focus": "open-vocabulary 抓取、空间推理能力、自然语言指令执行、端到端迁移至双足机器人", "bottleneck": "high" }
+          ]
+        }
+      ],
+      "bottlenecks": [
+        {
+          "dimension": "制造与设备层面",
+          "items": [
+            "精密加工设备：高精度数控螺纹磨床、谐波减速器专用加工设备依赖进口，影响滚柱丝杠导程精度与谐波齿形一致性",
+            "装配工艺：关节模组的精密装配与调试需要自动化产线，国内仍以人工为主，良率与一致性待提升",
+            "测试验证：减速器寿命测试、电机温升测试、传感器标定等设备与标准体系不完善，制约批量验证"
+          ]
+        },
+        {
+          "dimension": "生态与设计层面",
+          "items": [
+            "执行器-传感器-大模型协同：三者接口标准不统一，力控闭环需要定制化联调，增加集成复杂度",
+            "具身模型数据闭环：物理交互数据稀缺，大模型训练依赖高质量仿真与真实操作数据，数据壁垒高",
+            "关节模组标准化：不同本体厂关节规格差异大，缺乏通用接口规范，不利于零部件企业规模化"
+          ]
+        },
+        {
+          "dimension": "关键部件与材料层面",
+          "items": [
+            "特种材料：谐波减速器柔轮专用钢材、丝杠滚柱材料、电机高磁能积永磁体等高端材料仍依赖海外",
+            "微型传感器芯片：六维力传感器的敏感元件、信号调理芯片、柔性触觉传感器核心芯片国产化率低",
+            "精密轴承：关节端使用的高精度角接触球轴承、交叉滚子轴承，国内在精度等级与寿命上存在差距"
+          ]
+        }
+      ]
+    },
+    {
+      "key": "ai-computing",
+      "label": "AI 算力",
+      "tagline": "算力基建的产业链——芯片、光互连、封装、散热",
+      "hot": true,
+      "verified": true,
+      "nodes": ["AI芯片", "光模块", "CPO光互连", "HBM存储", "先进封装", "PCB", "液冷散热"],
+      "summary": "计算芯片及紧耦合的 HBM 与先进封装构成算力的物理实体核心，高速互连与散热是维持大规模集群高效运转的血液循环系统；国内卡脖子点集中在「先进制造 + 生态工具 + 关键材料」三角地带，需要全链条协同突破。",
+      "layers": [
+        {
+          "name": "基础算力芯片层",
+          "desc": "核心算力来源",
+          "nodes": [
+            { "name": "AI芯片", "role": "决定算力峰值与计算效率", "focus": "TFLOPS 增长、内存带宽匹配、CUDA 生态垄断", "bottleneck": "high" },
+            { "name": "HBM存储", "role": "解决数据吞吐瓶颈，喂养高算力芯片", "focus": "HBM3/3E 堆叠层数、带宽提升、与先进封装一体化集成", "bottleneck": "high" }
+          ]
+        },
+        {
+          "name": "高速互连层",
+          "desc": "数据通路与网络",
+          "nodes": [
+            { "name": "光模块", "role": "服务器到交换机、跨机柜高速数据传输", "focus": "800G 放量、1.6T 升级、LPO/硅光降功耗降成本", "bottleneck": "mid" },
+            { "name": "CPO光互连", "role": "将光互连推进到芯片封装内，颠覆传统网络架构", "focus": "从交换机侧向计算芯片封装内引入，标准化与产业链分工尚未成熟", "bottleneck": "high" },
+            { "name": "先进封装", "role": "实现芯片间超高密度、低功耗互连", "focus": "CoWoS 产能、Chiplet 异构集成、国内 2.5D 封装追赶", "bottleneck": "high" },
+            { "name": "PCB", "role": "系统级物理承载与信号连接", "focus": "40 层+、Ultra-low loss 材料、超大尺寸加工难度", "bottleneck": "mid" }
+          ]
+        },
+        {
+          "name": "物理基础设施层",
+          "desc": "供电与散热",
+          "nodes": [
+            { "name": "液冷散热", "role": "保障高功率密度下可靠运行", "focus": "冷板设计、冷却液、快接头可靠性与成本，数据中心规划适配", "bottleneck": "mid" }
+          ]
+        }
+      ],
+      "bottlenecks": [
+        {
+          "dimension": "制造与设备层面",
+          "items": [
+            "先进制程受限：AI 芯片依赖 7nm 及以下工艺，国内先进逻辑制程获取困难，直接约束芯片性能与能效",
+            "先进封装设备与材料：CoWoS 所需精度、键合设备、TSV 技术、中介层等高端设备及部分材料仍主要依赖海外",
+            "HBM 制造：DRAM 先进工艺及 TSV 高密度堆叠存在差距，尚无法量产与海外巨头相当的产品"
+          ]
+        },
+        {
+          "dimension": "生态与设计层面",
+          "items": [
+            "高端 GPU/NPU 设计与生态：硬件设计能力在追赶，但 AI 芯片的指令集、开发工具链（对标 CUDA）生态壁垒极高，国产芯片客户迁移成本高、应用适配难",
+            "CPO 核心技术链：硅光子芯片设计、光源集成、光纤耦合、3D 光电异质集成等国内完整产业链薄弱，硅光流片工艺、高功率连续光光源受制"
+          ]
+        },
+        {
+          "dimension": "关键部件与材料层面",
+          "items": [
+            "超低损耗 PCB 基材：高速信号传输所需的特级碳氢、PPO 等高端覆铜板及树脂，日、美企业占据主导",
+            "液冷系统核心部件：高可靠性无泄漏快接头、长寿命冷却液、CDU 控制精度等顶级数据中心级产品验证周期长，部分高端市场仍由国际厂商主导"
+          ]
+        }
+      ]
+    },
+    { "key": "hbm", "label": "HBM", "tagline": "高带宽存储——AI 芯片的内存瓶颈", "hot": true, "verified": false, "nodes": [] },
+    { "key": "cpo", "label": "光互联", "tagline": "光电共封装（CPO）——突破铜互连的带宽墙", "hot": true, "verified": false, "nodes": [] },
+    { "key": "semiconductor", "label": "半导体国产替代", "tagline": "设备、材料、EDA、制造的自主链条", "hot": true, "verified": false, "nodes": [] },
+    { "key": "solid-state-battery", "label": "固态电池", "tagline": "下一代电池的材料与工艺路线", "hot": true, "verified": false, "nodes": [] },
+    { "key": "low-altitude", "label": "低空经济", "tagline": "eVTOL、空管、基建与运营", "hot": true, "verified": false, "nodes": [] },
+    { "key": "smart-driving", "label": "智能驾驶", "tagline": "感知、算力、线控与整车", "hot": true, "verified": false, "nodes": [] },
+    { "key": "innovative-drug", "label": "创新药", "tagline": "靶点、临床、CXO 与出海", "hot": true, "verified": false, "nodes": [] },
+    { "key": "power-grid", "label": "电网与特高压", "tagline": "输配电设备与新型电力系统", "hot": false, "verified": false, "nodes": [] },
+    { "key": "defense", "label": "军工", "tagline": "航空、航天、船舶与信息化", "hot": false, "verified": false, "nodes": [] },
+    { "key": "fusion", "label": "可控核聚变", "tagline": "磁约束、超导与第一壁材料", "hot": true, "verified": false, "nodes": [] },
+    { "key": "business-space", "label": "商业航天", "tagline": "火箭、卫星制造与卫星互联网", "hot": true, "verified": false, "nodes": [] },
+    { "key": "ai-pharma", "label": "生物医药", "tagline": "创新药、AI 制药与生物技术", "hot": true, "verified": false, "nodes": [] },
+    { "key": "resources", "label": "资源卡口", "tagline": "稀土、锗、铟等被卡的关键资源", "hot": false, "verified": false, "nodes": [] },
+    { "key": "ai-application", "label": "AI 应用", "tagline": "大模型落地的应用与 Agent", "hot": true, "verified": false, "nodes": [] },
+    { "key": "ai-hardware", "label": "AI 硬件", "tagline": "端侧、AI 眼镜与消费终端", "hot": true, "verified": false, "nodes": [] },
+    { "key": "energy-storage", "label": "储能", "tagline": "电化学储能与电网侧调峰", "hot": false, "verified": false, "nodes": [] },
+    { "key": "data-element", "label": "数据要素", "tagline": "数据确权、交易与流通基建", "hot": false, "verified": false, "nodes": [] }
+  ]
+}

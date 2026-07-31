@@ -369,6 +369,7 @@ function formatValue(val: number | undefined, digits = 2, suffix = ''): string {
 async function doScan() {
   loading.value = true
   hasSearched.value = true
+  scannedCount.value = 0
   try {
     const resp = await screeningApi.scanThreeBuysThreeSells(scanParams.value, { timeout: 180000 })
     results.value = resp.items
@@ -654,11 +655,11 @@ onUnmounted(() => {
                   <el-tag v-if="results.length > 0" type="success" size="small" effect="plain">
                     找到 {{ results.length }} 只
                   </el-tag>
+                  <el-tag v-if="scannedCount > 0" type="warning" size="small" effect="plain">
+                    覆盖 {{ scannedCount }} 只
+                  </el-tag>
                   <el-tag v-if="tookMs" type="info" size="small" effect="plain">
                     耗时 {{ (tookMs / 1000).toFixed(1) }}s
-                  </el-tag>
-                  <el-tag v-if="scannedCount" type="info" size="small" effect="plain">
-                    扫描 {{ scannedCount }} 只
                   </el-tag>
                 </div>
                 <div style="display: flex; align-items: center; gap: 12px;">
