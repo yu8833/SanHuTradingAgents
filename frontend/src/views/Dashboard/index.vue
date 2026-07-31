@@ -360,9 +360,10 @@
           :text-inside="false"
         />
         <div class="sync-phases">
-          <div v-for="(p, i) in syncPhases" :key="i" :class="['sync-phase-item', syncPhase === p.id ? 'active' : '', syncPhase > p.id ? 'done' : '']">
+          <div v-for="(p, i) in syncPhases" :key="i" :class="['sync-phase-item', syncPhase === p.id ? 'active' : '', syncPhase > p.id ? 'done' : '', skippedPhases.has(p.id) ? 'skipped' : '']">
             <span class="sync-phase-icon">
-              <span v-if="syncPhase > p.id">✅</span>
+              <span v-if="skippedPhases.has(p.id)">⏭️</span>
+              <span v-else-if="syncPhase > p.id">✅</span>
               <span v-else-if="syncPhase === p.id">⏳</span>
               <span v-else>⬜</span>
             </span>
@@ -476,16 +477,26 @@ const syncErrors = ref(0)
 
 // 同步阶段：1=基础信息 2=历史K线 3=财务数据 4=新闻数据
 const syncPhase = ref(0)
+// 记录哪些阶段需要跳过（数据已最新）
+const skippedPhases = ref<Set<number>>(new Set())
 const syncPhases = [
-  { id: 1, label: '股票基础信息', job: 'basics_sync_service', range: [0, 15] },
-  { id: 2, label: '历史K线数据', job: 'tushare_historical_sync', range: [15, 70] },
-  { id: 3, label: '财务数据', job: 'tushare_financial_sync', range: [70, 90] },
-  { id: 4, label: '新闻数据', job: 'news_sync', range: [90, 100] },
+  { id: 1, label: '股票基础信息', job: 'basics_sync_service', freshnessKey: 'basics', range: [0, 15] },
+  { id: 2, label: '历史K线数据', job: 'tushare_historical_sync', freshnessKey: 'quotes', range: [15, 70] },
+  { id: 3, label: '财务数据', job: 'tushare_financial_sync', freshnessKey: 'financial', range: [70, 90] },
+  { id: 4, label: '新闻数据', job: 'news_sync', freshnessKey: 'news', range: [90, 100] },
 ]
 const syncPhaseLabel = computed(() => {
   const p = syncPhases.find(p => p.id === syncPhase.value)
   return p ? `正在同步：${p.label}...` : '正在同步数据...'
 })
+
+// 检查某个数据类型是否已最新（根据 freshness.items）
+const isPhaseFresh = (phaseId: number): boolean => {
+  const phase = syncPhases.find(p => p.id === phaseId)
+  if (!phase) return false
+  const item = freshness.items?.find((i: any) => i.key === phase.freshnessKey)
+  return item?.is_fresh === true
+}
 
 const openSyncConfirm = () => {
   syncRunning.value = false
@@ -493,6 +504,7 @@ const openSyncConfirm = () => {
   syncError.value = false
   syncProgress.value = 0
   syncPhase.value = 0
+  skippedPhases.value = new Set()
   syncStatusMessage.value = '准备同步'
   syncConfirmVisible.value = true
 }
@@ -550,24 +562,99 @@ const checkJobCompleted = async (jobId: string, sinceTs: number): Promise<{ done
   }
 }
 
+// 跳转到下一个需要同步的阶段，跳过已最新的阶段
+const advanceToNextPhase = async (syncStartTime: number) => {
+  // 先重新加载新鲜度，获取最新状态
+  await loadFreshness()
+
+  for (let nextPhase = syncPhase.value + 1; nextPhase <= 4; nextPhase++) {
+    if (isPhaseFresh(nextPhase)) {
+      // 该数据类型已最新，跳过
+      skippedPhases.value.add(nextPhase)
+      const phase = syncPhases.find(p => p.id === nextPhase)
+      const nextRange = syncPhases.find(p => p.id === nextPhase + 1)?.range?.[0] ?? 100
+      syncProgress.value = nextRange
+      continue
+    }
+    // 找到需要同步的阶段
+    syncPhase.value = nextPhase
+    const phase = syncPhases.find(p => p.id === nextPhase)
+    if (!phase) break
+    syncProgress.value = phase.range[0]
+    syncStatusMessage.value = `开始同步${phase.label}...`
+
+    if (nextPhase === 1) {
+      // 阶段1：触发基础信息同步
+      try {
+        await syncApi.runStockBasicsSync({ force: true })
+      } catch (_) {}
+    } else {
+      // 阶段2-4：触发调度任务
+      try {
+        await schedulerApi.triggerJob(phase.job, true)
+      } catch (_) {}
+    }
+    return true
+  }
+
+  // 所有阶段都已完成或跳过
+  return false
+}
+
 const doSync = async () => {
   syncStarting.value = true
+  skippedPhases.value = new Set()
   try {
-    // 阶段1：触发基础数据同步
-    await syncApi.runStockBasicsSync({ force: true })
+    // 先加载最新新鲜度，确定哪些阶段需要跳过
+    await loadFreshness()
+
+    // 从阶段1开始，如果阶段1已最新则跳到下一个
     syncRunning.value = true
-    syncPhase.value = 1
-    syncProgress.value = 2
-    syncStatusMessage.value = '同步股票基础信息中...'
     syncTotal.value = 0
     syncDone.value = 0
     syncInserted.value = 0
     syncUpdated.value = 0
     syncErrors.value = 0
 
+    // 找到第一个需要同步的阶段
+    let firstPhase = 0
+    for (let i = 1; i <= 4; i++) {
+      if (!isPhaseFresh(i)) {
+        firstPhase = i
+        break
+      } else {
+        skippedPhases.value.add(i)
+      }
+    }
+
+    if (firstPhase === 0) {
+      // 所有数据都最新
+      syncProgress.value = 100
+      syncStatusMessage.value = '所有数据均为最新，无需同步 ✅'
+      syncFinished.value = true
+      ElMessage.success('所有数据均为最新')
+      syncStarting.value = false
+      closeSyncTimer.value = setTimeout(() => {
+        syncConfirmVisible.value = false
+      }, 2000)
+      return
+    }
+
+    // 触发第一个阶段
+    syncPhase.value = firstPhase
+    const firstPhaseInfo = syncPhases.find(p => p.id === firstPhase)!
+    syncProgress.value = firstPhaseInfo.range[0]
+    syncStatusMessage.value = `开始同步${firstPhaseInfo.label}...`
+
+    if (firstPhase === 1) {
+      await syncApi.runStockBasicsSync({ force: true })
+    } else {
+      try { await schedulerApi.triggerJob(firstPhaseInfo.job, true) } catch (_) {}
+    }
+
     const syncStartTime = Date.now()
     let pollCount = 0
-    const MAX_POLL = 720 // 最多 60 分钟
+    const MAX_POLL = 720
     stopSyncPoll()
     closeSyncPoll.value = setInterval(async () => {
       pollCount++
@@ -580,7 +667,7 @@ const doSync = async () => {
         return
       }
       try {
-        // 阶段1：轮询基础信息同步状态（通过 multi-source sync status）
+        // 阶段1：轮询基础信息同步状态
         if (syncPhase.value === 1) {
           const res = await syncApi.getSyncStatus()
           const status = (res as any)?.data?.data || (res as any)?.data || {}
@@ -597,85 +684,50 @@ const doSync = async () => {
             } else {
               syncProgress.value = Math.min(15, syncProgress.value + 0.5)
             }
-          } else if (status.status === 'success' || status.status === 'success_with_errors') {
-            syncPhase.value = 2
-            syncProgress.value = 15
-            syncStatusMessage.value = '基础信息同步完成，开始同步历史K线数据...'
-            try { await schedulerApi.triggerJob('tushare_historical_sync', true) } catch (_) {}
-          } else if (status.status === 'failed') {
-            // 基础信息失败，直接进入阶段2（历史K线不依赖基础信息同步成功）
-            syncPhase.value = 2
-            syncProgress.value = 15
-            syncStatusMessage.value = '基础信息同步异常，继续同步历史K线数据...'
-            try { await schedulerApi.triggerJob('tushare_historical_sync', true) } catch (_) {}
-          }
-          return
-        }
-
-        // 阶段2：轮询历史K线同步
-        if (syncPhase.value === 2) {
-          const running = await checkJobRunning('tushare_historical_sync')
-          if (running) {
-            syncStatusMessage.value = '同步历史K线数据中（耗时较长）...'
-            syncProgress.value = Math.min(70, syncProgress.value + 0.3)
-          } else {
-            const result = await checkJobCompleted('tushare_historical_sync', syncStartTime)
-            if (result.done) {
-              syncPhase.value = 3
-              syncProgress.value = 70
-              syncStatusMessage.value = '历史K线同步完成，开始同步财务数据...'
-              try { await schedulerApi.triggerJob('tushare_financial_sync', true) } catch (_) {}
-            } else {
-              syncProgress.value = Math.min(70, syncProgress.value + 0.2)
-              syncStatusMessage.value = '等待历史K线同步任务调度...'
-            }
-          }
-          return
-        }
-
-        // 阶段3：轮询财务数据同步
-        if (syncPhase.value === 3) {
-          const running = await checkJobRunning('tushare_financial_sync')
-          if (running) {
-            syncStatusMessage.value = '同步财务数据中...'
-            syncProgress.value = Math.min(90, syncProgress.value + 0.3)
-          } else {
-            const result = await checkJobCompleted('tushare_financial_sync', syncStartTime)
-            if (result.done) {
-              syncPhase.value = 4
-              syncProgress.value = 90
-              syncStatusMessage.value = '财务数据同步完成，开始同步新闻数据...'
-              try { await schedulerApi.triggerJob('news_sync', true) } catch (_) {}
-            } else {
-              syncProgress.value = Math.min(90, syncProgress.value + 0.2)
-              syncStatusMessage.value = '等待财务数据同步任务调度...'
-            }
-          }
-          return
-        }
-
-        // 阶段4：轮询新闻数据同步
-        if (syncPhase.value === 4) {
-          const running = await checkJobRunning('news_sync')
-          if (running) {
-            syncStatusMessage.value = '同步新闻数据中...'
-            syncProgress.value = Math.min(99, syncProgress.value + 0.3)
-          } else {
-            const result = await checkJobCompleted('news_sync', syncStartTime)
-            if (result.done) {
+          } else if (status.status === 'success' || status.status === 'success_with_errors' || status.status === 'failed') {
+            // 阶段1完成（无论成功失败），尝试跳到下一个需要同步的阶段
+            const advanced = await advanceToNextPhase(syncStartTime)
+            if (!advanced) {
               stopSyncPoll()
               syncProgress.value = 100
-              syncStatusMessage.value = '全部数据同步完成 ✅'
+              syncStatusMessage.value = '数据同步完成 ✅'
               syncFinished.value = true
-              ElMessage.success('全部数据同步完成')
+              ElMessage.success('数据同步完成')
               await loadFreshness()
               closeSyncTimer.value = setTimeout(() => {
                 syncConfirmVisible.value = false
               }, 2500)
-              return
+            }
+          }
+          return
+        }
+
+        // 阶段2-4：轮询调度任务状态
+        if (syncPhase.value >= 2 && syncPhase.value <= 4) {
+          const phase = syncPhases.find(p => p.id === syncPhase.value)!
+          const running = await checkJobRunning(phase.job)
+          if (running) {
+            syncStatusMessage.value = `同步${phase.label}中...`
+            syncProgress.value = Math.min(phase.range[1], syncProgress.value + 0.3)
+          } else {
+            const result = await checkJobCompleted(phase.job, syncStartTime)
+            if (result.done) {
+              // 当前阶段完成，尝试跳到下一个
+              const advanced = await advanceToNextPhase(syncStartTime)
+              if (!advanced) {
+                stopSyncPoll()
+                syncProgress.value = 100
+                syncStatusMessage.value = '全部数据同步完成 ✅'
+                syncFinished.value = true
+                ElMessage.success('全部数据同步完成')
+                await loadFreshness()
+                closeSyncTimer.value = setTimeout(() => {
+                  syncConfirmVisible.value = false
+                }, 2500)
+              }
             } else {
-              syncProgress.value = Math.min(99, syncProgress.value + 0.2)
-              syncStatusMessage.value = '等待新闻数据同步任务调度...'
+              syncProgress.value = Math.min(phase.range[1], syncProgress.value + 0.2)
+              syncStatusMessage.value = `等待${phase.label}同步任务调度...`
             }
           }
           return
@@ -1516,6 +1568,11 @@ onMounted(async () => {
 
         &.done {
           color: var(--el-color-success);
+        }
+
+        &.skipped {
+          color: var(--el-text-color-placeholder);
+          opacity: 0.7;
         }
 
         .sync-phase-icon {
