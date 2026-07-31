@@ -865,128 +865,197 @@ async def backtest_volume_price(req: RetailStrategyBacktestRequest):
 @router.get("/data-freshness")
 async def check_data_freshness(user: dict = Depends(get_current_user)):
     """
-    检查选股数据的新鲜度
+    检查系统中所有需要及时更新的数据的新鲜度
 
-    返回:
-    - latest_data_date: stock_daily_quotes 中的最新交易日期
-    - expected_date: 预期最新交易日（今天或最近的交易日）
-    - is_fresh: 数据是否最新
-    - stale_days: 数据过期天数
-    - total_stocks: 有最新日期数据的股票数量
-    - expected_total: stock_basic_info 中的A股总数
+    返回多维度数据新鲜度信息：
+    - basics: 股票基础信息（stock_basic_info）
+    - quotes: 历史K线数据（stock_daily_quotes）
+    - financial: 财务数据（stock_financial_data）
+    - news: 新闻数据（stock_news）
+    - overall: 整体新鲜度（任一数据不新鲜则整体不新鲜）
     """
     try:
         from app.core.database import get_mongo_db
         from datetime import datetime, timedelta
 
         db = get_mongo_db()
+        today = datetime.now()
 
-        # 1. 获取 stock_daily_quotes 中的最新交易日（先取日期再按code去重计数，避免全表大group OOM）
-        latest_pipeline = [
-            {"$match": {"period": "daily"}},
-            {"$group": {"_id": "$trade_date"}},
-            {"$sort": {"_id": -1}},
-            {"$limit": 1},
-        ]
-        latest_cursor = db.stock_daily_quotes.aggregate(latest_pipeline)
-        latest_docs = await latest_cursor.to_list(length=1)
+        def is_trade_day(date):
+            if date.weekday() >= 5:
+                return False
+            try:
+                import chinese_calendar
+                return chinese_calendar.is_workday(date)
+            except ImportError:
+                return True
+            except Exception:
+                return True
 
-        if not latest_docs:
-            return {
-                "success": True,
-                "data": {
-                    "latest_data_date": None,
-                    "expected_date": datetime.now().strftime("%Y-%m-%d"),
-                    "is_fresh": False,
-                    "stale_days": 999,
-                    "total_stocks": 0,
-                    "expected_total": 0,
-                    "message": "数据库中无历史K线数据",
-                }
-            }
+        expected_date = today
+        while not is_trade_day(expected_date):
+            expected_date -= timedelta(days=1)
+        expected_date_str = expected_date.strftime("%Y-%m-%d")
+        is_trading_day = is_trade_day(today)
+        current_hour = today.hour
 
-        latest_data_date = latest_docs[0]["_id"]
-        # 在最新交易日内用 distinct 去重统计真实有数据的股票数量（多数据源只算1次）
-        total_stocks = len(
-            await db.stock_daily_quotes.distinct(
-                "code", {"trade_date": latest_data_date, "period": "daily"}
-            )
-        )
-
-        # 2. 获取期望的A股总数（stock_basic_info 存了多数据源记录，需按 code 去重）
+        # --- 1. 股票基础信息 ---
         basics_filter = {
             "$or": [
                 {"category": "stock_cn"},
                 {"market": {"$in": ["主板", "创业板", "科创板", "北交所"]}},
             ]
         }
-        expected_total = len(await db.stock_basic_info.distinct("code", basics_filter))
-
-        # 3. 判断数据是否新鲜
-        today = datetime.now()
-
-        def is_trade_day(date):
-            """判断是否为交易日（周一到周五且非法定节假日）"""
-            if date.weekday() >= 5:  # 周末
-                return False
-            # 尝试使用 chinese_calendar 库判断法定节假日
-            try:
-                import chinese_calendar
-                return chinese_calendar.is_workday(date)
-            except ImportError:
-                # chinese_calendar 未安装，仅按周末判断
-                return True
-            except Exception:
-                # chinese_calendar 数据范围外等异常，回退到仅周末判断
-                return True
-
-        # 获取最近的交易日（处理周末与法定节假日）
-        expected_date = today
-        while not is_trade_day(expected_date):
-            expected_date -= timedelta(days=1)
-        expected_date = expected_date.strftime("%Y-%m-%d")
-
-        # 今天是否为交易日
-        is_trading_day = is_trade_day(today)
-
-        # 计算过期天数
-        try:
-            latest_dt = datetime.strptime(latest_data_date, "%Y-%m-%d")
-            expected_dt = datetime.strptime(expected_date, "%Y-%m-%d")
-            stale_days = (expected_dt - latest_dt).days
-        except Exception:
-            stale_days = 999
-
-        # 如果今天是交易日但还没到收盘（15:30之前），允许数据是昨天的
-        current_hour = today.hour
-        if is_trading_day and current_hour < 16:
-            # 交易时段或收盘前，昨天数据即可
-            yesterday = (today - timedelta(days=1)).strftime("%Y-%m-%d")
-            try:
-                latest_dt = datetime.strptime(latest_data_date, "%Y-%m-%d")
-                yesterday_dt = datetime.strptime(yesterday, "%Y-%m-%d")
-                is_fresh = latest_dt >= yesterday_dt
-            except Exception:
-                is_fresh = False
+        basics_count = len(await db.stock_basic_info.distinct("code", basics_filter))
+        latest_basic_doc = await db.stock_basic_info.find().sort("updated_at", -1).limit(1).to_list(length=1)
+        basics_updated_at = latest_basic_doc[0].get("updated_at") if latest_basic_doc else None
+        # 基础信息只要今天更新过就算新鲜
+        basics_is_fresh = False
+        basics_stale_days = 999
+        if basics_updated_at:
+            if isinstance(basics_updated_at, str):
+                basics_dt = datetime.strptime(basics_updated_at[:19], "%Y-%m-%d %H:%M:%S")
+            else:
+                basics_dt = basics_updated_at
+            basics_stale_days = (today - basics_dt).days
+            # 当天更新过就算新鲜
+            basics_is_fresh = basics_stale_days <= 0
+            basics_updated_at_str = basics_dt.strftime("%Y-%m-%d %H:%M")
         else:
-            is_fresh = stale_days <= 0
+            basics_updated_at_str = None
 
-        # 4. 生成提示信息
-        if is_fresh:
-            message = f"数据最新（{latest_data_date}）"
+        # --- 2. 历史K线数据 ---
+        latest_pipeline = [
+            {"$match": {"period": "daily"}},
+            {"$group": {"_id": "$trade_date"}},
+            {"$sort": {"_id": -1}},
+            {"$limit": 1},
+        ]
+        latest_docs = await db.stock_daily_quotes.aggregate(latest_pipeline).to_list(length=1)
+        if latest_docs:
+            quotes_latest_date = latest_docs[0]["_id"]
+            quotes_total = len(await db.stock_daily_quotes.distinct("code", {"trade_date": quotes_latest_date, "period": "daily"}))
         else:
-            message = f"数据已过期 {stale_days} 天（最新数据：{latest_data_date}，预期：{expected_date}）"
+            quotes_latest_date = None
+            quotes_total = 0
+
+        quotes_is_fresh = False
+        quotes_stale_days = 999
+        if quotes_latest_date:
+            try:
+                quotes_dt = datetime.strptime(quotes_latest_date, "%Y-%m-%d")
+                quotes_stale_days = (expected_date - quotes_dt).days
+                if is_trading_day and current_hour < 16:
+                    yesterday = (today - timedelta(days=1)).strftime("%Y-%m-%d")
+                    quotes_is_fresh = quotes_dt >= datetime.strptime(yesterday, "%Y-%m-%d")
+                else:
+                    quotes_is_fresh = quotes_stale_days <= 0
+            except Exception:
+                pass
+
+        # --- 3. 财务数据 ---
+        latest_fin_doc = await db.stock_financial_data.find().sort("updated_at", -1).limit(1).to_list(length=1)
+        fin_updated_at = latest_fin_doc[0].get("updated_at") if latest_fin_doc else None
+        fin_count = await db.stock_financial_data.count_documents({})
+        fin_is_fresh = False
+        fin_stale_days = 999
+        if fin_updated_at:
+            if isinstance(fin_updated_at, str):
+                fin_dt = datetime.strptime(fin_updated_at[:19], "%Y-%m-%d %H:%M:%S")
+            else:
+                fin_dt = fin_updated_at
+            fin_stale_days = (today - fin_dt).days
+            # 财务数据每季度更新，30天内算新鲜
+            fin_is_fresh = fin_stale_days <= 30
+            fin_updated_at_str = fin_dt.strftime("%Y-%m-%d %H:%M")
+        else:
+            fin_updated_at_str = None
+
+        # --- 4. 新闻数据 ---
+        latest_news_doc = await db.stock_news.find().sort("published_at", -1).limit(1).to_list(length=1)
+        if not latest_news_doc:
+            latest_news_doc = await db.stock_news.find().sort("updated_at", -1).limit(1).to_list(length=1)
+        news_updated_at = None
+        if latest_news_doc:
+            news_updated_at = latest_news_doc[0].get("published_at") or latest_news_doc[0].get("updated_at")
+        news_count = await db.stock_news.count_documents({})
+        news_is_fresh = False
+        news_stale_days = 999
+        if news_updated_at:
+            if isinstance(news_updated_at, str):
+                news_dt = datetime.strptime(str(news_updated_at)[:19], "%Y-%m-%d %H:%M:%S")
+            else:
+                news_dt = news_updated_at
+            news_stale_days = (today - news_dt).days
+            # 新闻数据每天更新，1天内算新鲜
+            news_is_fresh = news_stale_days <= 1
+            news_updated_at_str = news_dt.strftime("%Y-%m-%d %H:%M")
+        else:
+            news_updated_at_str = None
+
+        # --- 整体新鲜度 ---
+        overall_is_fresh = basics_is_fresh and quotes_is_fresh and fin_is_fresh and news_is_fresh
+        overall_stale_days = max(basics_stale_days, quotes_stale_days, fin_stale_days, news_stale_days)
+
+        data_items = [
+            {
+                "key": "basics",
+                "label": "股票基础信息",
+                "is_fresh": basics_is_fresh,
+                "stale_days": basics_stale_days,
+                "latest": basics_updated_at_str or "无数据",
+                "count": basics_count,
+                "threshold": "每日更新",
+            },
+            {
+                "key": "quotes",
+                "label": "历史K线数据",
+                "is_fresh": quotes_is_fresh,
+                "stale_days": quotes_stale_days,
+                "latest": quotes_latest_date or "无数据",
+                "count": quotes_total,
+                "threshold": "每个交易日更新",
+            },
+            {
+                "key": "financial",
+                "label": "财务数据",
+                "is_fresh": fin_is_fresh,
+                "stale_days": fin_stale_days,
+                "latest": fin_updated_at_str or "无数据",
+                "count": fin_count,
+                "threshold": "每季度更新（30天内有效）",
+            },
+            {
+                "key": "news",
+                "label": "新闻数据",
+                "is_fresh": news_is_fresh,
+                "stale_days": news_stale_days,
+                "latest": news_updated_at_str or "无数据",
+                "count": news_count,
+                "threshold": "每日更新",
+            },
+        ]
+
+        if overall_is_fresh:
+            message = "所有数据均为最新"
+        else:
+            stale_items = [item["label"] for item in data_items if not item["is_fresh"]]
+            message = f"{', '.join(stale_items)} 需要更新"
 
         return {
             "success": True,
             "data": {
-                "latest_data_date": latest_data_date,
-                "expected_date": expected_date,
-                "is_fresh": is_fresh,
-                "stale_days": stale_days,
-                "total_stocks": total_stocks,
-                "expected_total": expected_total,
+                "overall_is_fresh": overall_is_fresh,
+                "overall_stale_days": overall_stale_days,
+                "expected_date": expected_date_str,
                 "message": message,
+                "items": data_items,
+                # 兼容旧字段
+                "latest_data_date": quotes_latest_date,
+                "is_fresh": overall_is_fresh,
+                "stale_days": overall_stale_days,
+                "total_stocks": quotes_total,
+                "expected_total": basics_count,
             }
         }
     except Exception as e:
