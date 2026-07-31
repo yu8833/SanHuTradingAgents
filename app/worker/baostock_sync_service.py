@@ -269,9 +269,28 @@ class BaoStockSyncService:
             logger.info("🔄 开始BaoStock日K线同步（最新交易日）...")
             logger.info("ℹ️ 注意：BaoStock不支持实时行情，此任务同步最新交易日的日K线数据")
 
-            # 从数据库获取股票列表
+            # 获取A股股票列表（与Tushare同步服务一致，去掉 data_source 过滤）
             collection = self.db.stock_basic_info
-            cursor = collection.find({"data_source": "baostock"}, {"code": 1})
+            cursor = collection.find(
+                {
+                    "$and": [
+                        {
+                            "$or": [
+                                {"market_info.market": "CN"},
+                                {"category": "stock_cn"},
+                                {"market": {"$in": ["主板", "创业板", "科创板", "北交所"]}},
+                            ]
+                        },
+                        {
+                            "$or": [
+                                {"status": {"$ne": "D"}},
+                                {"status": {"$exists": False}},
+                            ]
+                        },
+                    ]
+                },
+                {"code": 1}
+            )
             stock_codes = [doc["code"] async for doc in cursor]
 
             if not stock_codes:
@@ -369,9 +388,28 @@ class BaoStockSyncService:
             # 确定同步模式
             use_incremental = incremental or days < 0
 
-            # 从数据库获取股票列表
+            # 获取A股股票列表（与Tushare同步服务一致，去掉 data_source 过滤）
             collection = self.db.stock_basic_info
-            cursor = collection.find({"data_source": "baostock"}, {"code": 1})
+            cursor = collection.find(
+                {
+                    "$and": [
+                        {
+                            "$or": [
+                                {"market_info.market": "CN"},
+                                {"category": "stock_cn"},
+                                {"market": {"$in": ["主板", "创业板", "科创板", "北交所"]}},
+                            ]
+                        },
+                        {
+                            "$or": [
+                                {"status": {"$ne": "D"}},
+                                {"status": {"$exists": False}},
+                            ]
+                        },
+                    ]
+                },
+                {"code": 1}
+            )
             stock_codes = [doc["code"] async for doc in cursor]
 
             if not stock_codes:
@@ -516,6 +554,27 @@ class BaoStockSyncService:
                     except ValueError:
                         # 如果日期格式不对，直接返回
                         return latest_date
+                else:
+                    # 没有历史数据时，从上市日期开始全量同步（与Tushare/AKShare一致）
+                    stock_info = await self.db.stock_basic_info.find_one(
+                        {"code": symbol},
+                        {"list_date": 1}
+                    )
+                    if stock_info and stock_info.get("list_date"):
+                        list_date = stock_info["list_date"]
+                        # 处理不同的日期格式
+                        if isinstance(list_date, str):
+                            # 格式可能是 "20100101" 或 "2010-01-01"
+                            if len(list_date) == 8 and list_date.isdigit():
+                                return f"{list_date[:4]}-{list_date[4:6]}-{list_date[6:]}"
+                            else:
+                                return list_date
+                        else:
+                            return list_date.strftime('%Y-%m-%d')
+
+                    # 如果没有上市日期，从1990年开始
+                    logger.warning(f"⚠️ {symbol}: 未找到上市日期，从1990-01-01开始同步")
+                    return "1990-01-01"
 
             # 默认返回30天前（确保不漏数据）
             return (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
@@ -562,12 +621,24 @@ class BaoStockSyncService:
             }
 
 
+# 全局同步服务实例（单例模式，参考 tushare_sync_service.py）
+_baostock_sync_service = None
+
+
+async def get_baostock_sync_service() -> BaoStockSyncService:
+    """获取BaoStock同步服务单例实例"""
+    global _baostock_sync_service
+    if _baostock_sync_service is None:
+        _baostock_sync_service = BaoStockSyncService()
+        await _baostock_sync_service.initialize()
+    return _baostock_sync_service
+
+
 # APScheduler兼容的任务函数
 async def run_baostock_basic_info_sync():
     """运行BaoStock基础信息同步任务"""
     try:
-        service = BaoStockSyncService()
-        await service.initialize()  # 🔥 必须先初始化
+        service = await get_baostock_sync_service()
         stats = await service.sync_stock_basic_info()
         logger.info(f"🎯 BaoStock基础信息同步完成: {stats.basic_info_count}条记录, {len(stats.errors)}个错误")
     except Exception as e:
@@ -577,20 +648,18 @@ async def run_baostock_basic_info_sync():
 async def run_baostock_daily_quotes_sync():
     """运行BaoStock日K线同步任务（最新交易日）"""
     try:
-        service = BaoStockSyncService()
-        await service.initialize()  # 🔥 必须先初始化
+        service = await get_baostock_sync_service()
         stats = await service.sync_daily_quotes()
         logger.info(f"🎯 BaoStock日K线同步完成: {stats.quotes_count}条记录, {len(stats.errors)}个错误")
     except Exception as e:
         logger.error(f"❌ BaoStock日K线同步任务失败: {e}")
 
 
-async def run_baostock_historical_sync():
+async def run_baostock_historical_sync(incremental: bool = True):
     """运行BaoStock历史数据同步任务"""
     try:
-        service = BaoStockSyncService()
-        await service.initialize()  # 🔥 必须先初始化
-        stats = await service.sync_historical_data()
+        service = await get_baostock_sync_service()
+        stats = await service.sync_historical_data(incremental=incremental)
         logger.info(f"🎯 BaoStock历史数据同步完成: {stats.historical_records}条记录, {len(stats.errors)}个错误")
     except Exception as e:
         logger.error(f"❌ BaoStock历史数据同步任务失败: {e}")
@@ -599,8 +668,7 @@ async def run_baostock_historical_sync():
 async def run_baostock_status_check():
     """运行BaoStock状态检查任务"""
     try:
-        service = BaoStockSyncService()
-        await service.initialize()  # 🔥 必须先初始化
+        service = await get_baostock_sync_service()
         status = await service.check_service_status()
         logger.info(f"🔍 BaoStock服务状态: {status['status']}")
     except Exception as e:

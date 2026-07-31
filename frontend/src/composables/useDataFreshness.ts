@@ -29,8 +29,8 @@ export function useDataFreshness() {
     checking.value = true
     try {
       const resp = await screeningApi.checkDataFreshness()
-      freshnessInfo.value = resp
-      return resp
+      freshnessInfo.value = resp.data
+      return resp.data
     } catch (e: any) {
       console.error('[data-freshness] 检查失败:', e)
       return null
@@ -117,7 +117,7 @@ export function useDataFreshness() {
       ElMessage.info('正在触发历史数据同步，请稍后...')
 
       // 调用 scheduler API 触发 tushare 历史同步
-      const token = localStorage.getItem('token')
+      const token = localStorage.getItem('auth-token')
       const resp = await fetch('/api/scheduler/jobs/tushare_historical_sync/trigger?force=true', {
         method: 'POST',
         headers: {

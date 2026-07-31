@@ -276,7 +276,13 @@ async def lifespan(app: FastAPI):
     except Exception:
         croniter = None  # 可选依赖
     try:
-        scheduler = AsyncIOScheduler(timezone=settings.TIMEZONE)
+        scheduler = AsyncIOScheduler(
+            timezone=settings.TIMEZONE,
+            job_defaults={
+                'misfire_grace_time': 300,  # 5分钟容错，避免任务堆积时被丢弃
+                'coalesce': True,           # 合并堆积的触发，只执行一次
+            }
+        )
 
         # 使用多数据源同步服务（支持自动切换）
         multi_source_service = MultiSourceBasicsSyncService()
@@ -663,14 +669,24 @@ async def lifespan(app: FastAPI):
         try:
             from app.services.retail.scheduler_jobs import register_retail_jobs
             register_retail_jobs(scheduler, settings)
+            logger.info("✅ 散户策略定时任务注册完成")
         except Exception as e:
-            logger.error(f"❌ 散户策略定时任务注册失败: {e}", exc_info=True)
+            logger.error(f"🚨 散户策略定时任务注册失败，退出信号扫描/预警检查等功能将不可用: {e}", exc_info=True)
+
+        # 设置调度器实例到服务中，以便API可以管理任务
+        # 注意：必须在 scheduler.start() 之前设置，避免 start 与 set 之间的窗口期 API 无可用实例
+        set_scheduler_instance(scheduler)
 
         scheduler.start()
 
-        # 设置调度器实例到服务中，以便API可以管理任务
-        set_scheduler_instance(scheduler)
-        logger.info("✅ 调度器服务已初始化")
+        # 确保 SchedulerService 在启动时初始化（注册事件监听器和僵尸检测）
+        # 否则只有在首次调用 /api/scheduler/* 时才会创建，可能导致事件监听器永不注册
+        try:
+            from app.services.scheduler_service import get_scheduler_service
+            scheduler_service = get_scheduler_service()
+            logger.info("✅ 调度器服务已初始化（事件监听器+僵尸检测已注册）")
+        except Exception as e:
+            logger.error(f"❌ 调度器服务初始化失败: {e}", exc_info=True)
     except Exception as e:
         logger.error(f"❌ 调度器启动失败: {e}", exc_info=True)
         raise  # 抛出异常，阻止应用启动
@@ -680,6 +696,14 @@ async def lifespan(app: FastAPI):
     finally:
         # 关闭时清理
         if scheduler:
+            # 关闭前记录正在运行的任务，避免 wait=False 导致任务被静默中断
+            try:
+                running_jobs = scheduler.get_jobs()
+                for job in running_jobs:
+                    if job.next_run_time is None:
+                        logger.warning(f"⚠️ 服务关闭时任务 {job.id} 仍在运行，将被中断")
+            except Exception:
+                pass
             try:
                 scheduler.shutdown(wait=False)
                 logger.info("🛑 Scheduler stopped")

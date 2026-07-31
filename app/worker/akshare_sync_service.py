@@ -535,7 +535,8 @@ class AKShareSyncService:
         end_date: str = None,
         symbols: List[str] = None,
         incremental: bool = True,
-        period: str = "daily"
+        period: str = "daily",
+        job_id: str = None
     ) -> Dict[str, Any]:
         """
         同步历史数据
@@ -546,6 +547,7 @@ class AKShareSyncService:
             symbols: 指定股票代码列表
             incremental: 是否增量同步
             period: 数据周期 (daily/weekly/monthly)
+            job_id: 任务ID（用于进度跟踪和取消）
 
         Returns:
             同步结果统计
@@ -569,9 +571,28 @@ class AKShareSyncService:
             if not end_date:
                 end_date = datetime.now().strftime('%Y-%m-%d')
 
-            # 2. 确定要同步的股票列表
+            # 2. 确定要同步的股票列表（与Tushare同步服务一致，排除港股/美股/退市股）
             if symbols is None:
-                basic_info_cursor = self.db.stock_basic_info.find({}, {"code": 1})
+                basic_info_cursor = self.db.stock_basic_info.find(
+                    {
+                        "$and": [
+                            {
+                                "$or": [
+                                    {"market_info.market": "CN"},
+                                    {"category": "stock_cn"},
+                                    {"market": {"$in": ["主板", "创业板", "科创板", "北交所"]}},
+                                ]
+                            },
+                            {
+                                "$or": [
+                                    {"status": {"$ne": "D"}},
+                                    {"status": {"$exists": False}},
+                                ]
+                            },
+                        ]
+                    },
+                    {"code": 1}
+                )
                 symbols = [doc["code"] async for doc in basic_info_cursor]
 
             if not symbols:
@@ -592,6 +613,12 @@ class AKShareSyncService:
 
             # 4. 批量处理
             for i in range(0, len(symbols), self.batch_size):
+                # 检查是否需要退出
+                if job_id and await self._should_stop(job_id):
+                    logger.warning(f"⚠️ 任务 {job_id} 收到停止信号，正在退出...")
+                    stats["stopped"] = True
+                    break
+
                 batch = symbols[i:i + self.batch_size]
                 batch_stats = await self._process_historical_batch(
                     batch, start_date, end_date, period, incremental
@@ -605,8 +632,17 @@ class AKShareSyncService:
 
                 # 进度日志
                 progress = min(i + self.batch_size, len(symbols))
-                logger.info(f"📈 历史数据同步进度: {progress}/{len(symbols)} "
+                progress_percent = int((progress / len(symbols)) * 100)
+                logger.info(f"📈 历史数据同步进度: {progress}/{len(symbols)} ({progress_percent}%) "
                            f"(成功: {stats['success_count']}, 记录: {stats['total_records']})")
+
+                # 更新任务进度
+                if job_id:
+                    await self._update_progress(
+                        job_id,
+                        progress_percent,
+                        f"已处理 {progress}/{len(symbols)} 只股票"
+                    )
 
                 # API限流
                 if i + self.batch_size < len(symbols):
@@ -678,12 +714,9 @@ class AKShareSyncService:
                     batch_stats["total_records"] += saved_count
                     logger.debug(f"✅ {symbol}历史数据同步成功: {saved_count}条记录")
                 else:
-                    batch_stats["error_count"] += 1
-                    batch_stats["errors"].append({
-                        "code": symbol,
-                        "error": "历史数据为空",
-                        "context": "_process_historical_batch"
-                    })
+                    # 空数据可能是停牌或未上市，不计为错误
+                    logger.debug(f"股票 {symbol} 在该日期范围内无数据（可能停牌或未上市）")
+                    continue  # 跳过，不计入 error_count
 
             except Exception as e:
                 batch_stats["error_count"] += 1
@@ -750,6 +783,87 @@ class AKShareSyncService:
             logger.error(f"❌ 获取最后同步日期失败 {symbol}: {e}")
             # 出错时返回30天前，确保不漏数据
             return (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+
+    # ==================== 进度跟踪辅助方法（参考 tushare_sync_service.py） ====================
+
+    async def _should_stop(self, job_id: str) -> bool:
+        """
+        检查任务是否应该停止
+
+        Args:
+            job_id: 任务ID
+
+        Returns:
+            是否应该停止
+        """
+        try:
+            # 查询执行记录，检查 cancel_requested 标记
+            execution = await self.db.scheduler_executions.find_one(
+                {"job_id": job_id, "status": "running"},
+                sort=[("timestamp", -1)]
+            )
+
+            if execution and execution.get("cancel_requested"):
+                return True
+
+            return False
+
+        except Exception as e:
+            logger.error(f"❌ 检查任务停止标记失败: {e}")
+            return False
+
+    async def _update_progress(self, job_id: str, progress: int, message: str):
+        """
+        更新任务进度
+
+        Args:
+            job_id: 任务ID
+            progress: 进度百分比 (0-100)
+            message: 进度消息
+        """
+        try:
+            from app.services.scheduler_service import TaskCancelledException
+            from pymongo import MongoClient
+            from app.core.config import settings
+
+            # 使用同步 PyMongo 客户端（避免事件循环冲突）
+            sync_client = MongoClient(settings.MONGO_URI)
+            sync_db = sync_client[settings.MONGODB_DATABASE]
+
+            # 查找最新的 running 记录
+            execution = sync_db.scheduler_executions.find_one(
+                {"job_id": job_id, "status": "running"},
+                sort=[("timestamp", -1)]
+            )
+
+            if not execution:
+                logger.warning(f"⚠️ 未找到任务 {job_id} 的执行记录")
+                sync_client.close()
+                return
+
+            # 检查是否收到取消请求
+            if execution.get("cancel_requested"):
+                sync_client.close()
+                raise TaskCancelledException(f"任务 {job_id} 已被用户取消")
+
+            # 更新进度
+            sync_db.scheduler_executions.update_one(
+                {"_id": execution["_id"]},
+                {
+                    "$set": {
+                        "progress": progress,
+                        "progress_message": message,
+                        "updated_at": datetime.utcnow()
+                    }
+                }
+            )
+
+            sync_client.close()
+
+        except Exception as e:
+            if "TaskCancelledException" in str(type(e).__name__):
+                raise
+            logger.error(f"❌ 更新任务进度失败: {e}")
 
     async def sync_financial_data(self, symbols: List[str] = None) -> Dict[str, Any]:
         """
@@ -1189,7 +1303,7 @@ async def run_akshare_historical_sync(incremental: bool = True):
     """APScheduler任务：同步历史数据"""
     try:
         service = await get_akshare_sync_service()
-        result = await service.sync_historical_data(incremental=incremental)
+        result = await service.sync_historical_data(incremental=incremental, job_id="akshare_historical_sync")
         logger.info(f"✅ AKShare历史数据同步完成: {result}")
 
         # 同步完成后自动执行完整性检查（用Tushare补数）

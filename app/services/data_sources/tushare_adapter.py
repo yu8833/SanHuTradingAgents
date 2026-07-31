@@ -17,6 +17,9 @@ class TushareAdapter(DataSourceAdapter):
     def __init__(self):
         super().__init__()  # 调用父类初始化
         self._provider = None
+        # trade_cal 接口每天有频控(20000次/天)，避免频繁调用 is_available 时被封
+        self._cached_available: "Optional[bool]" = None
+        self._available_cache_ts: float = 0.0
         self._initialize()
 
     def _initialize(self):
@@ -43,11 +46,19 @@ class TushareAdapter(DataSourceAdapter):
 
     def is_available(self) -> bool:
         """Check whether Tushare is available"""
-        # 直接测试 Tushare API 连接，不依赖 connect_sync 方法
+        import time as _time
         if self._provider is None:
             return False
 
+        # 成功时缓存10分钟，失败时不缓存（立即重试），避免瞬态故障后无法快速恢复
+        CACHE_TTL = 600.0
+        now = _time.time()
+        # 只在缓存值为 True 时使用缓存（成功时缓存），失败时不缓存
+        if self._cached_available is True and (now - self._available_cache_ts) < CACHE_TTL:
+            return True
+
         # 尝试直接使用 tushare API 测试连接
+        result = False
         try:
             import tushare as ts
             # 获取 token（从环境变量或 provider）
@@ -58,16 +69,30 @@ class TushareAdapter(DataSourceAdapter):
 
             if not token:
                 logger.debug("Tushare: No token available")
-                return False
-
-            ts.set_token(token)
-            pro = ts.pro_api()
-            # 轻量级测试：获取最近一个交易日
-            df = pro.trade_cal(exchange='SSE', start_date='20240101', end_date='20240110')
-            return df is not None and len(df) > 0
+                result = False
+            else:
+                ts.set_token(token)
+                pro = ts.pro_api()
+                # 优先使用 name_basic（低频次接口），失败再用 daily 轻量查询
+                try:
+                    df = pro.name_basic(ts_code='000001.SZ', fields='ts_code')
+                    result = df is not None and len(df) > 0
+                except Exception as _e1:
+                    logger.debug(f"Tushare: name_basic test failed, fallback to daily: {_e1}")
+                    try:
+                        # daily 接口配额大得多，取 1 只股票的 1 行即可
+                        df = pro.daily(ts_code='000001.SZ', start_date='20260101', end_date='20260102')
+                        result = df is not None and len(df) > 0
+                    except Exception as _e2:
+                        logger.debug(f"Tushare: daily test failed: {_e2}")
+                        result = False
         except Exception as e:
             logger.debug(f"Tushare: Connection test failed: {e}")
-            return False
+            result = False
+
+        self._cached_available = result
+        self._available_cache_ts = now
+        return result
 
     def get_stock_list(self) -> Optional[pd.DataFrame]:
         """Get stock list"""

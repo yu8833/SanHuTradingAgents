@@ -881,17 +881,17 @@ async def check_data_freshness(user: dict = Depends(get_current_user)):
 
         db = get_mongo_db()
 
-        # 1. 获取 stock_daily_quotes 中的最新交易日
-        pipeline = [
+        # 1. 获取 stock_daily_quotes 中的最新交易日（先取日期再按code去重计数，避免全表大group OOM）
+        latest_pipeline = [
             {"$match": {"period": "daily"}},
-            {"$group": {"_id": "$trade_date", "count": {"$sum": 1}}},
+            {"$group": {"_id": "$trade_date"}},
             {"$sort": {"_id": -1}},
             {"$limit": 1},
         ]
-        cursor = db.stock_daily_quotes.aggregate(pipeline)
-        docs = await cursor.to_list(length=1)
+        latest_cursor = db.stock_daily_quotes.aggregate(latest_pipeline)
+        latest_docs = await latest_cursor.to_list(length=1)
 
-        if not docs:
+        if not latest_docs:
             return {
                 "success": True,
                 "data": {
@@ -905,27 +905,49 @@ async def check_data_freshness(user: dict = Depends(get_current_user)):
                 }
             }
 
-        latest_data_date = docs[0]["_id"]
-        total_stocks = docs[0]["count"]
+        latest_data_date = latest_docs[0]["_id"]
+        # 在最新交易日内用 distinct 去重统计真实有数据的股票数量（多数据源只算1次）
+        total_stocks = len(
+            await db.stock_daily_quotes.distinct(
+                "code", {"trade_date": latest_data_date, "period": "daily"}
+            )
+        )
 
-        # 2. 获取期望的A股总数
-        expected_total = await db.stock_basic_info.count_documents({
+        # 2. 获取期望的A股总数（stock_basic_info 存了多数据源记录，需按 code 去重）
+        basics_filter = {
             "$or": [
                 {"category": "stock_cn"},
                 {"market": {"$in": ["主板", "创业板", "科创板", "北交所"]}},
             ]
-        })
+        }
+        expected_total = len(await db.stock_basic_info.distinct("code", basics_filter))
 
         # 3. 判断数据是否新鲜
         today = datetime.now()
-        # 判断今天是否为交易日（周末不是）
-        weekday = today.weekday()
-        if weekday == 5:  # 周六
-            expected_date = (today - timedelta(days=1)).strftime("%Y-%m-%d")
-        elif weekday == 6:  # 周日
-            expected_date = (today - timedelta(days=2)).strftime("%Y-%m-%d")
-        else:
-            expected_date = today.strftime("%Y-%m-%d")
+
+        def is_trade_day(date):
+            """判断是否为交易日（周一到周五且非法定节假日）"""
+            if date.weekday() >= 5:  # 周末
+                return False
+            # 尝试使用 chinese_calendar 库判断法定节假日
+            try:
+                import chinese_calendar
+                return chinese_calendar.is_workday(date)
+            except ImportError:
+                # chinese_calendar 未安装，仅按周末判断
+                return True
+            except Exception:
+                # chinese_calendar 数据范围外等异常，回退到仅周末判断
+                return True
+
+        # 获取最近的交易日（处理周末与法定节假日）
+        expected_date = today
+        while not is_trade_day(expected_date):
+            expected_date -= timedelta(days=1)
+        expected_date = expected_date.strftime("%Y-%m-%d")
+
+        # 今天是否为交易日
+        is_trading_day = is_trade_day(today)
 
         # 计算过期天数
         try:
@@ -936,7 +958,6 @@ async def check_data_freshness(user: dict = Depends(get_current_user)):
             stale_days = 999
 
         # 如果今天是交易日但还没到收盘（15:30之前），允许数据是昨天的
-        is_trading_day = weekday < 5
         current_hour = today.hour
         if is_trading_day and current_hour < 16:
             # 交易时段或收盘前，昨天数据即可

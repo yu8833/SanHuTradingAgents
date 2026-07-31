@@ -25,12 +25,51 @@ class AKShareAdapter(DataSourceAdapter):
         return 2  # 数字越大优先级越高
 
     def is_available(self) -> bool:
-        """检查AKShare是否可用"""
+        """检查AKShare是否可用（仅检查 import，快速返回，不阻塞）"""
         try:
             import akshare as ak  # noqa: F401
             return True
         except ImportError:
             return False
+
+    async def test_connection(self) -> bool:
+        """
+        真正的网络连通性测试（异步，不阻塞事件循环）
+
+        使用 stock_zh_a_spot_em 获取一只股票的实时行情作为轻量级测试，
+        通过 ThreadPoolExecutor 添加超时保护，避免网络问题导致长时间阻塞。
+        成功结果缓存5分钟，失败时不缓存（允许立即重试）。
+        """
+        import time as _time
+        # 成功时缓存5分钟，失败时不缓存
+        now = _time.time()
+        if getattr(self, '_cached_available', None) is True and (now - getattr(self, '_available_cache_ts', 0.0)) < 300:
+            return True
+        try:
+            import akshare as ak
+            from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+
+            def _fetch():
+                # 轻量级测试：尝试获取一只股票的实时行情
+                return ak.stock_zh_a_spot_em()
+
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_fetch)
+                try:
+                    df = future.result(timeout=15)
+                except FuturesTimeoutError:
+                    logger.warning("AKShare test_connection 超时（15秒）")
+                    result = False
+                    df = None
+                else:
+                    result = df is not None and len(df) > 0
+        except Exception as e:
+            logger.debug(f"AKShare test_connection 失败: {e}")
+            result = False
+
+        self._cached_available = result
+        self._available_cache_ts = now
+        return result
 
     def get_stock_list(self) -> Optional[pd.DataFrame]:
         """获取股票列表（使用 AKShare 的 stock_info_a_code_name 接口获取真实股票名称）"""

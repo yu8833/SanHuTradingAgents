@@ -632,6 +632,10 @@ class TushareSyncService:
 
             logger.info(f"📊 历史数据同步: 结束日期={end_date}, 股票数量={len(symbols)}, 模式={'增量' if incremental else '全量'}")
 
+            # 连续失败熔断：API 完全不可用时避免逐只尝试全部股票
+            consecutive_failures = 0
+            MAX_CONSECUTIVE_FAILURES = 20  # 连续失败20次后终止
+
             # 4. 批量处理
             for i, symbol in enumerate(symbols):
                 # 记录单个股票开始时间
@@ -693,6 +697,9 @@ class TushareSyncService:
                             f"(start={symbol_start_date}, end={end_date})，耗时 {stock_duration:.2f}秒"
                         )
 
+                    # API 调用成功（无论有无数据），重置连续失败计数
+                    consecutive_failures = 0
+
                     # 每个股票都更新进度
                     progress_percent = int(((i + 1) / len(symbols)) * 100)
 
@@ -734,6 +741,14 @@ class TushareSyncService:
                         f"   错误信息: {str(e)}\n"
                         f"   堆栈跟踪:\n{error_details}"
                     )
+
+                    # 连续失败熔断：API 完全不可用时避免逐只尝试全部股票
+                    consecutive_failures += 1
+                    if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                        logger.error(f"🚨 连续 {MAX_CONSECUTIVE_FAILURES} 只股票同步失败，终止同步")
+                        stats["stopped"] = True
+                        stats["stop_reason"] = f"连续 {MAX_CONSECUTIVE_FAILURES} 次失败"
+                        break
 
             # 4. 完成统计
             stats["end_time"] = datetime.utcnow()
@@ -1325,8 +1340,8 @@ async def run_tushare_historical_sync(incremental: bool = True):
             from app.services.data_integrity_service import get_data_integrity_service
             integrity_service = await get_data_integrity_service()
             integrity_result = await integrity_service.check_historical_completeness(
-                auto_remediate=True,
-                remediate_source="akshare",
+                auto_remediate=settings.DATA_INTEGRITY_AUTO_REMEDIATE,
+                remediate_source=settings.DATA_INTEGRITY_REMEDIATE_SOURCE,
             )
             logger.info(f"🔍 [完整性检查] Tushare同步后检查结果: {integrity_result.get('status')} "
                        f"(期望: {integrity_result.get('expected_count')}, "

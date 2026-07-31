@@ -107,7 +107,7 @@ export function resumeJob(jobId: string) {
 /**
  * 手动触发任务
  */
-export function triggerJob(jobId: string, force: boolean = true) {
+export function triggerJob(jobId: string, force: boolean = false) {
   return ApiClient.post<void>(`/api/scheduler/jobs/${jobId}/trigger?force=${force}`)
 }
 

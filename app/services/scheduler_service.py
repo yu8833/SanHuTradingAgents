@@ -14,6 +14,7 @@ from apscheduler.events import (
     EVENT_JOB_EXECUTED,
     EVENT_JOB_ERROR,
     EVENT_JOB_MISSED,
+    EVENT_JOB_SUBMITTED,
     JobExecutionEvent
 )
 
@@ -42,6 +43,26 @@ def get_utc8_now():
     return now_tz().replace(tzinfo=None)
 
 
+# 长时间运行任务的僵尸检测阈值（小时）
+# 历史同步等任务运行时间较长，使用更宽松的阈值
+LONG_RUNNING_THRESHOLD_HOURS = 6
+
+
+# 模块级同步 MongoDB 客户端单例（供 update_job_progress 等同步函数使用）
+# 避免每次调用都新建 MongoClient，减少连接开销和事件循环阻塞
+_sync_mongo_client = None
+
+
+def _get_sync_db():
+    """获取同步 MongoDB 数据库单例"""
+    global _sync_mongo_client
+    if _sync_mongo_client is None:
+        from pymongo import MongoClient
+        from app.core.config import settings
+        _sync_mongo_client = MongoClient(settings.MONGO_URI)
+    return _sync_mongo_client[settings.MONGO_DB]
+
+
 class TaskCancelledException(Exception):
     """任务被取消异常"""
     pass
@@ -59,6 +80,14 @@ class SchedulerService:
         """
         self.scheduler = scheduler
         self.db = None
+
+        # 记录手动触发时临时恢复的任务，回调中用于恢复原状态
+        # {job_id: {"was_paused": bool}}
+        self._temporary_resumes = {}
+
+        # 记录任务实际开始执行的时间（SUBMITTED 事件），用于精确计算 execution_time
+        # {job_id: datetime}
+        self._job_start_times = {}
 
         # 添加事件监听器，监控任务执行
         self._setup_event_listeners()
@@ -158,11 +187,12 @@ class SchedulerService:
         """
         手动触发任务执行
 
-        注意：如果任务处于暂停状态，会先临时恢复任务，执行一次后不会自动暂停
+        注意：如果任务处于暂停状态，会临时恢复任务以执行一次，执行完成后会重新暂停。
+        不修改任务的 kwargs 配置，避免参数被永久固化。
 
         Args:
             job_id: 任务ID
-            kwargs: 传递给任务函数的关键字参数（可选）
+            kwargs: 传递给任务函数的关键字参数（可选，仅记录到执行历史，不修改原任务配置）
 
         Returns:
             是否成功
@@ -182,15 +212,12 @@ class SchedulerService:
                 job = self.scheduler.get_job(job_id)
                 logger.info(f"✅ 任务 {job_id} 已临时恢复")
 
-            # 如果提供了 kwargs，合并到任务的 kwargs 中
+            # 记录临时恢复信息，回调中用于重新暂停任务
+            # 注意：不修改 job.kwargs，避免参数被永久固化
+            self._temporary_resumes[job_id] = {"was_paused": was_paused}
+
             if kwargs:
-                # 获取任务原有的 kwargs
-                original_kwargs = job.kwargs.copy() if job.kwargs else {}
-                # 合并新的 kwargs
-                merged_kwargs = {**original_kwargs, **kwargs}
-                # 修改任务的 kwargs
-                job.modify(kwargs=merged_kwargs)
-                logger.info(f"📝 任务 {job_id} 参数已更新: {kwargs}")
+                logger.info(f"📝 任务 {job_id} 收到手动触发参数（仅记录，不修改原任务配置）: {kwargs}")
 
             # 手动触发任务 - 使用带时区的当前时间
             from datetime import timezone
@@ -722,6 +749,13 @@ class SchedulerService:
             EVENT_JOB_MISSED
         )
 
+        # 监听任务开始执行事件（任务被提交到执行器时触发）
+        # 用于创建 running 记录和记录实际开始时间
+        self.scheduler.add_listener(
+            self._on_job_submitted,
+            EVENT_JOB_SUBMITTED
+        )
+
         logger.info("✅ APScheduler事件监听器已设置")
 
         # 添加定时任务，检测僵尸任务（长时间处于running状态）
@@ -742,21 +776,39 @@ class SchedulerService:
         "baostock_historical_sync",
         "tushare_financial_sync",
         "akshare_financial_sync",
+        "data_integrity_check",
     }
 
     async def _check_zombie_tasks(self):
-        """检测僵尸任务（长时间处于running状态的任务）"""
+        """检测僵尸任务（长时间处于running状态的任务）
+
+        普通任务超过 30 分钟视为僵尸；LONG_RUNNING_JOBS 中的长任务超过 6 小时才视为僵尸。
+        这样长任务在进程崩溃后也能被清理，同时避免误杀正常的长任务。
+        """
         try:
             db = self._get_db()
 
-            # 查找超过30分钟仍处于running状态的任务
-            threshold_time = get_utc8_now() - timedelta(minutes=30)
+            now = get_utc8_now()
+            # 普通任务：30 分钟阈值
+            normal_threshold = now - timedelta(minutes=30)
+            # 长时间运行任务：6 小时阈值
+            long_threshold = now - timedelta(hours=LONG_RUNNING_THRESHOLD_HOURS)
 
+            long_job_ids = list(self.LONG_RUNNING_JOBS)
+
+            # 查询：普通任务超 30 分钟 OR 长任务超 6 小时
             zombie_tasks = await db.scheduler_executions.find({
                 "status": "running",
-                "timestamp": {"$lt": threshold_time},
-                # 排除历史同步等长时间运行的任务
-                "job_id": {"$nin": list(self.LONG_RUNNING_JOBS)}
+                "$or": [
+                    {
+                        "job_id": {"$nin": long_job_ids},
+                        "timestamp": {"$lt": normal_threshold}
+                    },
+                    {
+                        "job_id": {"$in": long_job_ids},
+                        "timestamp": {"$lt": long_threshold}
+                    }
+                ]
             }).to_list(length=100)
 
             for task in zombie_tasks:
@@ -779,13 +831,36 @@ class SchedulerService:
         except Exception as e:
             logger.error(f"❌ 检测僵尸任务失败: {e}")
 
+    def _on_job_submitted(self, event: JobExecutionEvent):
+        """任务开始执行回调（任务被提交到执行器时触发）
+
+        - 记录实际开始执行时间，用于精确计算 execution_time
+        - 为自动触发的任务创建 running 记录（手动触发的已在 trigger_job 中创建）
+        """
+        # 记录实际开始执行时间（用于计算 execution_time）
+        self._job_start_times[event.job_id] = datetime.now()
+
+        # 创建 running 记录（_record_job_execution 内部会做去重，避免与手动触发重复）
+        asyncio.create_task(self._record_job_execution(
+            job_id=event.job_id,
+            status="running",
+            scheduled_time=event.scheduled_run_time,
+            progress=0,
+            is_manual=False  # 自动触发
+        ))
+
     def _on_job_executed(self, event: JobExecutionEvent):
         """任务执行成功回调"""
-        # 计算执行时间（处理时区问题）
-        execution_time = None
-        if event.scheduled_run_time:
-            now = datetime.now(event.scheduled_run_time.tzinfo)
-            execution_time = (now - event.scheduled_run_time).total_seconds()
+        # 计算实际执行时间（基于 SUBMITTED 事件记录的开始时间）
+        start_time = self._job_start_times.pop(event.job_id, None)
+        if start_time is not None:
+            execution_time = (datetime.now() - start_time).total_seconds()
+        else:
+            # 兜底：使用 scheduled_run_time 估算（包含调度延迟，不精确）
+            execution_time = None
+            if event.scheduled_run_time:
+                now = datetime.now(event.scheduled_run_time.tzinfo)
+                execution_time = (now - event.scheduled_run_time).total_seconds()
 
         asyncio.create_task(self._record_job_execution(
             job_id=event.job_id,
@@ -796,13 +871,21 @@ class SchedulerService:
             progress=100  # 任务完成，进度100%
         ))
 
+        # 处理手动触发的临时恢复：执行完毕后重新暂停
+        self._handle_temporary_resume(event.job_id)
+
     def _on_job_error(self, event: JobExecutionEvent):
         """任务执行失败回调"""
-        # 计算执行时间（处理时区问题）
-        execution_time = None
-        if event.scheduled_run_time:
-            now = datetime.now(event.scheduled_run_time.tzinfo)
-            execution_time = (now - event.scheduled_run_time).total_seconds()
+        # 计算实际执行时间（基于 SUBMITTED 事件记录的开始时间）
+        start_time = self._job_start_times.pop(event.job_id, None)
+        if start_time is not None:
+            execution_time = (datetime.now() - start_time).total_seconds()
+        else:
+            # 兜底：使用 scheduled_run_time 估算（包含调度延迟，不精确）
+            execution_time = None
+            if event.scheduled_run_time:
+                now = datetime.now(event.scheduled_run_time.tzinfo)
+                execution_time = (now - event.scheduled_run_time).total_seconds()
 
         asyncio.create_task(self._record_job_execution(
             job_id=event.job_id,
@@ -814,8 +897,30 @@ class SchedulerService:
             progress=None  # 失败时不设置进度
         ))
 
+        # 处理手动触发的临时恢复：执行完毕后重新暂停
+        self._handle_temporary_resume(event.job_id)
+
+    def _handle_temporary_resume(self, job_id: str):
+        """处理手动触发的临时恢复：如果任务原本是暂停状态，执行完毕后重新暂停。
+
+        Args:
+            job_id: 任务ID
+        """
+        temp_info = self._temporary_resumes.pop(job_id, None)
+        if temp_info and temp_info.get("was_paused"):
+            try:
+                self.scheduler.pause_job(job_id)
+                logger.info(f"⏸️ 任务 {job_id} 手动触发执行完毕，已重新暂停（恢复原状态）")
+            except Exception as e:
+                logger.error(f"❌ 重新暂停任务 {job_id} 失败: {e}")
+
     def _on_job_missed(self, event: JobExecutionEvent):
         """任务错过执行回调"""
+        # 错过执行的任务不会有 SUBMITTED/EXECUTED/ERROR 事件，清理可能残留的开始时间
+        self._job_start_times.pop(event.job_id, None)
+        # 错过执行也应清理临时恢复标记（任务实际未执行）
+        self._temporary_resumes.pop(event.job_id, None)
+
         asyncio.create_task(self._record_job_execution(
             job_id=event.job_id,
             status="missed",
@@ -856,15 +961,32 @@ class SchedulerService:
             job = self.scheduler.get_job(job_id)
             job_name = job.name if job else job_id
 
+            # 如果是 running 状态，检查是否已有近期的 running 记录（1 分钟内）
+            # 避免手动触发的 trigger_job 和 SUBMITTED 事件重复创建 running 记录
+            if status == "running":
+                recent_window = get_utc8_now() - timedelta(minutes=1)
+                existing_running = await db.scheduler_executions.find_one({
+                    "job_id": job_id,
+                    "status": "running",
+                    "timestamp": {"$gte": recent_window}
+                })
+                if existing_running:
+                    logger.debug(f"ℹ️ 任务 {job_id} 已有近期的 running 记录，跳过重复创建")
+                    return
+
             # 如果是完成状态（success/failed），先查找是否有对应的 running 记录
             if status in ["success", "failed"]:
-                # 查找最近的 running 记录（5分钟内）
-                five_minutes_ago = get_utc8_now() - timedelta(minutes=5)
+                # 长期运行任务（历史同步/财务同步）使用 24h 窗口匹配，普通任务 5 分钟
+                if job_id in self.LONG_RUNNING_JOBS:
+                    window_minutes = 24 * 60
+                else:
+                    window_minutes = 5
+                window_start = get_utc8_now() - timedelta(minutes=window_minutes)
                 existing_record = await db.scheduler_executions.find_one(
                     {
                         "job_id": job_id,
                         "status": "running",
-                        "timestamp": {"$gte": five_minutes_ago}
+                        "timestamp": {"$gte": window_start}
                     },
                     sort=[("timestamp", -1)]
                 )
@@ -992,6 +1114,10 @@ class SchedulerService:
                     await self._record_job_action(job_id, "auto_disable", "success", f"连续失败 {consecutive_failures} 次，自动停用")
                     await self._update_job_metadata_field(job_id, "enabled", False)
                     logger.warning(f"⛔ 任务 {job_id} 连续失败 {consecutive_failures} 次，已自动停用")
+                    logger.error(
+                        f"🚨 任务 {job_id} 连续失败 {consecutive_failures} 次，已自动停用！"
+                        f"请检查任务配置和数据源状态。"
+                    )
 
         except Exception as e:
             logger.error(f"❌ 处理任务失败追踪失败: {e}")
@@ -1146,6 +1272,15 @@ class SchedulerService:
                         self.scheduler.pause_job(job_id)
                     await self._update_job_metadata_field(job_id, "enabled", enabled)
                     await self._record_job_action(job_id, "batch_update", "success", f"设置enabled={enabled}")
+
+                # 更新 Cron 表达式
+                if cron_expression:
+                    from apscheduler.triggers.cron import CronTrigger
+                    from app.core.config import settings
+                    trigger = CronTrigger.from_crontab(cron_expression, timezone=settings.TIMEZONE)
+                    self.scheduler.reschedule_job(job_id, trigger=trigger)
+                    await self._update_job_metadata_field(job_id, "cron_expression", cron_expression)
+                    await self._record_job_action(job_id, "batch_update", "success", f"更新cron表达式: {cron_expression}")
 
                 # 重置失败计数
                 if reset_failures:
@@ -1541,12 +1676,8 @@ async def update_job_progress(
         processed_items: 已处理项数
     """
     try:
-        from pymongo import MongoClient
-        from app.core.config import settings
-
-        # 使用同步客户端避免事件循环冲突
-        sync_client = MongoClient(settings.MONGO_URI)
-        sync_db = sync_client[settings.MONGO_DB]
+        # 使用模块级单例同步客户端，避免每次调用都新建 MongoClient
+        sync_db = _get_sync_db()
 
         # 查找最近的执行记录
         latest_execution = sync_db.scheduler_executions.find_one(
@@ -1557,7 +1688,6 @@ async def update_job_progress(
         if latest_execution:
             # 检查是否有取消请求
             if latest_execution.get("cancel_requested"):
-                sync_client.close()
                 logger.warning(f"⚠️ 任务 {job_id} 收到取消请求，即将停止")
                 raise TaskCancelledException(f"任务 {job_id} 已被用户取消")
 
@@ -1583,8 +1713,6 @@ async def update_job_progress(
             )
         else:
             # 创建新的执行记录（任务刚开始）
-            from apscheduler.schedulers.asyncio import AsyncIOScheduler
-
             # 获取任务名称
             job_name = job_id
             if _scheduler_instance:
@@ -1612,7 +1740,7 @@ async def update_job_progress(
 
             sync_db.scheduler_executions.insert_one(execution_record)
 
-        sync_client.close()
+        # 不再 close()：使用模块级单例客户端，由进程生命周期管理
 
     except Exception as e:
         logger.error(f"❌ 更新任务进度失败: {e}")
