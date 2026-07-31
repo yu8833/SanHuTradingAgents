@@ -5,8 +5,11 @@
         <el-icon><List /></el-icon>
         任务中心
       </h1>
-      <p class="page-description">统一查看并管理分析任务：进行中 / 已完成 / 失败</p>
+      <p class="page-description">统一查看并管理分析任务与定时任务</p>
     </div>
+
+    <el-tabs v-model="topTab" class="top-level-tabs">
+      <el-tab-pane label="📊 分析任务" name="analysis">
 
     <el-card class="tabs-card" shadow="never">
       <el-tabs v-model="activeTab" @tab-click="onTabChange">
@@ -132,6 +135,12 @@
       </div>
     </el-card>
 
+      </el-tab-pane>
+      <el-tab-pane label="⏰ 定时任务" name="scheduled" lazy>
+        <ScheduledTasksView />
+      </el-tab-pane>
+    </el-tabs>
+
     <!-- 结果弹窗组件化 -->
     <TaskResultDialog
       v-model="resultVisible"
@@ -157,10 +166,12 @@ import { List, Refresh, Download } from '@element-plus/icons-vue'
 import { analysisApi } from '@/api/analysis'
 import TaskResultDialog from '@/components/Global/TaskResultDialog.vue'
 import TaskReportDialog from '@/components/Global/TaskReportDialog.vue'
+import ScheduledTasksView from './ScheduledTasksView.vue'
 
 const router = useRouter()
 const route = useRoute()
 
+const topTab = ref<'analysis' | 'scheduled'>('analysis')
 const activeTab = ref<'running'|'completed'|'failed'|'all'>('running')
 const loading = ref(false)
 const keyword = ref('')
@@ -182,8 +193,8 @@ let timer: any = null
 
 const setupPolling = () => {
   clearInterval(timer)
-  // 定期刷新列表（每 5 秒）
-  if (activeTab.value === 'running') {
+  // 定期刷新列表（每 5 秒），仅在分析任务 Tab 的"进行中"视图
+  if (activeTab.value === 'running' && topTab.value === 'analysis') {
     timer = setInterval(() => loadList(), 5000)
   }
 }
@@ -533,6 +544,16 @@ watch(() => (route.query as any)?.tab, (newVal) => {
     setupPolling()
   }
 })
+
+// 切换一级 Tab 时控制轮询：定时任务页停止分析任务轮询
+watch(topTab, (newVal) => {
+  if (newVal === 'scheduled') {
+    clearInterval(timer)
+    disconnectAllWebSockets()
+  } else {
+    setupPolling()
+  }
+})
 onUnmounted(() => {
   clearInterval(timer)
   disconnectAllWebSockets()
@@ -555,6 +576,7 @@ const formatTime = (t:string) => t ? formatDateTime(t) : '-'
   .page-header { margin-bottom: 24px; }
   .page-title { display:flex; align-items:center; gap:8px; font-size:24px; font-weight:600; margin:0 0 8px 0; }
   .page-description { color: var(--el-text-color-regular); margin:0; }
+  .top-level-tabs { margin-bottom: 16px; }
   .tabs-card { margin-bottom: 16px; }
   .list-header { display:flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap:8px; }
   .pagination-wrapper { display:flex; justify-content:center; margin-top: 16px; }

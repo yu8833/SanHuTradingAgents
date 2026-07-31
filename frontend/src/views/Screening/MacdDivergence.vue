@@ -33,9 +33,6 @@
       </el-collapse-item>
     </el-collapse>
 
-    <!-- 数据新鲜度检查 -->
-    <DataFreshnessBanner />
-
     <el-tabs v-model="activeTab" style="margin-top: 16px;">
       <el-tab-pane label="扫描结果" name="scan">
         <el-card class="result-panel" shadow="never">
@@ -373,7 +370,6 @@ import VChart from 'vue-echarts'
 import { screeningApi, type RetailScanReq, type RetailBacktestReq, type RetailScanResp, type RetailBacktestResp } from '@/api/screening'
 import { favoritesApi } from '@/api/favorites'
 import RetailBuyDialog from './components/RetailBuyDialog.vue'
-import DataFreshnessBanner from '@/components/Screening/DataFreshnessBanner.vue'
 
 echartsUse([RadarChart, LineChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent, CanvasRenderer])
 
