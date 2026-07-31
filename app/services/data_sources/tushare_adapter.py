@@ -73,15 +73,18 @@ class TushareAdapter(DataSourceAdapter):
             else:
                 ts.set_token(token)
                 pro = ts.pro_api()
-                # 优先使用 name_basic（低频次接口），失败再用 daily 轻量查询
+                # 优先使用 stock_basic（标准接口，验证 token 有效性），失败再用 daily 轻量查询
                 try:
-                    df = pro.name_basic(ts_code='000001.SZ', fields='ts_code')
+                    df = pro.stock_basic(ts_code='000001.SZ', fields='ts_code')
                     result = df is not None and len(df) > 0
                 except Exception as _e1:
-                    logger.debug(f"Tushare: name_basic test failed, fallback to daily: {_e1}")
+                    logger.debug(f"Tushare: stock_basic test failed, fallback to daily: {_e1}")
                     try:
-                        # daily 接口配额大得多，取 1 只股票的 1 行即可
-                        df = pro.daily(ts_code='000001.SZ', start_date='20260101', end_date='20260102')
+                        # daily 接口：取最近 30 天数据（确保覆盖至少一个交易日）
+                        from datetime import datetime, timedelta
+                        end_date = datetime.now().strftime('%Y%m%d')
+                        start_date = (datetime.now() - timedelta(days=30)).strftime('%Y%m%d')
+                        df = pro.daily(ts_code='000001.SZ', start_date=start_date, end_date=end_date)
                         result = df is not None and len(df) > 0
                     except Exception as _e2:
                         logger.debug(f"Tushare: daily test failed: {_e2}")

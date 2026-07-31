@@ -17,6 +17,8 @@ class TushareProvider:
         self.token = kwargs.get("token") or ""
         self._adapter = None
         self._connected = False
+        # Token 来源标记：'database' / 'env' / None（由 config_bridge 设置）
+        self.token_source = None
         logger.info("[TushareProvider] 初始化中...")
 
     def _get_adapter(self):

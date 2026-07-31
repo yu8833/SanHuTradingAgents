@@ -215,14 +215,17 @@ async def _test_single_adapter(adapter) -> dict:
                 logger.info(f"🔄 强制 {adapter.name} 重新连接以使用最新配置...")
                 provider = adapter._provider
                 if provider:
-                    # 重置连接状态
-                    provider.connected = False
-                    provider.token_source = None
-                    # 重新连接
-                    await asyncio.wait_for(
-                        asyncio.to_thread(provider.connect_sync),
-                        timeout=test_timeout
-                    )
+                    # 重新从数据库加载配置到环境变量（用户可能在前端修改了 token）
+                    try:
+                        from app.core.config_bridge import bridge_config_to_env
+                        bridge_config_to_env()
+                    except Exception as e:
+                        logger.warning(f"⚠️ 重新加载配置失败: {e}")
+                    # 重置 adapter 的可用性缓存，让下次 is_available() 重新测试连接
+                    adapter._cached_available = None
+                    adapter._available_cache_ts = 0.0
+                    # 重置 provider 的连接状态
+                    provider._connected = False
 
             # 在线程池中运行 is_available() 检查
             is_available = await asyncio.wait_for(

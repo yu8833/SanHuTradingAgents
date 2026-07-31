@@ -188,20 +188,33 @@ def bridge_config_to_env():
                 if ds_config.type.value == 'tushare':
                     existing_token = os.getenv('TUSHARE_TOKEN')
 
+                    # Token 来源标记：数据库优先，降级到 .env
+                    _tushare_token_source = None
+
                     # 优先使用数据库配置
                     if ds_config.api_key and not ds_config.api_key.startswith("your_"):
                         os.environ['TUSHARE_TOKEN'] = ds_config.api_key
+                        _tushare_token_source = 'database'
                         logger.info(f"  ✓ 使用数据库中的 TUSHARE_TOKEN (长度: {len(ds_config.api_key)})")
                         if existing_token and existing_token != ds_config.api_key:
                             logger.info(f"  ℹ️  已覆盖 .env 文件中的 TUSHARE_TOKEN")
                     # 降级到 .env 文件配置
                     elif existing_token and not existing_token.startswith("your_"):
+                        _tushare_token_source = 'env'
                         logger.info(f"  ✓ 使用 .env 文件中的 TUSHARE_TOKEN (长度: {len(existing_token)})")
                         logger.info(f"  ℹ️  数据库中未配置有效的 TUSHARE_TOKEN，使用 .env 降级方案")
                     else:
                         logger.warning(f"  ⚠️  TUSHARE_TOKEN 在数据库和 .env 中都未配置有效值")
                         continue
                     bridged_count += 1
+
+                    # 同步设置 TushareProvider 单例的 token_source（供前端显示来源）
+                    if _tushare_token_source:
+                        try:
+                            from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
+                            get_tushare_provider().token_source = _tushare_token_source
+                        except Exception:
+                            pass
 
                 # FinnHub API Key
                 # 🔥 优先级：数据库配置 > .env 文件
