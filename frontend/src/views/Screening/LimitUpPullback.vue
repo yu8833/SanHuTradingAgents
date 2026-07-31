@@ -695,8 +695,16 @@
               </div>
             </template>
             <el-table :data="backtestResult.top_trades" stripe style="width: 100%">
-              <el-table-column prop="code" label="代码" width="80" />
-              <el-table-column prop="name" label="名称" width="100" />
+              <el-table-column prop="code" label="代码" width="80">
+                <template #default="{ row }">
+                  <router-link :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
+                </template>
+              </el-table-column>
+              <el-table-column prop="name" label="名称" width="100">
+                <template #default="{ row }">
+                  <router-link :to="`/stocks/${row.code}`" class="stock-name">{{ row.name }}</router-link>
+                </template>
+              </el-table-column>
               <el-table-column prop="limit_up_date" label="涨停日" width="105" />
               <el-table-column label="左侧买点" width="105">
                 <template #default="{ row }">
@@ -770,8 +778,16 @@
               </div>
             </template>
             <el-table :data="backtestResult.worst_trades" stripe style="width: 100%">
-              <el-table-column prop="code" label="代码" width="80" />
-              <el-table-column prop="name" label="名称" width="100" />
+              <el-table-column prop="code" label="代码" width="80">
+                <template #default="{ row }">
+                  <router-link :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
+                </template>
+              </el-table-column>
+              <el-table-column prop="name" label="名称" width="100">
+                <template #default="{ row }">
+                  <router-link :to="`/stocks/${row.code}`" class="stock-name">{{ row.name }}</router-link>
+                </template>
+              </el-table-column>
               <el-table-column prop="limit_up_date" label="涨停日" width="105" />
               <el-table-column label="左侧买点" width="105">
                 <template #default="{ row }">

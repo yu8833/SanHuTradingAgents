@@ -303,8 +303,16 @@
           <el-card shadow="never" style="margin-top: 16px;">
             <template #header><div class="card-header"><span>盈利最多交易</span></div></template>
             <el-table :data="backtestResult.top_trades" stripe style="width: 100%">
-              <el-table-column prop="code" label="代码" width="90" />
-              <el-table-column prop="name" label="名称" width="100" />
+              <el-table-column prop="code" label="代码" width="90">
+                <template #default="{ row }">
+                  <router-link :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
+                </template>
+              </el-table-column>
+              <el-table-column prop="name" label="名称" width="100">
+                <template #default="{ row }">
+                  <router-link :to="`/stocks/${row.code}`" class="stock-name">{{ row.name }}</router-link>
+                </template>
+              </el-table-column>
               <el-table-column prop="buy_date" label="买入日期" width="110" />
               <el-table-column prop="sell_date" label="卖出日期" width="110" />
               <el-table-column prop="buy_price" label="买入价" width="90">
@@ -325,8 +333,16 @@
           <el-card shadow="never" style="margin-top: 16px;">
             <template #header><div class="card-header"><span>亏损最多交易</span></div></template>
             <el-table :data="backtestResult.worst_trades" stripe style="width: 100%">
-              <el-table-column prop="code" label="代码" width="90" />
-              <el-table-column prop="name" label="名称" width="100" />
+              <el-table-column prop="code" label="代码" width="90">
+                <template #default="{ row }">
+                  <router-link :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
+                </template>
+              </el-table-column>
+              <el-table-column prop="name" label="名称" width="100">
+                <template #default="{ row }">
+                  <router-link :to="`/stocks/${row.code}`" class="stock-name">{{ row.name }}</router-link>
+                </template>
+              </el-table-column>
               <el-table-column prop="buy_date" label="买入日期" width="110" />
               <el-table-column prop="sell_date" label="卖出日期" width="110" />
               <el-table-column prop="buy_price" label="买入价" width="90">
