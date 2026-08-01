@@ -477,6 +477,10 @@ const syncErrors = ref(0)
 
 // 同步阶段：1=基础信息 2=历史K线 3=财务数据 4=新闻数据
 const syncPhase = ref(0)
+// 触发失败标记（供轮询检测）
+const triggerFailed = ref(false)
+// 阶段1触发后等待同步启动的轮询计数（用于检测触发失败）
+const phase1WaitCount = ref(0)
 // 记录哪些阶段需要跳过（数据已最新）
 const skippedPhases = ref<Set<number>>(new Set())
 const syncPhases = [
@@ -504,6 +508,8 @@ const openSyncConfirm = () => {
   syncError.value = false
   syncProgress.value = 0
   syncPhase.value = 0
+  triggerFailed.value = false
+  phase1WaitCount.value = 0
   skippedPhases.value = new Set()
   syncStatusMessage.value = '准备同步'
   syncConfirmVisible.value = true
@@ -536,24 +542,24 @@ const checkJobRunning = async (jobId: string): Promise<boolean> => {
 }
 
 // 检查调度任务最近一次是否已完成（在给定时间之后）
+// 后端执行记录的 status 为 'success'/'failed'/'running'/'missed'（非 'completed'）
+// 时间字段为 updated_at（完成时间）或 timestamp（创建时间），无 end_time/created_at
 const checkJobCompleted = async (jobId: string, sinceTs: number): Promise<{ done: boolean; failed: boolean }> => {
   try {
-    const res = await schedulerApi.getJobExecutions({ job_id: jobId, status: 'completed', limit: 1 })
+    // 查询最近的执行记录（不限状态），客户端筛选已完成且时间匹配的记录
+    const res = await schedulerApi.getJobExecutions({ job_id: jobId, limit: 5 })
     const items = (res as any)?.data?.data?.items || (res as any)?.data?.items || []
-    if (items.length > 0) {
-      const endTime = items[0].end_time || items[0].created_at
-      if (endTime) {
-        const ts = new Date(endTime).getTime()
-        if (ts >= sinceTs) return { done: true, failed: false }
-      }
-    }
-    const res2 = await schedulerApi.getJobExecutions({ job_id: jobId, status: 'failed', limit: 1 })
-    const items2 = (res2 as any)?.data?.data?.items || (res2 as any)?.data?.items || []
-    if (items2.length > 0) {
-      const endTime = items2[0].end_time || items2[0].created_at
-      if (endTime) {
-        const ts = new Date(endTime).getTime()
-        if (ts >= sinceTs) return { done: true, failed: true }
+    // 5秒容差，避免客户端与服务端时钟差异导致漏判
+    const threshold = sinceTs - 5000
+    for (const item of items) {
+      if (item.status === 'success' || item.status === 'failed') {
+        const timeStr = item.updated_at || item.timestamp
+        if (timeStr) {
+          const ts = new Date(timeStr).getTime()
+          if (ts >= threshold) {
+            return { done: true, failed: item.status === 'failed' }
+          }
+        }
       }
     }
     return { done: false, failed: false }
@@ -564,8 +570,8 @@ const checkJobCompleted = async (jobId: string, sinceTs: number): Promise<{ done
 
 // 跳转到下一个需要同步的阶段，跳过已最新的阶段
 const advanceToNextPhase = async (syncStartTime: number) => {
-  // 先重新加载新鲜度，获取最新状态
-  await loadFreshness()
+  // 先重新加载新鲜度（静默模式，避免 UI 闪烁）
+  await loadFreshness(true)
 
   for (let nextPhase = syncPhase.value + 1; nextPhase <= 4; nextPhase++) {
     if (isPhaseFresh(nextPhase)) {
@@ -584,15 +590,20 @@ const advanceToNextPhase = async (syncStartTime: number) => {
     syncStatusMessage.value = `开始同步${phase.label}...`
 
     if (nextPhase === 1) {
-      // 阶段1：触发基础信息同步
-      try {
-        await syncApi.runStockBasicsSync({ force: true })
-      } catch (_) {}
+      // 阶段1：触发基础信息同步（非阻塞，立即开始轮询进度）
+      // 后端 run_full_sync 会立即将状态持久化为 'running'，前端轮询 getSyncStatus 即可获取进度
+      syncApi.runStockBasicsSync({ force: true }).catch(e => {
+        console.warn('触发基础信息同步失败', e)
+        triggerFailed.value = true
+      })
     } else {
-      // 阶段2-4：触发调度任务
+      // 阶段2-4：触发调度任务（triggerJob 是非阻塞的，立即返回）
       try {
         await schedulerApi.triggerJob(phase.job, true)
-      } catch (_) {}
+      } catch (e) {
+        console.warn(`触发${phase.label}失败`, e)
+        triggerFailed.value = true
+      }
     }
     return true
   }
@@ -604,6 +615,8 @@ const advanceToNextPhase = async (syncStartTime: number) => {
 const doSync = async () => {
   syncStarting.value = true
   skippedPhases.value = new Set()
+  triggerFailed.value = false
+  phase1WaitCount.value = 0
   try {
     // 先加载最新新鲜度，确定哪些阶段需要跳过
     await loadFreshness()
@@ -646,24 +659,48 @@ const doSync = async () => {
     syncProgress.value = firstPhaseInfo.range[0]
     syncStatusMessage.value = `开始同步${firstPhaseInfo.label}...`
 
+    // 记录同步开始时间（在触发之前，用于后续判断同步是否已启动）
+    const syncStartTime = Date.now()
+
     if (firstPhase === 1) {
-      await syncApi.runStockBasicsSync({ force: true })
+      // 阶段1：非阻塞触发，立即开始轮询进度（避免 HTTP 请求阻塞导致进度条卡住）
+      syncApi.runStockBasicsSync({ force: true }).catch(e => {
+        console.warn('触发基础信息同步失败', e)
+        triggerFailed.value = true
+      })
     } else {
-      try { await schedulerApi.triggerJob(firstPhaseInfo.job, true) } catch (_) {}
+      // 阶段2-4：triggerJob 是非阻塞的，立即返回
+      try {
+        await schedulerApi.triggerJob(firstPhaseInfo.job, true)
+      } catch (e) {
+        console.warn(`触发${firstPhaseInfo.label}失败`, e)
+        triggerFailed.value = true
+      }
     }
 
-    const syncStartTime = Date.now()
     let pollCount = 0
     const MAX_POLL = 720
     stopSyncPoll()
     closeSyncPoll.value = setInterval(async () => {
       pollCount++
+
+      // 检测触发失败
+      if (triggerFailed.value) {
+        stopSyncPoll()
+        syncError.value = true
+        syncFinished.value = true
+        const failLabel = syncPhases.find(p => p.id === syncPhase.value)?.label || ''
+        syncStatusMessage.value = `触发${failLabel}同步失败，请检查权限或稍后重试`
+        ElMessage.error(syncStatusMessage.value)
+        return
+      }
+
       if (pollCount >= MAX_POLL) {
         stopSyncPoll()
         syncStatusMessage.value = '同步超时，任务可能仍在后台执行，请在任务中心查看'
         syncProgress.value = 95
         syncFinished.value = true
-        await loadFreshness()
+        await loadFreshness(true)
         return
       }
       try {
@@ -677,15 +714,21 @@ const doSync = async () => {
           syncErrors.value = status.errors || 0
           syncDone.value = (status.inserted || 0) + (status.updated || 0)
 
+          // 判断新同步是否已启动（started_at 在 syncStartTime 之后，含10秒容差）
+          const startedAtTs = status.started_at ? new Date(status.started_at).getTime() : 0
+          const syncStarted = startedAtTs >= syncStartTime - 10000
+
           if (status.status === 'running') {
+            phase1WaitCount.value = 0
             syncStatusMessage.value = '同步股票基础信息中...'
             if (syncTotal.value > 0) {
               syncProgress.value = Math.min(15, Math.round((syncDone.value / syncTotal.value) * 15))
             } else {
               syncProgress.value = Math.min(15, syncProgress.value + 0.5)
             }
-          } else if (status.status === 'success' || status.status === 'success_with_errors' || status.status === 'failed') {
-            // 阶段1完成（无论成功失败），尝试跳到下一个需要同步的阶段
+          } else if ((status.status === 'success' || status.status === 'success_with_errors' || status.status === 'failed') && syncStarted) {
+            // 新同步已完成（通过 started_at 确认是新的一次同步，而非旧状态）
+            phase1WaitCount.value = 0
             const advanced = await advanceToNextPhase(syncStartTime)
             if (!advanced) {
               stopSyncPoll()
@@ -693,10 +736,23 @@ const doSync = async () => {
               syncStatusMessage.value = '数据同步完成 ✅'
               syncFinished.value = true
               ElMessage.success('数据同步完成')
-              await loadFreshness()
+              await loadFreshness(true)
               closeSyncTimer.value = setTimeout(() => {
                 syncConfirmVisible.value = false
               }, 2500)
+            }
+          } else {
+            // 同步尚未启动（可能是旧的 success 状态或 idle），等待后端启动
+            phase1WaitCount.value++
+            syncProgress.value = Math.min(15, syncProgress.value + 0.3)
+            syncStatusMessage.value = '正在启动基础信息同步...'
+            // 连续6次（30秒）仍未启动，判定触发失败
+            if (phase1WaitCount.value > 6) {
+              stopSyncPoll()
+              syncError.value = true
+              syncFinished.value = true
+              syncStatusMessage.value = '基础信息同步启动超时，请稍后重试'
+              ElMessage.error('基础信息同步启动超时')
             }
           }
           return
@@ -720,7 +776,7 @@ const doSync = async () => {
                 syncStatusMessage.value = '全部数据同步完成 ✅'
                 syncFinished.value = true
                 ElMessage.success('全部数据同步完成')
-                await loadFreshness()
+                await loadFreshness(true)
                 closeSyncTimer.value = setTimeout(() => {
                   syncConfirmVisible.value = false
                 }, 2500)
@@ -749,8 +805,8 @@ const doSync = async () => {
   }
 }
 
-const loadFreshness = async () => {
-  freshnessLoading.value = true
+const loadFreshness = async (silent = false) => {
+  if (!silent) freshnessLoading.value = true
   try {
     const res = await screeningApi.checkDataFreshness()
     const data = (res as any)?.data?.data || (res as any)?.data || {}
@@ -758,7 +814,7 @@ const loadFreshness = async () => {
   } catch (e) {
     console.warn('加载数据新鲜度失败', e)
   } finally {
-    freshnessLoading.value = false
+    if (!silent) freshnessLoading.value = false
   }
 }
 

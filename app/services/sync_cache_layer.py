@@ -118,3 +118,56 @@ def cached_sync(key: str, build_fn: Callable, category: str = "default",
         logger.warning(f"缓存跳过（校验失败）: {key}")
 
     return value
+
+
+# ============================
+# 缓存失效 / 删除能力（B4）
+# ============================
+def _iter_memory_keys(prefix: Optional[str] = None) -> list[str]:
+    """返回匹配前缀（或全部）的内存缓存 key 的副本（安全遍历删除）。"""
+    if prefix is None:
+        return list(_memory_cache.keys())
+    return [k for k in _memory_cache.keys() if k.startswith(prefix)]
+
+
+def delete_cache_sync(key: str) -> bool:
+    """同步删除单个缓存 key（同时清 Redis + 内存）。返回是否清到了至少一处。"""
+    deleted_mem = _memory_cache.pop(key, None) is not None
+    deleted_redis = False
+    if _redis_available():
+        try:
+            from app.core.sync_redis import get_sync_redis
+            r = get_sync_redis()
+            if r is not None:
+                deleted_redis = bool(r.delete(key))
+        except Exception as e:
+            logger.warning(f"Redis 删除缓存 {key} 失败（忽略）: {e}")
+    return deleted_mem or deleted_redis
+
+
+def delete_cache_by_prefix_sync(prefix: str) -> int:
+    """按前缀批量删除缓存（同步）。返回删除的 key 数量（近似，内存 + Redis 去重可能高估，但足够）。"""
+    if not prefix:
+        return 0
+    count = 0
+    # 内存
+    for k in _iter_memory_keys(prefix):
+        if _memory_cache.pop(k, None) is not None:
+            count += 1
+    # Redis
+    if _redis_available():
+        try:
+            from app.core.sync_redis import get_sync_redis
+            r = get_sync_redis()
+            if r is not None:
+                # SCAN 避免阻塞（生产环境通常禁用 KEYS 命令）
+                cursor = 0
+                while True:
+                    cursor, keys = r.scan(cursor=cursor, match=f"{prefix}*", count=200)
+                    if keys:
+                        count += r.delete(*keys) or 0
+                    if cursor == 0:
+                        break
+        except Exception as e:
+            logger.warning(f"Redis 前缀删除缓存失败（忽略）: prefix={prefix}, err={e}")
+    return count

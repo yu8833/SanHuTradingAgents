@@ -377,7 +377,8 @@ export const vibeApi = {
     onError?: (msg: string) => void,
     signal?: AbortSignal
   ): Promise<void> {
-    const token = localStorage.getItem('token') || ''
+    const authStore = (await import('@/stores/auth')).useAuthStore()
+    const token = authStore.token || localStorage.getItem('auth-token') || ''
     const controller = new AbortController()
     const combinedSignal = signal || controller.signal
 

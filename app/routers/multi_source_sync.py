@@ -156,7 +156,14 @@ async def run_stock_basics_sync(
     force: bool = Query(False, description="是否强制运行同步"),
     preferred_sources: Optional[str] = Query(None, description="优先使用的数据源，用逗号分隔")
 ):
-    """运行多数据源股票基础信息同步"""
+    """运行多数据源股票基础信息同步（立即返回，后台执行）。
+
+    之前版本使用 await service.run_full_sync() 阻塞 HTTP，在大库下耗时数十分钟，
+    导致 nginx/uvicorn 超时断连，前端表现为"一键更新一直卡住"。现改为：
+    1. 先写入 sync_status 为 running（保证 get_status 可查询）；
+    2. 用 asyncio.create_task 在后台执行；
+    3. 接口立即返回 202 风格响应，前端进入轮询。
+    """
     try:
         service = get_multi_source_sync_service()
 
@@ -165,25 +172,31 @@ async def run_stock_basics_sync(
         if preferred_sources and isinstance(preferred_sources, str):
             sources_list = [s.strip() for s in preferred_sources.split(",") if s.strip()]
 
-        # 运行同步（同步执行，前端已设置10分钟超时）
-        result = await service.run_full_sync(force=force, preferred_sources=sources_list)
+        # 若已经在运行，直接返回当前状态（不重复启动）
+        pre_status = await service.get_status()
+        if pre_status.get("status") == "running" and not force:
+            return SyncResponse(
+                success=True,
+                message="Synchronization is already running",
+                data=pre_status
+            )
 
-        # 判断是否成功
-        success = result.get("status") in ["success", "success_with_errors"]
-        message = "Synchronization completed successfully"
+        async def _background_sync():
+            try:
+                await service.run_full_sync(force=force, preferred_sources=sources_list)
+            except Exception as bg_e:
+                logger.exception(f"后台基础信息同步异常: {bg_e}")
 
-        if result.get("status") == "success_with_errors":
-            message = f"Synchronization completed with {result.get('errors', 0)} errors"
-        elif result.get("status") == "failed":
-            message = f"Synchronization failed: {result.get('message', 'Unknown error')}"
-            success = False
-        elif result.get("status") == "running":
-            message = "Synchronization is already running"
+        # 放入后台执行，不等结果
+        asyncio.create_task(_background_sync())
 
+        # 短暂等待，让 status 记录被写入（running 状态），方便前端立即轮询拿到
+        await asyncio.sleep(0.3)
+        current_status = await service.get_status()
         return SyncResponse(
-            success=success,
-            message=message,
-            data=result
+            success=True,
+            message="Synchronization started in background",
+            data=current_status
         )
 
     except Exception as e:

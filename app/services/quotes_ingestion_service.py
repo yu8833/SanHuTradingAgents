@@ -9,6 +9,12 @@ from pymongo import UpdateOne
 
 from app.core.config import settings
 from app.core.database import get_mongo_db
+from app.core.numeric_sanitizer import (
+    sanitize_price as _s_price,
+    sanitize_pct_chg as _s_pct,
+    sanitize_amount as _s_amount,
+    sanitize_volume as _s_volume,
+)
 from app.services.data_sources.manager import DataSourceManager
 
 logger = logging.getLogger(__name__)
@@ -396,14 +402,14 @@ class QuotesIngestionService:
                     {"$set": {
                         "code": code6,
                         "symbol": code6,  # 添加 symbol 字段，与 code 保持一致
-                        "close": q.get("close"),
-                        "pct_chg": q.get("pct_chg"),
-                        "amount": q.get("amount"),
-                        "volume": volume,
-                        "open": q.get("open"),
-                        "high": q.get("high"),
-                        "low": q.get("low"),
-                        "pre_close": q.get("pre_close"),
+                        "close": _s_price(q.get("close")),
+                        "pct_chg": _s_pct(q.get("pct_chg")),
+                        "amount": _s_amount(q.get("amount")),
+                        "volume": _s_volume(volume),
+                        "open": _s_price(q.get("open")),
+                        "high": _s_price(q.get("high")),
+                        "low": _s_price(q.get("low")),
+                        "pre_close": _s_price(q.get("pre_close")),
                         "trade_date": trade_date,
                         "updated_at": updated_at,
                     }},
@@ -418,8 +424,94 @@ class QuotesIngestionService:
             f"✅ 行情入库完成 source={source}, matched={result.matched_count}, upserted={len(result.upserted_ids) if result.upserted_ids else 0}, modified={result.modified_count}"
         )
 
+        # 修复 #B4：入库后立刻失效相关缓存，避免下一次 /quote 查询返回旧值
+        try:
+            await self._invalidate_quotes_caches(list(quotes_map.keys()))
+        except Exception as cache_e:
+            logger.warning(f"失效行情缓存失败（不影响主流程）: {cache_e}")
+
         # 通知 SSE 订阅者行情已更新（前端通过 EventSource 接收信号后主动拉取最新行情）
         await self._publish_quotes_update_signal(trade_date, source, len(ops))
+
+    async def _invalidate_quotes_caches(self, updated_codes: List[str]) -> None:
+        """
+        行情入库后失效本地缓存层：
+        1) unified_quotes /sync_cache_layer 的 realtime 分类缓存（异步用 to_thread 调用同步版本）
+        2) KlineCache 中相关股票（所有常用 period/limit/adj 组合按前缀删除）
+        3) /api/stocks/{code}/quote 等使用的 sync_cache_layer key（按股票 key 删除）
+        失败不抛异常，只记日志。
+        """
+        if not updated_codes:
+            return
+
+        code6_list: List[str] = []
+        for c in updated_codes:
+            code6 = self._normalize_stock_code(c)
+            if code6:
+                code6_list.append(code6)
+        if not code6_list:
+            return
+
+        import asyncio
+
+        # --- 1. 失效 unified_quotes 的缓存（通过 refresh_quotes_cache 重新拉取，若数量少直接按 key 删除） ---
+        def _clear_sync_caches_sync():
+            cleared = 0
+            try:
+                from app.services.sync_cache_layer import delete_cache_by_prefix_sync, delete_cache_sync
+                # 先按单只股票的 quotes-service 细粒度 key 删（通常 category=realtime,quotes,stock 等）
+                for c in code6_list:
+                    for prefix in [f"quotes:{c}", f"quote:{c}", f"stock:{c}:quote"]:
+                        try:
+                            delete_cache_by_prefix_sync(prefix)
+                            cleared += 1
+                        except Exception:
+                            pass
+                    # 完全匹配 category 型 key 不容易枚举，用 refresh 兜底
+                    try:
+                        delete_cache_sync(f"stock:{c}", category="quotes")
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.debug(f"清理 sync_cache_layer 单股票 key 失败（忽略）: {e}")
+
+            # 2) KlineCache：用前缀 kline:{code}: 批量删除
+            try:
+                from app.services.screening_service import KlineCache
+                from app.core.sync_redis import get_sync_redis
+                r = get_sync_redis()
+                if r is not None:
+                    # 用 scan_iter 找前缀键（避免 keys() 阻塞）
+                    for c in code6_list:
+                        prefix = f"{KlineCache.PREFIX}:{c}:"
+                        try:
+                            for k in r.scan_iter(match=f"{prefix}*"):
+                                try:
+                                    r.delete(k)
+                                    cleared += 1
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
+            except Exception as e:
+                logger.debug(f"清理 KlineCache 失败（忽略）: {e}")
+
+            try:
+                # 3) unified_quotes 按数量策略：如果更新的是大量股票（>200），直接跑 refresh 重拉实时；否则删单票 key
+                from app.services.unified_quotes import refresh_quotes_cache
+                if len(code6_list) > 200:
+                    refresh_quotes_cache(None)
+                else:
+                    refresh_quotes_cache(code6_list)
+            except Exception as e:
+                logger.debug(f"refresh_quotes_cache 失败（忽略）: {e}")
+            return cleared
+
+        try:
+            cleared_count = await asyncio.to_thread(_clear_sync_caches_sync)
+            logger.info(f"🧹 已失效行情相关缓存 keys（约）: {cleared_count}, 涉及股票数: {len(code6_list)}")
+        except Exception as e:
+            logger.warning(f"后台清理缓存线程异常: {e}")
 
     async def _publish_quotes_update_signal(self, trade_date: str, source: str, count: int) -> None:
         """

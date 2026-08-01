@@ -14,7 +14,6 @@ import router from './router'
 import { setupGlobalComponents } from './components'
 import { useAuthStore } from './stores/auth'
 import { useAppStore } from './stores/app'
-import { setupTokenRefreshTimer } from './utils/auth'
 import './styles/index.scss'
 import './styles/dark-theme.scss'
 
@@ -117,9 +116,9 @@ const initApp = async () => {
       await Promise.race([checkPromise, timeoutPromise])
       console.log('✅ 认证状态初始化完成')
 
-      // 如果用户已登录，启动 token 自动刷新定时器
+      // 如果用户已登录，启动 token 自动刷新定时器（由 store 内部去重管理）
       if (authStore.isAuthenticated) {
-        setupTokenRefreshTimer()
+        authStore.ensureTokenRefreshTimer()
       }
     } else {
       console.log('⚠️ API连接失败，跳过认证检查')

@@ -11,6 +11,16 @@ import pandas as pd
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.core.database import get_database
+from app.core.numeric_sanitizer import (
+    sanitize_numeric,
+    sanitize_price,
+    sanitize_pct_chg,
+    sanitize_amount,
+    sanitize_volume,
+    sanitize_turnover_rate,
+    sanitize_pe,
+    sanitize_pb,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -313,15 +323,16 @@ class HistoricalDataService:
         }
         
         # OHLCV数据（单位转换已在 DataFrame 层面完成）
-        amount_value = self._safe_float(row.get('amount') or row.get('turnover'))
-        volume_value = self._safe_float(row.get('volume') or row.get('vol'))
+        # 修复 #B5：使用统一的数值清洗口径，拒绝脏数据（NaN/负值/超范围）写入
+        amount_value = sanitize_amount(row.get('amount') or row.get('turnover'))
+        volume_value = sanitize_volume(row.get('volume') or row.get('vol'))
 
         doc.update({
-            "open": self._safe_float(row.get('open')),
-            "high": self._safe_float(row.get('high')),
-            "low": self._safe_float(row.get('low')),
-            "close": self._safe_float(row.get('close')),
-            "pre_close": self._safe_float(row.get('pre_close') or row.get('preclose')),
+            "open": sanitize_price(row.get('open')),
+            "high": sanitize_price(row.get('high')),
+            "low": sanitize_price(row.get('low')),
+            "close": sanitize_price(row.get('close')),
+            "pre_close": sanitize_price(row.get('pre_close') or row.get('preclose')),
             "volume": volume_value,
             "amount": amount_value
         })
@@ -329,18 +340,20 @@ class HistoricalDataService:
         # 计算涨跌数据
         if doc["close"] and doc["pre_close"]:
             doc["change"] = round(doc["close"] - doc["pre_close"], 4)
-            doc["pct_chg"] = round((doc["change"] / doc["pre_close"]) * 100, 4)
+            doc["pct_chg"] = sanitize_pct_chg((doc["change"] / doc["pre_close"]) * 100)
         else:
-            doc["change"] = self._safe_float(row.get('change'))
-            doc["pct_chg"] = self._safe_float(row.get('pct_chg') or row.get('change_percent'))
+            doc["change"] = sanitize_numeric(
+                row.get('change'), min_value=-1_000_000, max_value=1_000_000, round_digits=4
+            )
+            doc["pct_chg"] = sanitize_pct_chg(row.get('pct_chg') or row.get('change_percent'))
         
         # 可选字段
         optional_fields = {
-            "turnover_rate": row.get('turnover_rate') or row.get('turn'),
-            "volume_ratio": row.get('volume_ratio'),
-            "pe": row.get('pe'),
-            "pb": row.get('pb'),
-            "ps": row.get('ps'),
+            "turnover_rate": sanitize_turnover_rate(row.get('turnover_rate') or row.get('turn')),
+            "volume_ratio": sanitize_numeric(row.get('volume_ratio'), min_value=0.0, max_value=1e5),
+            "pe": sanitize_pe(row.get('pe')),
+            "pb": sanitize_pb(row.get('pb')),
+            "ps": sanitize_numeric(row.get('ps'), min_value=-10_000.0, max_value=10_000.0, round_digits=2),
             "adjustflag": row.get('adjustflag') or row.get('adj_factor'),
             "tradestatus": row.get('tradestatus'),
             "isST": row.get('isST')
@@ -348,7 +361,7 @@ class HistoricalDataService:
         
         for key, value in optional_fields.items():
             if value is not None:
-                doc[key] = self._safe_float(value)
+                doc[key] = value
         
         return doc
     

@@ -182,13 +182,30 @@ export const autoRefreshToken = async (): Promise<boolean> => {
 
 /**
  * 设置定时刷新 token
+ * @returns 定时器 ID（用于后续清除），若因缺少 token 未启动则返回 null
  */
-export const setupTokenRefreshTimer = (): void => {
+export const setupTokenRefreshTimer = (): number | null => {
+  const authStore = useAuthStore()
+  if (!authStore.token) {
+    console.log('⏭️ 无 token，跳过启动 Token 自动刷新定时器')
+    return null
+  }
   // 每分钟检查一次
-  setInterval(() => {
+  const timerId = window.setInterval(() => {
     autoRefreshToken()
-  }, 60000)
+  }, 60000) as unknown as number
 
-  console.log('✅ Token 自动刷新定时器已启动')
+  console.log('✅ Token 自动刷新定时器已启动, ID:', timerId)
+  return timerId
+}
+
+/**
+ * 清除 token 自动刷新定时器
+ */
+export const clearTokenRefreshTimer = (timerId: number | null | undefined): void => {
+  if (timerId !== null && timerId !== undefined) {
+    clearInterval(timerId)
+    console.log('✅ Token 自动刷新定时器已停止, ID:', timerId)
+  }
 }
 

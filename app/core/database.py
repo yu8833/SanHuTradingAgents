@@ -230,22 +230,38 @@ async def init_database_views_and_indexes():
 
 
 async def create_stock_screening_view(db):
-    """创建股票筛选视图"""
+    """创建股票筛选视图（可反复调用：若已存在会先删除后重建，以确保 pipeline 最新）"""
     try:
-        # 检查视图是否已存在
+        # 若视图已存在，先删除（确保每次发布的 pipeline 变更能生效，避免旧 lookup 逻辑残留）
         collections = await db.list_collection_names()
         if "stock_screening_view" in collections:
-            logger.info("📋 视图 stock_screening_view 已存在，跳过创建")
-            return
+            try:
+                await db.command("drop", "stock_screening_view")
+                logger.info("📋 旧视图 stock_screening_view 已删除，准备重建")
+            except Exception as drop_e:
+                logger.debug(f"ℹ️ 删除旧视图跳过（可能是系统保留或命名空间非视图）: {drop_e}")
 
         # 创建视图：将 stock_basic_info、market_quotes 和 stock_financial_data 关联
         pipeline = [
             # 第一步：关联实时行情数据 (market_quotes)
+            # 修复 #B2：同时用 symbol 和 code 匹配，避免只写了 symbol 的记录 join 失败
             {
                 "$lookup": {
                     "from": "market_quotes",
-                    "localField": "code",
-                    "foreignField": "code",
+                    "let": {"stock_code": "$code", "stock_symbol": "$symbol"},
+                    "pipeline": [
+                        {
+                            "$match": {
+                                "$expr": {
+                                    "$or": [
+                                        {"$eq": ["$code", "$$stock_code"]},
+                                        {"$eq": ["$symbol", "$$stock_symbol"]}
+                                    ]
+                                }
+                            }
+                        },
+                        {"$limit": 1}
+                    ],
                     "as": "quote_data"
                 }
             },
@@ -257,16 +273,20 @@ async def create_stock_screening_view(db):
                 }
             },
             # 第三步：关联财务数据 (stock_financial_data)
+            # 修复 #B2：同时匹配 symbol + code
             {
                 "$lookup": {
                     "from": "stock_financial_data",
-                    "let": {"stock_code": "$code", "stock_source": "$source"},
+                    "let": {"stock_code": "$code", "stock_symbol": "$symbol", "stock_source": "$source"},
                     "pipeline": [
                         {
                             "$match": {
                                 "$expr": {
                                     "$and": [
-                                        {"$eq": ["$code", "$$stock_code"]},
+                                        {"$or": [
+                                            {"$eq": ["$code", "$$stock_code"]},
+                                            {"$eq": ["$symbol", "$$stock_symbol"]}
+                                        ]},
                                         {"$eq": ["$data_source", "$$stock_source"]}
                                     ]
                                 }
@@ -362,7 +382,14 @@ async def create_database_indexes(db):
     try:
         # stock_basic_info 的索引
         basic_info = db["stock_basic_info"]
-        if await _safe_create_index(basic_info, [("code", 1), ("source", 1)], unique=True):
+        # 修复 #B7：唯一索引改为 (symbol, source) 作为主键，保持向后兼容
+        # 注意：_safe_create_index 在已存在但选项不同时会跳过；对重复脏数据的集合创建唯一会失败，
+        # 但这是希望暴露问题的信号，避免新增更多重复行。
+        if await _safe_create_index(basic_info, [("symbol", 1), ("source", 1)], unique=True):
+            index_count += 1
+        # code+source 保留为非唯一查询索引（兼容仅按 code 查询的旧代码），
+        # 加 sparse 保证 code 字段为 null 的新记录也能正常写入（唯一索引已在 symbol+source 上）
+        if await _safe_create_index(basic_info, [("code", 1), ("source", 1)], sparse=True):
             index_count += 1
         if await _safe_create_index(basic_info, [("industry", 1)]):
             index_count += 1
@@ -463,9 +490,21 @@ async def create_database_indexes(db):
 
         # stock_daily_quotes 的索引（日线数据 - 策略扫描高频查询）
         daily_quotes = db["stock_daily_quotes"]
+        # 修复 #B3：先加复合唯一索引，避免三源同步同一天同 period 造成重复插入
+        # 注意：如集合中已存在历史脏数据（重复），create_index 会失败并被 _safe_create_index 吞掉。
+        # 先创建非唯一查询索引，再创建唯一索引，保证无论如何查询都是快的。
         if await _safe_create_index(daily_quotes, [("code", 1), ("trade_date", -1), ("period", 1)], background=True):
             index_count += 1
+        if await _safe_create_index(daily_quotes, [("symbol", 1), ("trade_date", -1), ("period", 1)], background=True):
+            index_count += 1
         if await _safe_create_index(daily_quotes, [("trade_date", 1), ("period", 1)], background=True):
+            index_count += 1
+        if await _safe_create_index(
+            daily_quotes,
+            [("code", 1), ("trade_date", 1), ("period", 1), ("data_source", 1)],
+            unique=True,
+            background=True,
+        ):
             index_count += 1
 
         # stock_screening_view 的索引（筛选视图 - 全表扫描频繁）
@@ -488,7 +527,16 @@ async def create_database_indexes(db):
         stock_historical_data = db["stock_historical_data"]
         if await _safe_create_index(stock_historical_data, [("code", 1), ("trade_date", -1)]):
             index_count += 1
-        if await _safe_create_index(stock_historical_data, [("code", 1), ("source", 1), ("trade_date", -1)]):
+        # 修复 #B3：复合唯一索引 + 同步 symbol 维度索引
+        if await _safe_create_index(stock_historical_data, [("symbol", 1), ("trade_date", -1)]):
+            index_count += 1
+        if await _safe_create_index(
+            stock_historical_data,
+            [("code", 1), ("source", 1), ("trade_date", 1)],
+            unique=True,
+        ):
+            index_count += 1
+        if await _safe_create_index(stock_historical_data, [("source", 1), ("trade_date", -1)]):
             index_count += 1
         if await _safe_create_index(stock_historical_data, [("trade_date", -1)]):
             index_count += 1

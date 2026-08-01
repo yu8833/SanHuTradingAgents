@@ -55,29 +55,35 @@ class StockDataService:
                 query["source"] = source
                 doc = await db[self.basic_info_collection].find_one(query, {"_id": 0})
             else:
-                # 🔥 未指定数据源，按优先级查询
+                # 修复 #B1：按优先级收集所有非空 doc，然后 merge 字段（高优先级覆盖低优先级，
+                # 但低优先级中的非 None / 非空字段用来填充高优先级中缺失的值）
                 source_priority = ["tushare", "multi_source", "akshare", "baostock"]
-                doc = None
+                collected_docs: List[Dict[str, Any]] = []
 
                 for src in source_priority:
                     query_with_source = query.copy()
                     query_with_source["source"] = src
                     doc = await db[self.basic_info_collection].find_one(query_with_source, {"_id": 0})
                     if doc:
+                        collected_docs.append(doc)
                         logger.debug(f"✅ 使用数据源: {src}")
-                        break
 
                 # 如果所有数据源都没有，尝试不带 source 条件查询（兼容旧数据）
-                if not doc:
-                    doc = await db[self.basic_info_collection].find_one(
+                if not collected_docs:
+                    legacy = await db[self.basic_info_collection].find_one(
                         {"$or": [{"symbol": symbol6}, {"code": symbol6}]},
                         {"_id": 0}
                     )
-                    if doc:
+                    if legacy:
+                        collected_docs.append(legacy)
                         logger.warning(f"⚠️ 使用旧数据（无 source 字段）: {symbol6}")
 
-            if not doc:
-                return None
+                if not collected_docs:
+                    return None
+
+                # Merge：按"出现早 = 优先级高 = 优先保留"的方式合并，
+                # 高优先级的非空值保留，低优先级只填充缺失项。
+                doc = self._merge_basic_info_docs(collected_docs)
 
             # 数据标准化处理
             standardized_doc = self._standardize_basic_info(doc)
@@ -87,6 +93,53 @@ class StockDataService:
         except Exception as e:
             logger.error(f"获取股票基础信息失败 symbol={symbol}, source={source}: {e}")
             return None
+
+    @staticmethod
+    def _is_meaningful(value) -> bool:
+        """判断值是否为"有意义"的字段（用于 merge 时填充缺失）"""
+        if value is None:
+            return False
+        if isinstance(value, str) and value.strip() == "":
+            return False
+        if isinstance(value, float):
+            # NaN / Inf 视为无效
+            import math
+            if math.isnan(value) or math.isinf(value):
+                return False
+        if isinstance(value, (list, dict)) and len(value) == 0:
+            return False
+        return True
+
+    @classmethod
+    def _merge_basic_info_docs(cls, docs_by_priority: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """按优先级 merge 多个基础信息 doc，首个 = 最高优先级（覆盖，非 None 优先保留），
+        后续用于填充最高优先级缺失的字段。
+        """
+        if not docs_by_priority:
+            return {}
+        if len(docs_by_priority) == 1:
+            return docs_by_priority[0]
+
+        merged: Dict[str, Any] = {}
+        # 先把最高优先级的所有字段写进去
+        for k, v in docs_by_priority[0].items():
+            if cls._is_meaningful(v):
+                merged[k] = v
+
+        # 其余按顺序填充仍为空的字段
+        for other in docs_by_priority[1:]:
+            for k, v in other.items():
+                if k in merged and cls._is_meaningful(merged[k]):
+                    continue
+                if cls._is_meaningful(v):
+                    merged[k] = v
+
+        # 始终确保 symbol 和 code 至少有一个，且都是 6 位
+        if not merged.get("symbol") and merged.get("code"):
+            merged["symbol"] = str(merged["code"]).zfill(6)
+        if not merged.get("code") and merged.get("symbol"):
+            merged["code"] = str(merged["symbol"]).zfill(6)
+        return merged
     
     async def get_market_quotes(self, symbol: str) -> Optional[MarketQuotesExtended]:
         """

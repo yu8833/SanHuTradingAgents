@@ -22,6 +22,9 @@ export interface AuthState {
   
   // 重定向路径
   redirectPath: string
+
+  // Token 自动刷新定时器 ID
+  _tokenRefreshTimerId: number | null
 }
 
 export const useAuthStore = defineStore('auth', {
@@ -63,7 +66,9 @@ export const useAuthStore = defineStore('auth', {
       roles: [],
 
       loginLoading: false,
-      redirectPath: '/'
+      redirectPath: '/',
+
+      _tokenRefreshTimerId: null,
     }
   },
 
@@ -145,6 +150,13 @@ export const useAuthStore = defineStore('auth', {
     
     // 清除认证信息
     clearAuthInfo() {
+      // 先停止 Token 自动刷新定时器
+      if (this._tokenRefreshTimerId !== null && this._tokenRefreshTimerId !== undefined) {
+        clearInterval(this._tokenRefreshTimerId)
+        console.log('✅ Token 自动刷新定时器已停止(clearAuthInfo), ID:', this._tokenRefreshTimerId)
+        this._tokenRefreshTimerId = null
+      }
+
       this.token = null
       this.refreshToken = null
       this.user = null
@@ -211,9 +223,8 @@ export const useAuthStore = defineStore('auth', {
           // 同步用户偏好设置到 appStore
           this.syncUserPreferencesToAppStore()
 
-          // 启动 token 自动刷新定时器
-          const { setupTokenRefreshTimer } = await import('@/utils/auth')
-          setupTokenRefreshTimer()
+          // 启动 token 自动刷新定时器（去重，确保只有一个在运行）
+          this.ensureTokenRefreshTimer()
 
           // 不在这里显示成功消息，由调用方显示
           return true
@@ -227,6 +238,34 @@ export const useAuthStore = defineStore('auth', {
         return false
       } finally {
         this.loginLoading = false
+      }
+    },
+    
+    // 确保 Token 自动刷新定时器仅启动一次（去重）
+    async ensureTokenRefreshTimer() {
+      // 缺少 token 时不启动，也顺便清除遗留定时器
+      if (!this.token) {
+        if (this._tokenRefreshTimerId !== null && this._tokenRefreshTimerId !== undefined) {
+          clearInterval(this._tokenRefreshTimerId)
+          console.log('✅ Token 自动刷新定时器已停止(ensureTokenRefreshTimer 无 token), ID:', this._tokenRefreshTimerId)
+          this._tokenRefreshTimerId = null
+        }
+        return
+      }
+
+      // 已有定时器，直接返回，避免重复启动
+      if (this._tokenRefreshTimerId !== null && this._tokenRefreshTimerId !== undefined) {
+        return
+      }
+
+      try {
+        const { setupTokenRefreshTimer } = await import('@/utils/auth')
+        const timerId = setupTokenRefreshTimer()
+        if (timerId !== null) {
+          this._tokenRefreshTimerId = timerId
+        }
+      } catch (err) {
+        console.error('❌ 启动 Token 自动刷新定时器失败:', err)
       }
     },
     

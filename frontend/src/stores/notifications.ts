@@ -251,6 +251,14 @@ export const useNotificationStore = defineStore('notifications', () => {
   watch(() => useAuthStore().token, (newToken, oldToken) => {
     if (newToken && newToken !== oldToken) {
       connectWebSocket()
+    } else if (!newToken) {
+      // 登出后 token 清空：主动断开 WebSocket，并清除重连状态，避免空转重连
+      if (wsReconnectTimer) {
+        clearTimeout(wsReconnectTimer)
+        wsReconnectTimer = null
+      }
+      wsReconnectAttempts = 0
+      disconnectWebSocket()
     }
   })
 
