@@ -102,11 +102,12 @@ async def create_hk_collections(db):
         logger.info(f"✅ 创建集合: {collection_name}")
     
     collection = db[collection_name]
-    await collection.create_index([("code", 1), ("published_at", -1)])
-    await collection.create_index([("published_at", -1)])
+    # 修复：字段名应为 publish_time 而非 published_at，与 news_data_service 写入逻辑一致
+    await collection.create_index([("code", 1), ("publish_time", -1)])
+    await collection.create_index([("publish_time", -1)])
     await collection.create_index([("title", "text"), ("content", "text")])
     logger.info(f"✅ 创建索引: {collection_name}")
-    
+
     logger.info("✅ 港股集合创建完成")
 
 
@@ -173,11 +174,12 @@ async def create_us_collections(db):
         logger.info(f"✅ 创建集合: {collection_name}")
     
     collection = db[collection_name]
-    await collection.create_index([("code", 1), ("published_at", -1)])
-    await collection.create_index([("published_at", -1)])
+    # 修复：字段名应为 publish_time 而非 published_at，与 news_data_service 写入逻辑一致
+    await collection.create_index([("code", 1), ("publish_time", -1)])
+    await collection.create_index([("publish_time", -1)])
     await collection.create_index([("title", "text"), ("content", "text")])
     logger.info(f"✅ 创建索引: {collection_name}")
-    
+
     logger.info("✅ 美股集合创建完成")
 
 

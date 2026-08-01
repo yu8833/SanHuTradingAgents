@@ -140,7 +140,7 @@ services:
     networks:
       - tradingagents-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "-k", "https://localhost/health"]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "https://localhost/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -196,7 +196,7 @@ services:
     networks:
       - tradingagents-network
     healthcheck:
-      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      test: ["CMD", "redis-cli", "-a", "tradingagents123", "ping"]
       interval: 30s
       timeout: 10s
       retries: 3

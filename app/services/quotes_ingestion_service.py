@@ -573,9 +573,24 @@ class QuotesIngestionService:
             logger.info(f"📊 从历史数据集合导入 {latest_trade_date} 的收盘数据到 market_quotes")
 
             # 从 stock_daily_quotes 集合查询最新交易日的数据
+            # 修复：find_latest_trade_date_with_fallback() 返回 "YYYYMMDD" 格式，
+            # 但 stock_daily_quotes.trade_date 实际存储为 "YYYY-MM-DD" 格式（见 historical_data_service._format_date）。
+            # 不做格式归一化会导致查询永远匹配不到文档，冷启动历史数据导入静默失败。
+            def _normalize_trade_date_for_daily_quotes(d: str) -> str:
+                if not d:
+                    return d
+                d = d.strip()
+                if len(d) == 8 and "-" not in d:
+                    return f"{d[:4]}-{d[4:6]}-{d[6:8]}"
+                return d
+
+            query_trade_date = _normalize_trade_date_for_daily_quotes(latest_trade_date)
+            if query_trade_date != latest_trade_date:
+                logger.info(f"📅 trade_date 格式归一化: {latest_trade_date} -> {query_trade_date}（适配 stock_daily_quotes）")
+
             daily_quotes_collection = db["stock_daily_quotes"]
             cursor = daily_quotes_collection.find({
-                "trade_date": latest_trade_date,
+                "trade_date": query_trade_date,
                 "period": "daily"
             })
 

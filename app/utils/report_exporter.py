@@ -587,7 +587,7 @@ pre, code {
             try:
                 if 'output_file' in locals() and os.path.exists(output_file):
                     os.unlink(output_file)
-            except:
+            except Exception:
                 pass
             raise Exception(f"生成 Word 文档失败: {e}")
     
@@ -905,12 +905,12 @@ pre, code {
             if 'html_file' in locals():
                 try:
                     os.unlink(html_file)
-                except:
+                except Exception:
                     pass
             if 'pdf_file' in locals():
                 try:
                     os.unlink(pdf_file)
-                except:
+                except Exception:
                     pass
             logger.error(f"❌ PDF 生成失败（命令行方式）: {e}")
             raise
@@ -1022,13 +1022,13 @@ pre, code {
             if result.stderr:
                 try:
                     logger.info(f"📋 标准错误: {result.stderr.decode('utf-8', errors='replace')[:200]}")
-                except:
+                except Exception:
                     logger.info(f"📋 标准错误: (二进制数据，长度: {len(result.stderr)})")
             
             if result.returncode != 0:
                 try:
                     error_msg = f"wkhtmltopdf 执行失败: {result.stderr.decode('utf-8', errors='replace')}"
-                except:
+                except Exception:
                     error_msg = f"wkhtmltopdf 执行失败，返回码: {result.returncode}"
                 logger.error(f"❌ {error_msg}")
                 raise Exception(error_msg)
@@ -1079,7 +1079,7 @@ pre, code {
         if result.returncode != 0:
             try:
                 error_msg = f"pandoc 执行失败: {result.stderr.decode('utf-8', errors='replace')}"
-            except:
+            except Exception:
                 error_msg = f"pandoc 执行失败，返回码: {result.returncode}"
             logger.error(f"❌ {error_msg}")
             raise Exception(error_msg)

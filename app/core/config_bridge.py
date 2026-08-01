@@ -60,6 +60,7 @@ def bridge_config_to_env():
         # 🔧 [优先级] .env 文件 > 数据库厂家配置
         # 🔥 修改：从数据库的 llm_providers 集合读取厂家配置，而不是从 JSON 文件
         # 只有当环境变量不存在或为占位符时，才使用数据库中的配置
+        client = None
         try:
             # 使用同步 MongoDB 客户端读取厂家配置
             from pymongo import MongoClient
@@ -97,9 +98,6 @@ def bridge_config_to_env():
                 else:
                     logger.debug(f"  ⏭️  {env_key} 未配置有效的 API Key")
 
-            # 关闭同步客户端
-            client.close()
-
         except Exception as e:
             logger.error(f"❌ 从数据库读取厂家配置失败: {e}", exc_info=True)
             logger.warning("⚠️  将尝试从 JSON 文件读取配置作为后备方案")
@@ -125,6 +123,13 @@ def bridge_config_to_env():
                         logger.warning(f"  ⚠️  {env_key} 在 .env 和 JSON 文件中都是占位符，跳过")
                 else:
                     logger.debug(f"  ⏭️  {env_key} 未配置")
+        finally:
+            # 修复：确保 MongoClient 在任何情况下都被关闭，避免连接泄漏
+            if client is not None:
+                try:
+                    client.close()
+                except Exception:
+                    pass
 
         # 2. 桥接默认模型配置
         default_model = unified_config.get_default_model()
@@ -148,6 +153,7 @@ def bridge_config_to_env():
         # 3. 桥接数据源配置（基础 API 密钥）
         # 🔧 [优先级] .env 文件 > 数据库配置
         # 🔥 修改：从数据库的 system_configs 集合读取数据源配置，而不是从 JSON 文件
+        client = None
         try:
             # 使用同步 MongoDB 客户端读取系统配置
             from pymongo import MongoClient
@@ -173,13 +179,17 @@ def bridge_config_to_env():
                 logger.warning("  ⚠️  数据库中没有数据源配置，使用 JSON 文件配置")
                 data_source_configs = unified_config.get_data_source_configs()
 
-            # 关闭同步客户端
-            client.close()
-
         except Exception as e:
             logger.error(f"❌ 从数据库读取数据源配置失败: {e}", exc_info=True)
             logger.warning("⚠️  将尝试从 JSON 文件读取配置作为后备方案")
             data_source_configs = unified_config.get_data_source_configs()
+        finally:
+            # 修复：确保 MongoClient 在任何情况下都被关闭，避免连接泄漏
+            if client is not None:
+                try:
+                    client.close()
+                except Exception:
+                    pass
 
         for ds_config in data_source_configs:
             if ds_config.enabled and ds_config.api_key:

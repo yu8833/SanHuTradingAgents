@@ -220,7 +220,7 @@ class TushareSyncService:
                         code = stock_info.dict().get("code", "unknown")
                     else:
                         code = stock_info.get("code", "unknown")
-                except:
+                except Exception:
                     code = "unknown"
 
                 batch_stats["errors"].append({
@@ -823,7 +823,7 @@ class TushareSyncService:
                         last_date_obj = datetime.strptime(latest_date, '%Y-%m-%d')
                         next_date = last_date_obj + timedelta(days=1)
                         return next_date.strftime('%Y-%m-%d')
-                    except:
+                    except Exception:
                         # 如果日期格式不对，直接返回
                         return latest_date
                 else:

@@ -98,9 +98,11 @@ db.market_quotes.createIndex({ "code": 1 }, { unique: true });
 db.market_quotes.createIndex({ "updated_at": 1 });
 
 // 股票新闻索引
-db.stock_news.createIndex({ "code": 1, "published_at": -1 });
+// 修复：实际字段名为 publish_time（见 app/services/news_data_service.py 写入逻辑），
+// 之前错误地写成 published_at 导致索引完全失效
+db.stock_news.createIndex({ "code": 1, "publish_time": -1 });
 db.stock_news.createIndex({ "title": "text", "content": "text" });
-db.stock_news.createIndex({ "published_at": -1 });
+db.stock_news.createIndex({ "publish_time": -1 });
 
 // 分析任务索引
 db.analysis_tasks.createIndex({ "task_id": 1 }, { unique: true });

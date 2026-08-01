@@ -994,7 +994,7 @@ class SimpleAnalysisService:
                 currency = "CNY"
 
                 usage_record = UsageRecord(
-                    timestamp=datetime.now().isoformat(),
+                    timestamp=datetime.utcnow().isoformat(),
                     provider="dashscope",
                     model_name=model_info,
                     input_tokens=input_tokens,

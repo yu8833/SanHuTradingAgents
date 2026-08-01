@@ -15,7 +15,8 @@ from apscheduler.events import (
     EVENT_JOB_ERROR,
     EVENT_JOB_MISSED,
     EVENT_JOB_SUBMITTED,
-    JobExecutionEvent
+    JobExecutionEvent,
+    JobSubmissionEvent
 )
 
 from app.core.database import get_mongo_db
@@ -831,7 +832,7 @@ class SchedulerService:
         except Exception as e:
             logger.error(f"❌ 检测僵尸任务失败: {e}")
 
-    def _on_job_submitted(self, event: JobExecutionEvent):
+    def _on_job_submitted(self, event: JobSubmissionEvent):
         """任务开始执行回调（任务被提交到执行器时触发）
 
         - 记录实际开始执行时间，用于精确计算 execution_time
@@ -840,11 +841,16 @@ class SchedulerService:
         # 记录实际开始执行时间（用于计算 execution_time）
         self._job_start_times[event.job_id] = datetime.now()
 
+        # 修复：JobSubmissionEvent 的属性是 scheduled_run_times（复数，列表），
+        # 不是 scheduled_run_time（单数）。JobExecutionEvent 才有 scheduled_run_time。
+        scheduled_times = getattr(event, 'scheduled_run_times', None) or []
+        scheduled_time = scheduled_times[0] if scheduled_times else None
+
         # 创建 running 记录（_record_job_execution 内部会做去重，避免与手动触发重复）
         asyncio.create_task(self._record_job_execution(
             job_id=event.job_id,
             status="running",
-            scheduled_time=event.scheduled_run_time,
+            scheduled_time=scheduled_time,
             progress=0,
             is_manual=False  # 自动触发
         ))

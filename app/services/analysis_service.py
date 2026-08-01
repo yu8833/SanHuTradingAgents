@@ -68,40 +68,41 @@ def _read_model_configs_from_mongo(quick_model: str, deep_model: str) -> tuple:
     Returns:
         (quick_model_config, deep_model_config) 各为 dict 或 None
     """
+    # 修复：使用 with 上下文管理器确保 MongoClient 正确关闭，避免连接泄漏
+    from pymongo import MongoClient
+    from app.core.config import settings
+
     try:
-        from pymongo import MongoClient
-        from app.core.config import settings
+        with MongoClient(settings.MONGO_URI) as client:
+            db = client[settings.MONGO_DB]
+            collection = db.system_configs
+            doc = collection.find_one({"is_active": True}, sort=[("version", -1)])
 
-        client = MongoClient(settings.MONGO_URI)
-        db = client[settings.MONGO_DB]
-        collection = db.system_configs
-        doc = collection.find_one({"is_active": True}, sort=[("version", -1)])
+            if not doc or "llm_configs" not in doc:
+                logger.warning("⚠️ MongoDB 中没有找到系统配置，将使用默认参数")
+                return None, None
 
-        if not doc or "llm_configs" not in doc:
-            logger.warning("⚠️ MongoDB 中没有找到系统配置，将使用默认参数")
-            return None, None
+            llm_configs = doc["llm_configs"]
+            logger.info(f"✅ 从 MongoDB 读取到 {len(llm_configs)} 个模型配置")
 
-        llm_configs = doc["llm_configs"]
-        logger.info(f"✅ 从 MongoDB 读取到 {len(llm_configs)} 个模型配置")
+            quick_cfg = None
+            deep_cfg = None
+            for llm_config in llm_configs:
+                cfg = {
+                    "max_tokens": llm_config.get("max_tokens", 4000),
+                    "temperature": llm_config.get("temperature", 0.7),
+                    "timeout": llm_config.get("timeout", 180),
+                    "retry_times": llm_config.get("retry_times", 3),
+                    "api_base": llm_config.get("api_base"),
+                }
+                if llm_config.get("model_name") == quick_model:
+                    quick_cfg = cfg
+                    logger.info(f"✅ 读取快速模型配置: {quick_model} -> {cfg}")
+                if llm_config.get("model_name") == deep_model:
+                    deep_cfg = cfg
+                    logger.info(f"✅ 读取深度模型配置: {deep_model} -> {cfg}")
 
-        quick_cfg = None
-        deep_cfg = None
-        for llm_config in llm_configs:
-            cfg = {
-                "max_tokens": llm_config.get("max_tokens", 4000),
-                "temperature": llm_config.get("temperature", 0.7),
-                "timeout": llm_config.get("timeout", 180),
-                "retry_times": llm_config.get("retry_times", 3),
-                "api_base": llm_config.get("api_base"),
-            }
-            if llm_config.get("model_name") == quick_model:
-                quick_cfg = cfg
-                logger.info(f"✅ 读取快速模型配置: {quick_model} -> {cfg}")
-            if llm_config.get("model_name") == deep_model:
-                deep_cfg = cfg
-                logger.info(f"✅ 读取深度模型配置: {deep_model} -> {cfg}")
-
-        return quick_cfg, deep_cfg
+            return quick_cfg, deep_cfg
     except Exception as e:
         logger.warning(f"⚠️ 从 MongoDB 读取模型配置失败: {e}，将使用默认参数")
         return None, None
@@ -181,60 +182,19 @@ class AnalysisService:
             deep_model = getattr(task.parameters, 'deep_analysis_model', None) or unified_config.get_deep_analysis_model()
 
             # 🔧 从 MongoDB 数据库读取模型的完整配置参数（而不是从 JSON 文件）
-            quick_model_config = None
-            deep_model_config = None
-
-            try:
-                from pymongo import MongoClient
-                from app.core.config import settings
-
-                # 使用同步 MongoDB 客户端
-                client = MongoClient(settings.MONGO_URI)
-                db = client[settings.MONGO_DB]
-                collection = db.system_configs
-
-                # 查询最新的活跃配置
-                doc = collection.find_one({"is_active": True}, sort=[("version", -1)])
-
-                if doc and "llm_configs" in doc:
-                    llm_configs = doc["llm_configs"]
-                    logger.info(f"✅ 从 MongoDB 读取到 {len(llm_configs)} 个模型配置")
-
-                    for llm_config in llm_configs:
-                        if llm_config.get("model_name") == quick_model:
-                            quick_model_config = {
-                                "max_tokens": llm_config.get("max_tokens", 4000),
-                                "temperature": llm_config.get("temperature", 0.7),
-                                "timeout": llm_config.get("timeout", 180),
-                                "retry_times": llm_config.get("retry_times", 3),
-                                "api_base": llm_config.get("api_base")
-                            }
-                            logger.info(f"✅ 读取快速模型配置: {quick_model}")
-                            logger.info(f"   max_tokens={quick_model_config['max_tokens']}, temperature={quick_model_config['temperature']}")
-                            logger.info(f"   timeout={quick_model_config['timeout']}, retry_times={quick_model_config['retry_times']}")
-                            logger.info(f"   api_base={quick_model_config['api_base']}")
-
-                        if llm_config.get("model_name") == deep_model:
-                            deep_model_config = {
-                                "max_tokens": llm_config.get("max_tokens", 4000),
-                                "temperature": llm_config.get("temperature", 0.7),
-                                "timeout": llm_config.get("timeout", 180),
-                                "retry_times": llm_config.get("retry_times", 3),
-                                "api_base": llm_config.get("api_base")
-                            }
-                            logger.info(f"✅ 读取深度模型配置: {deep_model} - {deep_model_config}")
-                else:
-                    logger.warning("⚠️ MongoDB 中没有找到系统配置，将使用默认参数")
-            except Exception as e:
-                logger.warning(f"⚠️ 从 MongoDB 读取模型配置失败: {e}，将使用默认参数")
+            # 修复：直接调用 _read_model_configs_from_mongo 复用已有逻辑，
+            # 避免重复创建 MongoClient 且未关闭导致的连接泄漏
+            quick_model_config, deep_model_config = _read_model_configs_from_mongo(quick_model, deep_model)
 
             # 成本估算
             progress_tracker.update_progress("💰 预估分析成本")
 
             # 根据模型名称动态查找供应商（同步版本）
+            # 修复：同步函数中应使用 get_provider_by_model_name_sync 而非 async 版本
+            from app.services.simple_analysis_service import get_provider_by_model_name_sync
             from tradingagents.llm_clients.provider_keys import normalize_provider_key
 
-            llm_provider = normalize_provider_key(get_provider_by_model_name(quick_model))
+            llm_provider = normalize_provider_key(get_provider_by_model_name_sync(quick_model))
 
             # 参数配置
             progress_tracker.update_progress("⚙️ 配置分析参数")
@@ -317,57 +277,16 @@ class AnalysisService:
             deep_model = getattr(task.parameters, 'deep_analysis_model', None) or unified_config.get_deep_analysis_model()
 
             # 🔧 从 MongoDB 数据库读取模型的完整配置参数（而不是从 JSON 文件）
-            quick_model_config = None
-            deep_model_config = None
-
-            try:
-                from pymongo import MongoClient
-                from app.core.config import settings
-
-                # 使用同步 MongoDB 客户端
-                client = MongoClient(settings.MONGO_URI)
-                db = client[settings.MONGO_DB]
-                collection = db.system_configs
-
-                # 查询最新的活跃配置
-                doc = collection.find_one({"is_active": True}, sort=[("version", -1)])
-
-                if doc and "llm_configs" in doc:
-                    llm_configs = doc["llm_configs"]
-                    logger.info(f"✅ 从 MongoDB 读取到 {len(llm_configs)} 个模型配置")
-
-                    for llm_config in llm_configs:
-                        if llm_config.get("model_name") == quick_model:
-                            quick_model_config = {
-                                "max_tokens": llm_config.get("max_tokens", 4000),
-                                "temperature": llm_config.get("temperature", 0.7),
-                                "timeout": llm_config.get("timeout", 180),
-                                "retry_times": llm_config.get("retry_times", 3),
-                                "api_base": llm_config.get("api_base")
-                            }
-                            logger.info(f"✅ 读取快速模型配置: {quick_model}")
-                            logger.info(f"   max_tokens={quick_model_config['max_tokens']}, temperature={quick_model_config['temperature']}")
-                            logger.info(f"   timeout={quick_model_config['timeout']}, retry_times={quick_model_config['retry_times']}")
-                            logger.info(f"   api_base={quick_model_config['api_base']}")
-
-                        if llm_config.get("model_name") == deep_model:
-                            deep_model_config = {
-                                "max_tokens": llm_config.get("max_tokens", 4000),
-                                "temperature": llm_config.get("temperature", 0.7),
-                                "timeout": llm_config.get("timeout", 180),
-                                "retry_times": llm_config.get("retry_times", 3),
-                                "api_base": llm_config.get("api_base")
-                            }
-                            logger.info(f"✅ 读取深度模型配置: {deep_model} - {deep_model_config}")
-                else:
-                    logger.warning("⚠️ MongoDB 中没有找到系统配置，将使用默认参数")
-            except Exception as e:
-                logger.warning(f"⚠️ 从 MongoDB 读取模型配置失败: {e}，将使用默认参数")
+            # 修复：直接调用 _read_model_configs_from_mongo 复用已有逻辑，
+            # 避免重复创建 MongoClient 且未关闭导致的连接泄漏
+            quick_model_config, deep_model_config = _read_model_configs_from_mongo(quick_model, deep_model)
 
             # 根据模型名称动态查找供应商（同步版本）
+            # 修复：同步函数中应使用 get_provider_by_model_name_sync 而非 async 版本
+            from app.services.simple_analysis_service import get_provider_by_model_name_sync
             from tradingagents.llm_clients.provider_keys import normalize_provider_key
 
-            llm_provider = normalize_provider_key(get_provider_by_model_name(quick_model))
+            llm_provider = normalize_provider_key(get_provider_by_model_name_sync(quick_model))
 
             # 🧹 强制补全全部7个分析师（确保所有维度都有报告）
             supported_analysts = {"market", "social", "news", "fundamentals", "policy", "hot_money", "lockup"}
@@ -481,8 +400,9 @@ class AnalysisService:
                 model_name = deep_model or quick_model or "qwen-plus"
 
                 # 根据模型名称确定供应商
+                # 修复：get_provider_by_model_name 是 async 函数，在 async 上下文中必须 await
                 from app.services.simple_analysis_service import get_provider_by_model_name
-                provider = get_provider_by_model_name(model_name)
+                provider = await get_provider_by_model_name(model_name)
 
                 # 记录使用情况
                 await self._record_token_usage(task, result, provider, model_name)
@@ -1018,8 +938,9 @@ class AnalysisService:
                 currency = llm_config.currency or "CNY"
 
             # 创建使用记录
+            # 修复：与其他时间戳字段统一使用 UTC（见 simple_analysis_service.py 中 updated_at/created_at 均用 utcnow）
             usage_record = UsageRecord(
-                timestamp=datetime.now().isoformat(),
+                timestamp=datetime.utcnow().isoformat(),
                 provider=provider,
                 model_name=model_name,
                 input_tokens=input_tokens,

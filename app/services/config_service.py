@@ -1186,7 +1186,7 @@ class ConfigService:
                             "response_time": response_time,
                             "details": None
                         }
-                    except:
+                    except Exception:
                         return {
                         "success": False,
                         "message": f"API测试失败: HTTP {response.status_code}",
@@ -3623,7 +3623,7 @@ class ConfigService:
                         "success": False,
                         "message": f"{display_name} API请求错误: {error_msg}"
                     }
-                except:
+                except Exception:
                     return {
                         "success": False,
                         "message": f"{display_name} API请求格式错误"
@@ -3651,7 +3651,7 @@ class ConfigService:
                             "success": False,
                             "message": f"{display_name} 服务暂时不可用: {error_msg}"
                         }
-                except:
+                except Exception:
                     return {
                         "success": False,
                         "message": f"{display_name} 服务暂时不可用 (HTTP 503)"
@@ -3736,7 +3736,7 @@ class ConfigService:
                 error_detail = ""
                 try:
                     error_detail = response.json().get("error", {}).get("message", "")
-                except:
+                except Exception:
                     pass
                 return {
                     "success": False,
@@ -4036,7 +4036,7 @@ class ConfigService:
                         "success": False,
                         "message": f"{display_name} API测试失败: {error_msg}"
                     }
-                except:
+                except Exception:
                     return {
                         "success": False,
                         "message": f"{display_name} API测试失败: HTTP {response.status_code}"
@@ -4233,7 +4233,7 @@ class ConfigService:
                         "success": False,
                         "message": f"{display_name} API请求失败: {error_msg}"
                     }
-                except:
+                except Exception:
                     print(f"❌ HTTP 错误: {response.status_code}")
                     return {
                         "success": False,
@@ -4763,7 +4763,7 @@ class ConfigService:
                         "success": False,
                         "message": f"{display_name} API测试失败: {error_msg}"
                     }
-                except:
+                except Exception:
                     logger.error(f"❌ [{display_name}] API测试失败")
                     logger.error(f"   请求URL: {url}")
                     logger.error(f"   状态码: {response.status_code}")

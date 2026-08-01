@@ -138,7 +138,8 @@ async def create_database_indexes(db):
         db.stock_basic_info.create_index([("source", 1)])  # 数据源索引
         db.stock_basic_info.create_index([("market", 1)])
         db.market_quotes.create_index([("code", 1)], unique=True)
-        db.stock_news.create_index([("code", 1), ("published_at", -1)])
+        # 修复：字段名应为 publish_time 而非 published_at，与 news_data_service 写入逻辑一致
+        db.stock_news.create_index([("code", 1), ("publish_time", -1)])
         
         # 分析相关索引
         db.analysis_tasks.create_index([("user_id", 1), ("created_at", -1)])
