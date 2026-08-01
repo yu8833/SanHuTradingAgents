@@ -95,4 +95,8 @@ EXPOSE 8000
 ENV DOCKER_CONTAINER=true
 
 # 启动FastAPI服务
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "--timeout-keep-alive", "65"]
+# 修复：--workers 改为 1，因为 APScheduler 使用内存 job store，
+# 多 worker 会导致 4 个独立 scheduler 实例争抢同一任务，造成 trigger_job 只对其中一个
+# 生效、定时任务大量 missed、日志重复等问题。
+# 后台分析任务已由 tradingagents-worker 容器独立承担，单 worker 足以处理 API 请求。
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--timeout-keep-alive", "65"]

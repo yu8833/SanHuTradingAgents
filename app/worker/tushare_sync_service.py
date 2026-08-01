@@ -969,9 +969,21 @@ class TushareSyncService:
             stats["errors"].append({"error": str(e), "context": "sync_financial_data"})
             return stats
 
-    async def _save_financial_data(self, symbol: str, financial_data: Dict[str, Any]) -> bool:
+    async def _save_financial_data(self, symbol: str, financial_data) -> bool:
         """保存财务数据"""
         try:
+            # 修复：get_fundamentals 返回的是格式化文本字符串而非 dict，
+            # 需要先解析为结构化 dict 再保存
+            if isinstance(financial_data, str):
+                financial_data = self._parse_financial_text(symbol, financial_data)
+                if not financial_data:
+                    logger.warning(f"⚠️ {symbol} 财务数据文本解析后为空，跳过保存")
+                    return False
+
+            if not isinstance(financial_data, dict):
+                logger.warning(f"⚠️ {symbol} 财务数据类型异常: {type(financial_data)}, 跳过保存")
+                return False
+
             # 使用统一的财务数据服务
             from app.services.financial_data_service import get_financial_data_service
 
@@ -992,6 +1004,74 @@ class TushareSyncService:
         except Exception as e:
             logger.error(f"❌ 保存 {symbol} 财务数据失败: {e}")
             return False
+
+    @staticmethod
+    def _parse_financial_text(symbol: str, text: str) -> Dict[str, Any]:
+        """将 get_fundamentals 返回的格式化文本解析为结构化 dict。
+
+        文本格式示例：
+            Name: 贵州茅台
+            Price: 1689.00
+            PE (TTM): 30.5
+            PE (Static): 32.1
+            PB: 12.3
+            ...
+        """
+        import re
+        result: Dict[str, Any] = {"symbol": symbol, "data_source": "tushare"}
+
+        for line in text.splitlines():
+            line = line.strip()
+            if not line or ":" not in line:
+                continue
+            # 按第一个冒号分割
+            key, _, val = line.partition(":")
+            key = key.strip().lower()
+            val = val.strip()
+
+            # 映射常见字段
+            if key == "name":
+                result["name"] = val
+            elif key in ("price", "current_price"):
+                try: result["current_price"] = float(val)
+                except ValueError: pass
+            elif "pe_ttm" in key or key == "pe (ttm)":
+                try: result["pe_ttm"] = float(val)
+                except ValueError: pass
+            elif "pe_static" in key or key == "pe (static)":
+                try: result["pe_static"] = float(val)
+                except ValueError: pass
+            elif key == "pb":
+                try: result["pb"] = float(val)
+                except ValueError: pass
+            elif key == "roe":
+                try: result["roe"] = float(val)
+                except ValueError: pass
+            elif "total_mv" in key or "总市值" in key:
+                try: result["total_mv"] = float(val.replace("亿", "").strip())
+                except ValueError: pass
+            elif "circ_mv" in key or "流通市值" in key:
+                try: result["circ_mv"] = float(val.replace("亿", "").strip())
+                except ValueError: pass
+            elif "turnover" in key or "换手" in key:
+                try: result["turnover_rate"] = float(val.replace("%", "").strip())
+                except ValueError: pass
+            elif "volume" in key or "成交量" in key:
+                try: result["volume"] = float(val)
+                except ValueError: pass
+            elif "amount" in key or "成交额" in key:
+                try: result["amount"] = float(val)
+                except ValueError: pass
+
+        # 生成默认 report_period（当前季度末）
+        from datetime import datetime
+        now = datetime.now()
+        quarter_month = ((now.month - 1) // 3) * 3 + 1  # 1/4/7/10
+        result["report_period"] = f"{now.year}{quarter_month:02d}30"
+        result["report_type"] = "quarterly"
+        result["raw_text"] = text[:2000]  # 保留原始文本前2000字符用于调试
+
+        return result
 
     # ==================== 辅助方法 ====================
 
