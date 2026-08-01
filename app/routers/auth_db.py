@@ -540,12 +540,13 @@ async def create_user(
         if payload.is_admin:
             from pymongo import MongoClient
             from app.core.config import settings
-            client = MongoClient(settings.MONGO_URI)
-            db = client[settings.MONGO_DB]
-            db.users.update_one(
-                {"username": payload.username},
-                {"$set": {"is_admin": True}}
-            )
+            # 修复：使用 with 语句确保 MongoClient 正确关闭，避免连接泄漏
+            with MongoClient(settings.MONGO_URI) as client:
+                db = client[settings.MONGO_DB]
+                db.users.update_one(
+                    {"username": payload.username},
+                    {"$set": {"is_admin": True}}
+                )
 
         return {
             "success": True,

@@ -1498,12 +1498,14 @@ const goSimOrder = async () => {
   }
 }
 
-// 组件销毁时清理定时器
+// 组件销毁时清理定时器和事件监听器
 onUnmounted(() => {
   if (pollingTimer.value) {
     clearInterval(pollingTimer.value)
     pollingTimer.value = null
   }
+  // 修复：移除 visibilitychange 监听器，避免组件卸载后内存泄漏和闭包引用残留
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 
 // 页面可见性变化时的处理

@@ -353,11 +353,13 @@ const handleValidate = async () => {
     console.log('🔍 配置验证响应:', response.data)
 
     if (response.data.success) {
-      validationResult.value = response.data.data
+      // 修复：使用可选链避免 response.data.data 为 null 时抛出 TypeError
+      const data = response.data?.data
+      validationResult.value = data
 
       // 提取环境变量验证结果和 MongoDB 验证结果
-      envValidation.value = response.data.data.env_validation || null
-      mongodbValidation.value = response.data.data.mongodb_validation || null
+      envValidation.value = data?.env_validation || null
+      mongodbValidation.value = data?.mongodb_validation || null
 
       console.log('🔍 环境变量验证:', envValidation.value)
       console.log('🔍 MongoDB 验证:', mongodbValidation.value)

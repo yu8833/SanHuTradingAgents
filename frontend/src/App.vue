@@ -10,9 +10,10 @@
         mode="out-in"
         appear
       >
-        <keep-alive :include="keepAliveComponents">
-          <component :is="Component" :key="route?.fullPath || 'default'" />
-        </keep-alive>
+        <!-- 修复：移除无效的 keep-alive。此层级渲染的是 BasicLayout/Login/Register/404 等顶层组件，
+             include 列表用的是路由 name（Dashboard 等）而非组件 name，导致缓存完全失效。
+             BasicLayout 内部已有自己的 keep-alive 处理子路由缓存，此处无需再缓存。 -->
+        <component :is="Component" :key="route?.fullPath || 'default'" />
       </transition>
     </router-view>
 
@@ -25,18 +26,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import NetworkStatus from '@/components/NetworkStatus.vue'
 import axios from 'axios'
 import { configApi } from '@/api/config'
-
-// 需要缓存的组件
-const keepAliveComponents = computed(() => [
-  'Dashboard',
-  'StockScreening',
-  'AnalysisHistory'
-])
 
 // 配置向导
 const showConfigWizard = ref(false)

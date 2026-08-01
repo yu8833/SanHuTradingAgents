@@ -485,6 +485,7 @@ def get_progress_by_id(task_id: str) -> Optional[Dict[str, Any]]:
                 redis_db = int(os.getenv('REDIS_DB', 0))
 
                 # 创建Redis连接
+                # 修复：使用 try/finally 确保 Redis 连接在使用后被正确关闭，避免连接泄漏
                 if redis_password:
                     redis_client = redis.Redis(
                         host=redis_host,
@@ -501,12 +502,15 @@ def get_progress_by_id(task_id: str) -> Optional[Dict[str, Any]]:
                         decode_responses=True
                     )
 
-                key = f"progress:{task_id}"
-                data = redis_client.get(key)
-                if data:
-                    progress_data = json.loads(data)
-                    progress_data = RedisProgressTracker._calculate_static_time_estimates(progress_data)
-                    return progress_data
+                try:
+                    key = f"progress:{task_id}"
+                    data = redis_client.get(key)
+                    if data:
+                        progress_data = json.loads(data)
+                        progress_data = RedisProgressTracker._calculate_static_time_estimates(progress_data)
+                        return progress_data
+                finally:
+                    redis_client.close()
             except Exception as e:
                 logger.debug(f"📊 [Redis进度] Redis读取失败: {e}")
 

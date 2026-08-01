@@ -104,7 +104,9 @@ def _fetch_source(src: dict, per: int, cutoff, redline: list[str]):
 
 def fetch_radar() -> dict:
     """抓全部源，返回 12 赛道数据并落盘缓存。"""
-    cfg = json.load(open(SOURCES_FILE, encoding="utf-8"))
+    # 修复：使用 with 语句确保文件句柄正确关闭
+    with open(SOURCES_FILE, encoding="utf-8") as f:
+        cfg = json.load(f)
     days = cfg.get("fetch", {}).get("recent_days", 7)
     per = cfg.get("fetch", {}).get("per_source", 6)
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
@@ -179,7 +181,9 @@ def load_cache():
 
 def skeleton() -> dict:
     """无缓存时返回赛道骨架（空 items），前端提示点刷新。"""
-    cfg = json.load(open(SOURCES_FILE, encoding="utf-8"))
+    # 修复：使用 with 语句确保文件句柄正确关闭
+    with open(SOURCES_FILE, encoding="utf-8") as f:
+        cfg = json.load(f)
     byhint: dict[str, int] = {}
     for s in cfg["sources"]:
         byhint[s["hint"]] = byhint.get(s["hint"], 0) + 1
