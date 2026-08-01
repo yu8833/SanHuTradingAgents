@@ -979,12 +979,13 @@ async def check_data_freshness(user: dict = Depends(get_current_user)):
             fin_updated_at_str = None
 
         # --- 4. 新闻数据 ---
-        latest_news_doc = await db.stock_news.find().sort("published_at", -1).limit(1).to_list(length=1)
+        # 修复：字段名 publish_time（不带 ed），实际写入字段见 news_data_service.py
+        latest_news_doc = await db.stock_news.find().sort("publish_time", -1).limit(1).to_list(length=1)
         if not latest_news_doc:
             latest_news_doc = await db.stock_news.find().sort("updated_at", -1).limit(1).to_list(length=1)
         news_updated_at = None
         if latest_news_doc:
-            news_updated_at = latest_news_doc[0].get("published_at") or latest_news_doc[0].get("updated_at")
+            news_updated_at = latest_news_doc[0].get("publish_time") or latest_news_doc[0].get("updated_at")
         news_count = await db.stock_news.count_documents({})
         news_is_fresh = False
         news_stale_days = 999
