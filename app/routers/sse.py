@@ -45,7 +45,7 @@ async def get_current_user_for_sse(
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="User not found or inactive")
 
-    return {"id": str(user.id), "username": user.username, "role": user.role}
+    return {"id": str(user.id), "username": user.username, "role": "admin" if user.is_admin else "user"}
 
 
 async def task_progress_generator(task_id: str, user_id: str):
