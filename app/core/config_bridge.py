@@ -9,6 +9,8 @@ import logging
 import os
 from pathlib import Path
 
+from app.utils.credential_crypto import decrypt_config_dict
+
 logger = logging.getLogger("app.config_bridge")
 
 
@@ -405,6 +407,8 @@ def _bridge_system_settings() -> int:
                 logger.debug("  ⚠️  系统设置为空，跳过桥接")
                 return 0
 
+            # 解密敏感字段（system_settings 中的 api_key/secret/password/token 键）
+            config_doc = decrypt_config_dict(config_doc)
             system_settings = config_doc['system_settings']
         except Exception as e:
             logger.debug(f"  ⚠️  无法从数据库获取系统设置: {e}")
@@ -709,6 +713,9 @@ async def _sync_pricing_config_from_db():
         if not config:
             logger.warning("⚠️  未找到激活的配置")
             return
+
+        # 解密敏感字段（llm_configs[].api_key 等）
+        config = decrypt_config_dict(config)
 
         # 获取项目根目录的 config 目录
         project_root = Path(__file__).parent.parent.parent

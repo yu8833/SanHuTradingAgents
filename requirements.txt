@@ -50,6 +50,7 @@ pydantic-settings>=2.0.0  # 设置管理，用于配置加载
 python-multipart>=0.0.6  # 文件上传支持
 PyJWT>=2.0.0  # JWT令牌处理
 bcrypt>=4.0.0  # 密码加密
+cryptography>=41.0.0  # 凭证字段级加密（API Key/Token 等）
 apscheduler>=3.10.0  # 任务调度器，用于定时任务
 chinese-calendar>=1.9.0  # 中国法定节假日判断，用于交易日检查
 aiofiles>=0.8.0  # 异步文件操作

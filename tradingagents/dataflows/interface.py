@@ -162,6 +162,11 @@ def route_to_vendor(method: str, *args, **kwargs):
     Tries vendors in the configured priority order. The first vendor that
     returns a non-empty / non-error result wins. If all fail, raises the
     last exception.
+
+    返回前经过 DataIntegrityGuard 校验：
+    - 日线过期 → 触发即时补数 → 补数失败则抛 DataStaleError 阻断分析
+    - 无数据 → 标记 MISSING
+    - 异常值 → 标记 ABNORMAL
     """
     if method not in ALL_TOOL_METHODS:
         logger.warning(f"⚠️ [route_to_vendor] 未知方法: {method}")
@@ -185,8 +190,16 @@ def route_to_vendor(method: str, *args, **kwargs):
                 continue
             if len(tried) > 1:
                 logger.info(f"✅ [route_to_vendor] {method} fallback 成功: {tried[0]} 失败 → {vendor} 成功")
+
+            # 数据完整性校验拦截（日线过期+补数失败会抛 DataStaleError 阻断分析）
+            from tradingagents.dataflows.integrity_guard import check_integrity
+            result = check_integrity(result, method, args)
             return result
         except Exception as e:
+            # DataStaleError 是"故意阻断"的异常，不 fallback，直接向上传播
+            from tradingagents.dataflows.integrity_guard import DataStaleError
+            if isinstance(e, DataStaleError):
+                raise
             last_error = e
             logger.warning(f"[route_to_vendor] {vendor}.{method} 失败: {e}，尝试 fallback")
             continue

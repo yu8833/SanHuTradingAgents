@@ -92,6 +92,7 @@ from app.models.config import (
     ModelProvider,
     SystemConfig,
 )
+from app.utils.credential_crypto import decrypt_config_dict, encrypt_config_dict
 
 logger = logging.getLogger(__name__)
 
@@ -473,6 +474,9 @@ class ConfigService:
 
             if config_data:
                 print(f"📊 从数据库获取配置，版本: {config_data.get('version', 0)}, LLM配置数量: {len(config_data.get('llm_configs', []))}")
+                # 解密敏感字段（api_key / api_secret / password 等）
+                # 老明文数据会被 decrypt 原样返回（向后兼容），下次 save 时自动加密
+                config_data = decrypt_config_dict(config_data)
                 return SystemConfig(**config_data)
 
             # 如果没有配置，创建默认配置
@@ -640,6 +644,10 @@ class ConfigService:
             config_dict = config.model_dump(by_alias=True)
             if '_id' in config_dict:
                 del config_dict['_id']  # 移除旧的_id，让MongoDB生成新的
+
+            # 加密敏感字段（api_key / api_secret / password 等）后再落库
+            # 占位符和空值不会被加密，幂等安全
+            config_dict = encrypt_config_dict(config_dict)
 
             # 打印即将保存的 system_settings
             system_settings = config_dict.get('system_settings', {})
