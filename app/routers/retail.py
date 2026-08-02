@@ -8,8 +8,6 @@
 """
 
 import logging
-from datetime import datetime
-from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -37,7 +35,7 @@ class HoldingItem(BaseModel):
 
 class PositionRequest(BaseModel):
     account_size: float = Field(..., gt=0, description="账户总资产（元）")
-    holdings: List[HoldingItem] = Field(default_factory=list)
+    holdings: list[HoldingItem] = Field(default_factory=list)
     symbol: str = Field(..., description="目标股票代码")
     strategy: str = Field("default", description="策略类型")
     price: float = Field(..., gt=0, description="当前股价")
@@ -45,7 +43,7 @@ class PositionRequest(BaseModel):
     profit_loss_ratio: float = Field(1.5, gt=0, description="策略历史盈亏比")
     industry: str = Field("未知", description="行业")
     theme: str = Field("未知", description="主题")
-    daily_volume_amount: Optional[float] = Field(None, description="当日成交额（元）")
+    daily_volume_amount: float | None = Field(None, description="当日成交额（元）")
 
 
 class ExitHoldingItem(BaseModel):
@@ -54,13 +52,13 @@ class ExitHoldingItem(BaseModel):
     buy_price: float
     buy_date: str  # ISO格式
     current_price: float
-    current_ma: Optional[float] = None
+    current_ma: float | None = None
     thesis_invalid: bool = False
     thesis_invalid_reason: str = ""
 
 
 class ExitRequest(BaseModel):
-    holdings: List[ExitHoldingItem]
+    holdings: list[ExitHoldingItem]
 
 
 class RegimeRequest(BaseModel):
@@ -264,7 +262,7 @@ class RiskScanResponse(BaseModel):
     has_high_risk: bool
     has_any_risk: bool
     risk_level: str
-    risks: List[dict]
+    risks: list[dict]
 
 
 @router.post("/risk-scan")
@@ -287,7 +285,7 @@ async def scan_stock_risks(
 
 @router.post("/risk-scan/batch")
 async def batch_scan_risks(
-    stocks: List[dict],
+    stocks: list[dict],
     user=Depends(get_current_user),
 ):
     """

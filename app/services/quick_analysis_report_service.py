@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 ===================================
 快速分析报告服务
@@ -11,11 +10,10 @@
 - 六维度+多空辩论格式：覆盖全面、结构清晰
 """
 
-import json
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, Any, List, Optional
 from datetime import datetime
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -41,14 +39,14 @@ class QuickAnalysisReport:
     sentiment_score: int = 0
     
     # 原始数据（用于调试和结构化展示）
-    technical_data: Dict[str, Any] = field(default_factory=dict)
-    fundamental_data: Dict[str, Any] = field(default_factory=dict)
-    news_data: List[Dict[str, Any]] = field(default_factory=list)
+    technical_data: dict[str, Any] = field(default_factory=dict)
+    fundamental_data: dict[str, Any] = field(default_factory=dict)
+    news_data: list[dict[str, Any]] = field(default_factory=list)
     
     # 分析时间
     analysis_date: str = ""
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "stock_code": self.stock_code,
             "stock_name": self.stock_name,
@@ -139,28 +137,28 @@ class QuickAnalysisReport:
         risks = []
         
         current_price = tech_data.get('current_price', 0)
-        ma5 = tech_data.get('ma5', 0)
+        tech_data.get('ma5', 0)
         ma20 = tech_data.get('ma20', 0)
-        ma60 = tech_data.get('ma60', 0)
+        tech_data.get('ma60', 0)
         rsi_6 = tech_data.get('rsi_6', 50)
-        rsi_12 = tech_data.get('rsi_12', 50)
+        tech_data.get('rsi_12', 50)
         bias_ma5 = tech_data.get('bias_ma5', 0)
-        bias_ma20 = tech_data.get('bias_ma20', 0)
+        tech_data.get('bias_ma20', 0)
         volume_ratio = tech_data.get('volume_ratio', 1)
         turnover = fundamental_data.get('turnover_rate')
         pe = fundamental_data.get('pe_ttm') or fundamental_data.get('pe')
         trend_status = tech_data.get('trend_status', '')
         macd_status = tech_data.get('macd_status', '')
-        signal_type = tech_data.get('signal_type', '')
+        tech_data.get('signal_type', '')
         resistance_levels = tech_data.get('resistance_levels', [])
-        support_levels = tech_data.get('support_levels', [])
+        tech_data.get('support_levels', [])
         
         # 从 recent_trend 中获取近期高低点
         recent_trend = tech_data.get('recent_trend', {})
         recent_low = recent_trend.get('low_price', 0)
-        recent_high = recent_trend.get('high_price', 0)
+        recent_trend.get('high_price', 0)
         low_date = recent_trend.get('low_date', '')
-        high_date = recent_trend.get('high_date', '')
+        recent_trend.get('high_date', '')
         
         # 1. RSI超买风险
         if rsi_6 and isinstance(rsi_6, (int, float)) and rsi_6 > 75:
@@ -340,7 +338,7 @@ class QuickAnalysisReportService:
             logger.error(f"LLM 客户端初始化异常: {e}")
             raise
     
-    def _collect_technical_data(self, stock_code: str) -> Dict[str, Any]:
+    def _collect_technical_data(self, stock_code: str) -> dict[str, Any]:
         """收集技术面数据"""
         try:
             from app.services.quick_analysis_service import get_quick_analysis_service
@@ -403,13 +401,12 @@ class QuickAnalysisReportService:
             logger.error(f"收集技术面数据失败: {e}")
             return {}
     
-    def _extract_recent_trend(self, df) -> Dict[str, Any]:
+    def _extract_recent_trend(self, df) -> dict[str, Any]:
         """提取近期走势数据"""
         if df is None or df.empty or len(df) < 10:
             return {}
         
         try:
-            import pandas as pd
             df = df.sort_values('date').reset_index(drop=True)
             recent = df.tail(20).copy()
             
@@ -453,13 +450,12 @@ class QuickAnalysisReportService:
             logger.debug(f"提取近期走势失败: {e}")
             return {}
     
-    def _extract_volume_analysis(self, df) -> Dict[str, Any]:
+    def _extract_volume_analysis(self, df) -> dict[str, Any]:
         """提取量价分析数据"""
         if df is None or df.empty or len(df) < 20:
             return {}
         
         try:
-            import pandas as pd
             import numpy as np
             df = df.sort_values('date').reset_index(drop=True)
             recent = df.tail(20).copy()
@@ -500,7 +496,7 @@ class QuickAnalysisReportService:
             logger.debug(f"提取量价分析失败: {e}")
             return {}
     
-    def _collect_fundamental_data(self, stock_code: str) -> Dict[str, Any]:
+    def _collect_fundamental_data(self, stock_code: str) -> dict[str, Any]:
         """收集基本面数据 - 优先使用 DataSourceManager 实时获取，其次使用 MongoDB 缓存"""
         code6 = stock_code.zfill(6) if len(stock_code) < 6 else stock_code[-6:]
         result = {}
@@ -614,7 +610,7 @@ class QuickAnalysisReportService:
             logger.error(f"收集基本面数据失败: {e}")
             return {}
     
-    def _collect_news_data(self, stock_code: str, limit: int = 10) -> List[Dict[str, Any]]:
+    def _collect_news_data(self, stock_code: str, limit: int = 10) -> list[dict[str, Any]]:
         """收集新闻数据"""
         try:
             from app.core.database import get_mongo_db
@@ -756,9 +752,9 @@ MM/DD 阶段低点 XX.XX ──→ MM/DD +X.XX% ──→ MM/DD 高点 XX.XX
         self,
         stock_code: str,
         stock_name: str,
-        tech_data: Dict[str, Any],
-        fundamental_data: Dict[str, Any],
-        news_data: List[Dict[str, Any]],
+        tech_data: dict[str, Any],
+        fundamental_data: dict[str, Any],
+        news_data: list[dict[str, Any]],
     ) -> str:
         """构建用户提示词 - 提供结构化数据供LLM生成报告"""
         lines = []
@@ -801,11 +797,11 @@ MM/DD 阶段低点 XX.XX ──→ MM/DD +X.XX% ──→ MM/DD 高点 XX.XX
         
         # 买点判断
         if abs(bias_ma5) < 2:
-            lines.append(f"- 买点判断：✅ 最佳买点区间（乖离率<2%）")
+            lines.append("- 买点判断：✅ 最佳买点区间（乖离率<2%）")
         elif abs(bias_ma5) < 5:
-            lines.append(f"- 买点判断：⚠️ 可小仓介入（乖离率2-5%）")
+            lines.append("- 买点判断：⚠️ 可小仓介入（乖离率2-5%）")
         else:
-            lines.append(f"- 买点判断：❌ 不宜追高（乖离率>5%）")
+            lines.append("- 买点判断：❌ 不宜追高（乖离率>5%）")
         lines.append("")
         
         # MACD
@@ -849,11 +845,11 @@ MM/DD 阶段低点 XX.XX ──→ MM/DD +X.XX% ──→ MM/DD 高点 XX.XX
             
             if avg_up_vol > 0 and avg_down_vol > 0:
                 if avg_up_vol > avg_down_vol * 1.2:
-                    lines.append(f"- 量价配合：✅ 上涨放量、下跌缩量，量价配合良好")
+                    lines.append("- 量价配合：✅ 上涨放量、下跌缩量，量价配合良好")
                 elif avg_down_vol > avg_up_vol * 1.2:
-                    lines.append(f"- 量价配合：⚠️ 放量下跌、缩量上涨，量价背离")
+                    lines.append("- 量价配合：⚠️ 放量下跌、缩量上涨，量价背离")
                 else:
-                    lines.append(f"- 量价配合：中性，量能变化不明显")
+                    lines.append("- 量价配合：中性，量能变化不明显")
         lines.append("")
         
         # 支撑阻力
@@ -893,10 +889,10 @@ MM/DD 阶段低点 XX.XX ──→ MM/DD +X.XX% ──→ MM/DD 高点 XX.XX
         lines.append("### 综合信号")
         lines.append(f"- 买卖信号：{tech_data.get('buy_signal', 'N/A')}")
         lines.append(f"- 信号评分：{tech_data.get('signal_score', 0)}/100")
-        lines.append(f"- 信号理由：")
+        lines.append("- 信号理由：")
         for reason in tech_data.get('signal_reasons', []):
             lines.append(f"  - {reason}")
-        lines.append(f"- 风险因素：")
+        lines.append("- 风险因素：")
         for risk in tech_data.get('risk_factors', []):
             lines.append(f"  - {risk}")
         lines.append("")
@@ -959,17 +955,17 @@ MM/DD 阶段低点 XX.XX ──→ MM/DD +X.XX% ──→ MM/DD 高点 XX.XX
             lines.append(f"- 换手率：{turnover}%")
             if isinstance(turnover, (int, float)):
                 if turnover < 0.5:
-                    lines.append(f"  解读：交投冷淡，可能处于底部区域")
+                    lines.append("  解读：交投冷淡，可能处于底部区域")
                 elif turnover < 2:
-                    lines.append(f"  解读：正常交投水平")
+                    lines.append("  解读：正常交投水平")
                 elif turnover < 5:
-                    lines.append(f"  解读：交投活跃，关注资金动向")
+                    lines.append("  解读：交投活跃，关注资金动向")
                 elif turnover < 10:
-                    lines.append(f"  解读：高度活跃，短期波动可能加大")
+                    lines.append("  解读：高度活跃，短期波动可能加大")
                 else:
-                    lines.append(f"  解读：极度过热，注意短期顶部风险")
+                    lines.append("  解读：极度过热，注意短期顶部风险")
         else:
-            lines.append(f"- 换手率：N/A")
+            lines.append("- 换手率：N/A")
         
         lines.append(f"- 量比：{volume_ratio:.2f}")
         lines.append("")
@@ -1009,7 +1005,7 @@ MM/DD 阶段低点 XX.XX ──→ MM/DD +X.XX% ──→ MM/DD 高点 XX.XX
             raise RuntimeError("LLM 客户端未初始化")
         
         try:
-            from langchain_core.messages import SystemMessage, HumanMessage
+            from langchain_core.messages import HumanMessage, SystemMessage
             
             messages = [
                 SystemMessage(content=system_prompt),
@@ -1034,7 +1030,7 @@ MM/DD 阶段低点 XX.XX ──→ MM/DD +X.XX% ──→ MM/DD 高点 XX.XX
             logger.error(f"LLM 调用失败: {e}")
             raise
     
-    def analyze(self, stock_code: str, stock_name: Optional[str] = None) -> QuickAnalysisReport:
+    def analyze(self, stock_code: str, stock_name: str | None = None) -> QuickAnalysisReport:
         """
         执行完整的快速分析
         
@@ -1053,7 +1049,7 @@ MM/DD 阶段低点 XX.XX ──→ MM/DD +X.XX% ──→ MM/DD 高点 XX.XX
         
         try:
             # 1. 收集技术面数据
-            logger.info(f"  收集技术面数据...")
+            logger.info("  收集技术面数据...")
             tech_data = self._collect_technical_data(stock_code)
             report.technical_data = tech_data
             
@@ -1065,7 +1061,7 @@ MM/DD 阶段低点 XX.XX ──→ MM/DD +X.XX% ──→ MM/DD 高点 XX.XX
                 report.stock_name = stock_name or stock_code
             
             # 2. 收集基本面数据
-            logger.info(f"  收集基本面数据...")
+            logger.info("  收集基本面数据...")
             fundamental_data = self._collect_fundamental_data(stock_code)
             report.fundamental_data = fundamental_data
             
@@ -1073,7 +1069,7 @@ MM/DD 阶段低点 XX.XX ──→ MM/DD +X.XX% ──→ MM/DD 高点 XX.XX
                 report.stock_name = fundamental_data.get("name", "") or stock_code
             
             # 3. 收集新闻数据
-            logger.info(f"  收集新闻数据...")
+            logger.info("  收集新闻数据...")
             news_data = self._collect_news_data(stock_code)
             report.news_data = news_data
             
@@ -1082,7 +1078,7 @@ MM/DD 阶段低点 XX.XX ──→ MM/DD +X.XX% ──→ MM/DD 高点 XX.XX
             llm_output_valid = False  # LLM输出是否包含有效内容
             if self._ensure_initialized() and self._llm_client:
                 try:
-                    logger.info(f"  调用 LLM 生成分析报告...")
+                    logger.info("  调用 LLM 生成分析报告...")
                     system_prompt = self._build_system_prompt()
                     user_prompt = self._build_user_prompt(
                         stock_code, report.stock_name, tech_data, fundamental_data, news_data
@@ -1097,16 +1093,16 @@ MM/DD 阶段低点 XX.XX ──→ MM/DD +X.XX% ──→ MM/DD 高点 XX.XX
                     # 检查LLM输出是否包含有效内容（特别是操作建议）
                     if report.operation_advice or report.final_conclusion or report.dimension_analysis:
                         llm_output_valid = True
-                        logger.info(f"  LLM 分析报告生成成功")
+                        logger.info("  LLM 分析报告生成成功")
                     else:
-                        logger.warning(f"  LLM 输出内容不完整，将使用降级报告")
+                        logger.warning("  LLM 输出内容不完整，将使用降级报告")
                 except Exception as e:
                     logger.warning(f"LLM 生成报告失败，降级使用程序化分析: {e}")
             
             # 5. 如果 LLM 失败或输出无效，使用程序化生成的降级报告
             if not llm_success or not llm_output_valid:
                 if llm_success and not llm_output_valid:
-                    logger.info(f"  触发降级报告: LLM输出内容不完整")
+                    logger.info("  触发降级报告: LLM输出内容不完整")
                 self._generate_fallback_report(report, tech_data, fundamental_data, news_data)
             
             # 6. 确保 operation_advice 始终有值（基于信号类型或评分）
@@ -1159,10 +1155,7 @@ MM/DD 阶段低点 XX.XX ──→ MM/DD +X.XX% ──→ MM/DD 高点 XX.XX
                 conclusion_idx = idx
                 break
         
-        if debate_idx != -1:
-            dimension_part = content[:debate_idx].strip()
-        else:
-            dimension_part = content
+        dimension_part = content[:debate_idx].strip() if debate_idx != -1 else content
         
         if debate_idx != -1 and conclusion_idx != -1:
             debate_part = content[debate_idx:conclusion_idx].strip()
@@ -1286,14 +1279,12 @@ MM/DD 阶段低点 XX.XX ──→ MM/DD +X.XX% ──→ MM/DD 高点 XX.XX
     def _generate_fallback_report(
         self,
         report: QuickAnalysisReport,
-        tech_data: Dict[str, Any],
-        fundamental_data: Dict[str, Any],
-        news_data: List[Dict[str, Any]],
+        tech_data: dict[str, Any],
+        fundamental_data: dict[str, Any],
+        news_data: list[dict[str, Any]],
     ):
         """生成降级版报告（当 LLM 不可用时）- 格式对齐 daily_stock_analysis 风格"""
         
-        stock_name = report.stock_name or "未知"
-        stock_code = report.stock_code
         
         # ===== 维度分析 =====
         dim_parts = []
@@ -1319,13 +1310,13 @@ MM/DD 阶段低点 XX.XX ──→ MM/DD +X.XX% ──→ MM/DD 高点 XX.XX
         dim_parts.append("")
         
         # 维度二：公司基本面
-        pe = fundamental_data.get("pe_ttm") or fundamental_data.get("pe", None) if fundamental_data else None
-        pb = fundamental_data.get("pb", None) if fundamental_data else None
-        total_mv = fundamental_data.get("total_mv", None) if fundamental_data else None
-        circ_mv = fundamental_data.get("circ_mv", None) if fundamental_data else None
-        roe = fundamental_data.get("roe", None) if fundamental_data else None
-        revenue_yoy = fundamental_data.get("revenue_yoy", None) if fundamental_data else None
-        net_profit_yoy = fundamental_data.get("net_profit_yoy", None) if fundamental_data else None
+        pe = fundamental_data.get("pe_ttm") or fundamental_data.get("pe") if fundamental_data else None
+        pb = fundamental_data.get("pb") if fundamental_data else None
+        total_mv = fundamental_data.get("total_mv") if fundamental_data else None
+        circ_mv = fundamental_data.get("circ_mv") if fundamental_data else None
+        roe = fundamental_data.get("roe") if fundamental_data else None
+        revenue_yoy = fundamental_data.get("revenue_yoy") if fundamental_data else None
+        net_profit_yoy = fundamental_data.get("net_profit_yoy") if fundamental_data else None
         
         # 基本面评分
         fund_score = 5
@@ -1346,9 +1337,8 @@ MM/DD 阶段低点 XX.XX ──→ MM/DD +X.XX% ──→ MM/DD 高点 XX.XX
             elif roe < 5:
                 fund_score -= 1
         
-        if total_mv is not None and isinstance(total_mv, (int, float)):
-            if 100 < total_mv < 1000:
-                fund_score += 0.5
+        if total_mv is not None and isinstance(total_mv, (int, float)) and 100 < total_mv < 1000:
+            fund_score += 0.5
         
         fund_score = max(1, min(10, fund_score))
         
@@ -1441,7 +1431,7 @@ MM/DD 阶段低点 XX.XX ──→ MM/DD +X.XX% ──→ MM/DD 高点 XX.XX
         macd_dif = tech_data.get('macd_dif', 0) if tech_data else 0
         macd_dea = tech_data.get('macd_dea', 0) if tech_data else 0
         macd_bar = tech_data.get('macd_bar', 0) if tech_data else 0
-        macd_signal_text = tech_data.get('macd_signal', '') if tech_data else ''
+        tech_data.get('macd_signal', '') if tech_data else ''
         dim_parts.append(f"| MACD | DIF={macd_dif:.2f}, DEA={macd_dea:.2f}, 柱线{macd_bar:+.2f} | {macd_status} |")
         
         rsi_6 = tech_data.get('rsi_6', 0) if tech_data else 0
@@ -1461,16 +1451,16 @@ MM/DD 阶段低点 XX.XX ──→ MM/DD +X.XX% ──→ MM/DD 高点 XX.XX
             low_price = recent_trend.get('low_price', 0)
             high_date = recent_trend.get('high_date', '')[5:]
             high_price = recent_trend.get('high_price', 0)
-            period_change = recent_trend.get('period_change_pct', 0)
+            recent_trend.get('period_change_pct', 0)
             
             # 参考项目格式：阶段低点 → 高点 → 回调
             daily_changes = recent_trend.get('daily_changes', [])
             if daily_changes and len(daily_changes) >= 3:
                 # 计算从低点到高点的涨幅
                 if low_price and high_price:
-                    low_to_high_pct = (high_price - low_price) / low_price * 100 if low_price else 0
+                    (high_price - low_price) / low_price * 100 if low_price else 0
                 else:
-                    low_to_high_pct = 0
+                    pass
                 
                 # 构建走势描述
                 first_line = f"{low_date} 阶段低点 {low_price:.2f} ──→ {high_date} 高点 {high_price:.2f}"
@@ -1485,7 +1475,7 @@ MM/DD 阶段低点 XX.XX ──→ MM/DD +X.XX% ──→ MM/DD 高点 XX.XX
                         last_change = daily_changes[-1]
                         last_date = last_change.get('date', '')[5:]
                         last_close = last_change.get('close', 0)
-                        last_change_pct = last_change.get('change_pct', 0)
+                        last_change.get('change_pct', 0)
                         
                         # 从高点到最新的跌幅
                         high_to_now_pct = (last_close - high_price) / high_price * 100 if high_price else 0
@@ -1516,7 +1506,7 @@ MM/DD 阶段低点 XX.XX ──→ MM/DD +X.XX% ──→ MM/DD 高点 XX.XX
         dim_parts.append("")
         
         # 维度四：资金与情绪
-        turnover = fundamental_data.get("turnover_rate", None) if fundamental_data else None
+        turnover = fundamental_data.get("turnover_rate") if fundamental_data else None
         volume_ratio = tech_data.get("volume_ratio", 0) if tech_data else 0
         vol_analysis = tech_data.get("volume_analysis", {}) if tech_data else {}
         
@@ -1836,7 +1826,7 @@ MM/DD 阶段低点 XX.XX ──→ MM/DD +X.XX% ──→ MM/DD 高点 XX.XX
 
 
 # 单例模式
-_service: Optional[QuickAnalysisReportService] = None
+_service: QuickAnalysisReportService | None = None
 
 
 def get_quick_analysis_report_service() -> QuickAnalysisReportService:

@@ -4,12 +4,12 @@
 """
 
 import asyncio
-import threading
-from typing import Dict, Any, Optional, List
-from datetime import datetime
 import logging
-from dataclasses import dataclass, asdict
+import threading
+from dataclasses import asdict, dataclass
+from datetime import datetime
 from enum import Enum
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -28,24 +28,24 @@ class TaskState:
     user_id: str
     stock_code: str
     status: TaskStatus
-    stock_name: Optional[str] = None
+    stock_name: str | None = None
     progress: int = 0
     message: str = ""
     current_step: str = ""
-    start_time: Optional[datetime] = None
-    end_time: Optional[datetime] = None
-    result_data: Optional[Dict[str, Any]] = None
-    error_message: Optional[str] = None
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+    result_data: dict[str, Any] | None = None
+    error_message: str | None = None
     
     # 分析参数
-    parameters: Optional[Dict[str, Any]] = None
+    parameters: dict[str, Any] | None = None
 
     # 性能指标
-    execution_time: Optional[float] = None
-    tokens_used: Optional[int] = None
-    estimated_duration: Optional[float] = None  # 预估总时长（秒）
+    execution_time: float | None = None
+    tokens_used: int | None = None
+    estimated_duration: float | None = None  # 预估总时长（秒）
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典格式"""
         data = asdict(self)
         # 处理枚举类型
@@ -95,7 +95,7 @@ class MemoryStateManager:
     """内存状态管理器"""
 
     def __init__(self):
-        self._tasks: Dict[str, TaskState] = {}
+        self._tasks: dict[str, TaskState] = {}
         # 🔧 使用 threading.Lock 代替 asyncio.Lock，避免事件循环冲突
         # 当在线程池中执行分析时，会创建新的事件循环，asyncio.Lock 会导致
         # "is bound to a different event loop" 错误
@@ -111,8 +111,8 @@ class MemoryStateManager:
         task_id: str,
         user_id: str,
         stock_code: str,
-        parameters: Optional[Dict[str, Any]] = None,
-        stock_name: Optional[str] = None,
+        parameters: dict[str, Any] | None = None,
+        stock_name: str | None = None,
     ) -> TaskState:
         """创建新任务"""
         with self._lock:
@@ -137,7 +137,7 @@ class MemoryStateManager:
             logger.info(f"🔍 内存管理器实例ID: {id(self)}")
             return task_state
 
-    def _calculate_estimated_duration(self, parameters: Dict[str, Any]) -> float:
+    def _calculate_estimated_duration(self, parameters: dict[str, Any]) -> float:
         """根据分析参数计算预估总时长（秒）"""
         # 获取分析模式
         analysis_mode = parameters.get('analysis_mode', parameters.get('mode', 'deep'))
@@ -176,11 +176,11 @@ class MemoryStateManager:
         self,
         task_id: str,
         status: TaskStatus,
-        progress: Optional[int] = None,
-        message: Optional[str] = None,
-        current_step: Optional[str] = None,
-        result_data: Optional[Dict[str, Any]] = None,
-        error_message: Optional[str] = None
+        progress: int | None = None,
+        message: str | None = None,
+        current_step: str | None = None,
+        result_data: dict[str, Any] | None = None,
+        error_message: str | None = None
     ) -> bool:
         """更新任务状态"""
         with self._lock:
@@ -238,7 +238,7 @@ class MemoryStateManager:
 
             return True
     
-    async def get_task(self, task_id: str) -> Optional[TaskState]:
+    async def get_task(self, task_id: str) -> TaskState | None:
         """获取任务状态"""
         with self._lock:
             logger.debug(f"🔍 查询任务: {task_id}")
@@ -251,17 +251,17 @@ class MemoryStateManager:
                 logger.debug(f"❌ 未找到任务: {task_id}")
             return task
     
-    async def get_task_dict(self, task_id: str) -> Optional[Dict[str, Any]]:
+    async def get_task_dict(self, task_id: str) -> dict[str, Any] | None:
         """获取任务状态（字典格式）"""
         task = await self.get_task(task_id)
         return task.to_dict() if task else None
     
     async def list_all_tasks(
         self,
-        status: Optional[TaskStatus] = None,
+        status: TaskStatus | None = None,
         limit: int = 20,
         offset: int = 0
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """获取所有任务列表（不限用户）"""
         with self._lock:
             tasks = []
@@ -282,21 +282,20 @@ class MemoryStateManager:
     async def list_user_tasks(
         self,
         user_id: str,
-        status: Optional[TaskStatus] = None,
+        status: TaskStatus | None = None,
         limit: int = 20,
         offset: int = 0
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """获取用户的任务列表"""
         with self._lock:
             tasks = []
             for task in self._tasks.values():
-                if task.user_id == user_id:
-                    if status is None or task.status == status:
-                        item = task.to_dict()
-                        # 兼容前端字段
-                        if 'stock_name' not in item or not item.get('stock_name'):
-                            item['stock_name'] = None
-                        tasks.append(item)
+                if task.user_id == user_id and (status is None or task.status == status):
+                    item = task.to_dict()
+                    # 兼容前端字段
+                    if 'stock_name' not in item or not item.get('stock_name'):
+                        item['stock_name'] = None
+                    tasks.append(item)
 
             # 按开始时间倒序排列
             tasks.sort(key=lambda x: x.get('start_time', ''), reverse=True)
@@ -313,7 +312,7 @@ class MemoryStateManager:
                 return True
             return False
     
-    async def get_statistics(self) -> Dict[str, Any]:
+    async def get_statistics(self) -> dict[str, Any]:
         """获取统计信息"""
         with self._lock:
             total_tasks = len(self._tasks)

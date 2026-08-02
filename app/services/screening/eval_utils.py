@@ -4,10 +4,11 @@ Extracted from ScreeningService to separate concerns while keeping API unchanged
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Iterable
-import pandas as pd
-import numpy as np
+from collections.abc import Iterable
+from typing import Any
 
+import numpy as np
+import pandas as pd
 
 # 标志字段集（技术信号类筛选）
 FLAG_FIELDS = frozenset({
@@ -43,17 +44,15 @@ def _normalize_op(op: Any) -> str:
     return o
 
 
-def _is_group(node: Dict[str, Any]) -> bool:
+def _is_group(node: dict[str, Any]) -> bool:
     if not isinstance(node, dict):
         return False
     if node.get("op") == "group":
         return True
-    if "children" in node and isinstance(node.get("children"), (list, tuple)):
-        return True
-    return False
+    return bool("children" in node and isinstance(node.get("children"), (list, tuple)))
 
 
-def collect_fields_from_conditions(node: Dict[str, Any], allowed_fields: Iterable[str]) -> List[str]:
+def collect_fields_from_conditions(node: dict[str, Any], allowed_fields: Iterable[str]) -> list[str]:
     if not node:
         return []
 
@@ -61,7 +60,7 @@ def collect_fields_from_conditions(node: Dict[str, Any], allowed_fields: Iterabl
 
     # group 节点：递归收集
     if _is_group(node):
-        fields: List[str] = []
+        fields: list[str] = []
         for c in node.get("children", []) or []:
             fields.extend(collect_fields_from_conditions(c, allowed))
         return list(dict.fromkeys(fields))
@@ -71,10 +70,9 @@ def collect_fields_from_conditions(node: Dict[str, Any], allowed_fields: Iterabl
     # (b) {"macd_golden_fork": True, "total_mv": ...}
     if isinstance(node, dict) and "field" in node:
         f = node.get("field")
-        out: List[str] = []
-        if isinstance(f, str):
-            if f in allowed or f in FLAG_FIELDS:
-                out.append(f)
+        out: list[str] = []
+        if isinstance(f, str) and (f in allowed or f in FLAG_FIELDS):
+            out.append(f)
         rf = node.get("right_field")
         if isinstance(rf, str) and (rf in allowed or rf in FLAG_FIELDS):
             out.append(rf)
@@ -82,8 +80,8 @@ def collect_fields_from_conditions(node: Dict[str, Any], allowed_fields: Iterabl
 
     # 扁平字典
     if isinstance(node, dict):
-        out2: List[str] = []
-        for f in node.keys():
+        out2: list[str] = []
+        for f in node:
             if not isinstance(f, str):
                 continue
             if f in allowed or f in FLAG_FIELDS:
@@ -93,7 +91,7 @@ def collect_fields_from_conditions(node: Dict[str, Any], allowed_fields: Iterabl
     return []
 
 
-def evaluate_fund_conditions(snap: Dict[str, Any], node: Dict[str, Any], fund_fields: Iterable[str]) -> bool:
+def evaluate_fund_conditions(snap: dict[str, Any], node: dict[str, Any], fund_fields: Iterable[str]) -> bool:
     if not node:
         return True
     # group
@@ -187,7 +185,7 @@ def _compare_values(left: Any, op: str, right: Any) -> bool:
 
 def evaluate_conditions(
     df: pd.DataFrame,
-    node: Dict[str, Any],
+    node: dict[str, Any],
     allowed_fields: Iterable[str],
     allowed_ops: Iterable[str],
 ) -> bool:
@@ -475,10 +473,10 @@ def _evaluate_flag(df: pd.DataFrame, field: str, op: str, right: Any) -> bool:
                 else:
                     continue
                 if _golden_found:
-                    return True if want_true else False
+                    return bool(want_true)
             except Exception:
                 continue
-        return False if want_true else True
+        return not want_true
 
     return False
 
@@ -511,7 +509,7 @@ def _evaluate_simple_field(df: pd.DataFrame, field: str, value: Any) -> bool:
         return False
 
 
-def safe_float(v: Any) -> Optional[float]:
+def safe_float(v: Any) -> float | None:
     try:
         if v is None or (isinstance(v, float) and np.isnan(v)):
             return None

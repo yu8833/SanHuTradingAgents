@@ -4,37 +4,33 @@
 """
 
 import json
+import logging
 import time
 import uuid
-import asyncio
-import logging
-from typing import List, Optional, Dict, Any
-from datetime import datetime, timedelta
+from typing import Any
 
 from redis.asyncio import Redis
 
 from app.core.database import get_redis_client
-
 from app.services.queue import (
-    READY_LIST,
-    TASK_PREFIX,
     BATCH_PREFIX,
-    SET_PROCESSING,
-    SET_COMPLETED,
-    SET_FAILED,
     BATCH_TASKS_PREFIX,
-    USER_PROCESSING_PREFIX,
-    GLOBAL_CONCURRENT_KEY,
-    VISIBILITY_TIMEOUT_PREFIX,
     DEFAULT_USER_CONCURRENT_LIMIT,
     GLOBAL_CONCURRENT_LIMIT,
+    READY_LIST,
+    SET_COMPLETED,
+    SET_FAILED,
+    SET_PROCESSING,
+    TASK_PREFIX,
+    USER_PROCESSING_PREFIX,
+    VISIBILITY_TIMEOUT_PREFIX,
     VISIBILITY_TIMEOUT_SECONDS,
-    check_user_concurrent_limit,
     check_global_concurrent_limit,
-    mark_task_processing,
-    unmark_task_processing,
-    set_visibility_timeout,
+    check_user_concurrent_limit,
     clear_visibility_timeout,
+    mark_task_processing,
+    set_visibility_timeout,
+    unmark_task_processing,
 )
 
 logger = logging.getLogger(__name__)
@@ -55,8 +51,8 @@ class QueueService:
         self,
         user_id: str,
         symbol: str,
-        params: Dict[str, Any],
-        batch_id: Optional[str] = None
+        params: dict[str, Any],
+        batch_id: str | None = None
     ) -> str:
         """任务入队，支持并发控制（开源版FIFO队列）"""
 
@@ -97,7 +93,7 @@ class QueueService:
         logger.info(f"任务已入队: {task_id}")
         return task_id
 
-    async def dequeue_task(self, worker_id: str) -> Optional[Dict[str, Any]]:
+    async def dequeue_task(self, worker_id: str) -> dict[str, Any] | None:
         """从FIFO队列中取出任务"""
         try:
             # 从FIFO队列获取任务
@@ -148,7 +144,7 @@ class QueueService:
                 return False
 
             user_id = task_data.get("user")
-            worker_id = task_data.get("worker_id")
+            task_data.get("worker_id")
 
             # 从处理中集合移除
             await self._unmark_task_processing(task_id, user_id)
@@ -176,7 +172,7 @@ class QueueService:
             logger.error(f"确认任务失败: {e}")
             return False
 
-    async def create_batch(self, user_id: str, symbols: List[str], params: Dict[str, Any]) -> tuple[str, int]:
+    async def create_batch(self, user_id: str, symbols: list[str], params: dict[str, Any]) -> tuple[str, int]:
         batch_id = str(uuid.uuid4())
         now = int(time.time())
         batch_key = BATCH_PREFIX + batch_id
@@ -191,7 +187,7 @@ class QueueService:
             await self.enqueue_task(user_id=user_id, symbol=s, params=params, batch_id=batch_id)
         return batch_id, len(symbols)
 
-    async def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
+    async def get_task(self, task_id: str) -> dict[str, Any] | None:
         key = TASK_PREFIX + task_id
         data = await self.r.hgetall(key)
         if not data:
@@ -208,7 +204,7 @@ class QueueService:
             data["submitted"] = int(data["submitted"])
         return data
 
-    async def get_batch(self, batch_id: str) -> Optional[Dict[str, Any]]:
+    async def get_batch(self, batch_id: str) -> dict[str, Any] | None:
         key = BATCH_PREFIX + batch_id
         data = await self.r.hgetall(key)
         if not data:
@@ -222,7 +218,7 @@ class QueueService:
         data["tasks"] = list(await self.r.smembers(BATCH_TASKS_PREFIX + batch_id))
         return data
 
-    async def stats(self) -> Dict[str, int]:
+    async def stats(self) -> dict[str, int]:
         queued = await self.r.llen(READY_LIST)
         processing = await self.r.scard(SET_PROCESSING)
         completed = await self.r.scard(SET_COMPLETED)
@@ -259,7 +255,7 @@ class QueueService:
         """清除可见性超时"""
         await clear_visibility_timeout(self.r, task_id)
 
-    async def get_user_queue_status(self, user_id: str) -> Dict[str, int]:
+    async def get_user_queue_status(self, user_id: str) -> dict[str, int]:
         """获取用户队列状态"""
         user_processing_key = USER_PROCESSING_PREFIX + user_id
         processing_count = await self.r.scard(user_processing_key)

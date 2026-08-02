@@ -17,7 +17,7 @@ import asyncio
 import logging
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import numpy as np
 
@@ -30,8 +30,8 @@ class TurnaroundService(RetailScreeningBase):
     """困境反转策略"""
 
     async def scan_turnaround(
-        self, params: Dict[str, Any] = None
-    ) -> Dict[str, Any]:
+        self, params: dict[str, Any] = None
+    ) -> dict[str, Any]:
         """
         扫描困境反转候选股
 
@@ -104,12 +104,12 @@ class TurnaroundService(RetailScreeningBase):
         }
 
     def _analyze_stock(
-        self, code: str, sv: dict, quotes: List[dict]
-    ) -> Optional[dict]:
+        self, code: str, sv: dict, quotes: list[dict]
+    ) -> dict | None:
         """分析单只股票"""
         name = sv.get("name", "")
         industry = sv.get("industry", "")
-        market = sv.get("market", "主板")
+        sv.get("market", "主板")
         pe = sv.get("pe", 0) or 0
         pb = sv.get("pb", 0) or 0
         total_mv = sv.get("total_mv", 0) or 0
@@ -121,7 +121,7 @@ class TurnaroundService(RetailScreeningBase):
 
         closes = np.array([q["close"] for q in quotes], dtype=float)
         volumes = np.array([q.get("volume", 0) for q in quotes], dtype=float)
-        pct_chgs = np.array([q.get("pct_chg", 0) for q in quotes], dtype=float)
+        np.array([q.get("pct_chg", 0) for q in quotes], dtype=float)
 
         # 1. 从60日高点的回撤
         high_60 = float(np.max(closes))
@@ -146,10 +146,7 @@ class TurnaroundService(RetailScreeningBase):
         rebound_from_low = (close - low_20) / low_20 if low_20 > 0 else 0
 
         # 5. 近5日涨幅
-        if len(closes) >= 6:
-            recent_5_pct = (closes[-1] - closes[-6]) / closes[-6]
-        else:
-            recent_5_pct = 0
+        recent_5_pct = (closes[-1] - closes[-6]) / closes[-6] if len(closes) >= 6 else 0
 
         # 6. 信号判定
         signal_type = "观察"
@@ -240,12 +237,11 @@ class TurnaroundService(RetailScreeningBase):
             "low_20": round(low_20, 2),
         }
 
-    async def backtest(self, params: Dict[str, Any] = None) -> Dict[str, Any]:
+    async def backtest(self, params: dict[str, Any] = None) -> dict[str, Any]:
         """回测"""
         params = params or {}
-        from datetime import datetime
 
-        async def scan_func(date_str: str) -> List[dict]:
+        async def scan_func(date_str: str) -> list[dict]:
             """回测扫描函数：使用历史数据，避免未来函数"""
             screening_data = await self._get_screening_view_for_date(date_str)
             pe_positive_codes = [
@@ -278,7 +274,7 @@ class TurnaroundService(RetailScreeningBase):
         return await self.run_backtest("turnaround", scan_func, params)
 
 
-_service: Optional[TurnaroundService] = None
+_service: TurnaroundService | None = None
 
 
 def get_turnaround_service() -> TurnaroundService:

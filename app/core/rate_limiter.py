@@ -3,10 +3,9 @@
 用于控制API调用频率，避免超过数据源的限流限制
 """
 import asyncio
-import time
 import logging
+import time
 from collections import deque
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -189,9 +188,9 @@ class BaoStockRateLimiter(RateLimiter):
 
 
 # 全局速率限制器实例
-_tushare_limiter: Optional[TushareRateLimiter] = None
-_akshare_limiter: Optional[AKShareRateLimiter] = None
-_baostock_limiter: Optional[BaoStockRateLimiter] = None
+_tushare_limiter: TushareRateLimiter | None = None
+_akshare_limiter: AKShareRateLimiter | None = None
+_baostock_limiter: BaoStockRateLimiter | None = None
 
 
 def get_tushare_rate_limiter(tier: str = "standard", safety_margin: float = 0.8) -> TushareRateLimiter:

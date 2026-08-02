@@ -1,0 +1,36 @@
+# Dockerfile.test - 测试专用镜像
+# 基于已构建的 backend 镜像，额外安装测试/静态检查依赖
+# tests/ 目录通过 docker-compose volume 挂载（.dockerignore 排除了 tests/）
+#
+# 用法：
+#   docker compose build test
+#   docker compose run --rm test pytest -m "unit or regression"
+#   docker compose run --rm test ruff check app/ tests/
+#   docker compose run --rm test mypy app/ --config-file mypy.ini
+
+FROM tradingagents-backend:latest
+
+WORKDIR /app
+
+# 安装测试与静态检查依赖（使用清华镜像加速）
+RUN pip install --prefer-binary \
+    pytest>=7.4.0 \
+    pytest-asyncio>=0.23.0 \
+    pytest-cov>=4.1.0 \
+    pytest-timeout>=2.3.0 \
+    pytest-xdist>=3.5.0 \
+    httpx>=0.24.0 \
+    schemathesis>=3.25.0 \
+    ruff>=0.6.0 \
+    mypy>=1.11.0 \
+    -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+# 复制测试配置文件（这些不被 .dockerignore 排除）
+# tests/ 目录通过 docker-compose volume 挂载到 /app/tests
+COPY pytest.ini ./
+COPY ruff.toml ./
+COPY mypy.ini ./
+
+# 默认命令：跑 unit + regression 测试
+# 可通过 docker compose run --rm test <命令> 覆盖
+CMD ["python", "-m", "pytest", "-m", "unit or regression", "--tb=short", "--strict-markers", "-v"]

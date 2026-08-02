@@ -15,7 +15,6 @@
 import logging
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, List, Optional, Set
 
 from app.services.retail.position_sizer import StrategyType
 
@@ -62,7 +61,7 @@ class MarketRegime:
     breadth: MarketBreadth
     sentiment: SentimentLevel
     # 在当前环境下建议激活的策略
-    active_strategies: List[StrategyType]
+    active_strategies: list[StrategyType]
     # 环境判断的简要说明
     summary: str
 
@@ -205,7 +204,7 @@ class MarketRegimeDetector:
         volatility: VolatilityLevel,
         breadth: MarketBreadth,
         sentiment: SentimentLevel,
-    ) -> List[StrategyType]:
+    ) -> list[StrategyType]:
         """
         根据市场环境选择激活的策略
 
@@ -215,7 +214,7 @@ class MarketRegimeDetector:
         - 震荡市 → 困境反转（需要深度研究）
         - 任何环境 → 转债（有债底保护，跨周期）
         """
-        active: List[StrategyType] = []
+        active: list[StrategyType] = []
 
         # 策略A极端反转：熊市+高波动+恐慌 时最有价值
         if (
@@ -251,7 +250,7 @@ class MarketRegimeDetector:
         volatility: VolatilityLevel,
         breadth: MarketBreadth,
         sentiment: SentimentLevel,
-        active: List[StrategyType],
+        active: list[StrategyType],
     ) -> str:
         trend_map = {
             RegimeType.BULL: "牛市",

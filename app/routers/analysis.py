@@ -3,25 +3,26 @@
 增强版本，支持优先级、进度跟踪、任务管理等功能
 """
 
-from fastapi import APIRouter, HTTPException, Depends, Query, BackgroundTasks, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any
-from datetime import datetime
+import asyncio
+import contextlib
 import logging
 import time
 import uuid
-import asyncio
+from datetime import datetime
+from typing import Any
 
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel, Field
+
+from app.models.analysis import (
+    BatchAnalysisRequest,
+    SingleAnalysisRequest,
+)
 from app.routers.auth_db import get_current_user
-from app.services.queue_service import get_queue_service, QueueService
-from app.services.analysis_service import get_analysis_service
+from app.routers.reports import _calculate_confidence, extract_structured_fields
+from app.services.queue_service import QueueService, get_queue_service
 from app.services.simple_analysis_service import get_simple_analysis_service
 from app.services.websocket_manager import get_websocket_manager
-from app.models.analysis import (
-    SingleAnalysisRequest, BatchAnalysisRequest, AnalysisParameters,
-    AnalysisTaskResponse, AnalysisBatchResponse, AnalysisHistoryQuery
-)
-from app.routers.reports import extract_structured_fields, _calculate_confidence
 
 router = APIRouter()
 logger = logging.getLogger("webapi")
@@ -32,13 +33,13 @@ class SingleAnalyzeRequest(BaseModel):
     parameters: dict = Field(default_factory=dict)
 
 class BatchAnalyzeRequest(BaseModel):
-    symbols: List[str]
+    symbols: list[str]
     parameters: dict = Field(default_factory=dict)
     title: str = Field(default="批量分析", description="批次标题")
-    description: Optional[str] = Field(None, description="批次描述")
+    description: str | None = Field(None, description="批次描述")
 
 # 新版API端点
-@router.post("/single", response_model=Dict[str, Any])
+@router.post("/single", response_model=dict[str, Any])
 async def submit_single_analysis(
     request: SingleAnalysisRequest,
     background_tasks: BackgroundTasks,
@@ -47,7 +48,7 @@ async def submit_single_analysis(
 ):
     """提交单股分析任务 - 优先使用队列+Worker模式，兜底使用BackgroundTasks"""
     try:
-        logger.info(f"🎯 收到单股分析请求")
+        logger.info("🎯 收到单股分析请求")
         logger.info(f"👤 用户信息: {user}")
         logger.info(f"📊 请求数据: {request}")
 
@@ -95,11 +96,11 @@ async def submit_single_analysis(
                     logger.info(f"📝 [BackgroundTask] request={request}")
 
                     # 重新获取服务实例，确保在正确的上下文中
-                    logger.info(f"🔧 [BackgroundTask] 正在获取服务实例...")
+                    logger.info("🔧 [BackgroundTask] 正在获取服务实例...")
                     service = get_simple_analysis_service()
                     logger.info(f"✅ [BackgroundTask] 服务实例获取成功: {id(service)}")
 
-                    logger.info(f"🚀 [BackgroundTask] 准备调用 execute_analysis_background...")
+                    logger.info("🚀 [BackgroundTask] 准备调用 execute_analysis_background...")
                     await service.execute_analysis_background(
                         task_id,
                         user_id,
@@ -130,7 +131,7 @@ async def test_route():
     logger.info("🧪 测试路由被调用了！")
     return {"message": "测试路由工作正常", "timestamp": time.time()}
 
-@router.get("/tasks/{task_id}/status", response_model=Dict[str, Any])
+@router.get("/tasks/{task_id}/status", response_model=dict[str, Any])
 async def get_task_status_new(
     task_id: str,
     user: dict = Depends(get_current_user)
@@ -245,7 +246,7 @@ async def get_task_status_new(
         logger.error(f"❌ 获取任务状态失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/tasks/{task_id}/result", response_model=Dict[str, Any])
+@router.get("/tasks/{task_id}/result", response_model=dict[str, Any])
 async def get_task_result(
     task_id: str,
     user: dict = Depends(get_current_user)
@@ -263,7 +264,7 @@ async def get_task_result(
         if task_status and task_status.get('status') == 'completed':
             # 从内存中获取结果数据
             result_data = task_status.get('result_data')
-            logger.info(f"📊 [RESULT] 从内存中获取到结果数据")
+            logger.info("📊 [RESULT] 从内存中获取到结果数据")
 
             # 🔍 调试：检查内存中的数据结构
             if result_data:
@@ -275,7 +276,7 @@ async def get_task_result(
                     decision = result_data['decision']
                     logger.info(f"📊 [RESULT] 内存decision内容: action={decision.get('action')}, target_price={decision.get('target_price')}")
             else:
-                logger.warning(f"⚠️ [RESULT] 内存中result_data为空")
+                logger.warning("⚠️ [RESULT] 内存中result_data为空")
 
         if not result_data:
             # 内存中没有找到，尝试从MongoDB中查找
@@ -421,7 +422,7 @@ async def get_task_result(
                 logger.warning(f"⚠️ [RESULT] 从文件系统加载报告失败: {fs_err}")
 
             if 'reports' not in result_data or not result_data['reports']:
-                logger.info(f"📊 [RESULT] reports字段缺失，尝试从state中提取")
+                logger.info("📊 [RESULT] reports字段缺失，尝试从state中提取")
 
                 # 从state中提取报告内容
                 reports = {}
@@ -516,7 +517,7 @@ async def get_task_result(
 
                 # 如果清理后没有有效报告，设置为空字典
                 if not cleaned_reports:
-                    logger.warning(f"⚠️ [RESULT] 清理后没有有效报告")
+                    logger.warning("⚠️ [RESULT] 清理后没有有效报告")
                     result_data['reports'] = {}
             else:
                 logger.warning(f"⚠️ [RESULT] reports字段不是字典类型: {type(reports)}")
@@ -763,16 +764,16 @@ async def get_task_result(
         logger.error(f"❌ [RESULT] 获取任务结果失败: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
-@router.get("/tasks/all", response_model=Dict[str, Any])
+@router.get("/tasks/all", response_model=dict[str, Any])
 async def list_all_tasks(
     user: dict = Depends(get_current_user),
-    status: Optional[str] = Query(None, description="任务状态过滤"),
+    status: str | None = Query(None, description="任务状态过滤"),
     limit: int = Query(20, ge=1, le=100, description="返回数量限制"),
     offset: int = Query(0, ge=0, description="偏移量")
 ):
     """获取所有任务列表（不限用户）"""
     try:
-        logger.info(f"📋 查询所有任务列表")
+        logger.info("📋 查询所有任务列表")
 
         result = await get_simple_analysis_service().list_all_tasks(
             status=status,
@@ -796,10 +797,10 @@ async def list_all_tasks(
         logger.error(f"❌ 获取任务列表失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/tasks", response_model=Dict[str, Any])
+@router.get("/tasks", response_model=dict[str, Any])
 async def list_user_tasks(
     user: dict = Depends(get_current_user),
-    status: Optional[str] = Query(None, description="任务状态过滤"),
+    status: str | None = Query(None, description="任务状态过滤"),
     limit: int = Query(20, ge=1, le=100, description="返回数量限制"),
     offset: int = Query(0, ge=0, description="偏移量")
 ):
@@ -830,7 +831,7 @@ async def list_user_tasks(
         logger.error(f"❌ 获取任务列表失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/batch", response_model=Dict[str, Any])
+@router.post("/batch", response_model=dict[str, Any])
 async def submit_batch_analysis(
     request: BatchAnalysisRequest,
     user: dict = Depends(get_current_user)
@@ -845,8 +846,8 @@ async def submit_batch_analysis(
 
         simple_service = get_simple_analysis_service()
         batch_id = str(uuid.uuid4())
-        task_ids: List[str] = []
-        mapping: List[Dict[str, str]] = []
+        task_ids: list[str] = []
+        mapping: list[dict[str, str]] = []
 
         # 获取股票代码列表 (兼容旧字段)
         stock_symbols = request.get_symbols()
@@ -1046,12 +1047,12 @@ async def get_user_queue_status(
 @router.get("/user/history")
 async def get_user_analysis_history(
     user: dict = Depends(get_current_user),
-    status: Optional[str] = Query(None, description="任务状态过滤"),
-    start_date: Optional[str] = Query(None, description="开始日期，YYYY-MM-DD"),
-    end_date: Optional[str] = Query(None, description="结束日期，YYYY-MM-DD"),
-    symbol: Optional[str] = Query(None, description="股票代码"),
-    stock_code: Optional[str] = Query(None, description="股票代码(已废弃,使用symbol)"),
-    market_type: Optional[str] = Query(None, description="市场类型"),
+    status: str | None = Query(None, description="任务状态过滤"),
+    start_date: str | None = Query(None, description="开始日期，YYYY-MM-DD"),
+    end_date: str | None = Query(None, description="结束日期，YYYY-MM-DD"),
+    symbol: str | None = Query(None, description="股票代码"),
+    stock_code: str | None = Query(None, description="股票代码(已废弃,使用symbol)"),
+    market_type: str | None = Query(None, description="市场类型"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页大小")
 ):
@@ -1068,7 +1069,7 @@ async def get_user_analysis_history(
 
         # 进行基础筛选
         from datetime import datetime
-        def in_date_range(t: Optional[str]) -> bool:
+        def in_date_range(t: str | None) -> bool:
             if not t:
                 return True
             try:
@@ -1077,15 +1078,11 @@ async def get_user_analysis_history(
                 return True
             ok = True
             if start_date:
-                try:
+                with contextlib.suppress(Exception):
                     ok = ok and (dt.date() >= datetime.fromisoformat(start_date).date())
-                except Exception:
-                    pass
             if end_date:
-                try:
+                with contextlib.suppress(Exception):
                     ok = ok and (dt.date() <= datetime.fromisoformat(end_date).date())
-                except Exception:
-                    pass
             return ok
 
         # 获取查询的股票代码 (兼容旧字段)
@@ -1275,8 +1272,9 @@ async def mark_task_as_failed(
         )
 
         # 更新 MongoDB 中的任务状态
-        from app.core.database import get_mongo_db
         from datetime import datetime
+
+        from app.core.database import get_mongo_db
         db = get_mongo_db()
 
         result = await db.analysis_tasks.update_one(

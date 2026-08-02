@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
+
 from app.routers.auth_db import get_current_user
-from app.services.queue_service import get_queue_service, QueueService
+from app.services.queue_service import QueueService, get_queue_service
 
 router = APIRouter()
 

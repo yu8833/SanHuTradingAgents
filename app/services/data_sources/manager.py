@@ -1,15 +1,15 @@
 """
 Data source manager that orchestrates multiple adapters with priority and optional consistency checks
 """
-from typing import List, Optional, Tuple, Dict
 import logging
 from datetime import datetime, timedelta
+
 import pandas as pd
 
-from .base import DataSourceAdapter
-from .tushare_adapter import TushareAdapter
 from .akshare_adapter import AKShareAdapter
 from .baostock_adapter import BaoStockAdapter
+from .base import DataSourceAdapter
+from .tushare_adapter import TushareAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ class DataSourceManager:
     """
 
     def __init__(self):
-        self.adapters: List[DataSourceAdapter] = [
+        self.adapters: list[DataSourceAdapter] = [
             TushareAdapter(),
             AKShareAdapter(),
             BaoStockAdapter(),
@@ -88,8 +88,8 @@ class DataSourceManager:
             for adapter in self.adapters:
                 adapter._priority = adapter._get_default_priority()
 
-    def get_available_adapters(self) -> List[DataSourceAdapter]:
-        available: List[DataSourceAdapter] = []
+    def get_available_adapters(self) -> list[DataSourceAdapter]:
+        available: list[DataSourceAdapter] = []
         for adapter in self.adapters:
             if adapter.is_available():
                 available.append(adapter)
@@ -100,7 +100,7 @@ class DataSourceManager:
                 logger.warning(f"Data source {adapter.name} is not available")
         return available
 
-    def get_stock_list_with_fallback(self, preferred_sources: Optional[List[str]] = None) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
+    def get_stock_list_with_fallback(self, preferred_sources: list[str] | None = None) -> tuple[pd.DataFrame | None, str | None]:
         """
         获取股票列表，支持指定优先数据源
 
@@ -137,7 +137,7 @@ class DataSourceManager:
                 continue
         return None, None
 
-    def get_daily_basic_with_fallback(self, trade_date: str, preferred_sources: Optional[List[str]] = None) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
+    def get_daily_basic_with_fallback(self, trade_date: str, preferred_sources: list[str] | None = None) -> tuple[pd.DataFrame | None, str | None]:
         """
         获取每日基础数据，支持指定优先数据源
 
@@ -169,7 +169,7 @@ class DataSourceManager:
                 continue
         return None, None
 
-    def find_latest_trade_date_with_fallback(self, preferred_sources: Optional[List[str]] = None) -> Optional[str]:
+    def find_latest_trade_date_with_fallback(self, preferred_sources: list[str] | None = None) -> str | None:
         """
         查找最新交易日期，支持指定优先数据源
 
@@ -199,7 +199,7 @@ class DataSourceManager:
                 continue
         return (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
 
-    def get_realtime_quotes_with_fallback(self) -> Tuple[Optional[Dict], Optional[str]]:
+    def get_realtime_quotes_with_fallback(self) -> tuple[dict | None, str | None]:
         """
         获取全市场实时快照，按适配器优先级依次尝试，返回首个成功结果
         Returns: (quotes_dict, source_name)
@@ -220,7 +220,7 @@ class DataSourceManager:
 
     def get_daily_basic_with_consistency_check(
         self, trade_date: str
-    ) -> Tuple[Optional[pd.DataFrame], Optional[str], Optional[Dict]]:
+    ) -> tuple[pd.DataFrame | None, str | None, dict | None]:
         """
         使用一致性检查获取每日基础数据
 
@@ -279,7 +279,7 @@ class DataSourceManager:
 
 
 
-    def get_kline_with_fallback(self, code: str, period: str = "day", limit: int = 120, adj: Optional[str] = None) -> Tuple[Optional[List[Dict]], Optional[str]]:
+    def get_kline_with_fallback(self, code: str, period: str = "day", limit: int = 120, adj: str | None = None) -> tuple[list[dict] | None, str | None]:
         """按优先级尝试获取K线，返回(items, source)"""
         available_adapters = self.get_available_adapters()
         for adapter in available_adapters:
@@ -293,7 +293,7 @@ class DataSourceManager:
                 continue
         return None, None
 
-    def get_news_with_fallback(self, code: str, days: int = 2, limit: int = 50, include_announcements: bool = True) -> Tuple[Optional[List[Dict]], Optional[str]]:
+    def get_news_with_fallback(self, code: str, days: int = 2, limit: int = 50, include_announcements: bool = True) -> tuple[list[dict] | None, str | None]:
         """按优先级尝试获取新闻与公告，返回(items, source)"""
         available_adapters = self.get_available_adapters()
         for adapter in available_adapters:
@@ -307,7 +307,7 @@ class DataSourceManager:
                 continue
         return None, None
 
-    def get_stock_realtime_fundamental_with_fallback(self, code: str) -> Tuple[Optional[Dict], Optional[str]]:
+    def get_stock_realtime_fundamental_with_fallback(self, code: str) -> tuple[dict | None, str | None]:
         """按优先级尝试获取单只股票的实时行情+基本面数据，返回(data, source)"""
         available_adapters = self.get_available_adapters()
         for adapter in available_adapters:

@@ -3,13 +3,13 @@ TradingAgentsGraph 实例缓存管理器
 复用图实例，减少重复初始化开销
 """
 
-import threading
-import time
 import hashlib
 import logging
-from typing import Dict, Any, Optional, List
+import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class GraphInstance:
     """图实例包装类"""
     graph: Any
-    config: Dict[str, Any]
+    config: dict[str, Any]
     created_at: datetime = field(default_factory=datetime.now)
     last_used: datetime = field(default_factory=datetime.now)
     use_count: int = 0
@@ -51,7 +51,7 @@ class GraphCache:
         max_age_seconds: int = 3600,
         cleanup_interval_seconds: int = 300
     ):
-        self._cache: Dict[str, GraphInstance] = {}
+        self._cache: dict[str, GraphInstance] = {}
         self._lock = threading.Lock()
         self._max_instances = max_instances
         self._max_age_seconds = max_age_seconds
@@ -63,7 +63,7 @@ class GraphCache:
             f"max_age={max_age_seconds}s"
         )
 
-    def _generate_key(self, config: Dict[str, Any], selected_analysts: List[str]) -> str:
+    def _generate_key(self, config: dict[str, Any], selected_analysts: list[str]) -> str:
         """生成缓存键"""
         # 使用关键配置参数生成唯一键
         key_parts = [
@@ -76,7 +76,7 @@ class GraphCache:
         key_string = "|".join(key_parts)
         return hashlib.md5(key_string.encode()).hexdigest()
 
-    def get(self, config: Dict[str, Any], selected_analysts: List[str]) -> Optional[Any]:
+    def get(self, config: dict[str, Any], selected_analysts: list[str]) -> Any | None:
         """
         获取缓存的图实例
 
@@ -110,7 +110,7 @@ class GraphCache:
 
         return None
 
-    def put(self, config: Dict[str, Any], selected_analysts: List[str], graph: Any) -> str:
+    def put(self, config: dict[str, Any], selected_analysts: list[str], graph: Any) -> str:
         """
         缓存图实例
 
@@ -178,7 +178,7 @@ class GraphCache:
             self._cache.clear()
             logger.info(f"📊 [图缓存] 清空缓存: {count} 个实例")
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """获取缓存统计信息"""
         with self._lock:
             instances = list(self._cache.values())
@@ -207,7 +207,7 @@ class GraphCache:
 
 
 # 全局缓存实例
-_graph_cache: Optional[GraphCache] = None
+_graph_cache: GraphCache | None = None
 _cache_lock = threading.Lock()
 
 

@@ -11,11 +11,12 @@
 
 from __future__ import annotations
 
-import time
 import json
 import logging
-from typing import Any, Callable, Optional
-from datetime import datetime, timezone, timedelta
+import time
+from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ _memory_cache: dict[str, tuple[float, Any]] = {}
 _MEMORY_MAX = 500
 
 
-def _memory_get(key: str) -> Optional[Any]:
+def _memory_get(key: str) -> Any | None:
     hit = _memory_cache.get(key)
     if not hit:
         return None
@@ -73,7 +74,7 @@ def _redis_available() -> bool:
         return False
 
 
-def get_cache_sync(key: str) -> Optional[Any]:
+def get_cache_sync(key: str) -> Any | None:
     if _redis_available():
         try:
             from app.core.sync_redis import get_sync_redis
@@ -88,7 +89,7 @@ def get_cache_sync(key: str) -> Optional[Any]:
     return _memory_get(key)
 
 
-def set_cache_sync(key: str, value: Any, ttl: Optional[int] = None, category: str = "default"):
+def set_cache_sync(key: str, value: Any, ttl: int | None = None, category: str = "default"):
     if ttl is None:
         ttl = get_ttl(category)
 
@@ -123,11 +124,11 @@ def cached_sync(key: str, build_fn: Callable, category: str = "default",
 # ============================
 # 缓存失效 / 删除能力（B4）
 # ============================
-def _iter_memory_keys(prefix: Optional[str] = None) -> list[str]:
+def _iter_memory_keys(prefix: str | None = None) -> list[str]:
     """返回匹配前缀（或全部）的内存缓存 key 的副本（安全遍历删除）。"""
     if prefix is None:
         return list(_memory_cache.keys())
-    return [k for k in _memory_cache.keys() if k.startswith(prefix)]
+    return [k for k in _memory_cache if k.startswith(prefix)]
 
 
 def delete_cache_sync(key: str) -> bool:

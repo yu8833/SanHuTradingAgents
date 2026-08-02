@@ -4,9 +4,8 @@
 用于测试Web界面的报告显示功能
 """
 
-import sys
 import os
-from datetime import datetime
+import sys
 
 # 添加项目路径
 sys.path.append(os.path.join(os.path.dirname(__file__), 'web'))

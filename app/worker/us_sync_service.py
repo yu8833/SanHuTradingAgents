@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 美股数据同步服务（支持多数据源）
 
@@ -14,21 +13,21 @@
 - 批量更新操作提高性能
 """
 
-import asyncio
 import logging
-from datetime import datetime
-from typing import List, Dict, Optional, Any
-from pymongo import UpdateOne
 
 # 导入美股数据提供器
 import sys
+from datetime import datetime
 from pathlib import Path
+
+from pymongo import UpdateOne
+
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from tradingagents.dataflows.providers.us.yfinance import YFinanceUtils
-from app.core.database import get_mongo_db
 from app.core.config import settings
+from app.core.database import get_mongo_db
+from tradingagents.dataflows.providers.us.yfinance import YFinanceUtils
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +58,9 @@ class USSyncService:
         """获取 Finnhub 客户端（延迟初始化）"""
         if self._finnhub_client is None:
             try:
-                import finnhub
                 import os
+
+                import finnhub
 
                 api_key = os.getenv('FINNHUB_API_KEY')
                 if not api_key:
@@ -75,7 +75,7 @@ class USSyncService:
 
         return self._finnhub_client
 
-    def _get_us_stock_list_from_finnhub(self) -> List[str]:
+    def _get_us_stock_list_from_finnhub(self) -> list[str]:
         """
         从 Finnhub 获取所有美股列表
 
@@ -129,7 +129,7 @@ class USSyncService:
             logger.info("📋 使用备用美股列表")
             return self._get_fallback_stock_list()
 
-    def _get_fallback_stock_list(self) -> List[str]:
+    def _get_fallback_stock_list(self) -> list[str]:
         """
         获取备用美股列表（主要美股标的）
 
@@ -174,7 +174,7 @@ class USSyncService:
         self,
         source: str = "yfinance",
         force_update: bool = False
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         """
         从指定数据源同步美股基础信息
 
@@ -259,7 +259,7 @@ class USSyncService:
         
         return result
     
-    def _normalize_stock_info(self, stock_info: Dict, source: str) -> Dict:
+    def _normalize_stock_info(self, stock_info: dict, source: str) -> dict:
         """
         标准化股票信息格式
         
@@ -296,7 +296,7 @@ class USSyncService:
     async def sync_quotes_from_source(
         self,
         source: str = "yfinance"
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         """
         从指定数据源同步美股实时行情
         

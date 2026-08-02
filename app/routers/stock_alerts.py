@@ -4,17 +4,17 @@
 支持创建/查询/更新/删除价格预警和涨跌幅预警规则。
 """
 
-from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status
 import logging
 
+from fastapi import APIRouter, Depends, HTTPException
+
+from app.core.response import ok
 from app.routers.auth_db import get_current_user
 from app.services.stock_alert_service import (
-    stock_alert_service,
     AlertRuleCreate,
     AlertRuleUpdate,
+    stock_alert_service,
 )
-from app.core.response import ok
 
 logger = logging.getLogger("webapi")
 
@@ -23,7 +23,7 @@ router = APIRouter(tags=["个股预警"])
 
 @router.get("/alerts", response_model=dict)
 async def get_alerts(
-    code: Optional[str] = None,
+    code: str | None = None,
     current_user: dict = Depends(get_current_user),
 ):
     """获取用户的预警规则列表"""

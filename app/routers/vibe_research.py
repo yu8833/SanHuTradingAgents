@@ -2,29 +2,27 @@
 Vibe-Research 融合模块 API 路由
 提供复盘（大盘指数/市场情绪/资金流/短线情绪/成交额榜）、资讯雷达、板块、AI对话等接口
 """
-from fastapi import APIRouter, HTTPException, Depends, Header
+import json
+import logging
+import os
+from datetime import datetime
+from typing import Any
+
+from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
-import logging
-import json
-import os
-import asyncio
-from datetime import datetime, timedelta
 
 from app.core.response import ok
-from app.services.newsradar import get_radar_cached, fetch_radar
-from app.services.market_overview import (
-    get_overview, get_short_term_emotion, get_turnover_top, get_global_indices
-)
 from app.services import vibe_astock as astock
-from app.services.news_data_service import get_news_data_service, NewsQueryParams
+from app.services.market_overview import get_global_indices, get_overview, get_short_term_emotion, get_turnover_top
+from app.services.news_data_service import NewsQueryParams, get_news_data_service
+from app.services.newsradar import fetch_radar, get_radar_cached
 
 router = APIRouter(prefix="/api/vibe", tags=["Vibe-Research"])
 logger = logging.getLogger("webapi")
 
 
-async def get_optional_current_user(authorization: Optional[str] = Header(default=None)) -> dict:
+async def get_optional_current_user(authorization: str | None = Header(default=None)) -> dict:
     """获取当前用户信息（可选）：有token则验证，没有则返回guest用户"""
     if not authorization:
         return {"user_id": "guest", "username": "guest", "is_guest": True}
@@ -151,7 +149,7 @@ async def quotes(codes: str, current_user: dict = Depends(get_optional_current_u
 
 # ==================== 新闻数据统一服务辅助函数 ====================
 
-def _convert_vibe_news_to_standard(vibe_news: Dict[str, Any], symbol: str) -> Dict[str, Any]:
+def _convert_vibe_news_to_standard(vibe_news: dict[str, Any], symbol: str) -> dict[str, Any]:
     """将Vibe格式（中文键名）的新闻转换为标准格式（英文键名）"""
     title = vibe_news.get("新闻标题", "")
     url = vibe_news.get("新闻链接", "")
@@ -217,7 +215,7 @@ def _convert_vibe_news_to_standard(vibe_news: Dict[str, Any], symbol: str) -> Di
     }
 
 
-def _convert_standard_news_to_vibe(standard_news: Dict[str, Any]) -> Dict[str, Any]:
+def _convert_standard_news_to_vibe(standard_news: dict[str, Any]) -> dict[str, Any]:
     """将标准格式（英文键名）的新闻转换为前端统一格式（英文键名）"""
     publish_time = standard_news.get("publish_time")
     if isinstance(publish_time, datetime):
@@ -236,7 +234,7 @@ def _convert_standard_news_to_vibe(standard_news: Dict[str, Any]) -> Dict[str, A
     }
 
 
-async def _fetch_and_save_stock_news(code: str, limit: int = 20) -> List[Dict[str, Any]]:
+async def _fetch_and_save_stock_news(code: str, limit: int = 20) -> list[dict[str, Any]]:
     """从东财获取股票新闻并保存到数据库，返回统一格式的新闻列表"""
     try:
         vibe_news_list = astock.stock_news(code, limit)
@@ -467,7 +465,7 @@ async def sectors(current_user: dict = Depends(get_optional_current_user)):
     """板块中心：热门赛道产业链骨架（静态数据）"""
     sectors_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "sectors.json")
     try:
-        with open(sectors_file, "r", encoding="utf-8") as f:
+        with open(sectors_file, encoding="utf-8") as f:
             data = json.load(f)
         return ok(data)
     except Exception as e:
@@ -485,7 +483,7 @@ class ChatMessage(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    messages: List[ChatMessage]
+    messages: list[ChatMessage]
     context: str = ""
 
 
@@ -619,7 +617,7 @@ async def chat(req: ChatRequest, current_user: dict = Depends(get_optional_curre
 # ---------------------------------------------------------------------------
 
 @router.get("/notes")
-async def get_notes(kind: Optional[str] = None, current_user: dict = Depends(get_optional_current_user)):
+async def get_notes(kind: str | None = None, current_user: dict = Depends(get_optional_current_user)):
     """获取研究笔记列表"""
     try:
         from app.services.research_notes_service import research_notes_service
@@ -635,9 +633,9 @@ class AddNoteRequest(BaseModel):
     kind: str
     title: str
     content: str
-    related_code: Optional[str] = None
-    related_strategy: Optional[str] = None
-    related_trade_id: Optional[str] = None
+    related_code: str | None = None
+    related_strategy: str | None = None
+    related_trade_id: str | None = None
 
 
 @router.post("/notes")
@@ -703,7 +701,7 @@ async def get_watchlist(current_user: dict = Depends(get_optional_current_user))
 
 class WatchlistRequest(BaseModel):
     code: str
-    name: Optional[str] = ""
+    name: str | None = ""
 
 
 @router.post("/watchlist")

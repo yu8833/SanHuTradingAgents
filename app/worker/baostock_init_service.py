@@ -5,13 +5,12 @@ BaoStock数据初始化服务
 """
 import asyncio
 import logging
-from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any
 
 from app.core.config import get_settings
-from app.core.database import get_database
-from app.worker.baostock_sync_service import BaoStockSyncService, BaoStockSyncStats
+from app.worker.baostock_sync_service import BaoStockSyncService
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +27,9 @@ class BaoStockInitializationStats:
     weekly_records: int = 0
     monthly_records: int = 0
     financial_records: int = 0
-    errors: List[str] = field(default_factory=list)
-    start_time: Optional[datetime] = None
-    end_time: Optional[datetime] = None
+    errors: list[str] = field(default_factory=list)
+    start_time: datetime | None = None
+    end_time: datetime | None = None
     
     @property
     def duration(self) -> float:
@@ -78,7 +77,7 @@ class BaoStockInitService:
             logger.error(f"❌ BaoStock初始化服务异步初始化失败: {e}")
             raise
     
-    async def check_database_status(self) -> Dict[str, Any]:
+    async def check_database_status(self) -> dict[str, Any]:
         """检查数据库状态"""
         try:
             # 检查基础信息

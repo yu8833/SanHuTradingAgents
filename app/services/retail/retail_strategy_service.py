@@ -7,22 +7,21 @@
 
 import logging
 from datetime import datetime
-from typing import List, Optional
 
-from app.services.retail.position_sizer import (
-    PositionSizer,
-    PositionAdvice,
-    Holding,
-    StrategyType,
-)
 from app.services.retail.exit_rule_engine import (
     ExitRuleEngine,
     ExitSignal,
     HoldingContext,
 )
 from app.services.retail.market_regime_detector import (
-    MarketRegimeDetector,
     MarketRegime,
+    MarketRegimeDetector,
+)
+from app.services.retail.position_sizer import (
+    Holding,
+    PositionAdvice,
+    PositionSizer,
+    StrategyType,
 )
 
 logger = logging.getLogger(__name__)
@@ -48,7 +47,7 @@ class RetailStrategyService:
     def calculate_position(
         self,
         account_size: float,
-        holdings: List[dict],
+        holdings: list[dict],
         symbol: str,
         strategy: StrategyType,
         price: float,
@@ -56,7 +55,7 @@ class RetailStrategyService:
         profit_loss_ratio: float = 1.5,
         industry: str = "未知",
         theme: str = "未知",
-        daily_volume_amount: Optional[float] = None,
+        daily_volume_amount: float | None = None,
     ) -> PositionAdvice:
         """
         计算仓位建议
@@ -100,7 +99,7 @@ class RetailStrategyService:
 
     # ---- 退出信号 ----
 
-    def check_exits(self, holdings: List[dict]) -> List[ExitSignal]:
+    def check_exits(self, holdings: list[dict]) -> list[ExitSignal]:
         """
         批量检查持仓退出信号
 
@@ -112,7 +111,7 @@ class RetailStrategyService:
         Returns:
             List[ExitSignal]
         """
-        contexts: List[HoldingContext] = []
+        contexts: list[HoldingContext] = []
         for h in holdings or []:
             try:
                 strategy = StrategyType(h.get("strategy", "default"))
@@ -179,7 +178,7 @@ class RetailStrategyService:
 
 
 # 单例
-_service: Optional[RetailStrategyService] = None
+_service: RetailStrategyService | None = None
 
 
 def get_retail_strategy_service() -> RetailStrategyService:

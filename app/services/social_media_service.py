@@ -2,10 +2,11 @@
 社媒消息数据服务
 提供统一的社媒消息存储、查询和分析功能
 """
-from typing import Optional, List, Dict, Any, Union
-from datetime import datetime, timedelta
-from dataclasses import dataclass, field
 import logging
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any
+
 from pymongo import ReplaceOne
 from pymongo.errors import BulkWriteError
 
@@ -17,19 +18,19 @@ logger = logging.getLogger(__name__)
 @dataclass
 class SocialMediaQueryParams:
     """社媒消息查询参数"""
-    symbol: Optional[str] = None
-    symbols: Optional[List[str]] = None
-    platform: Optional[str] = None  # weibo/wechat/douyin/xiaohongshu/zhihu/twitter/reddit
-    message_type: Optional[str] = None  # post/comment/repost/reply
-    start_time: Optional[datetime] = None
-    end_time: Optional[datetime] = None
-    sentiment: Optional[str] = None
-    importance: Optional[str] = None
-    min_influence_score: Optional[float] = None
-    min_engagement_rate: Optional[float] = None
+    symbol: str | None = None
+    symbols: list[str] | None = None
+    platform: str | None = None  # weibo/wechat/douyin/xiaohongshu/zhihu/twitter/reddit
+    message_type: str | None = None  # post/comment/repost/reply
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+    sentiment: str | None = None
+    importance: str | None = None
+    min_influence_score: float | None = None
+    min_engagement_rate: float | None = None
     verified_only: bool = False
-    keywords: Optional[List[str]] = None
-    hashtags: Optional[List[str]] = None
+    keywords: list[str] | None = None
+    hashtags: list[str] | None = None
     limit: int = 50
     skip: int = 0
     sort_by: str = "publish_time"
@@ -43,9 +44,9 @@ class SocialMediaStats:
     positive_count: int = 0
     negative_count: int = 0
     neutral_count: int = 0
-    platforms: Dict[str, int] = field(default_factory=dict)
-    message_types: Dict[str, int] = field(default_factory=dict)
-    top_hashtags: List[Dict[str, Any]] = field(default_factory=list)
+    platforms: dict[str, int] = field(default_factory=dict)
+    message_types: dict[str, int] = field(default_factory=dict)
+    top_hashtags: list[dict[str, Any]] = field(default_factory=list)
     avg_engagement_rate: float = 0.0
     total_views: int = 0
     total_likes: int = 0
@@ -79,8 +80,8 @@ class SocialMediaService:
     
     async def save_social_media_messages(
         self, 
-        messages: List[Dict[str, Any]]
-    ) -> Dict[str, int]:
+        messages: list[dict[str, Any]]
+    ) -> dict[str, int]:
         """
         批量保存社媒消息
         
@@ -138,7 +139,7 @@ class SocialMediaService:
     async def query_social_media_messages(
         self, 
         params: SocialMediaQueryParams
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         查询社媒消息
         
@@ -218,7 +219,7 @@ class SocialMediaService:
         symbol: str = None, 
         platform: str = None,
         limit: int = 20
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """获取最新社媒消息"""
         params = SocialMediaQueryParams(
             symbol=symbol,
@@ -235,7 +236,7 @@ class SocialMediaService:
         symbol: str = None,
         platform: str = None,
         limit: int = 50
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """全文搜索社媒消息"""
         try:
             collection = await self._get_collection()

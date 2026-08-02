@@ -3,12 +3,12 @@ Utility helpers for EnhancedScreeningService to separate analysis and conversion
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from app.models.screening import FieldType, BASIC_FIELDS_INFO
+from app.models.screening import BASIC_FIELDS_INFO, FieldType
 
 
-def analyze_conditions(conditions: List[Dict[str, Any]]) -> Dict[str, Any]:
+def analyze_conditions(conditions: list[dict[str, Any]]) -> dict[str, Any]:
     analysis = {
         "total_conditions": len(conditions),
         "database_supported_conditions": 0,
@@ -75,7 +75,7 @@ def analyze_conditions(conditions: List[Dict[str, Any]]) -> Dict[str, Any]:
     return analysis
 
 
-def convert_conditions_to_traditional_format(conditions: List[Dict[str, Any]]) -> Dict[str, Any]:
+def convert_conditions_to_traditional_format(conditions: list[dict[str, Any]]) -> dict[str, Any]:
     """
     把 [{field, operator, value}, ...] 列表转为后端可统一评估的
     {logic, children} 树结构。每个叶子是 {'field':..., 'op':..., 'value':...}。
@@ -85,7 +85,7 @@ def convert_conditions_to_traditional_format(conditions: List[Dict[str, Any]]) -
     if not conditions:
         return {"logic": "AND", "children": []}
 
-    children: List[Dict[str, Any]] = []
+    children: list[dict[str, Any]] = []
     for c in conditions:
         if not isinstance(c, dict):
             continue

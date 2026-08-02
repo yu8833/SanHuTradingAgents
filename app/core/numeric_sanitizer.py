@@ -14,13 +14,13 @@
 from __future__ import annotations
 
 import math
-from typing import Any, Optional, Tuple
+from typing import Any
 
 import pandas as pd  # 用于 pd.isna（服务层已全局依赖 pandas，复用即可）
 
 
 # ---------- 基础清洗 ----------
-def _coerce_raw(value: Any) -> Tuple[bool, Optional[float]]:
+def _coerce_raw(value: Any) -> tuple[bool, float | None]:
     """把输入尽可能转换成 float；返回 (是否成功, 数值)。
 
     规则：
@@ -68,13 +68,13 @@ def _coerce_raw(value: Any) -> Tuple[bool, Optional[float]]:
 def sanitize_numeric(
     value: Any,
     *,
-    min_value: Optional[float] = None,
-    max_value: Optional[float] = None,
+    min_value: float | None = None,
+    max_value: float | None = None,
     allow_negative: bool = True,
     reject_zero: bool = False,
-    default: Optional[float] = None,
-    round_digits: Optional[int] = None,
-) -> Optional[float]:
+    default: float | None = None,
+    round_digits: int | None = None,
+) -> float | None:
     """通用数值清洗 + 范围校验。
 
     Args:
@@ -110,7 +110,7 @@ def sanitize_numeric(
 # A股主板/创业板/科创板日涨跌停：±10% / ±20%；ST ±5%；北交所±30%。
 # 日K pct_chg 给 ±35% 的容忍范围（除权除息当日若未复权也不会超过此值），
 # 把脏数据如 -90% / +1000% 直接拒掉。
-def sanitize_pct_chg(value: Any, *, max_abs_pct: float = 35.0, round_digits: int = 4) -> Optional[float]:
+def sanitize_pct_chg(value: Any, *, max_abs_pct: float = 35.0, round_digits: int = 4) -> float | None:
     return sanitize_numeric(
         value,
         min_value=-max_abs_pct,
@@ -119,7 +119,7 @@ def sanitize_pct_chg(value: Any, *, max_abs_pct: float = 35.0, round_digits: int
     )
 
 
-def sanitize_price(value: Any, *, round_digits: int = 4) -> Optional[float]:
+def sanitize_price(value: Any, *, round_digits: int = 4) -> float | None:
     """股价类（close/open/high/low/pre_close）。非负，且合理上界 10 万元（A 股历史未见超过茅台 3000，但要兼容港股/美股后复权价百万级，给 1e6 上限）。"""
     return sanitize_numeric(
         value,
@@ -130,7 +130,7 @@ def sanitize_price(value: Any, *, round_digits: int = 4) -> Optional[float]:
     )
 
 
-def sanitize_amount(value: Any, *, round_digits: int = 2) -> Optional[float]:
+def sanitize_amount(value: Any, *, round_digits: int = 2) -> float | None:
     """成交额 / 流通市值（元或万元，看写入口径，但单位转换在外部，这里只管数值本身）。"""
     return sanitize_numeric(
         value,
@@ -141,12 +141,12 @@ def sanitize_amount(value: Any, *, round_digits: int = 2) -> Optional[float]:
     )
 
 
-def sanitize_volume(value: Any) -> Optional[float]:
+def sanitize_volume(value: Any) -> float | None:
     """成交量：非负整数域，但允许 float；绝对非负。"""
     return sanitize_numeric(value, min_value=0.0, max_value=1e14, allow_negative=False)
 
 
-def sanitize_turnover_rate(value: Any, *, round_digits: int = 4) -> Optional[float]:
+def sanitize_turnover_rate(value: Any, *, round_digits: int = 4) -> float | None:
     """换手率 %：0 ~ 100 之间。"""
     return sanitize_numeric(
         value,
@@ -157,7 +157,7 @@ def sanitize_turnover_rate(value: Any, *, round_digits: int = 4) -> Optional[flo
     )
 
 
-def sanitize_pe(value: Any, *, round_digits: int = 2) -> Optional[float]:
+def sanitize_pe(value: Any, *, round_digits: int = 2) -> float | None:
     """市盈率：允许负值（亏损股），但绝对数值限制在 [-1e4, 1e4]。
     负值的"含义"由前端/下游决定（很多展示会标为 None），这里只过滤离谱脏数据。
     """
@@ -169,7 +169,7 @@ def sanitize_pe(value: Any, *, round_digits: int = 2) -> Optional[float]:
     )
 
 
-def sanitize_pb(value: Any, *, round_digits: int = 2) -> Optional[float]:
+def sanitize_pb(value: Any, *, round_digits: int = 2) -> float | None:
     """市净率：一般非负（资不抵债可以 <0），给 [-100, 1000] 容忍范围。"""
     return sanitize_numeric(
         value,
@@ -179,7 +179,7 @@ def sanitize_pb(value: Any, *, round_digits: int = 2) -> Optional[float]:
     )
 
 
-def sanitize_roe(value: Any, *, round_digits: int = 2) -> Optional[float]:
+def sanitize_roe(value: Any, *, round_digits: int = 2) -> float | None:
     """ROE（%）。[-100, 100] 以外一般是脏数据。"""
     return sanitize_numeric(
         value,

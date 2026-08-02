@@ -9,8 +9,8 @@
 - 系统会自动映射到原厂模型的能力配置
 """
 
-from enum import IntEnum, Enum
-from typing import Dict, List, Any, Tuple
+from enum import Enum, IntEnum
+from typing import Any
 
 
 class ModelCapabilityLevel(IntEnum):
@@ -50,7 +50,7 @@ CAPABILITY_DESCRIPTIONS = {
 
 
 # 常见模型的默认能力配置（用于初始化和参考）
-DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
+DEFAULT_MODEL_CAPABILITIES: dict[str, dict[str, Any]] = {
     # ==================== 阿里百炼 (DashScope) ====================
     "qwen-turbo": {
         "capability_level": 1,
@@ -329,7 +329,7 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
 }
 
 
-def get_model_capability_badge(level: int) -> Dict[str, str]:
+def get_model_capability_badge(level: int) -> dict[str, str]:
     """获取能力等级徽章样式"""
     badges = {
         1: {"text": "基础", "color": "#909399", "icon": "⚡"},
@@ -341,7 +341,7 @@ def get_model_capability_badge(level: int) -> Dict[str, str]:
     return badges.get(level, badges[2])
 
 
-def get_role_badge(role: ModelRole) -> Dict[str, str]:
+def get_role_badge(role: ModelRole) -> dict[str, str]:
     """获取角色徽章样式"""
     badges = {
         ModelRole.QUICK_ANALYSIS: {"text": "快速分析", "color": "success", "icon": "⚡"},
@@ -351,7 +351,7 @@ def get_role_badge(role: ModelRole) -> Dict[str, str]:
     return badges.get(role, badges[ModelRole.BOTH])
 
 
-def get_feature_badge(feature: ModelFeature) -> Dict[str, str]:
+def get_feature_badge(feature: ModelFeature) -> dict[str, str]:
     """获取特性徽章样式"""
     badges = {
         ModelFeature.TOOL_CALLING: {"text": "工具调用", "color": "info", "icon": "🔧"},
@@ -429,7 +429,7 @@ def is_aggregator_model(model_name: str) -> bool:
     return "/" in model_name
 
 
-def parse_aggregator_model(model_name: str) -> Tuple[str, str]:
+def parse_aggregator_model(model_name: str) -> tuple[str, str]:
     """
     解析聚合渠道模型名称
 

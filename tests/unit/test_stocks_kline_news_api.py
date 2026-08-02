@@ -1,7 +1,8 @@
+from unittest.mock import patch
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from unittest.mock import patch
 
 # Build a minimal app that mounts only the stocks router to avoid triggering app.main lifespan
 from app.routers import stocks as stocks_router
@@ -21,7 +22,7 @@ def create_test_app():
     return app
 
 
-@pytest.fixture()
+@pytest.fixture
 def client():
     app = create_test_app()
     with TestClient(app) as c:
@@ -45,7 +46,8 @@ def test_kline_ok_source_and_adj(client):
         assert data["limit"] == 2
         assert data["adj"] == "qfq"
         assert data["source"] == "tushare"
-        assert isinstance(data["items"], list) and len(data["items"]) == 2
+        assert isinstance(data["items"], list)
+        assert len(data["items"]) == 2
 
 
 def test_kline_invalid_period_returns_400(client):
@@ -72,5 +74,6 @@ def test_news_ok_with_announcements_and_source(client):
         assert data["limit"] == 2
         assert data["include_announcements"] is True
         assert data["source"] == "tushare"
-        assert isinstance(data["items"], list) and len(data["items"]) == 2
+        assert isinstance(data["items"], list)
+        assert len(data["items"]) == 2
 

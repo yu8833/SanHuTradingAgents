@@ -5,8 +5,9 @@
 """
 import logging
 from datetime import datetime
-from typing import Dict, Any, List, Optional
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from typing import Any
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field
 
 from app.worker.multi_period_sync_service import get_multi_period_sync_service
@@ -18,19 +19,19 @@ router = APIRouter(prefix="/api/multi-period-sync", tags=["多周期同步"])
 
 class MultiPeriodSyncRequest(BaseModel):
     """多周期同步请求"""
-    symbols: Optional[List[str]] = Field(None, description="股票代码列表，None表示所有股票")
-    periods: Optional[List[str]] = Field(["daily"], description="周期列表 (daily/weekly/monthly)")
-    data_sources: Optional[List[str]] = Field(["tushare", "akshare", "baostock"], description="数据源列表")
-    start_date: Optional[str] = Field(None, description="开始日期 (YYYY-MM-DD)")
-    end_date: Optional[str] = Field(None, description="结束日期 (YYYY-MM-DD)")
-    all_history: Optional[bool] = Field(False, description="是否同步所有历史数据（忽略时间范围）")
+    symbols: list[str] | None = Field(None, description="股票代码列表，None表示所有股票")
+    periods: list[str] | None = Field(["daily"], description="周期列表 (daily/weekly/monthly)")
+    data_sources: list[str] | None = Field(["tushare", "akshare", "baostock"], description="数据源列表")
+    start_date: str | None = Field(None, description="开始日期 (YYYY-MM-DD)")
+    end_date: str | None = Field(None, description="结束日期 (YYYY-MM-DD)")
+    all_history: bool | None = Field(False, description="是否同步所有历史数据（忽略时间范围）")
 
 
 class MultiPeriodSyncResponse(BaseModel):
     """多周期同步响应"""
     success: bool
     message: str
-    data: Optional[Dict[str, Any]] = None
+    data: dict[str, Any] | None = None
 
 
 @router.post("/start", response_model=MultiPeriodSyncResponse)
@@ -72,8 +73,8 @@ async def start_multi_period_sync(
 @router.post("/start-daily", response_model=MultiPeriodSyncResponse)
 async def start_daily_sync(
     background_tasks: BackgroundTasks,
-    symbols: Optional[List[str]] = None,
-    data_sources: Optional[List[str]] = None
+    symbols: list[str] | None = None,
+    data_sources: list[str] | None = None
 ):
     """启动日线数据同步"""
     try:
@@ -103,8 +104,8 @@ async def start_daily_sync(
 @router.post("/start-weekly", response_model=MultiPeriodSyncResponse)
 async def start_weekly_sync(
     background_tasks: BackgroundTasks,
-    symbols: Optional[List[str]] = None,
-    data_sources: Optional[List[str]] = None
+    symbols: list[str] | None = None,
+    data_sources: list[str] | None = None
 ):
     """启动周线数据同步"""
     try:
@@ -134,8 +135,8 @@ async def start_weekly_sync(
 @router.post("/start-monthly", response_model=MultiPeriodSyncResponse)
 async def start_monthly_sync(
     background_tasks: BackgroundTasks,
-    symbols: Optional[List[str]] = None,
-    data_sources: Optional[List[str]] = None
+    symbols: list[str] | None = None,
+    data_sources: list[str] | None = None
 ):
     """启动月线数据同步"""
     try:
@@ -165,9 +166,9 @@ async def start_monthly_sync(
 @router.post("/start-all-history", response_model=MultiPeriodSyncResponse)
 async def start_all_history_sync(
     background_tasks: BackgroundTasks,
-    symbols: Optional[List[str]] = None,
-    periods: Optional[List[str]] = None,
-    data_sources: Optional[List[str]] = None
+    symbols: list[str] | None = None,
+    periods: list[str] | None = None,
+    data_sources: list[str] | None = None
 ):
     """启动全历史数据同步（从1990年开始）"""
     try:
@@ -202,10 +203,10 @@ async def start_all_history_sync(
 @router.post("/start-incremental", response_model=MultiPeriodSyncResponse)
 async def start_incremental_sync(
     background_tasks: BackgroundTasks,
-    symbols: Optional[List[str]] = None,
-    periods: Optional[List[str]] = None,
-    data_sources: Optional[List[str]] = None,
-    days_back: Optional[int] = 30
+    symbols: list[str] | None = None,
+    periods: list[str] | None = None,
+    data_sources: list[str] | None = None,
+    days_back: int | None = 30
 ):
     """启动增量数据同步（最近N天）"""
     try:

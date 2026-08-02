@@ -4,37 +4,35 @@
 """
 
 import logging
-import asyncio
-from typing import Optional
+
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from pymongo import MongoClient
 from pymongo.database import Database
-from redis.asyncio import Redis, ConnectionPool
-from pymongo.errors import ServerSelectionTimeoutError, ConnectionFailure
-from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.asyncio import ConnectionPool, Redis
+
 from .config import settings
 
 logger = logging.getLogger(__name__)
 
 # 全局连接实例
-mongo_client: Optional[AsyncIOMotorClient] = None
-mongo_db: Optional[AsyncIOMotorDatabase] = None
-redis_client: Optional[Redis] = None
-redis_pool: Optional[ConnectionPool] = None
+mongo_client: AsyncIOMotorClient | None = None
+mongo_db: AsyncIOMotorDatabase | None = None
+redis_client: Redis | None = None
+redis_pool: ConnectionPool | None = None
 
 # 同步 MongoDB 连接（用于非异步上下文）
-_sync_mongo_client: Optional[MongoClient] = None
-_sync_mongo_db: Optional[Database] = None
+_sync_mongo_client: MongoClient | None = None
+_sync_mongo_db: Database | None = None
 
 
 class DatabaseManager:
     """数据库连接管理器"""
 
     def __init__(self):
-        self.mongo_client: Optional[AsyncIOMotorClient] = None
-        self.mongo_db: Optional[AsyncIOMotorDatabase] = None
-        self.redis_client: Optional[Redis] = None
-        self.redis_pool: Optional[ConnectionPool] = None
+        self.mongo_client: AsyncIOMotorClient | None = None
+        self.mongo_db: AsyncIOMotorDatabase | None = None
+        self.redis_client: Redis | None = None
+        self.redis_pool: ConnectionPool | None = None
         self._mongo_healthy = False
         self._redis_healthy = False
 

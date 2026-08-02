@@ -3,18 +3,19 @@ Tushare数据同步服务
 负责将Tushare数据同步到MongoDB标准化集合
 """
 import asyncio
-from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Any, Optional
+import contextlib
 import logging
+from datetime import datetime, timedelta, timezone
+from typing import Any
 
-from tradingagents.dataflows.providers.china.tushare import TushareProvider
-from app.services.stock_data_service import get_stock_data_service
+from app.core.config import settings
+from app.core.database import get_mongo_db
+from app.core.rate_limiter import get_tushare_rate_limiter
 from app.services.historical_data_service import get_historical_data_service
 from app.services.news_data_service import get_news_data_service
-from app.core.database import get_mongo_db
-from app.core.config import settings
-from app.core.rate_limiter import get_tushare_rate_limiter
+from app.services.stock_data_service import get_stock_data_service
 from app.utils.timezone import now_tz
+from tradingagents.dataflows.providers.china.tushare import TushareProvider
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +81,7 @@ class TushareSyncService:
     
     # ==================== 基础信息同步 ====================
     
-    async def sync_stock_basic_info(self, force_update: bool = False, job_id: str = None) -> Dict[str, Any]:
+    async def sync_stock_basic_info(self, force_update: bool = False, job_id: str = None) -> dict[str, Any]:
         """
         同步股票基础信息
 
@@ -165,7 +166,7 @@ class TushareSyncService:
             stats["errors"].append({"error": str(e), "context": "sync_stock_basic_info"})
             return stats
     
-    async def _process_basic_info_batch(self, batch: List[Dict[str, Any]], force_update: bool) -> Dict[str, Any]:
+    async def _process_basic_info_batch(self, batch: list[dict[str, Any]], force_update: bool) -> dict[str, Any]:
         """处理基础信息批次"""
         batch_stats = {
             "success_count": 0,
@@ -233,7 +234,7 @@ class TushareSyncService:
     
     # ==================== 实时行情同步 ====================
     
-    async def sync_realtime_quotes(self, symbols: List[str] = None, force: bool = False) -> Dict[str, Any]:
+    async def sync_realtime_quotes(self, symbols: list[str] = None, force: bool = False) -> dict[str, Any]:
         """
         同步实时行情数据
 
@@ -425,7 +426,7 @@ class TushareSyncService:
     #     logger.info(f"✅ 单只接口获取完成，成功 {len(quotes_map)}/{len(symbols)} 只")
     #     return quotes_map
 
-    async def _process_quotes_batch(self, batch: List[str]) -> Dict[str, Any]:
+    async def _process_quotes_batch(self, batch: list[str]) -> dict[str, Any]:
         """处理行情批次"""
         batch_stats = {
             "success_count": 0,
@@ -495,6 +496,7 @@ class TushareSyncService:
         注意：此方法不检查节假日，仅检查时间段
         """
         from datetime import datetime
+
         import pytz
 
         # 使用上海时区
@@ -550,14 +552,14 @@ class TushareSyncService:
 
     async def sync_historical_data(
         self,
-        symbols: List[str] = None,
+        symbols: list[str] = None,
         start_date: str = None,
         end_date: str = None,
         incremental: bool = True,
         all_history: bool = False,
         period: str = "daily",
         job_id: str = None
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         同步历史数据
 
@@ -858,7 +860,7 @@ class TushareSyncService:
 
     # ==================== 财务数据同步 ====================
 
-    async def sync_financial_data(self, symbols: List[str] = None, limit: int = 20, job_id: str = None) -> Dict[str, Any]:
+    async def sync_financial_data(self, symbols: list[str] = None, limit: int = 20, job_id: str = None) -> dict[str, Any]:
         """
         同步财务数据
 
@@ -926,7 +928,7 @@ class TushareSyncService:
 
                         # 更新任务进度
                         if job_id:
-                            from app.services.scheduler_service import update_job_progress, TaskCancelledException
+                            from app.services.scheduler_service import TaskCancelledException, update_job_progress
                             try:
                                 await update_job_progress(
                                     job_id=job_id,
@@ -1006,7 +1008,7 @@ class TushareSyncService:
             return False
 
     @staticmethod
-    def _parse_financial_text(symbol: str, text: str) -> Dict[str, Any]:
+    def _parse_financial_text(symbol: str, text: str) -> dict[str, Any]:
         """将 get_fundamentals 返回的格式化文本解析为结构化 dict。
 
         文本格式示例：
@@ -1017,8 +1019,7 @@ class TushareSyncService:
             PB: 12.3
             ...
         """
-        import re
-        result: Dict[str, Any] = {"symbol": symbol, "data_source": "tushare"}
+        result: dict[str, Any] = {"symbol": symbol, "data_source": "tushare"}
 
         for line in text.splitlines():
             line = line.strip()
@@ -1033,35 +1034,25 @@ class TushareSyncService:
             if key == "name":
                 result["name"] = val
             elif key in ("price", "current_price"):
-                try: result["current_price"] = float(val)
-                except ValueError: pass
+                with contextlib.suppress(ValueError): result["current_price"] = float(val)
             elif "pe_ttm" in key or key == "pe (ttm)":
-                try: result["pe_ttm"] = float(val)
-                except ValueError: pass
+                with contextlib.suppress(ValueError): result["pe_ttm"] = float(val)
             elif "pe_static" in key or key == "pe (static)":
-                try: result["pe_static"] = float(val)
-                except ValueError: pass
+                with contextlib.suppress(ValueError): result["pe_static"] = float(val)
             elif key == "pb":
-                try: result["pb"] = float(val)
-                except ValueError: pass
+                with contextlib.suppress(ValueError): result["pb"] = float(val)
             elif key == "roe":
-                try: result["roe"] = float(val)
-                except ValueError: pass
+                with contextlib.suppress(ValueError): result["roe"] = float(val)
             elif "total_mv" in key or "总市值" in key:
-                try: result["total_mv"] = float(val.replace("亿", "").strip())
-                except ValueError: pass
+                with contextlib.suppress(ValueError): result["total_mv"] = float(val.replace("亿", "").strip())
             elif "circ_mv" in key or "流通市值" in key:
-                try: result["circ_mv"] = float(val.replace("亿", "").strip())
-                except ValueError: pass
+                with contextlib.suppress(ValueError): result["circ_mv"] = float(val.replace("亿", "").strip())
             elif "turnover" in key or "换手" in key:
-                try: result["turnover_rate"] = float(val.replace("%", "").strip())
-                except ValueError: pass
+                with contextlib.suppress(ValueError): result["turnover_rate"] = float(val.replace("%", "").strip())
             elif "volume" in key or "成交量" in key:
-                try: result["volume"] = float(val)
-                except ValueError: pass
+                with contextlib.suppress(ValueError): result["volume"] = float(val)
             elif "amount" in key or "成交额" in key:
-                try: result["amount"] = float(val)
-                except ValueError: pass
+                with contextlib.suppress(ValueError): result["amount"] = float(val)
 
         # 生成默认 report_period（当前季度末）
         from datetime import datetime
@@ -1083,7 +1074,7 @@ class TushareSyncService:
         threshold = datetime.utcnow() - timedelta(hours=hours)
         return updated_at > threshold
 
-    async def get_sync_status(self) -> Dict[str, Any]:
+    async def get_sync_status(self) -> dict[str, Any]:
         """获取同步状态"""
         try:
             # 统计各集合的数据量
@@ -1123,12 +1114,12 @@ class TushareSyncService:
 
     async def sync_news_data(
         self,
-        symbols: List[str] = None,
+        symbols: list[str] = None,
         hours_back: int = 24,
         max_news_per_stock: int = 20,
         force_update: bool = False,
         job_id: str = None
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         同步新闻数据
 
@@ -1223,10 +1214,10 @@ class TushareSyncService:
 
     async def _process_news_batch(
         self,
-        batch: List[str],
+        batch: list[str],
         hours_back: int,
         max_news_per_stock: int
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """处理新闻批次"""
         batch_stats = {
             "success_count": 0,
@@ -1294,10 +1285,7 @@ class TushareSyncService:
                 sort=[("timestamp", -1)]
             )
 
-            if execution and execution.get("cancel_requested"):
-                return True
-
-            return False
+            return bool(execution and execution.get("cancel_requested"))
 
         except Exception as e:
             logger.error(f"❌ 检查任务停止标记失败: {e}")
@@ -1313,9 +1301,10 @@ class TushareSyncService:
             message: 进度消息
         """
         try:
-            from app.services.scheduler_service import TaskCancelledException
             from pymongo import MongoClient
+
             from app.core.config import settings
+            from app.services.scheduler_service import TaskCancelledException
 
             logger.info(f"📊 [进度更新] 开始更新任务 {job_id} 进度: {progress}% - {message}")
 
@@ -1411,7 +1400,7 @@ async def run_tushare_historical_sync(incremental: bool = True):
     logger.info(f"🚀 [APScheduler] 开始执行 Tushare 历史数据同步任务 (incremental={incremental})")
     try:
         service = await get_tushare_sync_service()
-        logger.info(f"✅ [APScheduler] Tushare 同步服务已初始化")
+        logger.info("✅ [APScheduler] Tushare 同步服务已初始化")
         result = await service.sync_historical_data(incremental=incremental, job_id="tushare_historical_sync")
         logger.info(f"✅ [APScheduler] Tushare历史数据同步完成: {result}")
 

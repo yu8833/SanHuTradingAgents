@@ -1,9 +1,6 @@
-import os
 from importlib import reload
-from pathlib import Path
 
 import pytest
-
 
 MINIMAL_TOML = """
 [logging]
@@ -21,7 +18,7 @@ backup_count = 1
 """
 
 
-@pytest.mark.parametrize("profile, expect_name", [
+@pytest.mark.parametrize(("profile", "expect_name"), [
     ("", "logging.toml"),
     ("docker", "logging_docker.toml"),
 ])

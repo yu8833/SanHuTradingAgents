@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 ===================================
 速览分析服务
@@ -13,17 +12,17 @@
 
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, Any, List, Optional
 from datetime import datetime
+from typing import Any
 
+from app.data_provider import get_kline, get_realtime_quote
 from app.services.stock_analyzer import (
+    BuySignal,
     StockTrendAnalyzer,
     TrendAnalysisResult,
     TrendStatus,
     VolumeStatus,
-    BuySignal,
 )
-from app.data_provider import get_kline, get_realtime_quote
 
 logger = logging.getLogger(__name__)
 
@@ -79,14 +78,14 @@ class QuickAnalysisResult:
     signal_score: int = 0         # 综合评分 0-100
     
     # 关键价位
-    support_levels: List[float] = field(default_factory=list)  # 支撑位
-    resistance_levels: List[float] = field(default_factory=list)  # 阻力位
+    support_levels: list[float] = field(default_factory=list)  # 支撑位
+    resistance_levels: list[float] = field(default_factory=list)  # 阻力位
     stop_loss: float = 0.0        # 止损位
     target: float = 0.0           # 目标位
     
     # 原因和风险
-    signal_reasons: List[str] = field(default_factory=list)  # 买入理由
-    risk_factors: List[str] = field(default_factory=list)   # 风险因素
+    signal_reasons: list[str] = field(default_factory=list)  # 买入理由
+    risk_factors: list[str] = field(default_factory=list)   # 风险因素
     
     # 一句话结论
     summary: str = ""              # 一句话总结
@@ -94,7 +93,7 @@ class QuickAnalysisResult:
     # 时间
     analysis_date: str = ""        # 分析日期
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         return {
             "stock_code": self.stock_code,
@@ -147,7 +146,7 @@ class QuickAnalysisService:
         """初始化服务"""
         self.analyzer = StockTrendAnalyzer()
     
-    def analyze(self, stock_code: str, stock_name: Optional[str] = None) -> QuickAnalysisResult:
+    def analyze(self, stock_code: str, stock_name: str | None = None) -> QuickAnalysisResult:
         """
         执行快速分析
         
@@ -202,7 +201,9 @@ class QuickAnalysisService:
         if price <= 0:
             return df
         
-        from datetime import datetime, date as date_type
+        from datetime import date as date_type
+        from datetime import datetime
+
         import pandas as pd
         
         # 获取最新K线日期
@@ -257,8 +258,8 @@ class QuickAnalysisService:
     def _build_result(
         self,
         trend: TrendAnalysisResult,
-        realtime: Optional[dict],
-        stock_name: Optional[str] = None
+        realtime: dict | None,
+        stock_name: str | None = None
     ) -> QuickAnalysisResult:
         """构建速览分析结果"""
         result = QuickAnalysisResult()
@@ -441,9 +442,9 @@ class QuickAnalysisService:
         bias = trend.bias_ma5
         if abs(bias) < 3:
             if bias < 0:
-                parts.append(f"回踩买点")
+                parts.append("回踩买点")
             else:
-                parts.append(f"贴近MA5")
+                parts.append("贴近MA5")
         elif bias > 5:
             parts.append("⚠️偏离过大")
         
@@ -451,7 +452,7 @@ class QuickAnalysisService:
 
 
 # 单例模式
-_service: Optional[QuickAnalysisService] = None
+_service: QuickAnalysisService | None = None
 
 
 def get_quick_analysis_service() -> QuickAnalysisService:
@@ -462,7 +463,7 @@ def get_quick_analysis_service() -> QuickAnalysisService:
     return _service
 
 
-def quick_analyze(stock_code: str, stock_name: Optional[str] = None) -> QuickAnalysisResult:
+def quick_analyze(stock_code: str, stock_name: str | None = None) -> QuickAnalysisResult:
     """
     便捷函数：执行速览分析
     

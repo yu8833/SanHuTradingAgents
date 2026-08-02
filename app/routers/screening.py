@@ -1,14 +1,14 @@
 import logging
-from fastapi import APIRouter, HTTPException, Depends, Request
-from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any
-from app.routers.auth_db import get_current_user
+from typing import Any
 
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field
+
+from app.models.screening import BASIC_FIELDS_INFO, FieldInfo, ScreeningCondition
+from app.models.screening import ScreeningRequest as NewScreeningRequest
+from app.models.screening import ScreeningResponse as NewScreeningResponse
+from app.routers.auth_db import get_current_user
 from app.services.enhanced_screening_service import get_enhanced_screening_service
-from app.models.screening import (
-    ScreeningCondition, ScreeningRequest as NewScreeningRequest,
-    ScreeningResponse as NewScreeningResponse, FieldInfo, BASIC_FIELDS_INFO
-)
 
 router = APIRouter(tags=["screening"])
 logger = logging.getLogger("webapi")
@@ -16,12 +16,12 @@ logger = logging.getLogger("webapi")
 # 筛选字段配置响应模型
 class FieldConfigResponse(BaseModel):
     """筛选字段配置"""
-    fields: Dict[str, FieldInfo]
-    categories: Dict[str, List[str]]
+    fields: dict[str, FieldInfo]
+    categories: dict[str, list[str]]
 
 class ScreeningResponse(BaseModel):
     total: int
-    items: List[dict]
+    items: list[dict]
 
 enhanced_svc = get_enhanced_screening_service()
 
@@ -87,7 +87,7 @@ async def get_screening_fields(user: dict = Depends(get_current_user)):
         logger.error(f"[get_screening_fields] 获取字段配置失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-def _convert_legacy_conditions_to_new_format(legacy_conditions: Dict[str, Any]) -> List[ScreeningCondition]:
+def _convert_legacy_conditions_to_new_format(legacy_conditions: dict[str, Any]) -> list[ScreeningCondition]:
     """向后兼容的辅助函数（当前已由 run_screening 直接处理）"""
     conditions = []
     if isinstance(legacy_conditions, dict):
@@ -125,7 +125,7 @@ async def run_screening(request: Request, user: dict = Depends(get_current_user)
             raw_conditions = raw_body["children"]
 
         # 映射字段名和操作符
-        conditions: List[Dict[str, Any]] = []
+        conditions: list[dict[str, Any]] = []
         for c in raw_conditions:
             if not isinstance(c, dict):
                 continue
@@ -204,7 +204,7 @@ async def enhanced_screening(req: NewScreeningRequest, user: dict = Depends(get_
 
 
 # 获取单个字段的详细信息
-@router.get("/fields/{field_name}", response_model=Dict[str, Any])
+@router.get("/fields/{field_name}", response_model=dict[str, Any])
 async def get_field_info(field_name: str, user: dict = Depends(get_current_user)):
     """获取指定字段的详细信息"""
     try:
@@ -220,8 +220,8 @@ async def get_field_info(field_name: str, user: dict = Depends(get_current_user)
 
 
 # 验证筛选条件
-@router.post("/validate", response_model=Dict[str, Any])
-async def validate_conditions(conditions: List[ScreeningCondition], user: dict = Depends(get_current_user)):
+@router.post("/validate", response_model=dict[str, Any])
+async def validate_conditions(conditions: list[ScreeningCondition], user: dict = Depends(get_current_user)):
     """验证筛选条件的有效性"""
     try:
         validation_result = await enhanced_svc.validate_conditions(conditions)
@@ -352,10 +352,10 @@ class LimitUpPullbackRequest(BaseModel):
 class LimitUpPullbackResponse(BaseModel):
     """涨停回调策略响应"""
     total: int = Field(..., description="符合条件的股票总数")
-    items: List[dict] = Field(..., description="股票列表")
-    took_ms: Optional[int] = Field(None, description="耗时(毫秒)")
-    scanned_count: Optional[int] = Field(None, description="扫描的股票总数")
-    params: Optional[dict] = Field(None, description="使用的参数")
+    items: list[dict] = Field(..., description="股票列表")
+    took_ms: int | None = Field(None, description="耗时(毫秒)")
+    scanned_count: int | None = Field(None, description="扫描的股票总数")
+    params: dict | None = Field(None, description="使用的参数")
 
 
 @router.post("/limit-up-pullback/scan", response_model=LimitUpPullbackResponse)
@@ -401,8 +401,8 @@ async def scan_limit_up_pullback(
 
 class LimitUpPullbackBacktestRequest(LimitUpPullbackRequest):
     """涨停回调策略回测请求参数"""
-    start_date: Optional[str] = Field(None, description="回测开始日期 YYYY-MM-DD")
-    end_date: Optional[str] = Field(None, description="回测结束日期 YYYY-MM-DD")
+    start_date: str | None = Field(None, description="回测开始日期 YYYY-MM-DD")
+    end_date: str | None = Field(None, description="回测结束日期 YYYY-MM-DD")
 
 
 class LimitUpPullbackBacktestResponse(BaseModel):
@@ -425,11 +425,11 @@ class LimitUpPullbackBacktestResponse(BaseModel):
     backtest_days: int = Field(..., description="回测天数")
     signal_stats: dict = Field(default_factory=dict, description="按信号类型统计")
     sell_reason_stats: dict = Field(default_factory=dict, description="按卖出原因统计")
-    daily_results: List[dict] = Field(default_factory=list, description="每日结果(前50天)")
-    top_trades: List[dict] = Field(default_factory=list, description="盈利最多的20笔")
-    worst_trades: List[dict] = Field(default_factory=list, description="亏损最多的20笔")
-    params: Optional[dict] = Field(None, description="使用的参数")
-    took_ms: Optional[int] = Field(None, description="耗时(毫秒)")
+    daily_results: list[dict] = Field(default_factory=list, description="每日结果(前50天)")
+    top_trades: list[dict] = Field(default_factory=list, description="盈利最多的20笔")
+    worst_trades: list[dict] = Field(default_factory=list, description="亏损最多的20笔")
+    params: dict | None = Field(None, description="使用的参数")
+    took_ms: int | None = Field(None, description="耗时(毫秒)")
 
 
 @router.post("/limit-up-pullback/backtest", response_model=LimitUpPullbackBacktestResponse)
@@ -476,11 +476,11 @@ class ThreeBuysThreeSellsRequest(BaseModel):
 class ThreeBuysThreeSellsResponse(BaseModel):
     """三买三卖策略响应"""
     total: int = Field(..., description="符合条件的股票总数")
-    items: List[dict] = Field(..., description="股票列表")
-    took_ms: Optional[int] = Field(None, description="耗时(毫秒)")
-    scanned_count: Optional[int] = Field(None, description="扫描的股票总数")
-    params: Optional[dict] = Field(None, description="使用的参数")
-    market_trend: Optional[str] = Field(None, description="大盘趋势")
+    items: list[dict] = Field(..., description="股票列表")
+    took_ms: int | None = Field(None, description="耗时(毫秒)")
+    scanned_count: int | None = Field(None, description="扫描的股票总数")
+    params: dict | None = Field(None, description="使用的参数")
+    market_trend: str | None = Field(None, description="大盘趋势")
 
 
 @router.post("/three-buys-three-sells/scan", response_model=ThreeBuysThreeSellsResponse)
@@ -532,8 +532,8 @@ async def scan_three_buys_three_sells(
 
 class ThreeBuysThreeSellsBacktestRequest(ThreeBuysThreeSellsRequest):
     """三买三卖策略回测请求参数"""
-    start_date: Optional[str] = Field(None, description="回测开始日期 YYYY-MM-DD")
-    end_date: Optional[str] = Field(None, description="回测结束日期 YYYY-MM-DD")
+    start_date: str | None = Field(None, description="回测开始日期 YYYY-MM-DD")
+    end_date: str | None = Field(None, description="回测结束日期 YYYY-MM-DD")
 
 
 class ThreeBuysThreeSellsBacktestResponse(BaseModel):
@@ -556,11 +556,11 @@ class ThreeBuysThreeSellsBacktestResponse(BaseModel):
     backtest_days: int = Field(..., description="回测天数")
     signal_stats: dict = Field(default_factory=dict, description="按信号类型统计")
     sell_reason_stats: dict = Field(default_factory=dict, description="按卖出原因统计")
-    daily_results: List[dict] = Field(default_factory=list, description="每日结果(前50天)")
-    top_trades: List[dict] = Field(default_factory=list, description="盈利最多的20笔")
-    worst_trades: List[dict] = Field(default_factory=list, description="亏损最多的20笔")
-    params: Optional[dict] = Field(None, description="使用的参数")
-    took_ms: Optional[int] = Field(None, description="耗时(毫秒)")
+    daily_results: list[dict] = Field(default_factory=list, description="每日结果(前50天)")
+    top_trades: list[dict] = Field(default_factory=list, description="盈利最多的20笔")
+    worst_trades: list[dict] = Field(default_factory=list, description="亏损最多的20笔")
+    params: dict | None = Field(None, description="使用的参数")
+    took_ms: int | None = Field(None, description="耗时(毫秒)")
 
 
 @router.post("/three-buys-three-sells/backtest", response_model=ThreeBuysThreeSellsBacktestResponse)
@@ -605,30 +605,30 @@ class RetailStrategyRequest(BaseModel):
     limit: int = Field(50, ge=1, le=200, description="扫描返回数量限制")
     max_position_pct: float = Field(0.1, ge=0.01, le=0.5, description="单股最大仓位比例")
     # 转债下修博弈专用参数（其他策略忽略）
-    max_bond_price: Optional[float] = Field(None, description="转债价格上限")
-    max_stock_vs_conversion: Optional[float] = Field(None, description="正股/转股价最大比值")
-    min_issue_size: Optional[float] = Field(None, description="最小发行规模（亿元）")
+    max_bond_price: float | None = Field(None, description="转债价格上限")
+    max_stock_vs_conversion: float | None = Field(None, description="正股/转股价最大比值")
+    min_issue_size: float | None = Field(None, description="最小发行规模（亿元）")
 
 
 class RetailStrategyScanResponse(BaseModel):
     """散户策略扫描响应"""
     total: int
-    items: List[dict]
-    took_ms: Optional[int] = None
-    params: Optional[dict] = None
-    scanned_count: Optional[int] = None
-    message: Optional[str] = None
+    items: list[dict]
+    took_ms: int | None = None
+    params: dict | None = None
+    scanned_count: int | None = None
+    message: str | None = None
 
 
 class RetailStrategyBacktestRequest(RetailStrategyRequest):
     """散户策略回测请求"""
-    start_date: Optional[str] = Field(None, description="回测开始日期 YYYY-MM-DD")
-    end_date: Optional[str] = Field(None, description="回测结束日期 YYYY-MM-DD")
+    start_date: str | None = Field(None, description="回测开始日期 YYYY-MM-DD")
+    end_date: str | None = Field(None, description="回测结束日期 YYYY-MM-DD")
 
 
 class RetailStrategyBacktestResponse(BaseModel):
     """散户策略回测响应"""
-    strategy: Optional[str] = None
+    strategy: str | None = None
     total_trades: int = 0
     win_rate: float = 0
     avg_return: float = 0
@@ -645,13 +645,13 @@ class RetailStrategyBacktestResponse(BaseModel):
     final_capital: float = 0
     initial_capital: float = 0
     backtest_days: int = 0
-    sell_reason_stats: Optional[Dict[str, Any]] = None
-    daily_results: Optional[List[dict]] = None
-    top_trades: Optional[List[dict]] = None
-    worst_trades: Optional[List[dict]] = None
-    params: Optional[dict] = None
-    took_ms: Optional[int] = None
-    message: Optional[str] = None
+    sell_reason_stats: dict[str, Any] | None = None
+    daily_results: list[dict] | None = None
+    top_trades: list[dict] | None = None
+    worst_trades: list[dict] | None = None
+    params: dict | None = None
+    took_ms: int | None = None
+    message: str | None = None
 
 
 # ---- 极端反转 ----
@@ -875,8 +875,9 @@ async def check_data_freshness(user: dict = Depends(get_current_user)):
     - overall: 整体新鲜度（任一数据不新鲜则整体不新鲜）
     """
     try:
-        from app.core.database import get_mongo_db
         from datetime import datetime, timedelta
+
+        from app.core.database import get_mongo_db
 
         db = get_mongo_db()
         today = datetime.now()

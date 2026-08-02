@@ -1,21 +1,19 @@
 """
 分析报告管理API路由
 """
-import os
 import json
-from datetime import datetime, timedelta
-from typing import List, Optional, Dict, Any
-from pathlib import Path
-
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel
-
-from .auth_db import get_current_user
-from ..core.database import get_mongo_db
-from ..utils.timezone import to_config_tz
 import logging
 import re
+from datetime import datetime
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+
+from ..core.database import get_mongo_db
+from ..utils.timezone import to_config_tz
+from .auth_db import get_current_user
 
 logger = logging.getLogger("webapi")
 
@@ -46,7 +44,7 @@ _SCORE_FIELDS = [
 ]
 
 
-def _iter_text(reports: Dict[str, Any]):
+def _iter_text(reports: dict[str, Any]):
     """依次取出 reports 中所有字符串子报告，按优先级排序"""
     order = [
         "final_trade_decision", "trader_investment_plan",
@@ -86,9 +84,7 @@ def _clean_report_text(text: str) -> str:
         if re.search(r'面评分\s*[:：]', stripped):
             return True
         # 带编号的正式章节
-        if re.match(r'^\d+[\.、]\s+', stripped) and len(stripped) > 10:
-            return True
-        return False
+        return bool(re.match(r'^\d+[\.、]\s+', stripped) and len(stripped) > 10)
     
     # 判断一行是否是应该跳过的寒暄/思考内容
     def is_filler(line: str) -> bool:
@@ -110,9 +106,7 @@ def _clean_report_text(text: str) -> str:
         for pat in filler_patterns:
             if re.search(pat, stripped, re.IGNORECASE):
                 # 但如果是正式章节标题的一部分，就不跳过
-                if is_formal_start(stripped):
-                    return False
-                return True
+                return not is_formal_start(stripped)
         return False
     
     for line in lines:
@@ -136,7 +130,7 @@ def _clean_report_text(text: str) -> str:
     return "\n".join(cleaned_lines)
 
 
-def _match_price(text: str, aliases: List[str]) -> Optional[str]:
+def _match_price(text: str, aliases: list[str]) -> str | None:
     """
     在文本中查找诸如 `理想买入\n10.70 元` 或 `7. 支撑位：10.88元` 的价格。
     返回价格字符串（如 "10.70 元"），找不到返回 None。
@@ -188,7 +182,7 @@ def _match_price(text: str, aliases: List[str]) -> Optional[str]:
     return None
 
 
-def _match_score(text: str, aliases: List[str]) -> Optional[str]:
+def _match_score(text: str, aliases: list[str]) -> str | None:
     """从文本中抽取类似 `置信度：0.75` 或 `**11. 置信度**`\n0.75 的数值"""
     if not text:
         return None
@@ -231,7 +225,7 @@ def _match_score(text: str, aliases: List[str]) -> Optional[str]:
     return None
 
 
-def _extract_holder_empty_advice(text: str, field_name: str) -> Optional[str]:
+def _extract_holder_empty_advice(text: str, field_name: str) -> str | None:
     """
     提取持仓者建议或空仓者建议。
     匹配格式如：
@@ -306,9 +300,8 @@ def _extract_holder_empty_advice(text: str, field_name: str) -> Optional[str]:
                 break
             
             # 持仓者遇到"对于空仓者"或"空仓者"停止
-            if field_name == "持仓者建议":
-                if re.search(r"(对于空仓者|空仓者[：:：])", stripped):
-                    break
+            if field_name == "持仓者建议" and re.search(r"(对于空仓者|空仓者[：:：])", stripped):
+                break
             
             # 跳过纯标题行（如 "1. xxx：" 或 "#### xxx"）
             if re.match(r"^\d+[\.、]\s*", stripped) and re.search(r"[：:：]$", stripped):
@@ -361,10 +354,7 @@ def _extract_holder_empty_advice(text: str, field_name: str) -> Optional[str]:
     if len(content) > max_chars:
         # 在句号处截断
         pos = content.rfind("。", 0, max_chars)
-        if pos > max_chars // 2:
-            content = content[:pos + 1]
-        else:
-            content = content[:max_chars] + "…"
+        content = content[:pos + 1] if pos > max_chars // 2 else content[:max_chars] + "…"
     
     return content
 
@@ -388,7 +378,6 @@ def _normalize_rating(val: str) -> str:
         "MARKET PERFORM": "持有", "MARKET OUTPERFORM": "增持",
         "MARKET UNDERPERFORM": "减持", "EQUAL WEIGHT": "持有",
         "OUTPERFORM": "增持", "UNDERPERFORM": "减持",
-        "SELL SHORT": "卖出",
     }
     v_upper = v.upper().strip()
     if v_upper in en_map:
@@ -419,7 +408,7 @@ def _normalize_rating(val: str) -> str:
     return "持有"
 
 
-def extract_structured_fields(reports: Dict[str, Any]) -> Dict[str, Any]:
+def extract_structured_fields(reports: dict[str, Any]) -> dict[str, Any]:
     """
     遍历 reports 中的所有子报告（以及可能存在的 decision 字典），
     抽取可用于前端展示的结构化字段。字段会被合并到报告详情顶层，
@@ -439,12 +428,12 @@ def extract_structured_fields(reports: Dict[str, Any]) -> Dict[str, Any]:
       - 理想买入 / 二次买入 / 止损价格 / 止盈目标 / 支撑位 / 阻力位
       - 核心洞察 / 投资逻辑 / 情绪分析 / 趋势预测 / 策略点位 / 风险提示
     """
-    result: Dict[str, Any] = {}
+    result: dict[str, Any] = {}
     if not isinstance(reports, dict) or not reports:
         return result
 
     # 0) 清理所有报告文本，移除开头的思考过程、寒暄语等无关内容
-    cleaned_reports: Dict[str, Any] = {}
+    cleaned_reports: dict[str, Any] = {}
     for k, v in reports.items():
         if isinstance(v, str):
             cleaned_reports[k] = _clean_report_text(v)
@@ -664,7 +653,7 @@ def extract_structured_fields(reports: Dict[str, Any]) -> Dict[str, Any]:
 
     # 6) 多维度评分估算（技术面/基本面/情绪面/政策面/消息面/资金面/解禁面）
     #    如果已有明确评分则保留，否则基于报告倾向估算
-    def _estimate_score_from_text(text: str) -> Optional[float]:
+    def _estimate_score_from_text(text: str) -> float | None:
         """基于文本的整体倾向估算评分（0-100分）"""
         if not text:
             return None
@@ -695,7 +684,7 @@ def extract_structured_fields(reports: Dict[str, Any]) -> Dict[str, Any]:
         else:
             return 50.0
 
-    def _parse_score_value(val: Any) -> Optional[float]:
+    def _parse_score_value(val: Any) -> float | None:
         """将评分值标准化为 0-100 分（百分制）"""
         if val is None or val == "":
             return None
@@ -830,7 +819,7 @@ def extract_structured_fields(reports: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
-def _inject_position_advice(result: Dict[str, Any]) -> None:
+def _inject_position_advice(result: dict[str, Any]) -> None:
     """
     当评级为买入时，自动计算仓位建议并注入到 result 中。
 
@@ -858,8 +847,8 @@ def _inject_position_advice(result: Dict[str, Any]) -> None:
         return
 
     try:
-        from app.services.retail.retail_strategy_service import get_retail_strategy_service
         from app.services.retail.position_sizer import StrategyType
+        from app.services.retail.retail_strategy_service import get_retail_strategy_service
 
         service = get_retail_strategy_service()
         # 默认账户10万元，无持仓，default 策略
@@ -877,7 +866,7 @@ def _inject_position_advice(result: Dict[str, Any]) -> None:
         logger.warning(f"⚠️ 计算仓位建议失败: {e}")
 
 
-def _calculate_confidence(reports: Dict[str, Any]) -> Dict[str, Any]:
+def _calculate_confidence(reports: dict[str, Any]) -> dict[str, Any]:
     """
     基于多维度重新计算置信度（0-100分）
     
@@ -955,7 +944,7 @@ def _calculate_confidence(reports: Dict[str, Any]) -> Dict[str, Any]:
         "news_report", "policy_report", "hot_money_report", "lockup_report"
     ]
 
-    def _rating_direction_from_text(text: str) -> Optional[int]:
+    def _rating_direction_from_text(text: str) -> int | None:
         if not text:
             return None
         rating = _match_rating(text, ["操作建议", "评级", "投资建议", "建议", "行动评级", "执行评级", "最终结论", "核心观点", "结论"])
@@ -1027,7 +1016,7 @@ def _calculate_confidence(reports: Dict[str, Any]) -> Dict[str, Any]:
 
     risk_count = sum([has_risky, has_neutral, has_safe])
 
-    def _extract_risk_level(text: str) -> Optional[str]:
+    def _extract_risk_level(text: str) -> str | None:
         if not text:
             return None
         val = _match_score(text, ["风险等级", "风险评级", "风险评估", "风险级别"])
@@ -1235,7 +1224,7 @@ def _calculate_confidence(reports: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _match_rating(text: str, aliases: List[str]) -> Optional[str]:
+def _match_rating(text: str, aliases: list[str]) -> str | None:
     """
     从文本中抽取"操作建议/评级"的关键字（买入/持有/卖出等）。
     优先级：精确匹配标题行（含下一行内容）> 标题行带冒号 > 研究经理结论搜索 > 关键词搜索
@@ -1441,7 +1430,7 @@ def get_stock_name(stock_code: str) -> str:
 
 
 # 统一构建报告查询：支持 _id(ObjectId) / analysis_id / task_id 三种
-def _build_report_query(report_id: str) -> Dict[str, Any]:
+def _build_report_query(report_id: str) -> dict[str, Any]:
     ors = [
         {"analysis_id": report_id},
         {"task_id": report_id},
@@ -1457,29 +1446,29 @@ router = APIRouter(prefix="/api/reports", tags=["reports"])
 
 class ReportFilter(BaseModel):
     """报告筛选参数"""
-    search_keyword: Optional[str] = None
-    market_filter: Optional[str] = None
-    start_date: Optional[str] = None
-    end_date: Optional[str] = None
-    stock_code: Optional[str] = None
-    report_type: Optional[str] = None
+    search_keyword: str | None = None
+    market_filter: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    stock_code: str | None = None
+    report_type: str | None = None
 
 class ReportListResponse(BaseModel):
     """报告列表响应"""
-    reports: List[Dict[str, Any]]
+    reports: list[dict[str, Any]]
     total: int
     page: int
     page_size: int
 
-@router.get("/list", response_model=Dict[str, Any])
+@router.get("/list", response_model=dict[str, Any])
 async def get_reports_list(
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
-    search_keyword: Optional[str] = Query(None, description="搜索关键词"),
-    market_filter: Optional[str] = Query(None, description="市场筛选（A股/港股/美股）"),
-    start_date: Optional[str] = Query(None, description="开始日期"),
-    end_date: Optional[str] = Query(None, description="结束日期"),
-    stock_code: Optional[str] = Query(None, description="股票代码"),
+    search_keyword: str | None = Query(None, description="搜索关键词"),
+    market_filter: str | None = Query(None, description="市场筛选（A股/港股/美股）"),
+    start_date: str | None = Query(None, description="开始日期"),
+    end_date: str | None = Query(None, description="结束日期"),
+    stock_code: str | None = Query(None, description="股票代码"),
     user: dict = Depends(get_current_user)
 ):
     """获取分析报告列表"""
@@ -1540,7 +1529,7 @@ async def get_reports_list(
             # 收集 reports 中可能有的股票代码
             reports_data = doc.get("reports", {})
             if isinstance(reports_data, dict):
-                for k, v in reports_data.items():
+                for _k, v in reports_data.items():
                     if isinstance(v, str) and len(v) > 50:
                         codes_in_text = re.findall(r'\b\d{6}\b', v)
                         for code in codes_in_text:
@@ -2019,6 +2008,7 @@ async def download_report(
         elif format == "markdown":
             # Markdown格式下载 — 使用统一的报告导出器（全中文标题）
             from urllib.parse import quote
+
             from app.utils.report_exporter import report_exporter
             content = report_exporter.generate_markdown_report(doc)
             filename = f"{stock_symbol}_{analysis_date}_报告.md"
@@ -2039,6 +2029,7 @@ async def download_report(
         elif format == "docx":
             # Word 文档格式下载
             from urllib.parse import quote
+
             from app.utils.report_exporter import report_exporter
 
             try:
@@ -2064,8 +2055,9 @@ async def download_report(
 
         elif format == "pdf":
             # PDF 格式下载
-            from app.utils.report_exporter import report_exporter
             from urllib.parse import quote
+
+            from app.utils.report_exporter import report_exporter
 
             try:
                 # 生成 PDF 文档（基于中文 Markdown -> HTML -> PDF）

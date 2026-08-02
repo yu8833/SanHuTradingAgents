@@ -207,6 +207,59 @@ services:
         max-size: "50m"
         max-file: "2"
 
+  # 测试服务（基于 backend 镜像，额外装测试依赖）
+  # 用法：
+  #   docker compose run --rm test                          # 默认跑 unit+regression
+  #   docker compose run --rm test pytest -m smoke          # 跑冒烟测试
+  #   docker compose run --rm test ruff check app/ tests/   # 静态检查
+  #   docker compose run --rm test mypy app/                # 类型检查
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    image: tradingagents-test:latest
+    container_name: tradingagents-test
+    volumes:
+      # 源代码映射（与 backend 一致，确保测试最新代码）
+      - ./app:/app/app
+      - ./tradingagents:/app/tradingagents
+      - ./tests:/app/tests
+      - ./scripts:/app/scripts
+      - ./config:/app/config
+      # 前端源码映射（防回归测试需要扫描前端文件）
+      - ./frontend:/app/frontend
+      # Dockerfile 挂载（bug-004 防回归测试需要扫描 Dockerfile.backend 里的 --workers 配置）
+      - ./Dockerfile.backend:/app/Dockerfile.backend:ro
+      - ./Dockerfile.frontend:/app/Dockerfile.frontend:ro
+    env_file:
+      - .env
+    environment:
+      PYTHONUNBUFFERED: 1
+      PYTHONDONTWRITEBYTECODE: 1
+      TZ: "Asia/Shanghai"
+      # 测试目标：同网络内的 backend 服务
+      TEST_BASE_URL: "http://backend:8000"
+      TEST_ADMIN_USER: "admin"
+      TEST_ADMIN_PASS: "admin123"
+      # Docker专用数据库配置
+      TRADINGAGENTS_MONGODB_URL: mongodb://admin:tradingagents123@mongodb:27017/tradingagentscn?authSource=admin
+      TRADINGAGENTS_REDIS_URL: redis://:tradingagents123@redis:6379
+      TRADINGAGENTS_CACHE_TYPE: redis
+      DOCKER_CONTAINER: "true"
+    depends_on:
+      backend:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - tradingagents-network
+    # 测试容器用完即销毁，不需要 restart 策略
+    restart: "no"
+    profiles:
+      - test
+
   # Redis Commander 管理界面（可选）
   redis-commander:
     image: ghcr.io/joeferner/redis-commander:latest

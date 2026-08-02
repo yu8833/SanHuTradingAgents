@@ -2,17 +2,14 @@
 社媒消息数据API路由
 提供社媒消息的查询、搜索和统计接口
 """
-from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Query
+from typing import Any
+
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app.services.social_media_service import (
-    get_social_media_service,
-    SocialMediaQueryParams,
-    SocialMediaStats
-)
 from app.core.response import ok
+from app.services.social_media_service import SocialMediaQueryParams, get_social_media_service
 
 router = APIRouter(prefix="/api/social-media", tags=["social-media"])
 
@@ -23,18 +20,18 @@ class SocialMediaMessage(BaseModel):
     platform: str
     message_type: str = "post"
     content: str
-    media_urls: Optional[List[str]] = []
-    hashtags: Optional[List[str]] = []
-    author: Dict[str, Any]
-    engagement: Dict[str, Any]
+    media_urls: list[str] | None = []
+    hashtags: list[str] | None = []
+    author: dict[str, Any]
+    engagement: dict[str, Any]
     publish_time: datetime
-    sentiment: Optional[str] = "neutral"
-    sentiment_score: Optional[float] = 0.0
-    keywords: Optional[List[str]] = []
-    topics: Optional[List[str]] = []
-    importance: Optional[str] = "low"
-    credibility: Optional[str] = "medium"
-    location: Optional[Dict[str, str]] = None
+    sentiment: str | None = "neutral"
+    sentiment_score: float | None = 0.0
+    keywords: list[str] | None = []
+    topics: list[str] | None = []
+    importance: str | None = "low"
+    credibility: str | None = "medium"
+    location: dict[str, str] | None = None
     language: str = "zh-CN"
     data_source: str
     crawler_version: str = "1.0"
@@ -43,24 +40,24 @@ class SocialMediaMessage(BaseModel):
 class SocialMediaBatchRequest(BaseModel):
     """批量保存社媒消息请求"""
     symbol: str = Field(..., description="股票代码")
-    messages: List[SocialMediaMessage] = Field(..., description="社媒消息列表")
+    messages: list[SocialMediaMessage] = Field(..., description="社媒消息列表")
 
 
 class SocialMediaQueryRequest(BaseModel):
     """社媒消息查询请求"""
-    symbol: Optional[str] = None
-    symbols: Optional[List[str]] = None
-    platform: Optional[str] = None
-    message_type: Optional[str] = None
-    start_time: Optional[datetime] = None
-    end_time: Optional[datetime] = None
-    sentiment: Optional[str] = None
-    importance: Optional[str] = None
-    min_influence_score: Optional[float] = None
-    min_engagement_rate: Optional[float] = None
+    symbol: str | None = None
+    symbols: list[str] | None = None
+    platform: str | None = None
+    message_type: str | None = None
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+    sentiment: str | None = None
+    importance: str | None = None
+    min_influence_score: float | None = None
+    min_engagement_rate: float | None = None
     verified_only: bool = False
-    keywords: Optional[List[str]] = None
-    hashtags: Optional[List[str]] = None
+    keywords: list[str] | None = None
+    hashtags: list[str] | None = None
     limit: int = Field(50, ge=1, le=1000)
     skip: int = Field(0, ge=0)
 
@@ -134,7 +131,7 @@ async def query_social_media_messages(request: SocialMediaQueryRequest):
 @router.get("/latest/{symbol}", response_model=dict)
 async def get_latest_messages(
     symbol: str,
-    platform: Optional[str] = Query(None, description="平台类型"),
+    platform: str | None = Query(None, description="平台类型"),
     limit: int = Query(20, ge=1, le=100, description="返回数量")
 ):
     """获取最新社媒消息"""
@@ -158,8 +155,8 @@ async def get_latest_messages(
 @router.get("/search", response_model=dict)
 async def search_messages(
     query: str = Query(..., description="搜索关键词"),
-    symbol: Optional[str] = Query(None, description="股票代码"),
-    platform: Optional[str] = Query(None, description="平台类型"),
+    symbol: str | None = Query(None, description="股票代码"),
+    platform: str | None = Query(None, description="平台类型"),
     limit: int = Query(50, ge=1, le=200, description="返回数量")
 ):
     """全文搜索社媒消息"""
@@ -184,7 +181,7 @@ async def search_messages(
 
 @router.get("/statistics", response_model=dict)
 async def get_statistics(
-    symbol: Optional[str] = Query(None, description="股票代码"),
+    symbol: str | None = Query(None, description="股票代码"),
     hours_back: int = Query(24, ge=1, le=168, description="回溯小时数")
 ):
     """获取社媒消息统计信息"""
@@ -265,7 +262,7 @@ async def get_supported_platforms():
 @router.get("/sentiment-analysis/{symbol}", response_model=dict)
 async def get_sentiment_analysis(
     symbol: str,
-    platform: Optional[str] = Query(None, description="平台类型"),
+    platform: str | None = Query(None, description="平台类型"),
     hours_back: int = Query(24, ge=1, le=168, description="回溯小时数")
 ):
     """获取股票的社媒情绪分析"""

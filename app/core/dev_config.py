@@ -4,17 +4,16 @@
 """
 
 import logging
-from typing import List, Optional
 
 
 class DevConfig:
     """开发环境配置类"""
     
     # 文件监控配置
-    RELOAD_DIRS: List[str] = ["app"]
+    RELOAD_DIRS: list[str] = ["app"]
     
     # 排除的文件和目录
-    RELOAD_EXCLUDES: List[str] = [
+    RELOAD_EXCLUDES: list[str] = [
         # Python缓存文件
         "__pycache__",
         "*.pyc",
@@ -83,7 +82,7 @@ class DevConfig:
     ]
     
     # 只监控的文件类型
-    RELOAD_INCLUDES: List[str] = [
+    RELOAD_INCLUDES: list[str] = [
         "*.py"
     ]
     

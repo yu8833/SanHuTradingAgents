@@ -2,16 +2,17 @@
 Redis客户端配置和连接管理
 """
 
-import redis.asyncio as redis
 import logging
-from typing import Optional
+
+import redis.asyncio as redis
+
 from .config import settings
 
 logger = logging.getLogger(__name__)
 
 # 全局Redis连接池
-redis_pool: Optional[redis.ConnectionPool] = None
-redis_client: Optional[redis.Redis] = None
+redis_pool: redis.ConnectionPool | None = None
+redis_client: redis.Redis | None = None
 
 
 async def init_redis():
@@ -187,7 +188,7 @@ class RedisService:
 
 
 # 全局Redis服务实例
-redis_service: Optional[RedisService] = None
+redis_service: RedisService | None = None
 
 
 def get_redis_service() -> RedisService:

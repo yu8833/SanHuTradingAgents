@@ -7,24 +7,24 @@ import asyncio
 import logging
 import signal
 import sys
-import uuid
 import traceback
+import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any
 
 # 添加项目根目录到路径
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from app.services.queue_service import get_queue_service
-from app.services.simple_analysis_service import get_simple_analysis_service
-from app.core.database import init_database, close_database
-from app.core.redis_client import init_redis, close_redis
 from app.core.config import settings
-from app.models.analysis import AnalysisTask, AnalysisParameters, SingleAnalysisRequest
+from app.core.database import close_database, init_database
+from app.core.redis_client import close_redis, init_redis
+from app.models.analysis import AnalysisParameters, SingleAnalysisRequest
 from app.services.config_provider import provider as config_provider
 from app.services.queue import DEFAULT_USER_CONCURRENT_LIMIT, GLOBAL_CONCURRENT_LIMIT, VISIBILITY_TIMEOUT_SECONDS
+from app.services.queue_service import get_queue_service
+from app.services.simple_analysis_service import get_simple_analysis_service
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 class AnalysisWorker:
     """分析任务Worker类"""
 
-    def __init__(self, worker_id: Optional[str] = None):
+    def __init__(self, worker_id: str | None = None):
         self.worker_id = worker_id or f"worker-{uuid.uuid4().hex[:8]}"
         self.queue_service = None
         self.running = False
@@ -130,7 +130,7 @@ class AnalysisWorker:
 
         logger.info(f"🔄 Worker {self.worker_id} 工作循环结束")
 
-    async def _process_task(self, task_data: Dict[str, Any]):
+    async def _process_task(self, task_data: dict[str, Any]):
         """处理单个任务"""
         task_id = task_data.get("id")
         stock_code = task_data.get("symbol")

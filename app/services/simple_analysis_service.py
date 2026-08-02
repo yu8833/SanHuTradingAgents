@@ -4,13 +4,13 @@
 """
 
 import asyncio
-import uuid
 import logging
 import re
-from datetime import datetime
-from typing import Dict, Any, Optional, List
-from pathlib import Path
 import sys
+import uuid
+from datetime import datetime
+from pathlib import Path
+from typing import Any
 
 # 添加项目根目录到路径
 project_root = Path(__file__).parent.parent.parent
@@ -18,21 +18,21 @@ sys.path.insert(0, str(project_root))
 
 # 初始化TradingAgents日志系统
 from tradingagents.utils.logging_init import init_logging
+
 init_logging()
 
-from tradingagents.graph.trading_graph import TradingAgentsGraph
-from tradingagents.default_config import DEFAULT_CONFIG
-from app.models.analysis import (
-    AnalysisTask, AnalysisStatus, SingleAnalysisRequest, AnalysisParameters
-)
-from app.models.user import PyObjectId
-from app.models.notification import NotificationCreate
 from bson import ObjectId
+
 from app.core.database import get_mongo_db
+from app.models.analysis import AnalysisStatus, SingleAnalysisRequest
+from app.models.notification import NotificationCreate
+from app.models.user import PyObjectId
 from app.services.config_service import ConfigService
-from app.services.memory_state_manager import get_memory_state_manager, TaskStatus
-from app.services.redis_progress_tracker import RedisProgressTracker, get_progress_by_id
+from app.services.memory_state_manager import TaskStatus, get_memory_state_manager
 from app.services.progress_log_handler import register_analysis_tracker, unregister_analysis_tracker
+from app.services.redis_progress_tracker import RedisProgressTracker, get_progress_by_id
+from tradingagents.default_config import DEFAULT_CONFIG
+from tradingagents.graph.trading_graph import TradingAgentsGraph
 
 # 股票基础信息获取（用于补充显示名称）
 try:
@@ -132,7 +132,7 @@ async def get_provider_by_model_name(model_name: str) -> str:
         # 从配置服务获取系统配置
         system_config = await config_service.get_system_config()
         if not system_config or not system_config.llm_configs:
-            logger.warning(f"⚠️ 系统配置为空，使用默认供应商映射")
+            logger.warning("⚠️ 系统配置为空，使用默认供应商映射")
             return _get_default_provider_by_model(model_name)
 
         # 在LLM配置中查找匹配的模型
@@ -177,9 +177,10 @@ def get_provider_and_url_by_model_sync(model_name: str) -> dict:
     """
     try:
         # 使用同步 MongoDB 客户端直接查询
+
         from pymongo import MongoClient
+
         from app.core.config import settings
-        import os
 
         client = MongoClient(settings.MONGO_URI)
         db = client[settings.MONGO_DB]
@@ -205,18 +206,18 @@ def get_provider_and_url_by_model_sync(model_name: str) -> dict:
                     api_key = None
                     if model_api_key and model_api_key.strip() and model_api_key != "your-api-key":
                         api_key = model_api_key
-                        logger.info(f"✅ [同步查询] 使用模型配置的 API Key")
+                        logger.info("✅ [同步查询] 使用模型配置的 API Key")
                     elif provider_doc and provider_doc.get("api_key"):
                         provider_api_key = provider_doc["api_key"]
                         if provider_api_key and provider_api_key.strip() and provider_api_key != "your-api-key":
                             api_key = provider_api_key
-                            logger.info(f"✅ [同步查询] 使用厂家配置的 API Key")
+                            logger.info("✅ [同步查询] 使用厂家配置的 API Key")
 
                     # 如果数据库中没有有效的 API Key，尝试从环境变量获取
                     if not api_key:
                         api_key = _get_env_api_key_for_provider(provider)
                         if api_key:
-                            logger.info(f"✅ [同步查询] 使用环境变量的 API Key")
+                            logger.info("✅ [同步查询] 使用环境变量的 API Key")
                         else:
                             logger.warning(f"⚠️ [同步查询] 未找到 {provider} 的 API Key")
 
@@ -232,7 +233,7 @@ def get_provider_and_url_by_model_sync(model_name: str) -> dict:
                         backend_url = _get_default_backend_url(provider)
                         logger.warning(f"⚠️ [同步查询] 厂家 {provider} 没有配置 default_base_url，使用硬编码默认值")
 
-                    from tradingagents.llm_clients.provider_keys import normalize_provider_key, default_backend_url
+                    from tradingagents.llm_clients.provider_keys import default_backend_url, normalize_provider_key
 
                     provider_key = normalize_provider_key(provider)
                     if provider_key == "qwen" and backend_url == "https://dashscope.aliyuncs.com/api/v1":
@@ -276,9 +277,9 @@ def get_provider_and_url_by_model_sync(model_name: str) -> dict:
             if not api_key:
                 api_key = _get_env_api_key_for_provider(provider)
                 if api_key:
-                    logger.info(f"✅ [同步查询] 使用环境变量的 API Key")
+                    logger.info("✅ [同步查询] 使用环境变量的 API Key")
 
-            from tradingagents.llm_clients.provider_keys import normalize_provider_key, default_backend_url
+            from tradingagents.llm_clients.provider_keys import default_backend_url, normalize_provider_key
 
             provider_key = normalize_provider_key(provider)
             if provider_key == "qwen" and backend_url == "https://dashscope.aliyuncs.com/api/v1":
@@ -310,6 +311,7 @@ def get_provider_and_url_by_model_sync(model_name: str) -> dict:
         # 尝试从厂家配置中获取 default_base_url 和 API Key
         try:
             from pymongo import MongoClient
+
             from app.core.config import settings
 
             client = MongoClient(settings.MONGO_URI)
@@ -512,13 +514,13 @@ def create_analysis_config(
                    f"timeout={deep_model_config.get('timeout')}, "
                    f"retry_times={deep_model_config.get('retry_times')}")
 
-    logger.info(f"📋 ========== 创建分析配置完成 ==========")
+    logger.info("📋 ========== 创建分析配置完成 ==========")
     logger.info(f"   🔥 辩论轮次: {config['max_debate_rounds']}")
     logger.info(f"   ⚖️ 风险讨论轮次: {config['max_risk_discuss_rounds']}")
     logger.info(f"   🤖 LLM供应商: {llm_provider}")
     logger.info(f"   ⚡ 快速模型: {config['quick_think_llm']}")
     logger.info(f"   🧠 深度模型: {config['deep_think_llm']}")
-    logger.info(f"📋 ========================================")
+    logger.info("📋 ========================================")
 
     return config
 
@@ -531,7 +533,7 @@ class SimpleAnalysisService:
         self.memory_manager = get_memory_state_manager()
 
         # 进度跟踪器缓存
-        self._progress_trackers: Dict[str, RedisProgressTracker] = {}
+        self._progress_trackers: dict[str, RedisProgressTracker] = {}
 
         # 🔧 创建共享的线程池，支持并发执行多个分析任务
         # 默认最多同时执行3个分析任务（可根据服务器资源调整）
@@ -540,11 +542,11 @@ class SimpleAnalysisService:
 
         logger.info(f"🔧 [服务初始化] SimpleAnalysisService 实例ID: {id(self)}")
         logger.info(f"🔧 [服务初始化] 内存管理器实例ID: {id(self.memory_manager)}")
-        logger.info(f"🔧 [服务初始化] 线程池最大并发数: 3")
+        logger.info("🔧 [服务初始化] 线程池最大并发数: 3")
 
         # 设置 WebSocket 管理器
         # 简单的股票名称缓存，减少重复查询
-        self._stock_name_cache: Dict[str, str] = {}
+        self._stock_name_cache: dict[str, str] = {}
 
         # 设置 WebSocket 管理器
         try:
@@ -566,8 +568,9 @@ class SimpleAnalysisService:
             )
 
             # 更新 MongoDB
-            from app.core.database import get_mongo_db
             from datetime import datetime
+
+            from app.core.database import get_mongo_db
             db = get_mongo_db()
             await db.analysis_tasks.update_one(
                 {"task_id": task_id},
@@ -584,7 +587,7 @@ class SimpleAnalysisService:
         except Exception as e:
             logger.warning(f"⚠️ [异步更新] 失败: {e}")
 
-    async def _resolve_stock_name(self, code: Optional[str]) -> str:
+    async def _resolve_stock_name(self, code: str | None) -> str:
         """解析股票名称（带缓存）- 从数据库stock_basic_info表查询"""
         if not code:
             return ""
@@ -625,7 +628,7 @@ class SimpleAnalysisService:
         self._stock_name_cache[code] = name
         return name
 
-    async def _enrich_stock_names(self, tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    async def _enrich_stock_names(self, tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """为任务列表补齐股票名称(就地更新)"""
         import re
         try:
@@ -634,9 +637,8 @@ class SimpleAnalysisService:
                 name = t.get("stock_name")
                 # 如果没有名称，或者是兜底格式的名称（以"股票"开头后跟数字），则重新查询
                 is_placeholder = False
-                if name and isinstance(name, str):
-                    if re.match(r'^股票\d+$', name):
-                        is_placeholder = True
+                if name and isinstance(name, str) and re.match(r'^股票\d+$', name):
+                    is_placeholder = True
                 if (not name or is_placeholder) and code:
                     t["stock_name"] = await self._resolve_stock_name(code)
         except Exception as e:
@@ -665,7 +667,7 @@ class SimpleAnalysisService:
             logger.warning(f"⚠️ 生成新的用户ID: {new_object_id}")
             return PyObjectId(new_object_id)
 
-    def _get_trading_graph(self, config: Dict[str, Any], callbacks: Optional[List] = None) -> TradingAgentsGraph:
+    def _get_trading_graph(self, config: dict[str, Any], callbacks: list | None = None) -> TradingAgentsGraph:
         """获取或创建TradingAgents实例
 
         ⚠️ 注意：为了避免并发执行时的数据混淆，每次都创建新实例
@@ -680,7 +682,7 @@ class SimpleAnalysisService:
         """
         # 🔧 [并发安全] 每次都创建新实例，避免多线程共享状态
         # 不再使用缓存，因为 TradingAgentsGraph 有可变的实例变量
-        logger.info(f"🔧 创建新的TradingAgents实例（并发安全模式）...")
+        logger.info("🔧 创建新的TradingAgents实例（并发安全模式）...")
         logger.info(f"🔍 [_get_trading_graph] config中的selected_analysts: {config.get('selected_analysts')}")
 
         trading_graph = TradingAgentsGraph(
@@ -698,7 +700,7 @@ class SimpleAnalysisService:
         self,
         user_id: str,
         request: SingleAnalysisRequest
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """创建分析任务（立即返回，不执行分析）"""
         try:
             # 生成任务ID
@@ -798,8 +800,9 @@ class SimpleAnalysisService:
 
             # 🔍 验证股票代码是否存在
             logger.info(f"🔍 开始验证股票代码: {stock_code}")
-            from tradingagents.utils.stock_validator import prepare_stock_data_async
             from datetime import datetime
+
+            from tradingagents.utils.stock_validator import prepare_stock_data_async
 
             # 获取市场类型
             market_type = request.parameters.market_type if request.parameters else "A股"
@@ -1070,8 +1073,8 @@ class SimpleAnalysisService:
         task_id: str,
         user_id: str,
         request: SingleAnalysisRequest,
-        progress_tracker: Optional[RedisProgressTracker] = None
-    ) -> Dict[str, Any]:
+        progress_tracker: RedisProgressTracker | None = None
+    ) -> dict[str, Any]:
         """同步执行分析（在共享线程池中运行）"""
         # 🔧 使用共享线程池，支持多个任务并发执行
         # 不再每次创建新的线程池，避免串行执行
@@ -1093,12 +1096,12 @@ class SimpleAnalysisService:
         task_id: str,
         user_id: str,
         request: SingleAnalysisRequest,
-        progress_tracker: Optional[RedisProgressTracker] = None
-    ) -> Dict[str, Any]:
+        progress_tracker: RedisProgressTracker | None = None
+    ) -> dict[str, Any]:
         """同步执行分析的具体实现"""
         try:
             # 在线程中重新初始化日志系统
-            from tradingagents.utils.logging_init import init_logging, get_logger
+            from tradingagents.utils.logging_init import get_logger, init_logging
             init_logging()
             thread_logger = get_logger('analysis_thread')
 
@@ -1139,9 +1142,11 @@ class SimpleAnalysisService:
                         loop.close()
 
                     # 2. 更新 MongoDB（使用同步客户端，避免事件循环冲突）
-                    from pymongo import MongoClient
-                    from app.core.config import settings
                     from datetime import datetime
+
+                    from pymongo import MongoClient
+
+                    from app.core.config import settings
 
                     sync_client = MongoClient(settings.MONGO_URI)
                     sync_db = sync_client[settings.MONGO_DB]
@@ -1313,7 +1318,7 @@ class SimpleAnalysisService:
                     # 动态从缓存中获取 progress_tracker
                     progress_tracker_local = self._progress_trackers.get(task_id)
                     if not progress_tracker_local:
-                        logger.warning(f"⚠️ progress_tracker 为 None，无法更新进度")
+                        logger.warning("⚠️ progress_tracker 为 None，无法更新进度")
                         return
 
                     # 查找节点对应的进度百分比
@@ -1348,6 +1353,7 @@ class SimpleAnalysisService:
                                 except RuntimeError:
                                     # 没有运行的事件循环，使用同步方式更新 MongoDB
                                     from pymongo import MongoClient
+
                                     from app.core.config import settings
 
                                     # 创建同步 MongoDB 客户端
@@ -1435,7 +1441,7 @@ class SimpleAnalysisService:
 
             logger.info(f"📅 分析目标日期: {analysis_date}")
             logger.info(f"📅 数据查询范围: {data_start_date} 至 {data_end_date} (最近10天)")
-            logger.info(f"💡 说明: 获取10天数据可自动处理周末、节假日和数据延迟问题")
+            logger.info("💡 说明: 获取10天数据可自动处理周末、节假日和数据延迟问题")
 
             # 开始分析 - 进度10%，即将进入分析师阶段
             # 注意：不要手动设置过高的进度，让 graph_progress_callback 来更新实际的分析进度
@@ -1499,7 +1505,7 @@ class SimpleAnalysisService:
             progress_thread = threading.Thread(target=simulate_progress, daemon=True)
             progress_thread.start()
 
-            logger.info(f"🚀 准备调用 trading_graph.propagate（适配新接口，不再传 progress_callback）")
+            logger.info("🚀 准备调用 trading_graph.propagate（适配新接口，不再传 progress_callback）")
 
             # 执行实际分析 - 新接口 propagate(company_name, trade_date)
             # 进度回调通过 LangChain callbacks 注入到 TradingAgentsGraph.__init__ 中
@@ -1508,7 +1514,7 @@ class SimpleAnalysisService:
                 analysis_date,
             )
 
-            logger.info(f"✅ trading_graph.propagate 执行完成")
+            logger.info("✅ trading_graph.propagate 执行完成")
 
             # 🔍 调试：检查decision的结构
             logger.info(f"🔍 [DEBUG] Decision类型: {type(decision)}")
@@ -1846,11 +1852,11 @@ class SimpleAnalysisService:
             # 5. 最后的备用方案
             if not summary:
                 summary = f"对{request.stock_code}的分析已完成，请查看详细报告。"
-                logger.warning(f"⚠️ [SUMMARY] 使用备用摘要")
+                logger.warning("⚠️ [SUMMARY] 使用备用摘要")
 
             if not recommendation:
-                recommendation = f"请参考详细分析报告做出投资决策。"
-                logger.warning(f"⚠️ [RECOMMENDATION] 使用备用建议")
+                recommendation = "请参考详细分析报告做出投资决策。"
+                logger.warning("⚠️ [RECOMMENDATION] 使用备用建议")
 
             # 从决策中提取模型信息
             model_info = decision.get('model_info', 'Unknown') if isinstance(decision, dict) else 'Unknown'
@@ -1920,7 +1926,7 @@ class SimpleAnalysisService:
             # 抛出包含友好错误信息的异常
             raise Exception(user_friendly_error) from e
 
-    async def get_task_status(self, task_id: str) -> Optional[Dict[str, Any]]:
+    async def get_task_status(self, task_id: str) -> dict[str, Any] | None:
         """获取任务状态"""
         logger.info(f"🔍 查询任务状态: {task_id}")
         logger.info(f"🔍 当前服务实例ID: {id(self)}")
@@ -1947,7 +1953,7 @@ class SimpleAnalysisService:
                 if result_data.get('decision'):
                     logger.debug(f"🔍 [GET_STATUS] decision内容: {result_data['decision']}")
             else:
-                logger.debug(f"🔍 [GET_STATUS] result_data为空或不存在（任务运行中，这是正常的）")
+                logger.debug("🔍 [GET_STATUS] result_data为空或不存在（任务运行中，这是正常的）")
 
             # 优先从Redis获取详细进度信息
             redis_progress = get_progress_by_id(task_id)
@@ -2009,10 +2015,10 @@ class SimpleAnalysisService:
 
     async def list_all_tasks(
         self,
-        status: Optional[str] = None,
+        status: str | None = None,
         limit: int = 20,
         offset: int = 0
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """获取所有任务列表（不限用户）
         - 合并内存和 MongoDB 数据
         - 按开始时间倒序排列
@@ -2122,10 +2128,10 @@ class SimpleAnalysisService:
     async def list_user_tasks(
         self,
         user_id: str,
-        status: Optional[str] = None,
+        status: str | None = None,
         limit: int = 20,
         offset: int = 0
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """获取用户任务列表
         - 对于 processing 状态：优先从内存读取（实时进度）
         - 对于 completed/failed/all 状态：合并内存和 MongoDB 数据
@@ -2164,14 +2170,14 @@ class SimpleAnalysisService:
             # 因为 graph_progress_callback 可能直接更新了 MongoDB，而内存数据可能是旧的
 
             # 3) 从 MongoDB 读取历史任务（用于合并或兜底）
-            logger.info(f"📋 [Tasks] 从 MongoDB 读取历史任务")
-            mongo_tasks: List[Dict[str, Any]] = []
+            logger.info("📋 [Tasks] 从 MongoDB 读取历史任务")
+            mongo_tasks: list[dict[str, Any]] = []
             count = 0
             try:
                 db = get_mongo_db()
 
                 # user_id 可能是字符串或 ObjectId，做兼容
-                uid_candidates: List[Any] = [user_id]
+                uid_candidates: list[Any] = [user_id]
 
                 # 特殊处理 admin 用户
                 if str(user_id) == 'admin':
@@ -2195,7 +2201,7 @@ class SimpleAnalysisService:
 
                 # 兼容 user_id 与 user 两种字段名
                 base_condition = {"$in": uid_candidates}
-                or_conditions: List[Dict[str, Any]] = [
+                or_conditions: list[dict[str, Any]] = [
                     {"user_id": base_condition},
                     {"user": base_condition}
                 ]
@@ -2240,7 +2246,7 @@ class SimpleAnalysisService:
                             dt = item[k]
                             # 如果是 naive datetime（没有时区信息），假定为 UTC+8
                             if dt.tzinfo is None:
-                                from datetime import timezone, timedelta
+                                from datetime import timedelta, timezone
                                 china_tz = timezone(timedelta(hours=8))
                                 dt = dt.replace(tzinfo=china_tz)
                             item[k] = dt.isoformat()
@@ -2297,7 +2303,7 @@ class SimpleAnalysisService:
             results = merged_tasks[offset:offset + limit]
 
             # 🔥 统一处理时区信息（确保所有时间字段都有时区标识）
-            from datetime import timezone, timedelta
+            from datetime import timedelta, timezone
             china_tz = timezone(timedelta(hours=8))
 
             for task in results:
@@ -2349,7 +2355,7 @@ class SimpleAnalysisService:
                 "stats": {"total": 0, "completed": 0, "failed": 0, "unique_stocks": 0}
             }
 
-    async def cleanup_zombie_tasks(self, max_running_hours: int = 2) -> Dict[str, Any]:
+    async def cleanup_zombie_tasks(self, max_running_hours: int = 2) -> dict[str, Any]:
         """清理僵尸任务（长时间处于 processing/running 状态的任务）
 
         Args:
@@ -2411,7 +2417,7 @@ class SimpleAnalysisService:
                 "total_cleaned": 0
             }
 
-    async def get_zombie_tasks(self, max_running_hours: int = 2) -> List[Dict[str, Any]]:
+    async def get_zombie_tasks(self, max_running_hours: int = 2) -> list[dict[str, Any]]:
         """获取僵尸任务列表（不执行清理，仅查询）
 
         Args:
@@ -2500,7 +2506,7 @@ class SimpleAnalysisService:
         except Exception as e:
             logger.error(f"❌ 更新任务状态失败: {task_id} - {e}")
 
-    async def _save_analysis_result(self, task_id: str, result: Dict[str, Any]):
+    async def _save_analysis_result(self, task_id: str, result: dict[str, Any]):
         """保存分析结果（原始方法）"""
         try:
             db = get_mongo_db()
@@ -2512,7 +2518,7 @@ class SimpleAnalysisService:
         except Exception as e:
             logger.error(f"❌ 保存分析结果失败: {task_id} - {e}")
 
-    async def _save_analysis_result_web_style(self, task_id: str, result: Dict[str, Any]):
+    async def _save_analysis_result_web_style(self, task_id: str, result: dict[str, Any]):
         """保存分析结果 - 采用web目录的方式，保存到analysis_reports集合"""
         try:
             db = get_mongo_db()
@@ -2691,7 +2697,9 @@ class SimpleAnalysisService:
                         # 降级方案：尝试直接从数据源管理器获取
                         logger.warning(f"⚠️ 无法从统一接口解析股票名称: {stock_symbol}，尝试降级方案")
                         try:
-                            from tradingagents.dataflows.data_source_manager import get_china_stock_info_unified as get_info_dict
+                            from tradingagents.dataflows.data_source_manager import (
+                                get_china_stock_info_unified as get_info_dict,
+                            )
                             info_dict = get_info_dict(stock_symbol)
                             if info_dict and info_dict.get('name'):
                                 stock_name = info_dict['name']
@@ -2809,7 +2817,7 @@ class SimpleAnalysisService:
             except Exception as fallback_error:
                 logger.error(f"❌ 简化保存也失败: {task_id} - {fallback_error}")
 
-    async def _save_analysis_results_complete(self, task_id: str, result: Dict[str, Any]):
+    async def _save_analysis_results_complete(self, task_id: str, result: dict[str, Any]):
         """完整的分析结果保存 - 完全采用web目录的双重保存方式"""
         try:
             # 调试：打印result中的所有键
@@ -2822,25 +2830,25 @@ class SimpleAnalysisService:
             logger.info(f"💾 开始完整保存分析结果: {stock_symbol}")
 
             # 1. 保存分模块报告到本地目录
-            logger.info(f"📁 [本地保存] 开始保存分模块报告到本地目录")
+            logger.info("📁 [本地保存] 开始保存分模块报告到本地目录")
             local_files = await self._save_modular_reports_to_data_dir(result, stock_symbol)
             if local_files:
                 logger.info(f"✅ [本地保存] 已保存 {len(local_files)} 个本地报告文件")
                 for module, path in local_files.items():
                     logger.info(f"  - {module}: {path}")
             else:
-                logger.warning(f"⚠️ [本地保存] 本地报告文件保存失败")
+                logger.warning("⚠️ [本地保存] 本地报告文件保存失败")
 
             # 2. 保存分析报告到数据库
-            logger.info(f"🗄️ [数据库保存] 开始保存分析报告到数据库")
+            logger.info("🗄️ [数据库保存] 开始保存分析报告到数据库")
             await self._save_analysis_result_web_style(task_id, result)
-            logger.info(f"✅ [数据库保存] 分析报告已成功保存到数据库")
+            logger.info("✅ [数据库保存] 分析报告已成功保存到数据库")
 
             # 3. 记录保存结果
             if local_files:
-                logger.info(f"✅ 分析报告已保存到数据库和本地文件")
+                logger.info("✅ 分析报告已保存到数据库和本地文件")
             else:
-                logger.warning(f"⚠️ 数据库保存成功，但本地文件保存失败")
+                logger.warning("⚠️ 数据库保存成功，但本地文件保存失败")
 
         except Exception as save_error:
             logger.error(f"❌ [完整保存] 保存分析报告时发生错误: {str(save_error)}")
@@ -2851,13 +2859,13 @@ class SimpleAnalysisService:
             except Exception as fallback_error:
                 logger.error(f"❌ 降级保存也失败: {task_id} - {fallback_error}")
 
-    async def _save_modular_reports_to_data_dir(self, result: Dict[str, Any], stock_symbol: str) -> Dict[str, str]:
+    async def _save_modular_reports_to_data_dir(self, result: dict[str, Any], stock_symbol: str) -> dict[str, str]:
         """保存分模块报告到data目录 - 完全采用web目录的文件结构"""
         try:
-            import os
-            from pathlib import Path
-            from datetime import datetime
             import json
+            import os
+            from datetime import datetime
+            from pathlib import Path
 
             # 获取项目根目录
             project_root = Path(__file__).parent.parent.parent
@@ -2883,7 +2891,7 @@ class SimpleAnalysisService:
                 # 如果已经是字符串，检查格式
                 try:
                     # 尝试解析日期字符串，确保格式正确
-                    parsed_date = datetime.strptime(analysis_date_raw, '%Y-%m-%d')
+                    datetime.strptime(analysis_date_raw, '%Y-%m-%d')
                     analysis_date_str = analysis_date_raw
                 except ValueError:
                     # 如果格式不正确，使用当前日期
@@ -2984,10 +2992,7 @@ class SimpleAnalysisService:
                     if state_key in state:
                         # 提取模块内容
                         module_content = state[state_key]
-                        if isinstance(module_content, str):
-                            report_content = module_content
-                        else:
-                            report_content = str(module_content)
+                        report_content = module_content if isinstance(module_content, str) else str(module_content)
 
                         # 保存到文件 - 使用web目录的文件名
                         file_path = reports_dir / module_info['filename']
@@ -3006,7 +3011,7 @@ class SimpleAnalysisService:
                 decision_content = f"# {stock_symbol} 最终投资决策\n\n"
 
                 if isinstance(decision, dict):
-                    decision_content += f"## 投资建议\n\n"
+                    decision_content += "## 投资建议\n\n"
                     decision_content += f"**行动**: {decision.get('action', 'N/A')}\n\n"
                     decision_content += f"**置信度**: {decision.get('confidence', 0):.1%}\n\n"
                     decision_content += f"**风险评分**: {decision.get('risk_score', 0):.1%}\n\n"

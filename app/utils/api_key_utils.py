@@ -5,10 +5,9 @@ API Key 处理工具函数
 """
 
 import os
-from typing import Optional
 
 
-def is_valid_api_key(api_key: Optional[str]) -> bool:
+def is_valid_api_key(api_key: str | None) -> bool:
     """
     判断 API Key 是否有效
     
@@ -47,13 +46,10 @@ def is_valid_api_key(api_key: Optional[str]) -> bool:
         return False
     
     # 5. 不能是截断的密钥（包含 '...'）
-    if '...' in api_key:
-        return False
-    
-    return True
+    return '...' not in api_key
 
 
-def truncate_api_key(api_key: Optional[str]) -> Optional[str]:
+def truncate_api_key(api_key: str | None) -> str | None:
     """
     缩略 API Key，显示前6位和后6位
     
@@ -73,7 +69,7 @@ def truncate_api_key(api_key: Optional[str]) -> Optional[str]:
     return f"{api_key[:6]}...{api_key[-6:]}"
 
 
-def get_env_api_key_for_provider(provider_name: str) -> Optional[str]:
+def get_env_api_key_for_provider(provider_name: str) -> str | None:
     """
     从环境变量获取大模型厂家的 API Key
     
@@ -94,7 +90,7 @@ def get_env_api_key_for_provider(provider_name: str) -> Optional[str]:
     return None
 
 
-def get_env_api_key_for_datasource(ds_type: str) -> Optional[str]:
+def get_env_api_key_for_datasource(ds_type: str) -> str | None:
     """
     从环境变量获取数据源的 API Key
     
@@ -134,7 +130,7 @@ def get_env_api_key_for_datasource(ds_type: str) -> Optional[str]:
     return None
 
 
-def should_skip_api_key_update(api_key: Optional[str]) -> bool:
+def should_skip_api_key_update(api_key: str | None) -> bool:
     """
     判断是否应该跳过 API Key 的更新
     
@@ -158,8 +154,5 @@ def should_skip_api_key_update(api_key: Optional[str]) -> bool:
         return True
     
     # 2. 占位符
-    if api_key.startswith('your_') or api_key.startswith('your-'):
-        return True
-    
-    return False
+    return bool(api_key.startswith('your_') or api_key.startswith('your-'))
 

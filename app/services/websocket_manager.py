@@ -6,7 +6,8 @@ WebSocket 连接管理器 - 使用 Redis PubSub 支持多 Worker
 import asyncio
 import json
 import logging
-from typing import Dict, Set, Any
+from typing import Any
+
 from fastapi import WebSocket
 
 from app.core.database import get_redis_client
@@ -18,8 +19,8 @@ class WebSocketManager:
     """WebSocket 连接管理器 - 支持多进程部署"""
     
     def __init__(self):
-        self.active_connections: Dict[str, Set[WebSocket]] = {}
-        self.active_task_connections: Dict[str, Set[WebSocket]] = {}
+        self.active_connections: dict[str, set[WebSocket]] = {}
+        self.active_task_connections: dict[str, set[WebSocket]] = {}
         self._lock = asyncio.Lock()
         self._pubsub_task = None
         self._pubsub_listening = False
@@ -70,7 +71,7 @@ class WebSocketManager:
         
         logger.info(f"🔌 WS任务连接断开: task={task_id}")
     
-    async def send_personal_message(self, user_id: str, message: Dict[str, Any]):
+    async def send_personal_message(self, user_id: str, message: dict[str, Any]):
         """发送消息给指定用户的所有连接"""
         await self._publish_to_redis(f"notifications:{user_id}", message)
         
@@ -98,7 +99,7 @@ class WebSocketManager:
                     if not self.active_connections[user_id]:
                         del self.active_connections[user_id]
     
-    async def send_task_progress(self, task_id: str, user_id: str, message: Dict[str, Any]):
+    async def send_task_progress(self, task_id: str, user_id: str, message: dict[str, Any]):
         """发送任务进度给指定任务的所有连接"""
         await self._publish_to_redis(f"task_progress:{task_id}", message)
         
@@ -126,7 +127,7 @@ class WebSocketManager:
                     if not self.active_task_connections[task_id]:
                         del self.active_task_connections[task_id]
     
-    async def broadcast(self, message: Dict[str, Any]):
+    async def broadcast(self, message: dict[str, Any]):
         """广播消息给所有连接"""
         await self._publish_to_redis("notifications:broadcast", message)
         
@@ -143,7 +144,7 @@ class WebSocketManager:
             except Exception as e:
                 logger.warning(f"⚠️ WS广播失败: {e}")
     
-    async def _publish_to_redis(self, channel: str, message: Dict[str, Any]):
+    async def _publish_to_redis(self, channel: str, message: dict[str, Any]):
         """发布消息到 Redis PubSub 频道"""
         try:
             r = get_redis_client()

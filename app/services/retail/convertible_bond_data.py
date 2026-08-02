@@ -14,7 +14,7 @@
 
 import logging
 from datetime import date
-from typing import List, Optional, Dict, Any
+from typing import Any
 
 import pandas as pd
 
@@ -46,7 +46,7 @@ def _safe_float(v, default=0.0) -> float:
         return default
 
 
-def _estimate_years_to_maturity(list_date, term_years: int = 6) -> Optional[float]:
+def _estimate_years_to_maturity(list_date, term_years: int = 6) -> float | None:
     """
     估算剩余年限
 
@@ -80,7 +80,7 @@ def _estimate_years_to_maturity(list_date, term_years: int = 6) -> Optional[floa
         return None
 
 
-def _fetch_all_convertible_bonds() -> List[Dict[str, Any]]:
+def _fetch_all_convertible_bonds() -> list[dict[str, Any]]:
     """
     获取全市场已上市可转债数据
 
@@ -110,7 +110,7 @@ def _fetch_all_convertible_bonds() -> List[Dict[str, Any]]:
         if df is None or len(df) == 0:
             return []
 
-        items: List[Dict[str, Any]] = []
+        items: list[dict[str, Any]] = []
         for _, row in df.iterrows():
             try:
                 list_date = row.get("上市时间")
@@ -159,7 +159,7 @@ def _fetch_all_convertible_bonds() -> List[Dict[str, Any]]:
         return []
 
 
-async def get_all_convertible_bonds() -> List[Dict[str, Any]]:
+async def get_all_convertible_bonds() -> list[dict[str, Any]]:
     """
     异步入口：获取全市场可转债数据（带缓存）
 
@@ -173,7 +173,7 @@ async def get_all_convertible_bonds() -> List[Dict[str, Any]]:
     )
 
 
-def get_all_convertible_bonds_sync() -> List[Dict[str, Any]]:
+def get_all_convertible_bonds_sync() -> list[dict[str, Any]]:
     """同步入口：直接获取（无缓存）"""
     return _fetch_all_convertible_bonds()
 
@@ -204,12 +204,12 @@ def _rating_score(rating: str) -> int:
 
 
 def filter_down_revision_candidates(
-    bonds: List[Dict[str, Any]],
+    bonds: list[dict[str, Any]],
     max_bond_price: float = 110,
     max_stock_vs_conversion: float = 0.7,
     min_issue_size: float = 1.0,
     limit: int = 50,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     筛选下修博弈候选转债
 
@@ -235,7 +235,7 @@ def filter_down_revision_candidates(
     Returns:
         筛选后的候选列表，每项附加计算字段
     """
-    candidates: List[Dict[str, Any]] = []
+    candidates: list[dict[str, Any]] = []
     for b in bonds:
         bond_price = b.get("bond_price", 0)
         stock_price = b.get("stock_price", 0)
@@ -276,7 +276,7 @@ def filter_down_revision_candidates(
 
         # 评分（100分制）
         score = 0
-        score_details: Dict[str, str] = {}
+        score_details: dict[str, str] = {}
 
         # 1. 下修动力评分（40分）—— 正股/转股价偏离度越低，动力越强
         if stock_vs_conversion < 0.4:

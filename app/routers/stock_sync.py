@@ -3,19 +3,20 @@
 支持单个股票或批量股票的历史数据和财务数据同步
 """
 
-from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+import asyncio
+import contextlib
+import logging
+from datetime import datetime, timedelta
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from app.routers.auth_db import get_current_user
-from app.core.response import ok
 from app.core.database import get_mongo_db
-from app.worker.tushare_sync_service import get_tushare_sync_service
+from app.core.response import ok
+from app.routers.auth_db import get_current_user
 from app.worker.akshare_sync_service import get_akshare_sync_service
 from app.worker.financial_data_sync_service import get_financial_sync_service
-import logging
-import asyncio
-from datetime import datetime, timedelta
+from app.worker.tushare_sync_service import get_tushare_sync_service
 
 logger = logging.getLogger("webapi")
 
@@ -111,7 +112,7 @@ class SingleStockSyncRequest(BaseModel):
 
 class BatchStockSyncRequest(BaseModel):
     """批量股票同步请求"""
-    symbols: List[str] = Field(..., description="股票代码列表")
+    symbols: list[str] = Field(..., description="股票代码列表")
     sync_historical: bool = Field(True, description="是否同步历史数据")
     sync_financial: bool = Field(True, description="是否同步财务数据")
     sync_basic: bool = Field(False, description="是否同步基础数据")
@@ -162,7 +163,7 @@ async def sync_single_stock(
                 # 🔥 单个股票实时行情同步：优先使用 AKShare（避免 Tushare 接口限制）
                 actual_data_source = request.data_source
                 if request.data_source == "tushare":
-                    logger.info(f"💡 单个股票实时行情同步，自动切换到 AKShare 数据源（避免 Tushare 接口限制）")
+                    logger.info("💡 单个股票实时行情同步，自动切换到 AKShare 数据源（避免 Tushare 接口限制）")
                     actual_data_source = "akshare"
                 realtime_debug["data_source_used"] = actual_data_source
                 realtime_debug["attempted_sources"].append(actual_data_source)
@@ -185,8 +186,8 @@ async def sync_single_stock(
 
                 # 🔥 如果 AKShare 同步失败，回退到 Tushare 全量同步
                 if actual_data_source == "akshare" and realtime_result.get("success_count", 0) == 0:
-                    logger.warning(f"⚠️ AKShare 同步失败，回退到 Tushare 全量同步")
-                    logger.info(f"💡 Tushare 只支持全量同步，将同步所有股票的实时行情")
+                    logger.warning("⚠️ AKShare 同步失败，回退到 Tushare 全量同步")
+                    logger.info("💡 Tushare 只支持全量同步，将同步所有股票的实时行情")
                     realtime_debug["attempted_sources"].append("tushare")
 
                     tushare_service = await get_tushare_sync_service()
@@ -202,7 +203,7 @@ async def sync_single_stock(
                         realtime_result = fallback_result
                         logger.info(f"✅ Tushare 全量同步完成: 成功 {realtime_result.get('success_count', 0)} 只")
                     else:
-                        logger.error(f"❌ Tushare 服务不可用，无法回退")
+                        logger.error("❌ Tushare 服务不可用，无法回退")
                         realtime_result["fallback_failed"] = True
                         realtime_debug["fallback_error"] = {"error": "Tushare 服务不可用，无法回退", "context": "fallback_unavailable"}
 
@@ -344,10 +345,10 @@ async def sync_single_stock(
                 # 参考 basics_sync_service 的实现逻辑
                 if request.data_source == "tushare":
                     from app.services.basics_sync import (
-                        fetch_stock_basic_df,
-                        find_latest_trade_date,
                         fetch_daily_basic_mv_map,
                         fetch_latest_roe_map,
+                        fetch_stock_basic_df,
+                        find_latest_trade_date,
                     )
 
                     db = get_mongo_db()
@@ -392,10 +393,7 @@ async def sync_single_stock(
                             ts_code = stock_row.get("ts_code") or ""
 
                             # 提取6位代码
-                            if isinstance(ts_code, str) and "." in ts_code:
-                                code = ts_code.split(".")[0]
-                            else:
-                                code = symbol6
+                            code = ts_code.split(".")[0] if isinstance(ts_code, str) and "." in ts_code else symbol6
 
                             # 判断交易所
                             if isinstance(ts_code, str):
@@ -422,15 +420,11 @@ async def sync_single_stock(
                             total_mv_yi = None
                             circ_mv_yi = None
                             if "total_mv" in daily_metrics:
-                                try:
+                                with contextlib.suppress(Exception):
                                     total_mv_yi = float(daily_metrics["total_mv"]) / 10000.0
-                                except Exception:
-                                    pass
                             if "circ_mv" in daily_metrics:
-                                try:
+                                with contextlib.suppress(Exception):
                                     circ_mv_yi = float(daily_metrics["circ_mv"]) / 10000.0
-                                except Exception:
-                                    pass
 
                             # 构建文档
                             doc = {

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 数据获取模块
 
@@ -7,9 +6,9 @@
 
 from .stock_data_fetcher import (
     StockDataFetcher,
-    get_stock_data_fetcher,
     get_kline,
     get_realtime_quote,
+    get_stock_data_fetcher,
 )
 
 __all__ = [

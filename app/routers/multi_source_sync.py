@@ -4,12 +4,13 @@ Provides endpoints for multi-source stock data synchronization
 """
 import asyncio
 import logging
-from typing import Dict, List, Optional, Any, Union
+from typing import Any
+
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from app.services.multi_source_basics_sync_service import get_multi_source_sync_service
 from app.services.data_sources.manager import DataSourceManager
+from app.services.multi_source_basics_sync_service import get_multi_source_sync_service
 
 logger = logging.getLogger(__name__)
 
@@ -19,14 +20,14 @@ router = APIRouter(prefix="/api/sync/multi-source", tags=["Multi-Source Sync"])
 class SyncRequest(BaseModel):
     """同步请求模型"""
     force: bool = False
-    preferred_sources: Optional[List[str]] = None
+    preferred_sources: list[str] | None = None
 
 
 class SyncResponse(BaseModel):
     """同步响应模型"""
     success: bool
     message: str
-    data: Union[Dict[str, Any], List[Any], Any]
+    data: dict[str, Any] | list[Any] | Any
 
 
 class DataSourceStatus(BaseModel):
@@ -154,7 +155,7 @@ async def get_sync_status():
 @router.post("/stock_basics/run")
 async def run_stock_basics_sync(
     force: bool = Query(False, description="是否强制运行同步"),
-    preferred_sources: Optional[str] = Query(None, description="优先使用的数据源，用逗号分隔")
+    preferred_sources: str | None = Query(None, description="优先使用的数据源，用逗号分隔")
 ):
     """运行多数据源股票基础信息同步（立即返回，后台执行）。
 
@@ -419,7 +420,7 @@ async def get_sync_recommendations():
 async def get_sync_history(
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(10, ge=1, le=50, description="每页大小"),
-    status: Optional[str] = Query(None, description="状态筛选")
+    status: str | None = Query(None, description="状态筛选")
 ):
     """获取同步历史记录"""
     try:
@@ -487,7 +488,7 @@ async def clear_sync_cache():
 
         # 2. 清空数据源缓存（如果有的话）
         try:
-            manager = DataSourceManager()
+            DataSourceManager()
             # 这里可以添加数据源特定的缓存清理逻辑
             # 目前数据源适配器没有持久化缓存，所以跳过
         except Exception as e:

@@ -2,9 +2,10 @@
 股票筛选相关的数据模型
 """
 
-from pydantic import BaseModel, Field, model_validator
-from typing import Any, Dict, List, Optional, Union
 from enum import Enum
+from typing import Any
+
+from pydantic import BaseModel, Field, model_validator
 
 
 class OperatorType(str, Enum):
@@ -34,8 +35,8 @@ class ScreeningCondition(BaseModel):
     """单个筛选条件"""
     field: str = Field(..., description="字段名")
     operator: OperatorType = Field(..., description="操作符")
-    value: Union[float, int, str, List[Union[float, int, str]]] = Field(..., description="筛选值")
-    field_type: Optional[FieldType] = Field(None, description="字段类型")
+    value: float | int | str | list[float | int | str] = Field(..., description="筛选值")
+    field_type: FieldType | None = Field(None, description="字段类型")
     
     class Config:
         use_enum_values = True
@@ -44,21 +45,21 @@ class ScreeningCondition(BaseModel):
 class ScreeningRequest(BaseModel):
     """筛选请求"""
     market: str = Field("CN", description="市场：CN/HK/US")
-    date: Optional[str] = Field(None, description="交易日YYYY-MM-DD，缺省为最新")
+    date: str | None = Field(None, description="交易日YYYY-MM-DD，缺省为最新")
     adj: str = Field("qfq", description="复权口径：qfq/hfq/none")
 
     # 筛选条件
-    conditions: List[Dict[str, Any]] = Field(
+    conditions: list[dict[str, Any]] = Field(
         default_factory=list,
         description="筛选条件列表"
     )
 
     # 前端旧格式的顶层字段
-    logic: Optional[str] = Field(default=None)
-    children: Optional[List[Dict[str, Any]]] = Field(default=None)
+    logic: str | None = Field(default=None)
+    children: list[dict[str, Any]] | None = Field(default=None)
 
     # 排序和分页
-    order_by: Optional[List[Dict[str, str]]] = Field(None, description="排序条件")
+    order_by: list[dict[str, str]] | None = Field(None, description="排序条件")
     limit: int = Field(50, ge=1, le=500, description="返回数量限制")
     offset: int = Field(0, ge=0, description="偏移量")
 
@@ -85,10 +86,10 @@ class ScreeningRequest(BaseModel):
 class ScreeningResponse(BaseModel):
     """筛选响应"""
     total: int = Field(..., description="总数量")
-    items: List[Dict[str, Any]] = Field(..., description="筛选结果")
-    took_ms: Optional[int] = Field(None, description="耗时(毫秒)")
-    optimization_used: Optional[str] = Field(None, description="使用的优化方式")
-    source: Optional[str] = Field(None, description="数据源")
+    items: list[dict[str, Any]] = Field(..., description="筛选结果")
+    took_ms: int | None = Field(None, description="耗时(毫秒)")
+    optimization_used: str | None = Field(None, description="使用的优化方式")
+    source: str | None = Field(None, description="数据源")
 
     model_config = {"use_enum_values": True}
 
@@ -100,29 +101,29 @@ class FieldInfo(BaseModel):
     field_type: FieldType = Field(..., description="字段类型")
     data_type: str = Field(..., description="数据类型: number/string/date")
     description: str = Field("", description="字段描述")
-    unit: Optional[str] = Field(None, description="单位")
+    unit: str | None = Field(None, description="单位")
     
     # 数值字段的统计信息
-    min_value: Optional[float] = Field(None, description="最小值")
-    max_value: Optional[float] = Field(None, description="最大值")
-    avg_value: Optional[float] = Field(None, description="平均值")
+    min_value: float | None = Field(None, description="最小值")
+    max_value: float | None = Field(None, description="最大值")
+    avg_value: float | None = Field(None, description="平均值")
     
     # 枚举字段的可选值
-    available_values: Optional[List[str]] = Field(None, description="可选值列表")
+    available_values: list[str] | None = Field(None, description="可选值列表")
     
     # 支持的操作符
-    supported_operators: List[OperatorType] = Field(default_factory=list, description="支持的操作符")
+    supported_operators: list[OperatorType] = Field(default_factory=list, description="支持的操作符")
 
 
 class FieldStatistics(BaseModel):
     """字段统计信息"""
     field: str = Field(..., description="字段名")
     count: int = Field(..., description="有效数据数量")
-    min_value: Optional[float] = Field(None, description="最小值")
-    max_value: Optional[float] = Field(None, description="最大值")
-    avg_value: Optional[float] = Field(None, description="平均值")
-    median_value: Optional[float] = Field(None, description="中位数")
-    std_value: Optional[float] = Field(None, description="标准差")
+    min_value: float | None = Field(None, description="最小值")
+    max_value: float | None = Field(None, description="最大值")
+    avg_value: float | None = Field(None, description="平均值")
+    median_value: float | None = Field(None, description="中位数")
+    std_value: float | None = Field(None, description="标准差")
 
 
 # 预定义的字段信息

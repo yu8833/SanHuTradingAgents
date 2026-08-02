@@ -13,7 +13,6 @@
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +29,7 @@ class StrategyType(str, Enum):
 
 # 每种策略的风控参数
 # 单只仓位上限 / 总仓位上限 / 单只最大亏损容忍度
-STRATEGY_RISK_PARAMS: Dict[StrategyType, Dict[str, float]] = {
+STRATEGY_RISK_PARAMS: dict[StrategyType, dict[str, float]] = {
     StrategyType.EXTREME_REVERSAL: {
         "max_single_position": 0.05,  # 单只≤5%，高波动
         "max_total_position": 0.30,  # 总仓位≤30%
@@ -92,9 +91,9 @@ class PositionAdvice:
     # 是否触发风控限制
     blocked: bool
     # 阻断原因（若 blocked=True）
-    block_reasons: List[str] = field(default_factory=list)
+    block_reasons: list[str] = field(default_factory=list)
     # 风控提示
-    warnings: List[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -127,7 +126,7 @@ class PositionSizer:
     # A股最小交易单位
     LOT_SIZE = 100
 
-    def __init__(self, account_size: float, holdings: List[Holding]):
+    def __init__(self, account_size: float, holdings: list[Holding]):
         """
         Args:
             account_size: 账户总资产（元），包含现金+持仓市值
@@ -153,7 +152,7 @@ class PositionSizer:
         profit_loss_ratio: float = 1.5,
         industry: str = "未知",
         theme: str = "未知",
-        daily_volume_amount: Optional[float] = None,
+        daily_volume_amount: float | None = None,
     ) -> PositionAdvice:
         """
         计算建议买入股数
@@ -172,8 +171,8 @@ class PositionSizer:
             PositionAdvice 仓位建议
         """
         params = STRATEGY_RISK_PARAMS.get(strategy, STRATEGY_RISK_PARAMS[StrategyType.DEFAULT])
-        block_reasons: List[str] = []
-        warnings: List[str] = []
+        block_reasons: list[str] = []
+        warnings: list[str] = []
 
         if price <= 0:
             return PositionAdvice(

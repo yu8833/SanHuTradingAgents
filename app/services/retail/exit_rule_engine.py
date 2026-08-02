@@ -12,10 +12,9 @@
 """
 
 import logging
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
-from typing import List, Optional
 
 from app.services.retail.position_sizer import StrategyType
 
@@ -83,7 +82,7 @@ class HoldingContext:
     buy_date: datetime  # 买入日期
     current_price: float  # 当前价
     # 可选的辅助数据
-    current_ma: Optional[float] = None  # 当前均线价格（如启用均线止盈）
+    current_ma: float | None = None  # 当前均线价格（如启用均线止盈）
     # 投资逻辑是否证伪（由上层业务判断，如业绩拐点未出现）
     thesis_invalid: bool = False
     thesis_invalid_reason: str = ""
@@ -223,8 +222,8 @@ class ExitRuleEngine:
         )
 
     def evaluate_batch(
-        self, holdings: List[HoldingContext]
-    ) -> List[ExitSignal]:
+        self, holdings: list[HoldingContext]
+    ) -> list[ExitSignal]:
         """批量评估持仓退出信号"""
         return [self.evaluate(h) for h in holdings]
 

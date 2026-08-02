@@ -6,15 +6,17 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import pandas as pd
-import numpy as np
 
 from app.services.screening.eval_utils import (
     collect_fields_from_conditions as _collect_fields_from_conditions_util,
+)
+from app.services.screening.eval_utils import (
     evaluate_conditions as _evaluate_conditions_util,
-    evaluate_fund_conditions as _evaluate_fund_conditions_util,
+)
+from app.services.screening.eval_utils import (
     safe_float as _safe_float_util,
 )
 
@@ -67,14 +69,16 @@ ALLOWED_OPS = {">", "<", ">=", "<=", "==", "!=", "eq", "ne",
 @dataclass
 class ScreeningParams:
     market: str = "CN"
-    date: Optional[str] = None
+    date: str | None = None
     adj: str = "qfq"
     limit: int = 50
     offset: int = 0
-    order_by: Optional[List[Dict[str, str]]] = None
+    order_by: list[dict[str, str]] | None = None
 
 
+import contextlib
 import logging
+
 logger = logging.getLogger("agents")
 
 
@@ -121,7 +125,7 @@ class KlineCache:
             return self.ttl_trading
         return self.ttl_holiday
 
-    def get(self, code: str, period: str, limit: int, adj: str) -> Optional[List[Dict]]:
+    def get(self, code: str, period: str, limit: int, adj: str) -> list[dict] | None:
         client = _get_sync_redis()
         if client is None:
             return None
@@ -133,14 +137,12 @@ class KlineCache:
             pass
         return None
 
-    def set(self, code: str, period: str, limit: int, adj: str, data: List[Dict]):
+    def set(self, code: str, period: str, limit: int, adj: str, data: list[dict]):
         client = _get_sync_redis()
         if client is None:
             return
-        try:
+        with contextlib.suppress(Exception):
             client.setex(self._key(code, period, limit, adj), self._ttl(), json.dumps(data, ensure_ascii=False))
-        except Exception:
-            pass
 
 
 # ==========================
@@ -228,7 +230,7 @@ class ScreeningService:
                 logger.error(f"❌ 数据源管理器初始化失败: {e}")
         return self._data_source_manager
 
-    def _get_kline(self, code: str, limit: int = 220, adj: str = "qfq") -> Optional[List[Dict]]:
+    def _get_kline(self, code: str, limit: int = 220, adj: str = "qfq") -> list[dict] | None:
         """获取K线数据（Redis缓存优先 → 网络）"""
         # 1. 尝试Redis缓存
         cached = self._kline_cache.get(code, "day", limit, adj)
@@ -250,7 +252,7 @@ class ScreeningService:
             ).start()
         return kline_data
 
-    def _get_turnover_rates_batch(self, codes: List[str]) -> Dict[str, float]:
+    def _get_turnover_rates_batch(self, codes: list[str]) -> dict[str, float]:
         """批量获取股票的换手率（从数据库）"""
         result = {}
         try:
@@ -270,7 +272,7 @@ class ScreeningService:
             pass
         return result
 
-    def _process_one(self, code: str, conditions: Dict, need_tech: bool, params: ScreeningParams, turnover_map: Dict[str, float]) -> Optional[Dict]:
+    def _process_one(self, code: str, conditions: dict, need_tech: bool, params: ScreeningParams, turnover_map: dict[str, float]) -> dict | None:
         """处理单只股票"""
         try:
             kline_data = self._get_kline(code, 220, params.adj)
@@ -327,13 +329,14 @@ class ScreeningService:
                 "ma_bearish": bool(last.get("ma_bearish")) if need_tech else None,
             })
             return item
-        except Exception as e:
+        except Exception:
             return None
 
-    def _get_universe(self) -> List[str]:
+    def _get_universe(self) -> list[str]:
         """获取A股代码集合"""
         try:
-            from app.core.database import get_mongo_db_sync, settings as _db_settings
+            from app.core.database import get_mongo_db_sync
+            from app.core.database import settings as _db_settings
             db = get_mongo_db_sync()
             collection = db.stock_basic_info
             query = {
@@ -343,7 +346,7 @@ class ScreeningService:
                     {"market": {"$in": ["主板", "创业板", "科创板", "北交所"]}}
                 ]
             }
-            codes: List[str] = []
+            codes: list[str] = []
             try:
                 docs = list(collection.find(query, {"code": 1, "_id": 0}))
                 codes = [doc.get("code") for doc in docs if doc.get("code")]
@@ -366,7 +369,7 @@ class ScreeningService:
             return ["000001", "000002", "000858", "600519", "600036", "601318", "300750"]
 
     # --- 公共入口 ---
-    def run(self, conditions: Dict[str, Any], params: ScreeningParams) -> Dict[str, Any]:
+    def run(self, conditions: dict[str, Any], params: ScreeningParams) -> dict[str, Any]:
         symbols = self._get_universe()
         if not symbols:
             return {"total": 0, "items": []}
@@ -383,7 +386,7 @@ class ScreeningService:
         logger.info(f"📊 筛选开始，扫描 {len(symbols)} 只，技术指标={need_tech}，并发={self._max_workers}")
 
         # 批量获取换手率（从数据库）
-        turnover_map: Dict[str, float] = {}
+        turnover_map: dict[str, float] = {}
         if "turnover_rate" in all_needed:
             turnover_map = self._get_turnover_rates_batch(symbols)
             logger.info(f"📊 批量获取换手率: {len(turnover_map)} 只股票有数据")
@@ -391,7 +394,7 @@ class ScreeningService:
         # 预热数据源管理器（主线程初始化，避免子线程冲突）
         self._get_data_source_manager()
 
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
         t0 = time.time()
 
         # 并行处理（使用线程池，复用连接）

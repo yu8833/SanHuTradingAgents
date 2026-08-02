@@ -4,9 +4,8 @@
 """
 
 import logging
-from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
 from collections import defaultdict
+from datetime import datetime, timedelta
 
 from app.core.database import get_mongo_db
 from app.models.config import UsageRecord, UsageStatistics
@@ -28,7 +27,7 @@ class UsageStatisticsService:
             collection = db[self.collection_name]
 
             record_dict = record.model_dump(exclude={"id"})
-            result = await collection.insert_one(record_dict)
+            await collection.insert_one(record_dict)
 
             logger.info(f"✅ 添加使用记录成功: {record.provider}/{record.model_name}")
             return True
@@ -38,13 +37,13 @@ class UsageStatisticsService:
     
     async def get_usage_records(
         self,
-        provider: Optional[str] = None,
-        model_name: Optional[str] = None,
-        start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None,
+        provider: str | None = None,
+        model_name: str | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
         limit: int = 100,
         offset: int = 0
-    ) -> tuple[List[UsageRecord], int]:
+    ) -> tuple[list[UsageRecord], int]:
         """获取使用记录"""
         try:
             db = get_mongo_db()
@@ -83,8 +82,8 @@ class UsageStatisticsService:
     async def get_usage_statistics(
         self,
         days: int = 7,
-        provider: Optional[str] = None,
-        model_name: Optional[str] = None
+        provider: str | None = None,
+        model_name: str | None = None
     ) -> UsageStatistics:
         """获取使用统计"""
         try:
@@ -190,7 +189,7 @@ class UsageStatisticsService:
             logger.error(f"❌ 获取使用统计失败: {e}")
             return UsageStatistics()
     
-    async def get_cost_by_provider(self, days: int = 7) -> Dict[str, float]:
+    async def get_cost_by_provider(self, days: int = 7) -> dict[str, float]:
         """获取按供应商的成本统计"""
         stats = await self.get_usage_statistics(days=days)
         return {
@@ -198,7 +197,7 @@ class UsageStatisticsService:
             for provider, data in stats.by_provider.items()
         }
     
-    async def get_cost_by_model(self, days: int = 7) -> Dict[str, float]:
+    async def get_cost_by_model(self, days: int = 7) -> dict[str, float]:
         """获取按模型的成本统计"""
         stats = await self.get_usage_statistics(days=days)
         return {
@@ -206,7 +205,7 @@ class UsageStatisticsService:
             for model, data in stats.by_model.items()
         }
     
-    async def get_daily_cost(self, days: int = 7) -> Dict[str, float]:
+    async def get_daily_cost(self, days: int = 7) -> dict[str, float]:
         """获取每日成本统计"""
         stats = await self.get_usage_statistics(days=days)
         return {

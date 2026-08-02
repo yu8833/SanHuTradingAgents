@@ -1,16 +1,15 @@
 """
 通知服务：持久化 + 列表 + 已读 + SSE 发布
 """
-import json
+import contextlib
 import logging
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import timedelta
+from typing import Any
+
 from bson import ObjectId
 
-from app.core.database import get_mongo_db, get_redis_client
-from app.models.notification import (
-    NotificationCreate, NotificationOut, NotificationList
-)
+from app.core.database import get_mongo_db
+from app.models.notification import NotificationCreate, NotificationList, NotificationOut
 from app.utils.timezone import now_tz, to_config_tz
 
 logger = logging.getLogger("webapi.notifications")
@@ -112,13 +111,11 @@ class NotificationsService:
                 pass
         else:
             # 普通用户：尝试转换为 ObjectId
-            try:
+            with contextlib.suppress(Exception):
                 uid_candidates.append(ObjectId(user_id))
-            except Exception:
-                pass
         return uid_candidates
 
-    async def list(self, user_id: str, *, status: Optional[str] = None, ntype: Optional[str] = None, page: int = 1, page_size: int = 20) -> NotificationList:
+    async def list(self, user_id: str, *, status: str | None = None, ntype: str | None = None, page: int = 1, page_size: int = 20) -> NotificationList:
         db = get_mongo_db()
         # user_id 兼容查询：支持字符串和 ObjectId，支持 admin 特殊处理
         uid_candidates = self._build_uid_candidates(user_id)
@@ -126,14 +123,14 @@ class NotificationsService:
             {"user_id": {"$in": uid_candidates}},
             {"user": {"$in": uid_candidates}}
         ]
-        q: Dict[str, Any] = {"$or": or_conditions}
+        q: dict[str, Any] = {"$or": or_conditions}
         if status in ("read", "unread"):
             q["status"] = status
         if ntype in ("analysis", "alert", "system"):
             q["type"] = ntype
         total = await db[self.collection].count_documents(q)
         cursor = db[self.collection].find(q).sort("created_at", -1).skip((page-1)*page_size).limit(page_size)
-        items: List[NotificationOut] = []
+        items: list[NotificationOut] = []
         async for d in cursor:
             raw_dt = d.get("created_at")
             # MongoDB 存储 datetime 时会剥离 tzinfo，UTC 时间存储
@@ -180,7 +177,7 @@ class NotificationsService:
         return res.modified_count
 
 
-_notifications_service: Optional[NotificationsService] = None
+_notifications_service: NotificationsService | None = None
 
 
 def get_notifications_service() -> NotificationsService:

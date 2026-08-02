@@ -1,17 +1,18 @@
 """
 同步Redis客户端 - 用于筛选服务等同步代码
 """
-import redis
 import json
 import logging
-from typing import Optional, List, Dict, Any
+
+import redis
+
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 # 全局同步Redis连接池
-_sync_redis_pool: Optional[redis.ConnectionPool] = None
-_sync_redis_client: Optional[redis.Redis] = None
+_sync_redis_pool: redis.ConnectionPool | None = None
+_sync_redis_client: redis.Redis | None = None
 
 
 def init_sync_redis() -> redis.Redis:
@@ -36,7 +37,7 @@ def init_sync_redis() -> redis.Redis:
     return _sync_redis_client
 
 
-def get_sync_redis() -> Optional[redis.Redis]:
+def get_sync_redis() -> redis.Redis | None:
     """获取同步Redis客户端，连接失败返回None（不抛异常）"""
     global _sync_redis_client
     if _sync_redis_client is None:
@@ -82,7 +83,7 @@ class KlineCache:
             return self.ttl_trading  # 交易时段缓存5分钟
         return self.ttl_holiday  # 非交易时段缓存1小时
 
-    def get(self, code: str, period: str, limit: int, adj: str = None) -> Optional[List[Dict]]:
+    def get(self, code: str, period: str, limit: int, adj: str = None) -> list[dict] | None:
         """从缓存获取K线数据"""
         client = get_sync_redis()
         if client is None:
@@ -98,7 +99,7 @@ class KlineCache:
             logger.warning(f"⚠️ 缓存读取失败: {e}")
         return None
 
-    def set(self, code: str, period: str, limit: int, adj: str, data: List[Dict]):
+    def set(self, code: str, period: str, limit: int, adj: str, data: list[dict]):
         """写入缓存"""
         client = get_sync_redis()
         if client is None:

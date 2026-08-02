@@ -11,16 +11,15 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime
 from enum import Enum
+from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo import UpdateOne
 
 from app.core.database import get_mongo_db
 from app.services.basics_sync import add_financial_metrics as _add_financial_metrics_util
-
 
 logger = logging.getLogger(__name__)
 
@@ -43,16 +42,16 @@ class SyncStats:
     job: str = JOB_KEY
     data_type: str = "stock_basics"  # 添加data_type字段以符合数据库索引要求
     status: str = "idle"
-    started_at: Optional[str] = None
-    finished_at: Optional[str] = None
+    started_at: str | None = None
+    finished_at: str | None = None
     total: int = 0
     inserted: int = 0
     updated: int = 0
     errors: int = 0
-    last_trade_date: Optional[str] = None
-    data_sources_used: List[str] = field(default_factory=list)
-    source_stats: Dict[str, Dict[str, int]] = field(default_factory=dict)
-    message: Optional[str] = None
+    last_trade_date: str | None = None
+    data_sources_used: list[str] = field(default_factory=list)
+    source_stats: dict[str, dict[str, int]] = field(default_factory=dict)
+    message: str | None = None
 
 
 class MultiSourceBasicsSyncService:
@@ -61,9 +60,9 @@ class MultiSourceBasicsSyncService:
     def __init__(self):
         self._lock = asyncio.Lock()
         self._running = False
-        self._last_status: Optional[Dict[str, Any]] = None
+        self._last_status: dict[str, Any] | None = None
 
-    async def get_status(self) -> Dict[str, Any]:
+    async def get_status(self) -> dict[str, Any]:
         """获取同步状态
 
         智能处理逻辑：
@@ -191,7 +190,7 @@ class MultiSourceBasicsSyncService:
         default_status.status = "never_run"
         return default_status.__dict__
 
-    async def _persist_status(self, db: AsyncIOMotorDatabase, stats: Dict[str, Any]) -> None:
+    async def _persist_status(self, db: AsyncIOMotorDatabase, stats: dict[str, Any]) -> None:
         """持久化同步状态"""
         stats["job"] = JOB_KEY
 
@@ -213,9 +212,9 @@ class MultiSourceBasicsSyncService:
     async def _execute_bulk_write_with_retry(
         self,
         db: AsyncIOMotorDatabase,
-        operations: List,
+        operations: list,
         max_retries: int = 3
-    ) -> Tuple[int, int]:
+    ) -> tuple[int, int]:
         """
         执行批量写入，带重试机制
 
@@ -255,7 +254,7 @@ class MultiSourceBasicsSyncService:
 
         return inserted, updated
 
-    async def run_full_sync(self, force: bool = False, preferred_sources: List[str] = None) -> Dict[str, Any]:
+    async def run_full_sync(self, force: bool = False, preferred_sources: list[str] = None) -> dict[str, Any]:
         """
         运行完整同步
 
@@ -448,7 +447,7 @@ class MultiSourceBasicsSyncService:
 
 
 
-    def _add_financial_metrics(self, doc: Dict, daily_metrics: Dict) -> None:
+    def _add_financial_metrics(self, doc: dict, daily_metrics: dict) -> None:
         """委托到 basics_sync.processing.add_financial_metrics"""
         return _add_financial_metrics_util(doc, daily_metrics)
 

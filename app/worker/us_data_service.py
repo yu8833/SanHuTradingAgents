@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 美股数据服务（按需获取+缓存模式）
 
@@ -16,18 +15,19 @@
 """
 
 import logging
-from datetime import datetime, timedelta
-from typing import Dict, Optional, Any
 
 # 导入美股数据提供器
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
+
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from tradingagents.dataflows.providers.us.optimized import OptimizedUSDataProvider
-from app.core.database import get_mongo_db
 from app.core.config import settings
+from app.core.database import get_mongo_db
+from tradingagents.dataflows.providers.us.optimized import OptimizedUSDataProvider
 
 logger = logging.getLogger(__name__)
 
@@ -56,9 +56,9 @@ class USDataService:
     async def get_stock_info(
         self, 
         stock_code: str, 
-        source: Optional[str] = None,
+        source: str | None = None,
         force_refresh: bool = False
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """
         获取美股基础信息（按需获取+缓存）
         
@@ -113,7 +113,7 @@ class USDataService:
             logger.error(f"❌ 获取美股信息失败: {stock_code} ({source}): {e}")
             return None
     
-    async def _get_cached_info(self, code: str, source: str) -> Optional[Dict[str, Any]]:
+    async def _get_cached_info(self, code: str, source: str) -> dict[str, Any] | None:
         """从缓存获取股票信息"""
         try:
             cache_expire_time = datetime.now() - timedelta(hours=self.cache_hours)
@@ -130,7 +130,7 @@ class USDataService:
             logger.error(f"❌ 读取缓存失败: {code} ({source}): {e}")
             return None
     
-    async def _save_to_cache(self, stock_info: Dict[str, Any]) -> bool:
+    async def _save_to_cache(self, stock_info: dict[str, Any]) -> bool:
         """保存股票信息到缓存"""
         try:
             await self.db.stock_basic_info_us.update_one(
@@ -144,7 +144,7 @@ class USDataService:
             logger.error(f"❌ 保存缓存失败: {stock_info.get('code')} ({stock_info.get('source')}): {e}")
             return False
     
-    def _normalize_stock_info(self, stock_info: Dict, source: str) -> Dict:
+    def _normalize_stock_info(self, stock_info: dict, source: str) -> dict:
         """
         标准化股票信息格式
         

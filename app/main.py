@@ -13,64 +13,92 @@ For commercial licensing, please contact: hsliup@163.com
 商业许可咨询，请联系：hsliup@163.com
 """
 
+import asyncio
+import logging
+import time
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+import uvicorn
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
-import uvicorn
-import logging
-import time
-from datetime import datetime
-from contextlib import asynccontextmanager
-import asyncio
-from pathlib import Path
 
 from app.core.config import settings
-from app.core.database import init_db, close_db
+from app.core.database import close_db, init_db
 from app.core.logging_config import setup_logging
-from app.routers import auth_db as auth, analysis, screening, queue, sse, health, favorites, config, reports, database, operation_logs, tags, tushare_init, akshare_init, baostock_init, historical_data, multi_period_sync, financial_data, news_data, social_media, internal_messages, usage_statistics, model_capabilities, cache, logs, portfolio, retail
-from app.routers import sync as sync_router, multi_source_sync
-from app.routers import stocks as stocks_router
-from app.routers import stock_data as stock_data_router
-from app.routers import stock_sync as stock_sync_router
+
+# 港股和美股改为按需获取+缓存模式，不再需要定时同步任务
+# from app.worker.hk_sync_service import ...
+# from app.worker.us_sync_service import ...
+from app.middleware.operation_log_middleware import OperationLogMiddleware
+from app.routers import (
+    akshare_init,
+    analysis,
+    baostock_init,
+    cache,
+    config,
+    database,
+    favorites,
+    financial_data,
+    health,
+    historical_data,
+    internal_messages,
+    logs,
+    model_capabilities,
+    multi_period_sync,
+    multi_source_sync,
+    news_data,
+    operation_logs,
+    portfolio,
+    queue,
+    reports,
+    retail,
+    screening,
+    social_media,
+    sse,
+    tags,
+    tushare_init,
+    usage_statistics,
+)
+from app.routers import auth_db as auth
 from app.routers import multi_market_stocks as multi_market_stocks_router
 from app.routers import notifications as notifications_router
-from app.routers import websocket_notifications as websocket_notifications_router
+from app.routers import paper as paper_router
 from app.routers import scheduler as scheduler_router
-from app.services.basics_sync_service import get_basics_sync_service
+from app.routers import stock_data as stock_data_router
+from app.routers import stock_sync as stock_sync_router
+from app.routers import stocks as stocks_router
+from app.routers import sync as sync_router
+from app.routers import vibe_research as vibe_router
+from app.routers import websocket_notifications as websocket_notifications_router
 from app.services.multi_source_basics_sync_service import MultiSourceBasicsSyncService
+from app.services.quotes_ingestion_service import QuotesIngestionService
 from app.services.scheduler_service import set_scheduler_instance
-from app.worker.tushare_sync_service import (
-    run_tushare_basic_info_sync,
-    run_tushare_quotes_sync,
-    run_tushare_historical_sync,
-    run_tushare_financial_sync,
-    run_tushare_status_check
-)
 from app.worker.akshare_sync_service import (
     run_akshare_basic_info_sync,
-    run_akshare_quotes_sync,
-    run_akshare_historical_sync,
     run_akshare_financial_sync,
-    run_akshare_status_check
+    run_akshare_historical_sync,
+    run_akshare_quotes_sync,
+    run_akshare_status_check,
 )
 from app.worker.baostock_sync_service import (
     run_baostock_basic_info_sync,
     run_baostock_daily_quotes_sync,
     run_baostock_historical_sync,
-    run_baostock_status_check
+    run_baostock_status_check,
 )
-# 港股和美股改为按需获取+缓存模式，不再需要定时同步任务
-# from app.worker.hk_sync_service import ...
-# from app.worker.us_sync_service import ...
-from app.middleware.operation_log_middleware import OperationLogMiddleware
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.interval import IntervalTrigger
-from app.services.quotes_ingestion_service import QuotesIngestionService
-from app.routers import paper as paper_router
-from app.routers import quick_analysis
-from app.routers import vibe_research as vibe_router
+from app.worker.tushare_sync_service import (
+    run_tushare_basic_info_sync,
+    run_tushare_financial_sync,
+    run_tushare_historical_sync,
+    run_tushare_quotes_sync,
+    run_tushare_status_check,
+)
 
 
 def get_version() -> str:
@@ -113,9 +141,9 @@ async def _print_config_summary(logger):
                 env_file_found = True
                 # 显示文件的前几行（隐藏敏感信息）
                 try:
-                    with open(env_file, 'r', encoding='utf-8') as f:
+                    with open(env_file, encoding='utf-8') as f:
                         lines = f.readlines()[:5]  # 只读前5行
-                        logger.info(f"     Preview (first 5 lines):")
+                        logger.info("     Preview (first 5 lines):")
                         for i, line in enumerate(lines, 1):
                             # 隐藏包含密码、密钥等敏感信息的行
                             if any(keyword in line.upper() for keyword in ['PASSWORD', 'SECRET', 'KEY', 'TOKEN']):
@@ -171,7 +199,7 @@ async def _print_config_summary(logger):
                     logger.info(f"  NO_PROXY: {settings.NO_PROXY}")
                 else:
                     logger.info(f"  NO_PROXY: {','.join(no_proxy_list[:3])}... ({len(no_proxy_list)} domains)")
-            logger.info(f"  ✅ Proxy environment variables set successfully")
+            logger.info("  ✅ Proxy environment variables set successfully")
         else:
             logger.info("Proxy: Not configured (direct connection)")
 
@@ -241,7 +269,9 @@ async def lifespan(app: FastAPI):
 
     # Apply dynamic settings (log_level, enable_monitoring) from ConfigProvider
     try:
-        from app.services.config_provider import provider as config_provider  # local import to avoid early DB init issues
+        from app.services.config_provider import (
+            provider as config_provider,  # local import to avoid early DB init issues
+        )
         eff = await config_provider.get_effective_system_settings()
         desired_level = str(eff.get("log_level", "INFO")).upper()
         setup_logging(log_level=desired_level)
@@ -272,9 +302,9 @@ async def lifespan(app: FastAPI):
     # 启动每日定时任务：可配置
     scheduler: AsyncIOScheduler | None = None
     try:
-        from croniter import croniter
+        pass
     except Exception:
-        croniter = None  # 可选依赖
+        pass  # 可选依赖
     try:
         scheduler = AsyncIOScheduler(
             timezone=settings.TIMEZONE,
@@ -294,11 +324,11 @@ async def lifespan(app: FastAPI):
         if settings.TUSHARE_ENABLED:
             # Tushare 启用时，优先使用 Tushare
             preferred_sources = ["tushare", "akshare", "baostock"]
-            logger.info(f"📊 股票基础信息同步优先数据源: Tushare > AKShare > BaoStock")
+            logger.info("📊 股票基础信息同步优先数据源: Tushare > AKShare > BaoStock")
         else:
             # Tushare 禁用时，使用 AKShare 和 BaoStock
             preferred_sources = ["akshare", "baostock"]
-            logger.info(f"📊 股票基础信息同步优先数据源: AKShare > BaoStock (Tushare已禁用)")
+            logger.info("📊 股票基础信息同步优先数据源: AKShare > BaoStock (Tushare已禁用)")
 
         # 立即在启动后尝试一次（不阻塞）
         async def run_sync_with_sources():
@@ -683,7 +713,7 @@ async def lifespan(app: FastAPI):
         # 否则只有在首次调用 /api/scheduler/* 时才会创建，可能导致事件监听器永不注册
         try:
             from app.services.scheduler_service import get_scheduler_service
-            scheduler_service = get_scheduler_service()
+            get_scheduler_service()
             logger.info("✅ 调度器服务已初始化（事件监听器+僵尸检测已注册）")
         except Exception as e:
             logger.error(f"❌ 调度器服务初始化失败: {e}", exc_info=True)
@@ -779,6 +809,7 @@ async def log_requests(request: Request, call_next):
 # 全局异常处理
 # 请求ID/Trace-ID 中间件（需作为最外层，放在函数式中间件之后）
 from app.middleware.request_id import RequestIDMiddleware
+
 app.add_middleware(RequestIDMiddleware)
 
 @app.exception_handler(Exception)
@@ -831,9 +862,11 @@ app.include_router(portfolio.router, prefix="/api/portfolio", tags=["portfolio"]
 app.include_router(retail.router, prefix="/api/retail", tags=["retail"])
 # 个股预警
 from app.routers import stock_alerts as stock_alerts_router
+
 app.include_router(stock_alerts_router.router, prefix="/api/stock", tags=["stock-alerts"])
 # 新增：系统配置只读摘要
 from app.routers import system_config as system_config_router
+
 app.include_router(system_config_router.router, prefix="/api/system", tags=["system"])
 
 # 通知模块（REST + SSE）

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 速览分析 API 路由
 
@@ -13,12 +12,13 @@
 
 import logging
 import warnings
-from fastapi import APIRouter, Depends, HTTPException, Query
+from typing import Any, Literal
+
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any, Literal
 
 from app.routers.auth_db import get_current_user
-from app.services.quick_analysis_service import get_quick_analysis_service, QuickAnalysisResult
+from app.services.quick_analysis_service import get_quick_analysis_service
 
 router = APIRouter()
 logger = logging.getLogger("webapi")
@@ -27,17 +27,17 @@ logger = logging.getLogger("webapi")
 class QuickAnalysisRequest(BaseModel):
     """速览分析请求"""
     stock_code: str = Field(..., description="股票代码", example="000001")
-    stock_name: Optional[str] = Field(None, description="股票名称")
+    stock_name: str | None = Field(None, description="股票名称")
 
 
 class QuickAnalysisResponse(BaseModel):
     """速览分析响应"""
     code: int = Field(0, description="状态码，0表示成功")
     message: str = Field("success", description="状态消息")
-    data: Dict[str, Any] = Field(..., description="速览分析结果")
+    data: dict[str, Any] = Field(..., description="速览分析结果")
 
 
-@router.post("/quick", response_model=Dict[str, Any])
+@router.post("/quick", response_model=dict[str, Any])
 async def quick_analysis(
     request: QuickAnalysisRequest,
     user: dict = Depends(get_current_user)
@@ -79,7 +79,7 @@ async def quick_analysis(
         }
 
 
-@router.get("/{stock_code}", response_model=Dict[str, Any])
+@router.get("/{stock_code}", response_model=dict[str, Any])
 async def get_quick_analysis(
     stock_code: str,
     user: dict = Depends(get_current_user)
@@ -120,7 +120,7 @@ async def get_quick_analysis(
         }
 
 
-@router.post("/start", response_model=Dict[str, Any])
+@router.post("/start", response_model=dict[str, Any])
 async def start_analysis(
     body: QuickAnalysisRequest,
     mode: Literal["quick", "deep"] = Query("quick", description="分析模式: quick=速览, deep=深度"),

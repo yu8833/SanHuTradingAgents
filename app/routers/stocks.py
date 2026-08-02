@@ -4,17 +4,17 @@
 - 所有端点均需鉴权 (Bearer Token)
 - 路径前缀在 main.py 中挂载为 /api，当前路由自身前缀为 /stocks
 """
-from typing import Optional, Dict, Any, List, Tuple
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from datetime import datetime
 import asyncio  # 🔥 添加 asyncio 导入
 import logging
 import os
 import re
+from datetime import datetime
 
-from app.routers.auth_db import get_current_user
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+
 from app.core.database import get_mongo_db
 from app.core.response import ok
+from app.routers.auth_db import get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ def _zfill_code(code: str) -> str:
         return str(code)
 
 
-def _detect_market_and_code(code: str) -> Tuple[str, str]:
+def _detect_market_and_code(code: str) -> tuple[str, str]:
     """
     检测股票代码的市场类型并标准化代码
 
@@ -66,7 +66,7 @@ def _detect_market_and_code(code: str) -> Tuple[str, str]:
     return ('CN', _zfill_code(code))
 
 
-async def _fetch_news_from_multiple_sources(code: str, days: int = 30, limit: int = 50) -> List[Dict]:
+async def _fetch_news_from_multiple_sources(code: str, days: int = 30, limit: int = 50) -> list[dict]:
     """
     从多个数据源获取新闻数据（财联社、东方财富、同花顺等）
 
@@ -249,12 +249,12 @@ async def get_quote(
                     timeout=10.0  # 🔥 10秒超时（单只股票查询约 1 秒）
                 )
             except asyncio.TimeoutError:
-                logger.warning(f"⚠️ 单只股票快速查询超时（10秒），回退到全市场获取")
+                logger.warning("⚠️ 单只股票快速查询超时（10秒），回退到全市场获取")
                 q, source = None, None
             
             # 如果单只股票快速查询失败，回退到全市场获取
             if q is None:
-                logger.info(f"🔄 单只股票快速查询失败，回退到全市场获取")
+                logger.info("🔄 单只股票快速查询失败，回退到全市场获取")
                 from app.services.data_sources.manager import DataSourceManager
                 manager = DataSourceManager()
                 
@@ -277,7 +277,7 @@ async def get_quote(
                         q = quotes_map_data
                         source = fallback_source
                 except asyncio.TimeoutError:
-                    logger.warning(f"⚠️ 全市场获取实时行情超时（30秒），使用缓存数据")
+                    logger.warning("⚠️ 全市场获取实时行情超时（30秒），使用缓存数据")
                     q = await db["market_quotes"].find_one({"code": code6}, {"_id": 0})
 
             if q:
@@ -292,7 +292,7 @@ async def get_quote(
                     if cached_quote:
                         # 兼容 pre_close 和 prev_close 两种字段名
                         cached_pre_close = cached_quote.get("pre_close") or cached_quote.get("prev_close")
-                        cached_pct_chg = cached_quote.get("pct_chg")
+                        cached_quote.get("pct_chg")
 
                         # 使用缓存的昨收价计算涨跌幅
                         if q.get("pct_chg") is None and cached_pre_close and q.get("close") and cached_pre_close > 0:
@@ -382,7 +382,7 @@ async def get_quote(
     if q:
         logger.info(f"  ✅ 找到数据: volume={q.get('volume')}, amount={q.get('amount')}, volume_ratio={q.get('volume_ratio')}")
     else:
-        logger.info(f"  ❌ 未找到数据")
+        logger.info("  ❌ 未找到数据")
 
     # 🔥 基础信息 - 按数据源优先级查询
     from app.core.unified_config import UnifiedConfigManager
@@ -464,7 +464,7 @@ async def get_quote(
                 amplitude_date = (q or {}).get("trade_date")  # 来自实时数据
                 logger.info(f"  ✅ 振幅计算成功: {amplitude}%")
             else:
-                logger.warning(f"  ⚠️ 数据不完整，无法计算振幅")
+                logger.warning("  ⚠️ 数据不完整，无法计算振幅")
     except Exception as e:
         logger.warning(f"  ❌ 计算振幅失败: {e}")
         amplitude = None
@@ -504,7 +504,7 @@ async def get_quote(
 @router.get("/{code}/fundamentals", response_model=dict)
 async def get_fundamentals(
     code: str,
-    source: Optional[str] = Query(None, description="数据源 (tushare/akshare/baostock/multi_source)"),
+    source: str | None = Query(None, description="数据源 (tushare/akshare/baostock/multi_source)"),
     force_refresh: bool = Query(False, description="是否强制刷新（跳过缓存）"),
     current_user: dict = Depends(get_current_user)
 ):
@@ -790,7 +790,8 @@ async def get_kline(
     - 收盘后：检查历史数据是否有当天数据，没有则从 market_quotes 获取
     """
     import logging
-    from datetime import datetime, timedelta, time as dtime
+    from datetime import datetime, timedelta
+    from datetime import time as dtime
     from zoneinfo import ZoneInfo
     logger = logging.getLogger(__name__)
 
@@ -913,9 +914,10 @@ async def get_kline(
 
     # 2. 如果 MongoDB 没有数据，降级到外部 API（带超时保护，缩短超时避免长时间等待）
     if not items:
-        logger.info(f"📡 MongoDB 无数据，降级到外部 API")
+        logger.info("📡 MongoDB 无数据，降级到外部 API")
         try:
             import asyncio
+
             from app.services.data_sources.manager import DataSourceManager
 
             mgr = DataSourceManager()
@@ -933,7 +935,7 @@ async def get_kline(
                     logger.warning(f"⚠️ 保存K线到MongoDB缓存失败（不影响返回）: {save_err}")
 
         except asyncio.TimeoutError:
-            logger.warning(f"⚠️ 外部 API 获取 K 线超时（8秒），使用缓存数据或返回空")
+            logger.warning("⚠️ 外部 API 获取 K 线超时（8秒），使用缓存数据或返回空")
         except Exception as e:
             logger.warning(f"⚠️ 外部 API 获取 K 线失败: {e}")
 
@@ -1015,7 +1017,7 @@ async def get_kline(
 async def get_news(code: str, days: int = 30, limit: int = 50, include_announcements: bool = True, current_user: dict = Depends(get_current_user)):
     """获取新闻与公告（支持A股、港股、美股）"""
     from app.services.foreign_stock_service import ForeignStockService
-    from app.services.news_data_service import get_news_data_service, NewsQueryParams
+    from app.services.news_data_service import NewsQueryParams, get_news_data_service
 
     # 检测股票类型
     market, normalized_code = _detect_market_and_code(code)
@@ -1038,19 +1040,20 @@ async def get_news(code: str, days: int = 30, limit: int = 50, include_announcem
     else:
         # A股：直接调用同步服务的查询方法（包含智能回退逻辑）
         try:
-            logger.info(f"=" * 80)
+            logger.info("=" * 80)
             logger.info(f"📰 开始获取新闻: code={code}, normalized_code={normalized_code}, days={days}, limit={limit}")
 
             # 直接使用 news_data 路由的查询逻辑
-            from app.services.news_data_service import get_news_data_service, NewsQueryParams
-            from datetime import datetime, timedelta
+            from datetime import datetime
+
+            from app.services.news_data_service import NewsQueryParams, get_news_data_service
             from app.worker.akshare_sync_service import get_akshare_sync_service
 
             service = await get_news_data_service()
-            sync_service = await get_akshare_sync_service()
+            await get_akshare_sync_service()
 
             # 计算时间范围
-            hours_back = days * 24
+            days * 24
 
             # 🔥 不设置 start_time 限制，直接查询最新的 N 条新闻
             # 因为数据库中的新闻可能不是最近几天的，而是历史数据
@@ -1064,7 +1067,7 @@ async def get_news(code: str, days: int = 30, limit: int = 50, include_announcem
             logger.info(f"🔍 查询参数: symbol={params.symbol}, limit={params.limit} (不限制时间范围)")
 
             # 1. 先从数据库查询
-            logger.info(f"📊 步骤1: 从数据库查询新闻...")
+            logger.info("📊 步骤1: 从数据库查询新闻...")
             news_list = await service.query_news(params)
             logger.info(f"📊 数据库查询结果: 返回 {len(news_list)} 条新闻")
 
@@ -1083,7 +1086,7 @@ async def get_news(code: str, days: int = 30, limit: int = 50, include_announcem
                     # 🔥 直接调用AKShare适配器获取新闻（不依赖同步服务）
                     from app.services.data_sources.akshare_adapter import AKShareAdapter
                     adapter = AKShareAdapter()
-                    logger.info(f"📡 步骤2: 从AKShare实时获取新闻...")
+                    logger.info("📡 步骤2: 从AKShare实时获取新闻...")
                     akshare_items = adapter.get_news(normalized_code, days=days, limit=limit, include_announcements=False)
 
                     if akshare_items:
@@ -1136,7 +1139,7 @@ async def get_news(code: str, days: int = 30, limit: int = 50, include_announcem
                             news_list = akshare_news_list
                         data_source = "akshare_realtime"
                     else:
-                        logger.warning(f"⚠️ AKShare未获取到新闻数据，尝试其他数据源")
+                        logger.warning("⚠️ AKShare未获取到新闻数据，尝试其他数据源")
                         # 🔥 尝试从其他数据源获取（如同花顺、东方财富等）
                         try:
                             extra_news = await _fetch_news_from_multiple_sources(normalized_code, days, limit)
@@ -1150,7 +1153,7 @@ async def get_news(code: str, days: int = 30, limit: int = 50, include_announcem
                     logger.error(f"❌ AKShare获取新闻失败: {e}", exc_info=True)
 
             # 转换为旧格式（兼容前端）
-            logger.info(f"🔄 步骤4: 转换数据格式...")
+            logger.info("🔄 步骤4: 转换数据格式...")
             items = []
             for news in news_list:
                 # 🔥 将 datetime 对象转换为 ISO 字符串
@@ -1160,9 +1163,7 @@ async def get_news(code: str, days: int = 30, limit: int = 50, include_announcem
 
                 # 🔥 根据实际类型设置 type（公告 vs 新闻）
                 news_type = news.get("type", "news")
-                if news_type == "announcement":
-                    item_type = "announcement"
-                elif "notice" in str(news.get("title", "")).lower() or "公告" in str(news.get("title", "")):
+                if news_type == "announcement" or "notice" in str(news.get("title", "")).lower() or "公告" in str(news.get("title", "")):
                     item_type = "announcement"
                 else:
                     item_type = "news"
@@ -1182,7 +1183,7 @@ async def get_news(code: str, days: int = 30, limit: int = 50, include_announcem
             # 🔥 补充公告数据（从东财实时获取，与 filings 页面一致）
             if include_announcements:
                 try:
-                    logger.info(f"📡 步骤5: 获取公告数据...")
+                    logger.info("📡 步骤5: 获取公告数据...")
                     from app.services.vibe_astock import announcements
                     anns = announcements(normalized_code, limit)
                     for ann in anns:
@@ -1214,7 +1215,7 @@ async def get_news(code: str, days: int = 30, limit: int = 50, include_announcem
             }
 
             logger.info(f"📤 最终返回: source={data_source}, items_count={len(items)}")
-            logger.info(f"=" * 80)
+            logger.info("=" * 80)
             return ok(data)
 
         except Exception as e:
@@ -1307,8 +1308,9 @@ async def get_sector_info(
     # 2. 如果MongoDB没有，尝试AKShare
     if not sector_name:
         try:
-            import akshare as ak
             import asyncio
+
+            import akshare as ak
             df_sector = await asyncio.wait_for(
                 asyncio.to_thread(ak.stock_individual_info_em, symbol=code6),
                 timeout=5.0
@@ -1397,9 +1399,7 @@ async def get_sector_info(
                 # 构建板块股票列表（以 market_quotes 为主，缺失的用 stock_daily_quotes 兜底）
                 # ⚠️ 确保目标股票本身一定在展示列表中，否则无法计算其板块排名
                 display_codes = list(stock_codes[:29])
-                if code6 not in display_codes and code6 in stock_codes:
-                    display_codes.append(code6)
-                elif code6 not in display_codes:
+                if code6 not in display_codes and code6 in stock_codes or code6 not in display_codes:
                     display_codes.append(code6)
 
                 sector_stocks = []
@@ -1467,8 +1467,9 @@ async def get_sector_info(
         # 3.2 如果MongoDB没有数据，尝试AKShare
         if not sector_stocks:
             try:
-                import akshare as ak
                 import asyncio
+
+                import akshare as ak
                 df_industry = await asyncio.wait_for(
                     asyncio.to_thread(ak.stock_board_industry_cons_em, symbol=sector_name),
                     timeout=8.0
@@ -1515,7 +1516,7 @@ async def get_sector_info(
                     if s["code"] == code6:
                         rank = i + 1
                         break
-                logger.info(f"✅ 已用实时行情更新板块数据")
+                logger.info("✅ 已用实时行情更新板块数据")
         except Exception as e:
             logger.warning(f"更新实时行情到板块数据失败: {e}")
 
@@ -1572,6 +1573,7 @@ async def get_money_flow(
     tushare_ok = False
     try:
         import asyncio
+
         import tushare as ts
 
         token = os.getenv('TUSHARE_TOKEN', '').strip().strip('"').strip("'")
@@ -1664,8 +1666,9 @@ async def get_money_flow(
     # Tushare 失败时尝试 AKShare 备选（容器内常被东方财富风控，但保留作为非容器环境兜底）
     if not tushare_ok:
         try:
-            import akshare as ak
             import asyncio
+
+            import akshare as ak
 
             # 修正 market 参数映射：6开头=sh，0/3开头=sz，8/4开头=bj（北交所）
             if code6.startswith('6'):
@@ -1871,7 +1874,7 @@ async def get_risk_analysis(
         logger.warning(f"获取风险分析数据HTTP错误: {e}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"未找到该股票的风险分析数据"
+            detail="未找到该股票的风险分析数据"
         )
     except Exception as e:
         logger.error(f"获取风险分析数据失败: {e}", exc_info=True)

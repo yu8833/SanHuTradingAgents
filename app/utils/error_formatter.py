@@ -4,8 +4,6 @@
 将技术性错误转换为用户友好的错误提示，明确指出问题所在（数据源、大模型、配置等）
 """
 
-import re
-from typing import Dict, Optional, Tuple
 from enum import Enum
 
 
@@ -57,7 +55,7 @@ class ErrorFormatter:
     }
     
     @classmethod
-    def format_error(cls, error_message: str, context: Optional[Dict] = None) -> Dict[str, str]:
+    def format_error(cls, error_message: str, context: dict | None = None) -> dict[str, str]:
         """
         格式化错误信息
         
@@ -83,7 +81,7 @@ class ErrorFormatter:
         return cls._generate_friendly_message(category, provider_or_source, error_message, context)
     
     @classmethod
-    def _categorize_error(cls, error_message: str, context: Dict) -> Tuple[ErrorCategory, Optional[str]]:
+    def _categorize_error(cls, error_message: str, context: dict) -> tuple[ErrorCategory, str | None]:
         """
         分类错误
         
@@ -178,7 +176,7 @@ class ErrorFormatter:
         return ErrorCategory.UNKNOWN, None
     
     @classmethod
-    def _extract_llm_provider(cls, error_message: str) -> Optional[str]:
+    def _extract_llm_provider(cls, error_message: str) -> str | None:
         """从错误信息中提取 LLM 厂商"""
         error_lower = error_message.lower()
         for key, name in cls.LLM_PROVIDERS.items():
@@ -187,7 +185,7 @@ class ErrorFormatter:
         return None
     
     @classmethod
-    def _extract_data_source(cls, error_message: str) -> Optional[str]:
+    def _extract_data_source(cls, error_message: str) -> str | None:
         """从错误信息中提取数据源"""
         error_lower = error_message.lower()
         for key, name in cls.DATA_SOURCES.items():
@@ -199,10 +197,10 @@ class ErrorFormatter:
     def _generate_friendly_message(
         cls, 
         category: ErrorCategory, 
-        provider_or_source: Optional[str],
+        provider_or_source: str | None,
         original_error: str,
-        context: Dict
-    ) -> Dict[str, str]:
+        context: dict
+    ) -> dict[str, str]:
         """生成用户友好的错误信息"""
         
         # 获取友好的厂商/数据源名称

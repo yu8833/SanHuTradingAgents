@@ -9,13 +9,13 @@
 
 路径前缀: /api/markets
 """
-from typing import Optional, Dict, Any, List
-from fastapi import APIRouter, Depends, HTTPException, status, Query
 import logging
 
-from app.routers.auth_db import get_current_user
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+
 from app.core.database import get_mongo_db
 from app.core.response import ok
+from app.routers.auth_db import get_current_user
 from app.services.unified_stock_service import UnifiedStockService
 
 logger = logging.getLogger("webapi")
@@ -136,7 +136,7 @@ async def search_stocks(
 async def get_stock_info(
     market: str,
     code: str,
-    source: Optional[str] = Query(None, description="指定数据源（可选）"),
+    source: str | None = Query(None, description="指定数据源（可选）"),
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -260,8 +260,8 @@ async def get_stock_quote(
 async def get_stock_daily_quotes(
     market: str,
     code: str,
-    start_date: Optional[str] = Query(None, description="开始日期 (YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="结束日期 (YYYY-MM-DD)"),
+    start_date: str | None = Query(None, description="开始日期 (YYYY-MM-DD)"),
+    end_date: str | None = Query(None, description="结束日期 (YYYY-MM-DD)"),
     limit: int = Query(100, ge=1, le=1000, description="返回记录数"),
     current_user: dict = Depends(get_current_user)
 ):

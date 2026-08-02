@@ -4,14 +4,14 @@
 提供统一的交易时间判断逻辑，用于判断当前是否在A股交易时间内。
 """
 
-from datetime import datetime, time as dtime
-from typing import Optional
+from datetime import datetime
+from datetime import time as dtime
 from zoneinfo import ZoneInfo
 
 from app.core.config import settings
 
 
-def is_trading_time(now: Optional[datetime] = None) -> bool:
+def is_trading_time(now: datetime | None = None) -> bool:
     """
     判断是否在A股交易时间或收盘后缓冲期
 
@@ -50,7 +50,7 @@ def is_trading_time(now: Optional[datetime] = None) -> bool:
     return (morning <= t <= noon) or (afternoon_start <= t <= buffer_end)
 
 
-def is_strict_trading_time(now: Optional[datetime] = None) -> bool:
+def is_strict_trading_time(now: datetime | None = None) -> bool:
     """
     判断是否在严格的A股交易时间内（不包含缓冲期）
 
@@ -82,7 +82,7 @@ def is_strict_trading_time(now: Optional[datetime] = None) -> bool:
     return (morning <= t <= noon) or (afternoon_start <= t <= afternoon_end)
 
 
-def is_pre_market_time(now: Optional[datetime] = None) -> bool:
+def is_pre_market_time(now: datetime | None = None) -> bool:
     """
     判断是否在盘前时间（9:00-9:30）
 
@@ -106,7 +106,7 @@ def is_pre_market_time(now: Optional[datetime] = None) -> bool:
     return pre_market_start <= t < pre_market_end
 
 
-def is_after_market_time(now: Optional[datetime] = None) -> bool:
+def is_after_market_time(now: datetime | None = None) -> bool:
     """
     判断是否在盘后时间（15:00-15:30）
 
@@ -130,7 +130,7 @@ def is_after_market_time(now: Optional[datetime] = None) -> bool:
     return after_market_start <= t <= after_market_end
 
 
-def get_trading_status(now: Optional[datetime] = None) -> str:
+def get_trading_status(now: datetime | None = None) -> str:
     """
     获取当前交易状态
 

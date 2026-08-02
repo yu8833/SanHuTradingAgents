@@ -1,13 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from pydantic import BaseModel, Field
-from typing import Literal, Optional, Dict, Any, List, Tuple
-from datetime import datetime
 import logging
 import re
+from datetime import datetime
+from typing import Any, Literal
 
-from app.routers.auth_db import get_current_user
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
+
 from app.core.database import get_mongo_db
 from app.core.response import ok
+from app.routers.auth_db import get_current_user
 
 router = APIRouter(prefix="/paper", tags=["paper"])
 logger = logging.getLogger("webapi")
@@ -25,18 +26,18 @@ class PlaceOrderRequest(BaseModel):
     code: str = Field(..., description="股票代码（支持A股/港股/美股）")
     side: Literal["buy", "sell"]
     quantity: int = Field(..., gt=0)
-    market: Optional[str] = Field(None, description="市场类型 (CN/HK/US)，不传则自动识别")
+    market: str | None = Field(None, description="市场类型 (CN/HK/US)，不传则自动识别")
     # 可选：关联的分析ID，便于从分析页面一键下单后追踪
-    analysis_id: Optional[str] = None
+    analysis_id: str | None = None
     # 散户策略元数据（买入时写入 paper_positions，用于退出信号监控和策略表现统计）
-    strategy: Optional[str] = Field(None, description="策略类型（extreme_reversal/turnaround/small_cap_value/convertible_arbitrage）")
-    stop_loss_price: Optional[float] = Field(None, description="止损价")
-    take_profit_price: Optional[float] = Field(None, description="止盈价")
-    thesis: Optional[str] = Field(None, description="投资逻辑")
-    stock_name: Optional[str] = Field(None, description="股票名称")
+    strategy: str | None = Field(None, description="策略类型（extreme_reversal/turnaround/small_cap_value/convertible_arbitrage）")
+    stop_loss_price: float | None = Field(None, description="止损价")
+    take_profit_price: float | None = Field(None, description="止盈价")
+    thesis: str | None = Field(None, description="投资逻辑")
+    stock_name: str | None = Field(None, description="股票名称")
 
 
-def _detect_market_and_code(code: str) -> Tuple[str, str]:
+def _detect_market_and_code(code: str) -> tuple[str, str]:
     """
     检测股票代码的市场类型并标准化代码
 
@@ -68,7 +69,7 @@ def _detect_market_and_code(code: str) -> Tuple[str, str]:
     return ('CN', code.zfill(6))
 
 
-async def _get_or_create_account(user_id: str) -> Dict[str, Any]:
+async def _get_or_create_account(user_id: str) -> dict[str, Any]:
     """获取或创建账户（多货币）"""
     db = get_mongo_db()
     acc = await db["paper_accounts"].find_one({"user_id": user_id})
@@ -99,7 +100,7 @@ async def _get_or_create_account(user_id: str) -> Dict[str, Any]:
         await db["paper_accounts"].insert_one(acc)
     else:
         # 兼容旧账户结构：如果 cash 或 realized_pnl 仍为标量，迁移为多货币对象
-        updates: Dict[str, Any] = {}
+        updates: dict[str, Any] = {}
         try:
             cash_val = acc.get("cash")
             if not isinstance(cash_val, dict):
@@ -121,7 +122,7 @@ async def _get_or_create_account(user_id: str) -> Dict[str, Any]:
     return acc
 
 
-async def _get_market_rules(market: str) -> Optional[Dict[str, Any]]:
+async def _get_market_rules(market: str) -> dict[str, Any] | None:
     """获取市场规则配置"""
     db = get_mongo_db()
     rules_doc = await db["paper_market_rules"].find_one({"market": market})
@@ -130,7 +131,7 @@ async def _get_market_rules(market: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _calculate_commission(market: str, side: str, amount: float, rules: Dict[str, Any]) -> float:
+def _calculate_commission(market: str, side: str, amount: float, rules: dict[str, Any]) -> float:
     """计算手续费"""
     if not rules or "commission" not in rules:
         return 0.0
@@ -197,7 +198,7 @@ async def _get_available_quantity(user_id: str, code: str, market: str) -> int:
     return total_qty
 
 
-async def _get_last_price(code: str, market: str) -> Optional[float]:
+async def _get_last_price(code: str, market: str) -> float | None:
     """
     获取股票最新价格（支持多市场）
 
@@ -291,7 +292,7 @@ async def get_account(current_user: dict = Depends(get_current_user)):
         "USD": 0.0
     }
 
-    detailed_positions: List[Dict[str, Any]] = []
+    detailed_positions: list[dict[str, Any]] = []
     for p in positions:
         code = p.get("code")
         market = p.get("market", "CN")
@@ -578,7 +579,7 @@ async def place_order(payload: PlaceOrderRequest, current_user: dict = Depends(g
 
     # 自动管理止损预警：买入时创建，清仓时删除
     try:
-        from app.services.stock_alert_service import stock_alert_service, AlertRuleCreate, ALERT_TYPE_PRICE_BELOW
+        from app.services.stock_alert_service import ALERT_TYPE_PRICE_BELOW, AlertRuleCreate, stock_alert_service
         stock_name = payload.stock_name or (pos.get("stock_name") if pos else "") or ""
 
         if side == "buy":
@@ -600,7 +601,7 @@ async def place_order(payload: PlaceOrderRequest, current_user: dict = Depends(g
                         stock_name=stock_name,
                         alert_type=ALERT_TYPE_PRICE_BELOW,
                         threshold=float(effective_stop_loss),
-                        note=f"自动止损预警（持仓成本监控）",
+                        note="自动止损预警（持仓成本监控）",
                     ),
                 )
                 logger.info(f"🔔 已为 {normalized_code} 创建止损预警，阈值 {effective_stop_loss}")
@@ -622,7 +623,7 @@ async def place_order(payload: PlaceOrderRequest, current_user: dict = Depends(g
 
 @router.get("/positions", response_model=dict)
 async def list_positions(
-    status: Optional[str] = None,
+    status: str | None = None,
     current_user: dict = Depends(get_current_user)
 ):
     """获取持仓列表（支持多市场）
@@ -631,7 +632,7 @@ async def list_positions(
         status: 持仓状态筛选。open=未平仓(quantity>0)，closed=已平仓(quantity=0)，all=全部
     """
     db = get_mongo_db()
-    query: Dict[str, Any] = {"user_id": current_user["id"]}
+    query: dict[str, Any] = {"user_id": current_user["id"]}
     if status == "open":
         query["quantity"] = {"$gt": 0}
     elif status == "closed":
@@ -641,7 +642,7 @@ async def list_positions(
         query["quantity"] = {"$gt": 0}
 
     items = await db["paper_positions"].find(query).sort("updated_at", -1).to_list(None)
-    enriched: List[Dict[str, Any]] = []
+    enriched: list[dict[str, Any]] = []
     for p in items:
         code = p.get("code")
         market = p.get("market", "CN")

@@ -10,11 +10,12 @@
 
 from __future__ import annotations
 
-import time
 import json
 import logging
-from typing import Any, Callable, Optional
-from datetime import datetime, timezone, timedelta
+import time
+from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ _memory_cache: dict[str, tuple[float, Any]] = {}
 _MEMORY_MAX = 500
 
 
-def _memory_get(key: str) -> Optional[Any]:
+def _memory_get(key: str) -> Any | None:
     hit = _memory_cache.get(key)
     if not hit:
         return None
@@ -71,7 +72,7 @@ def _memory_set(key: str, value: Any, ttl: int = 60):
 async def _ensure_redis_available() -> bool:
     """确保Redis可用，如果不可用则尝试重新初始化。"""
     try:
-        from app.core.database import redis_client, db_manager
+        from app.core.database import db_manager, redis_client
         if redis_client is not None and db_manager._redis_healthy:
             try:
                 await redis_client.ping()
@@ -90,7 +91,7 @@ async def _ensure_redis_available() -> bool:
         return False
 
 
-async def get_cache(key: str) -> Optional[Any]:
+async def get_cache(key: str) -> Any | None:
     """从缓存获取数据（优先Redis，兜底内存）。"""
     # 1. 尝试Redis
     if await _ensure_redis_available():
@@ -106,7 +107,7 @@ async def get_cache(key: str) -> Optional[Any]:
     return _memory_get(key)
 
 
-async def set_cache(key: str, value: Any, ttl: Optional[int] = None, category: str = "default"):
+async def set_cache(key: str, value: Any, ttl: int | None = None, category: str = "default"):
     """写入缓存（同时写Redis和内存）。"""
     if ttl is None:
         ttl = get_ttl(category)

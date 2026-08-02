@@ -2,16 +2,14 @@
 新闻数据同步服务
 支持多数据源新闻数据同步和情绪分析
 """
-import asyncio
 import logging
-from typing import List, Dict, Any, Optional
-from datetime import datetime, timedelta
 from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any
 
 from app.services.news_data_service import get_news_data_service
-from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
-from tradingagents.dataflows.providers.china.akshare import get_akshare_provider
 from tradingagents.dataflows.news.realtime_news import RealtimeNewsAggregator
+from tradingagents.dataflows.providers.china.akshare import get_akshare_provider
 
 logger = logging.getLogger(__name__)
 
@@ -23,9 +21,9 @@ class NewsSyncStats:
     successful_saves: int = 0
     failed_saves: int = 0
     duplicate_skipped: int = 0
-    sources_used: List[str] = field(default_factory=list)
+    sources_used: list[str] = field(default_factory=list)
     start_time: datetime = field(default_factory=datetime.utcnow)
-    end_time: Optional[datetime] = None
+    end_time: datetime | None = None
     
     @property
     def duration_seconds(self) -> float:
@@ -92,7 +90,7 @@ class NewsDataSyncService:
     async def sync_stock_news(
         self,
         symbol: str,
-        data_sources: List[str] = None,
+        data_sources: list[str] = None,
         hours_back: int = 24,
         max_news_per_source: int = 50
     ) -> NewsSyncStats:
@@ -188,7 +186,7 @@ class NewsDataSyncService:
         symbol: str,
         hours_back: int,
         max_news: int
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """同步Tushare新闻"""
         try:
             provider = await self._get_tushare_provider()
@@ -233,7 +231,7 @@ class NewsDataSyncService:
         symbol: str, 
         hours_back: int, 
         max_news: int
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """同步AKShare新闻"""
         try:
             provider = await self._get_akshare_provider()
@@ -265,7 +263,7 @@ class NewsDataSyncService:
         symbol: str, 
         hours_back: int, 
         max_news: int
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """同步实时新闻"""
         try:
             aggregator = await self._get_realtime_aggregator()
@@ -291,7 +289,7 @@ class NewsDataSyncService:
             self.logger.error(f"❌ 实时新闻同步失败: {e}")
             return []
     
-    def _parse_publish_time(self, time_val: Any) -> Optional[datetime]:
+    def _parse_publish_time(self, time_val: Any) -> datetime | None:
         """解析发布时间，支持多种格式"""
         if not time_val:
             return None
@@ -314,7 +312,7 @@ class NewsDataSyncService:
                 continue
         return None
 
-    def _standardize_tushare_news(self, news: Dict[str, Any], symbol: str) -> Optional[Dict[str, Any]]:
+    def _standardize_tushare_news(self, news: dict[str, Any], symbol: str) -> dict[str, Any] | None:
         """标准化Tushare新闻数据"""
         try:
             # tushare adapter 使用 "time" 字段存储时间
@@ -338,7 +336,7 @@ class NewsDataSyncService:
             self.logger.error(f"❌ 标准化Tushare新闻失败: {e}")
             return None
 
-    def _standardize_akshare_news(self, news: Dict[str, Any], symbol: str) -> Optional[Dict[str, Any]]:
+    def _standardize_akshare_news(self, news: dict[str, Any], symbol: str) -> dict[str, Any] | None:
         """标准化AKShare新闻数据"""
         try:
             # akshare adapter 使用 "time" 字段存储时间
@@ -362,7 +360,7 @@ class NewsDataSyncService:
             self.logger.error(f"❌ 标准化AKShare新闻失败: {e}")
             return None
     
-    def _standardize_realtime_news(self, news_item, symbol: str) -> Optional[Dict[str, Any]]:
+    def _standardize_realtime_news(self, news_item, symbol: str) -> dict[str, Any] | None:
         """标准化实时新闻数据"""
         try:
             return {
@@ -430,7 +428,7 @@ class NewsDataSyncService:
         else:
             return "low"
     
-    def _extract_keywords(self, text: str) -> List[str]:
+    def _extract_keywords(self, text: str) -> list[str]:
         """提取关键词"""
         # 简单的关键词提取，实际应用中可以使用更复杂的NLP技术
         keywords = []
@@ -446,7 +444,7 @@ class NewsDataSyncService:
         
         return keywords[:10]  # 最多返回10个关键词
     
-    def _deduplicate_news(self, news_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _deduplicate_news(self, news_list: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """去重新闻"""
         seen = set()
         unique_news = []
@@ -462,7 +460,7 @@ class NewsDataSyncService:
     
     async def sync_market_news(
         self,
-        data_sources: List[str] = None,
+        data_sources: list[str] = None,
         hours_back: int = 24,
         max_news_per_source: int = 100
     ) -> NewsSyncStats:

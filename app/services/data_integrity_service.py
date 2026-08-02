@@ -13,10 +13,10 @@
 - 手动通过API触发
 """
 
-import logging
 import asyncio
+import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
+from typing import Any
 
 from app.core.database import get_mongo_db
 
@@ -37,12 +37,12 @@ class DataIntegrityService:
 
     async def check_historical_completeness(
         self,
-        trade_date: Optional[str] = None,
+        trade_date: str | None = None,
         auto_remediate: bool = True,
         remediate_source: str = "akshare",
         remediate_batch_size: int = 50,
         remediate_lookback_days: int = 30,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         检查指定交易日的历史数据完整性，可选自动补数
 
@@ -158,7 +158,7 @@ class DataIntegrityService:
             await self._save_check_result(db, result)
             return result
 
-    async def _get_latest_trade_date(self, db) -> Optional[str]:
+    async def _get_latest_trade_date(self, db) -> str | None:
         """获取最新交易日（从 stock_daily_quotes 中查找最新的交易日期）
 
         空库或异常时返回 None，不回退到今天，避免周末/节假日触发全量误报。
@@ -182,7 +182,7 @@ class DataIntegrityService:
         logger.warning("⚠️ stock_daily_quotes 为空，无法确定最新交易日")
         return None
 
-    async def _get_expected_stock_codes(self, db) -> List[str]:
+    async def _get_expected_stock_codes(self, db) -> list[str]:
         """获取应同步的A股股票代码列表（与同步服务一致），按 code 去重"""
         cursor = db.stock_basic_info.find(
             {
@@ -214,12 +214,12 @@ class DataIntegrityService:
 
     async def _remediate_missing(
         self,
-        missing_codes: List[str],
+        missing_codes: list[str],
         trade_date: str,
         source: str,
         batch_size: int,
         lookback_days: int = 30,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         对缺失数据的股票进行补数
 
@@ -321,11 +321,11 @@ class DataIntegrityService:
         self,
         source: str,
         service,
-        batch: List[str],
+        batch: list[str],
         start_date: str,
         end_date: str,
         lookback_days: int,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """执行单批次补数，归一化不同数据源接口差异
 
         - akshare/tushare: 调用 sync_historical_data(symbols, start_date, end_date, incremental)
@@ -366,12 +366,12 @@ class DataIntegrityService:
         self,
         source: str,
         service,
-        codes: List[str],
+        codes: list[str],
         start_date: str,
         end_date: str,
         batch_size: int,
         lookback_days: int,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """对给定股票列表分批补数，并对失败批次重试一次
 
         Returns:
@@ -385,7 +385,7 @@ class DataIntegrityService:
             "failed_codes": [],
         }
 
-        failed_codes: List[str] = []
+        failed_codes: list[str] = []
 
         # 主循环：分批补数
         for i in range(0, len(codes), batch_size):
@@ -437,7 +437,7 @@ class DataIntegrityService:
 
         return result
 
-    async def _save_check_result(self, db, result: Dict):
+    async def _save_check_result(self, db, result: dict):
         """保存检查结果到 MongoDB"""
         try:
             # 复制一份，避免修改原始引用
@@ -447,7 +447,7 @@ class DataIntegrityService:
         except Exception as e:
             logger.warning(f"保存完整性检查结果失败（不影响主流程）: {e}")
 
-    async def get_latest_check_result(self) -> Optional[Dict]:
+    async def get_latest_check_result(self) -> dict | None:
         """获取最近一次完整性检查结果"""
         try:
             db = await self._get_db()
@@ -467,7 +467,7 @@ class DataIntegrityService:
 
 
 # 单例
-_integrity_service: Optional[DataIntegrityService] = None
+_integrity_service: DataIntegrityService | None = None
 
 
 async def get_data_integrity_service() -> DataIntegrityService:

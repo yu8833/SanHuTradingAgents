@@ -5,21 +5,21 @@
 """
 import asyncio
 import logging
-from datetime import datetime, date
-from typing import Dict, Any, List, Optional, Union
+from datetime import date, datetime
+from typing import Any
+
 import pandas as pd
-from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.core.database import get_database
 from app.core.numeric_sanitizer import (
-    sanitize_numeric,
-    sanitize_price,
-    sanitize_pct_chg,
     sanitize_amount,
-    sanitize_volume,
-    sanitize_turnover_rate,
-    sanitize_pe,
+    sanitize_numeric,
     sanitize_pb,
+    sanitize_pct_chg,
+    sanitize_pe,
+    sanitize_price,
+    sanitize_turnover_rate,
+    sanitize_volume,
 )
 
 logger = logging.getLogger(__name__)
@@ -228,7 +228,7 @@ class HistoricalDataService:
     async def _execute_bulk_write_with_retry(
         self,
         symbol: str,
-        operations: List,
+        operations: list,
         max_retries: int = 5  # 增加重试次数：从3次改为5次
     ) -> int:
         """
@@ -288,7 +288,7 @@ class HistoricalDataService:
         market: str,
         period: str = "daily",
         date_index = None
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """标准化单条记录"""
         now = datetime.utcnow()
 
@@ -399,7 +399,7 @@ class HistoricalDataService:
         else:
             return str(date_value)
     
-    def _safe_float(self, value) -> Optional[float]:
+    def _safe_float(self, value) -> float | None:
         """安全转换为浮点数"""
         if value is None or value == '' or pd.isna(value):
             return None
@@ -416,7 +416,7 @@ class HistoricalDataService:
         data_source: str = None,
         period: str = None,
         limit: int = None
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         查询历史数据
 
@@ -467,7 +467,7 @@ class HistoricalDataService:
             logger.error(f"❌ 查询历史数据失败 {symbol}: {e}")
             return []
     
-    async def get_latest_date(self, symbol: str, data_source: str) -> Optional[str]:
+    async def get_latest_date(self, symbol: str, data_source: str) -> str | None:
         """获取最新数据日期"""
         if self.collection is None:
             await self.initialize()
@@ -486,7 +486,7 @@ class HistoricalDataService:
             logger.error(f"❌ 获取最新日期失败 {symbol}: {e}")
             return None
     
-    async def get_data_statistics(self) -> Dict[str, Any]:
+    async def get_data_statistics(self) -> dict[str, Any]:
         """获取数据统计信息"""
         if self.collection is None:
             await self.initialize()

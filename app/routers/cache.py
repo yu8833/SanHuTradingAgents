@@ -2,12 +2,12 @@
 缓存管理路由
 提供缓存统计、清理等功能
 """
-from fastapi import APIRouter, HTTPException, Depends, Query
-from typing import Optional
-from datetime import datetime, timedelta
 
-from app.routers.auth_db import get_current_user
+from fastapi import APIRouter, Depends, HTTPException, Query
+
 from app.core.response import ok
+from app.routers.auth_db import get_current_user
+
 try:
     from tradingagents.utils.logging_manager import get_logger
 except ImportError:

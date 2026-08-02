@@ -3,18 +3,13 @@
 基于现有MongoDB集合，提供标准化的数据访问服务
 """
 import logging
-from datetime import datetime, date
-from typing import Optional, Dict, Any, List
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from datetime import datetime
+from typing import Any
 
 from app.core.database import get_mongo_db
 from app.models.stock_models import (
-    StockBasicInfoExtended, 
     MarketQuotesExtended,
-    MarketInfo,
-    MarketType,
-    ExchangeType,
-    CurrencyType
+    StockBasicInfoExtended,
 )
 
 logger = logging.getLogger(__name__)
@@ -33,8 +28,8 @@ class StockDataService:
     async def get_stock_basic_info(
         self,
         symbol: str,
-        source: Optional[str] = None
-    ) -> Optional[StockBasicInfoExtended]:
+        source: str | None = None
+    ) -> StockBasicInfoExtended | None:
         """
         获取股票基础信息
         Args:
@@ -58,7 +53,7 @@ class StockDataService:
                 # 修复 #B1：按优先级收集所有非空 doc，然后 merge 字段（高优先级覆盖低优先级，
                 # 但低优先级中的非 None / 非空字段用来填充高优先级中缺失的值）
                 source_priority = ["tushare", "multi_source", "akshare", "baostock"]
-                collected_docs: List[Dict[str, Any]] = []
+                collected_docs: list[dict[str, Any]] = []
 
                 for src in source_priority:
                     query_with_source = query.copy()
@@ -106,12 +101,10 @@ class StockDataService:
             import math
             if math.isnan(value) or math.isinf(value):
                 return False
-        if isinstance(value, (list, dict)) and len(value) == 0:
-            return False
-        return True
+        return not (isinstance(value, (list, dict)) and len(value) == 0)
 
     @classmethod
-    def _merge_basic_info_docs(cls, docs_by_priority: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def _merge_basic_info_docs(cls, docs_by_priority: list[dict[str, Any]]) -> dict[str, Any]:
         """按优先级 merge 多个基础信息 doc，首个 = 最高优先级（覆盖，非 None 优先保留），
         后续用于填充最高优先级缺失的字段。
         """
@@ -120,7 +113,7 @@ class StockDataService:
         if len(docs_by_priority) == 1:
             return docs_by_priority[0]
 
-        merged: Dict[str, Any] = {}
+        merged: dict[str, Any] = {}
         # 先把最高优先级的所有字段写进去
         for k, v in docs_by_priority[0].items():
             if cls._is_meaningful(v):
@@ -141,7 +134,7 @@ class StockDataService:
             merged["code"] = str(merged["symbol"]).zfill(6)
         return merged
     
-    async def get_market_quotes(self, symbol: str) -> Optional[MarketQuotesExtended]:
+    async def get_market_quotes(self, symbol: str) -> MarketQuotesExtended | None:
         """
         获取实时行情数据
         Args:
@@ -173,12 +166,12 @@ class StockDataService:
     
     async def get_stock_list(
         self,
-        market: Optional[str] = None,
-        industry: Optional[str] = None,
+        market: str | None = None,
+        industry: str | None = None,
         page: int = 1,
         page_size: int = 20,
-        source: Optional[str] = None
-    ) -> List[StockBasicInfoExtended]:
+        source: str | None = None
+    ) -> list[StockBasicInfoExtended]:
         """
         获取股票列表
         Args:
@@ -240,9 +233,9 @@ class StockDataService:
     
     async def get_stock_list_count(
         self,
-        market: Optional[str] = None,
-        industry: Optional[str] = None,
-        source: Optional[str] = None
+        market: str | None = None,
+        industry: str | None = None,
+        source: str | None = None
     ) -> int:
         """
         🔥 获取股票列表总数（用于分页）
@@ -290,7 +283,7 @@ class StockDataService:
     async def update_stock_basic_info(
         self,
         symbol: str,
-        update_data: Dict[str, Any],
+        update_data: dict[str, Any],
         source: str = "tushare"
     ) -> bool:
         """
@@ -337,7 +330,7 @@ class StockDataService:
     async def update_market_quotes(
         self,
         symbol: str,
-        quote_data: Dict[str, Any]
+        quote_data: dict[str, Any]
     ) -> bool:
         """
         更新实时行情数据
@@ -373,7 +366,7 @@ class StockDataService:
             logger.error(f"更新实时行情失败 symbol={symbol}: {e}")
             return False
     
-    def _standardize_basic_info(self, doc: Dict[str, Any]) -> Dict[str, Any]:
+    def _standardize_basic_info(self, doc: dict[str, Any]) -> dict[str, Any]:
         """
         标准化股票基础信息数据
         将现有字段映射到标准化字段
@@ -452,7 +445,7 @@ class StockDataService:
 
         return result
     
-    def _standardize_market_quotes(self, doc: Dict[str, Any]) -> Dict[str, Any]:
+    def _standardize_market_quotes(self, doc: dict[str, Any]) -> dict[str, Any]:
         """
         标准化实时行情数据
         将现有字段映射到标准化字段
@@ -469,12 +462,11 @@ class StockDataService:
             result["code"] = doc["code"]
 
         # 生成完整代码和市场标识 (优先使用已有的full_symbol)
-        if "full_symbol" not in result or not result["full_symbol"]:
-            if symbol and len(symbol) == 6:
-                if symbol.startswith(('60', '68', '90')):
-                    result["full_symbol"] = f"{symbol}.SS"
-                else:
-                    result["full_symbol"] = f"{symbol}.SZ"
+        if ("full_symbol" not in result or not result["full_symbol"]) and symbol and len(symbol) == 6:
+            if symbol.startswith(('60', '68', '90')):
+                result["full_symbol"] = f"{symbol}.SS"
+            else:
+                result["full_symbol"] = f"{symbol}.SZ"
 
         if "market" not in result:
             result["market"] = "CN"

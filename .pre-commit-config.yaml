@@ -1,0 +1,22 @@
+repos:
+  # ============================================================
+  # L2：git commit 前自动执行的文件级检查
+  # 注意：所有 Python 测试和静态检查（ruff/mypy/pytest）都在
+  #       pre-push 阶段用容器执行，不在本地装任何依赖。
+  # 安装： pre-commit install
+  # 临时跳过：git commit --no-verify
+  # ============================================================
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+      - id: check-ast                    # 纯 Python AST 语法检查
+        name: Python AST 语法合法性检查
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: check-yaml
+        args: ["--unsafe"]
+      - id: detect-private-key
+      - id: end-of-file-fixer
+      - id: trailing-whitespace

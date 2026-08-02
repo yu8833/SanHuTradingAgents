@@ -16,8 +16,8 @@
 import asyncio
 import logging
 import time
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from datetime import datetime
+from typing import Any
 
 import numpy as np
 
@@ -30,8 +30,8 @@ class ExtremeReversalService(RetailScreeningBase):
     """极端情绪反转策略"""
 
     async def scan_extreme_reversal(
-        self, params: Dict[str, Any] = None
-    ) -> Dict[str, Any]:
+        self, params: dict[str, Any] = None
+    ) -> dict[str, Any]:
         """
         扫描极端反转候选股
 
@@ -124,10 +124,10 @@ class ExtremeReversalService(RetailScreeningBase):
         self,
         code: str,
         sv: dict,
-        quotes: List[dict],
+        quotes: list[dict],
         min_consecutive_down: int,
         min_total_drop_pct: float,
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """分析单只股票"""
         name = sv.get("name", "")
         industry = sv.get("industry", "")
@@ -193,7 +193,7 @@ class ExtremeReversalService(RetailScreeningBase):
         if len(quotes) >= 1:
             today = quotes[-1]
             open_p = today.get("open", close)
-            high_p = today.get("high", close)
+            today.get("high", close)
             low_p = today.get("low", close)
             if open_p > 0 and close > 0 and low_p > 0:
                 body = abs(close - open_p)
@@ -337,11 +337,11 @@ class ExtremeReversalService(RetailScreeningBase):
             "has_reversal_signal": has_reversal_signal,
         }
 
-    async def backtest(self, params: Dict[str, Any] = None) -> Dict[str, Any]:
+    async def backtest(self, params: dict[str, Any] = None) -> dict[str, Any]:
         """回测"""
         params = params or {}
 
-        async def scan_func(date_str: str) -> List[dict]:
+        async def scan_func(date_str: str) -> list[dict]:
             """回测扫描函数：在指定日期扫描（使用历史数据，避免未来函数）"""
             # 使用指定日期的历史行情数据，而非最新数据
             screening_data = await self._get_screening_view_for_date(date_str)
@@ -377,7 +377,7 @@ class ExtremeReversalService(RetailScreeningBase):
         return await self.run_backtest("extreme_reversal", scan_func, params)
 
 
-_service: Optional[ExtremeReversalService] = None
+_service: ExtremeReversalService | None = None
 
 
 def get_extreme_reversal_service() -> ExtremeReversalService:

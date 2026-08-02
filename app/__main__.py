@@ -3,10 +3,11 @@ TradingAgents-CN Backend Entry Point
 支持 python -m app 启动方式
 """
 
-import uvicorn
-import sys
 import os
+import sys
 from pathlib import Path
+
+import uvicorn
 
 # ============================================================================
 # 全局 UTF-8 编码设置（必须在最开始，支持 emoji 和中文）
@@ -71,10 +72,10 @@ def check_env_file():
 
                 # 读取并显示部分内容（隐藏敏感信息）
                 try:
-                    with open(env_path, 'r', encoding='utf-8') as f:
+                    with open(env_path, encoding='utf-8') as f:
                         lines = f.readlines()
                     logger.info(f"📄 .env文件内容预览 (共{len(lines)}行):")
-                    for i, line in enumerate(lines[:10]):  # 只显示前10行
+                    for _i, line in enumerate(lines[:10]):  # 只显示前10行
                         line = line.strip()
                         if line and not line.startswith('#'):
                             # 隐藏敏感信息

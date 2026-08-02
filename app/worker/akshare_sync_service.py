@@ -5,7 +5,7 @@ AKShare数据同步服务
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional
+from typing import Any
 
 from app.core.database import get_mongo_db
 from app.services.historical_data_service import get_historical_data_service
@@ -59,7 +59,7 @@ class AKShareSyncService:
             logger.error(f"❌ AKShare同步服务初始化失败: {e}")
             raise
     
-    async def sync_stock_basic_info(self, force_update: bool = False) -> Dict[str, Any]:
+    async def sync_stock_basic_info(self, force_update: bool = False) -> dict[str, Any]:
         """
         同步股票基础信息
         
@@ -116,7 +116,7 @@ class AKShareSyncService:
             stats["end_time"] = datetime.utcnow()
             stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
             
-            logger.info(f"🎉 股票基础信息同步完成！")
+            logger.info("🎉 股票基础信息同步完成！")
             logger.info(f"📊 总计: {stats['total_processed']}只, "
                        f"成功: {stats['success_count']}, "
                        f"错误: {stats['error_count']}, "
@@ -130,7 +130,7 @@ class AKShareSyncService:
             stats["errors"].append({"error": str(e), "context": "sync_stock_basic_info"})
             return stats
     
-    async def _process_basic_info_batch(self, batch: List[Dict[str, Any]], force_update: bool) -> Dict[str, Any]:
+    async def _process_basic_info_batch(self, batch: list[dict[str, Any]], force_update: bool) -> dict[str, Any]:
         """处理基础信息批次"""
         batch_stats = {
             "success_count": 0,
@@ -231,7 +231,7 @@ class AKShareSyncService:
             logger.debug(f"检查数据新鲜度失败: {e}")
             return False
     
-    async def sync_realtime_quotes(self, symbols: List[str] = None, force: bool = False) -> Dict[str, Any]:
+    async def sync_realtime_quotes(self, symbols: list[str] = None, force: bool = False) -> dict[str, Any]:
         """
         同步实时行情数据
 
@@ -277,7 +277,7 @@ class AKShareSyncService:
 
             # 🔥 优化：如果只同步1只股票，直接调用单个股票接口，不走批量接口
             if len(symbols) == 1:
-                logger.info(f"📈 单个股票同步，直接使用 get_stock_quotes 接口")
+                logger.info("📈 单个股票同步，直接使用 get_stock_quotes 接口")
                 symbol = symbols[0]
                 success = await self._get_and_save_quotes(symbol)
                 if success:
@@ -373,7 +373,7 @@ class AKShareSyncService:
             stats["end_time"] = datetime.utcnow()
             stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
 
-            logger.info(f"🎉 实时行情同步完成！")
+            logger.info("🎉 实时行情同步完成！")
             logger.info(f"📊 总计: {stats['total_processed']}只, "
                        f"成功: {stats['success_count']}, "
                        f"错误: {stats['error_count']}, "
@@ -386,7 +386,7 @@ class AKShareSyncService:
             stats["errors"].append({"error": str(e), "context": "sync_realtime_quotes"})
             return stats
     
-    async def _process_quotes_batch(self, batch: List[str]) -> Dict[str, Any]:
+    async def _process_quotes_batch(self, batch: list[str]) -> dict[str, Any]:
         """处理行情批次 - 优化版：一次获取全市场快照"""
         batch_stats = {
             "success_count": 0,
@@ -452,7 +452,7 @@ class AKShareSyncService:
             # 回退到原来的逐个获取方式
             return await self._process_quotes_batch_fallback(batch)
 
-    async def _process_quotes_batch_fallback(self, batch: List[str]) -> Dict[str, Any]:
+    async def _process_quotes_batch_fallback(self, batch: list[str]) -> dict[str, Any]:
         """处理行情批次 - 回退方案：逐个获取"""
         batch_stats = {
             "success_count": 0,
@@ -533,11 +533,11 @@ class AKShareSyncService:
         self,
         start_date: str = None,
         end_date: str = None,
-        symbols: List[str] = None,
+        symbols: list[str] = None,
         incremental: bool = True,
         period: str = "daily",
         job_id: str = None
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         同步历史数据
 
@@ -652,7 +652,7 @@ class AKShareSyncService:
             stats["end_time"] = datetime.utcnow()
             stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
 
-            logger.info(f"🎉 历史数据同步完成！")
+            logger.info("🎉 历史数据同步完成！")
             logger.info(f"📊 总计: {stats['total_processed']}只股票, "
                        f"成功: {stats['success_count']}, "
                        f"记录: {stats['total_records']}条, "
@@ -667,12 +667,12 @@ class AKShareSyncService:
 
     async def _process_historical_batch(
         self,
-        batch: List[str],
+        batch: list[str],
         start_date: str,
         end_date: str,
         period: str = "daily",
         incremental: bool = False
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """处理历史数据批次"""
         batch_stats = {
             "success_count": 0,
@@ -803,10 +803,7 @@ class AKShareSyncService:
                 sort=[("timestamp", -1)]
             )
 
-            if execution and execution.get("cancel_requested"):
-                return True
-
-            return False
+            return bool(execution and execution.get("cancel_requested"))
 
         except Exception as e:
             logger.error(f"❌ 检查任务停止标记失败: {e}")
@@ -822,9 +819,10 @@ class AKShareSyncService:
             message: 进度消息
         """
         try:
-            from app.services.scheduler_service import TaskCancelledException
             from pymongo import MongoClient
+
             from app.core.config import settings
+            from app.services.scheduler_service import TaskCancelledException
 
             # 使用同步 PyMongo 客户端（避免事件循环冲突）
             sync_client = MongoClient(settings.MONGO_URI)
@@ -865,7 +863,7 @@ class AKShareSyncService:
                 raise
             logger.error(f"❌ 更新任务进度失败: {e}")
 
-    async def sync_financial_data(self, symbols: List[str] = None) -> Dict[str, Any]:
+    async def sync_financial_data(self, symbols: list[str] = None) -> dict[str, Any]:
         """
         同步财务数据
 
@@ -933,7 +931,7 @@ class AKShareSyncService:
             stats["end_time"] = datetime.utcnow()
             stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
 
-            logger.info(f"🎉 财务数据同步完成！")
+            logger.info("🎉 财务数据同步完成！")
             logger.info(f"📊 总计: {stats['total_processed']}只股票, "
                        f"成功: {stats['success_count']}, "
                        f"错误: {stats['error_count']}, "
@@ -946,7 +944,7 @@ class AKShareSyncService:
             stats["errors"].append({"error": str(e), "context": "sync_financial_data"})
             return stats
 
-    async def _process_financial_batch(self, batch: List[str]) -> Dict[str, Any]:
+    async def _process_financial_batch(self, batch: list[str]) -> dict[str, Any]:
         """处理财务数据批次"""
         batch_stats = {
             "success_count": 0,
@@ -990,7 +988,7 @@ class AKShareSyncService:
 
         return batch_stats
 
-    async def _save_financial_data(self, symbol: str, financial_data: Dict[str, Any]) -> bool:
+    async def _save_financial_data(self, symbol: str, financial_data: dict[str, Any]) -> bool:
         """保存财务数据"""
         try:
             # 使用统一的财务数据服务
@@ -1013,7 +1011,7 @@ class AKShareSyncService:
             logger.error(f"❌ 保存 {symbol} 财务数据失败: {e}")
             return False
 
-    async def run_status_check(self) -> Dict[str, Any]:
+    async def run_status_check(self) -> dict[str, Any]:
         """运行状态检查"""
         try:
             logger.info("🔍 开始AKShare状态检查...")
@@ -1063,7 +1061,7 @@ class AKShareSyncService:
 
     # ==================== 新闻数据同步 ====================
 
-    async def _get_favorite_stocks(self) -> List[str]:
+    async def _get_favorite_stocks(self) -> list[str]:
         """
         获取所有用户的自选股列表（去重）
         注意：只获取最新的文档，避免获取历史旧数据
@@ -1095,7 +1093,7 @@ class AKShareSyncService:
             )
 
             if latest_doc:
-                logger.info(f"📌 从 user_favorites 获取最新文档的自选股")
+                logger.info("📌 从 user_favorites 获取最新文档的自选股")
                 for fav in latest_doc.get("favorites", []):
                     code = fav.get("stock_code")
                     if code:
@@ -1111,11 +1109,11 @@ class AKShareSyncService:
 
     async def sync_news_data(
         self,
-        symbols: List[str] = None,
+        symbols: list[str] = None,
         max_news_per_stock: int = 20,
         force_update: bool = False,
         favorites_only: bool = True
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         同步新闻数据
 
@@ -1205,9 +1203,9 @@ class AKShareSyncService:
 
     async def _process_news_batch(
         self,
-        batch: List[str],
+        batch: list[str],
         max_news_per_stock: int
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """处理新闻批次"""
         batch_stats = {
             "success_count": 0,

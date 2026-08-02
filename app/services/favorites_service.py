@@ -2,12 +2,12 @@
 自选股服务
 """
 
-from typing import List, Optional, Dict, Any
 from datetime import datetime
+from typing import Any
+
 from bson import ObjectId
 
 from app.core.database import get_mongo_db
-from app.models.user import FavoriteStock
 from app.services.quotes_service import get_quotes_service
 
 
@@ -32,7 +32,7 @@ class FavoritesService:
         # 强制返回 False，统一使用 user_favorites 集合
         return False
 
-    def _format_favorite(self, favorite: Dict[str, Any]) -> Dict[str, Any]:
+    def _format_favorite(self, favorite: dict[str, Any]) -> dict[str, Any]:
         """格式化收藏条目（仅基础信息，不包含实时行情）。
         行情将在 get_user_favorites 中批量富集。
         注意：market 字段统一表示「市场类型」（A股/港股/美股），
@@ -50,14 +50,7 @@ class FavoritesService:
         # 规范化 market：如果是板块值或非标准值，按股票代码推断市场类型
         board_keywords = ("主板", "创业板", "科创板", "中小板", "北交所")
         exchange_keywords = ("上海", "深圳", "上交所", "深交所", "沪市", "深市")
-        if raw_market in board_keywords or raw_market in exchange_keywords:
-            if re.match(r"^[A-Z]{1,5}$", code):
-                normalized_market = "美股"
-            elif re.match(r"^\d{6}$", code):
-                normalized_market = "A股"
-            else:
-                normalized_market = "港股"
-        elif raw_market not in ("A股", "港股", "美股"):
+        if raw_market in board_keywords or raw_market in exchange_keywords or raw_market not in ("A股", "港股", "美股"):
             if re.match(r"^[A-Z]{1,5}$", code):
                 normalized_market = "美股"
             elif re.match(r"^\d{6}$", code):
@@ -82,11 +75,11 @@ class FavoritesService:
             "volume": None,
         }
 
-    async def get_user_favorites(self, user_id: str) -> List[Dict[str, Any]]:
+    async def get_user_favorites(self, user_id: str) -> list[dict[str, Any]]:
         """获取用户自选股列表，并批量拉取实时行情进行富集（兼容字符串ID与ObjectId）。"""
         db = await self._get_db()
 
-        favorites: List[Dict[str, Any]] = []
+        favorites: list[dict[str, Any]] = []
         if self._is_valid_object_id(user_id):
             # 先尝试使用 ObjectId 查询
             user = await db.users.find_one({"_id": ObjectId(user_id)})
@@ -141,7 +134,7 @@ class FavoritesService:
                     else:
                         it["board"] = "-"
                         it["exchange"] = "-"
-            except Exception as e:
+            except Exception:
                 # 查询失败时设置默认值
                 for it in items:
                     it["board"] = "-"
@@ -185,10 +178,10 @@ class FavoritesService:
         stock_code: str,
         stock_name: str,
         market: str = "A股",
-        tags: List[str] = None,
+        tags: list[str] = None,
         notes: str = "",
-        alert_price_high: Optional[float] = None,
-        alert_price_low: Optional[float] = None
+        alert_price_high: float | None = None,
+        alert_price_low: float | None = None
     ) -> bool:
         """添加股票到自选股（兼容字符串ID与ObjectId）"""
         import logging
@@ -198,7 +191,7 @@ class FavoritesService:
             logger.info(f"🔧 [add_favorite] 开始添加自选股: user_id={user_id}, stock_code={stock_code}")
 
             db = await self._get_db()
-            logger.info(f"🔧 [add_favorite] 数据库连接获取成功")
+            logger.info("🔧 [add_favorite] 数据库连接获取成功")
 
             favorite_stock = {
                 "stock_code": stock_code,
@@ -217,7 +210,7 @@ class FavoritesService:
             logger.info(f"🔧 [add_favorite] 用户ID类型检查: is_valid_object_id={is_oid}")
 
             if is_oid:
-                logger.info(f"🔧 [add_favorite] 使用 ObjectId 方式添加到 users 集合")
+                logger.info("🔧 [add_favorite] 使用 ObjectId 方式添加到 users 集合")
 
                 # 先尝试使用 ObjectId 查询
                 result = await db.users.update_one(
@@ -231,7 +224,7 @@ class FavoritesService:
 
                 # 如果 ObjectId 查询失败，尝试使用字符串查询
                 if result.matched_count == 0:
-                    logger.info(f"🔧 [add_favorite] ObjectId查询失败，尝试使用字符串ID查询")
+                    logger.info("🔧 [add_favorite] ObjectId查询失败，尝试使用字符串ID查询")
                     result = await db.users.update_one(
                         {"_id": user_id},
                         {
@@ -244,7 +237,7 @@ class FavoritesService:
                 logger.info(f"🔧 [add_favorite] 返回结果: {success}")
                 return success
             else:
-                logger.info(f"🔧 [add_favorite] 使用字符串ID方式添加到 user_favorites 集合")
+                logger.info("🔧 [add_favorite] 使用字符串ID方式添加到 user_favorites 集合")
                 result = await db.user_favorites.update_one(
                     {"user_id": user_id},
                     {
@@ -255,7 +248,7 @@ class FavoritesService:
                     upsert=True
                 )
                 logger.info(f"🔧 [add_favorite] 更新结果: matched_count={result.matched_count}, modified_count={result.modified_count}, upserted_id={result.upserted_id}")
-                logger.info(f"🔧 [add_favorite] 返回结果: True")
+                logger.info("🔧 [add_favorite] 返回结果: True")
                 return True
         except Exception as e:
             logger.error(f"❌ [add_favorite] 添加自选股异常: {type(e).__name__}: {str(e)}", exc_info=True)
@@ -292,10 +285,10 @@ class FavoritesService:
         self,
         user_id: str,
         stock_code: str,
-        tags: Optional[List[str]] = None,
-        notes: Optional[str] = None,
-        alert_price_high: Optional[float] = None,
-        alert_price_low: Optional[float] = None
+        tags: list[str] | None = None,
+        notes: str | None = None,
+        alert_price_high: float | None = None,
+        alert_price_low: float | None = None
     ) -> bool:
         """更新自选股信息（兼容字符串ID与ObjectId）"""
         db = await self._get_db()
@@ -303,7 +296,7 @@ class FavoritesService:
         # 统一构建更新字段（根据不同集合的字段路径设置前缀）
         is_oid = self._is_valid_object_id(user_id)
         prefix = "favorite_stocks.$." if is_oid else "favorites.$."
-        update_fields: Dict[str, Any] = {}
+        update_fields: dict[str, Any] = {}
         if tags is not None:
             update_fields[prefix + "tags"] = tags
         if notes is not None:
@@ -364,7 +357,7 @@ class FavoritesService:
 
                 # 如果 ObjectId 查询失败，尝试使用字符串查询
                 if user is None:
-                    logger.info(f"🔧 [is_favorite] ObjectId查询未找到，尝试使用字符串ID查询")
+                    logger.info("🔧 [is_favorite] ObjectId查询未找到，尝试使用字符串ID查询")
                     user = await db.users.find_one(
                         {
                             "_id": user_id,
@@ -389,7 +382,7 @@ class FavoritesService:
             logger.error(f"❌ [is_favorite] 检查自选股异常: {type(e).__name__}: {str(e)}", exc_info=True)
             raise
 
-    async def get_user_tags(self, user_id: str) -> List[str]:
+    async def get_user_tags(self, user_id: str) -> list[str]:
         """获取用户使用的所有标签（兼容字符串ID与ObjectId）"""
         db = await self._get_db()
 

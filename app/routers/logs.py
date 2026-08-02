@@ -4,7 +4,7 @@
 """
 
 import logging
-from typing import List, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -21,18 +21,18 @@ class LogReadRequest(BaseModel):
     """日志读取请求"""
     filename: str = Field(..., description="日志文件名")
     lines: int = Field(default=1000, ge=1, le=10000, description="读取行数")
-    level: Optional[str] = Field(default=None, description="日志级别过滤")
-    keyword: Optional[str] = Field(default=None, description="关键词过滤")
-    start_time: Optional[str] = Field(default=None, description="开始时间（ISO格式）")
-    end_time: Optional[str] = Field(default=None, description="结束时间（ISO格式）")
+    level: str | None = Field(default=None, description="日志级别过滤")
+    keyword: str | None = Field(default=None, description="关键词过滤")
+    start_time: str | None = Field(default=None, description="开始时间（ISO格式）")
+    end_time: str | None = Field(default=None, description="结束时间（ISO格式）")
 
 
 class LogExportRequest(BaseModel):
     """日志导出请求"""
-    filenames: Optional[List[str]] = Field(default=None, description="要导出的文件名列表（空表示全部）")
-    level: Optional[str] = Field(default=None, description="日志级别过滤")
-    start_time: Optional[str] = Field(default=None, description="开始时间（ISO格式）")
-    end_time: Optional[str] = Field(default=None, description="结束时间（ISO格式）")
+    filenames: list[str] | None = Field(default=None, description="要导出的文件名列表（空表示全部）")
+    level: str | None = Field(default=None, description="日志级别过滤")
+    start_time: str | None = Field(default=None, description="开始时间（ISO格式）")
+    end_time: str | None = Field(default=None, description="结束时间（ISO格式）")
     format: str = Field(default="zip", description="导出格式：zip, txt")
 
 
@@ -50,7 +50,7 @@ class LogFileInfo(BaseModel):
 class LogContentResponse(BaseModel):
     """日志内容响应"""
     filename: str
-    lines: List[str]
+    lines: list[str]
     stats: dict
 
 
@@ -59,11 +59,11 @@ class LogStatisticsResponse(BaseModel):
     total_files: int
     total_size_mb: float
     error_files: int
-    recent_errors: List[str]
+    recent_errors: list[str]
     log_types: dict
 
 
-@router.get("/files", response_model=List[LogFileInfo])
+@router.get("/files", response_model=list[LogFileInfo])
 async def list_log_files(
     current_user: dict = Depends(get_current_user)
 ):
@@ -216,7 +216,7 @@ async def delete_log_file(
             raise HTTPException(status_code=404, detail="日志文件不存在")
         
         # 安全检查：只允许删除 .log 文件
-        if not filename.endswith('.log') and not '.log.' in filename:
+        if not filename.endswith('.log') and '.log.' not in filename:
             raise HTTPException(status_code=400, detail="只能删除日志文件")
         
         file_path.unlink()

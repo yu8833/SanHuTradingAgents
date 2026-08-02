@@ -1,9 +1,9 @@
 """
 Tushare data source adapter
 """
-from typing import Optional, Dict
 import logging
 from datetime import datetime, timedelta
+
 import pandas as pd
 
 from .base import DataSourceAdapter
@@ -18,7 +18,7 @@ class TushareAdapter(DataSourceAdapter):
         super().__init__()  # 调用父类初始化
         self._provider = None
         # trade_cal 接口每天有频控(20000次/天)，避免频繁调用 is_available 时被封
-        self._cached_available: "Optional[bool]" = None
+        self._cached_available: bool | None = None
         self._available_cache_ts: float = 0.0
         self._initialize()
 
@@ -38,7 +38,7 @@ class TushareAdapter(DataSourceAdapter):
     def _get_default_priority(self) -> int:
         return 3  # highest priority (数字越大优先级越高)  # highest priority
 
-    def get_token_source(self) -> Optional[str]:
+    def get_token_source(self) -> str | None:
         """获取 Token 来源"""
         if self._provider:
             return getattr(self._provider, "token_source", None)
@@ -97,7 +97,7 @@ class TushareAdapter(DataSourceAdapter):
         self._available_cache_ts = now
         return result
 
-    def get_stock_list(self) -> Optional[pd.DataFrame]:
+    def get_stock_list(self) -> pd.DataFrame | None:
         """Get stock list"""
         if not self.is_available():
             logger.warning("Tushare: Provider is not available")
@@ -123,7 +123,7 @@ class TushareAdapter(DataSourceAdapter):
             logger.error(f"Tushare: Failed to fetch stock list: {e}")
         return None
 
-    def get_daily_basic(self, trade_date: str) -> Optional[pd.DataFrame]:
+    def get_daily_basic(self, trade_date: str) -> pd.DataFrame | None:
         """Get daily basic financial data"""
         if not self.is_available():
             return None
@@ -180,7 +180,7 @@ class TushareAdapter(DataSourceAdapter):
             if 'ts_code' not in df.columns or 'close' not in df.columns:
                 logger.error(f'Tushare rt_k missing columns: {list(df.columns)}')
                 return None
-            result: Dict[str, Dict[str, Optional[float]]] = {}
+            result: dict[str, dict[str, float | None]] = {}
             for _, row in df.iterrows():
                 ts_code = str(row.get('ts_code') or '')
                 if not ts_code or '.' not in ts_code:
@@ -232,7 +232,7 @@ class TushareAdapter(DataSourceAdapter):
             logger.error(f'Failed to fetch realtime quotes from Tushare rt_k: {e}')
             return None
 
-    def get_kline(self, code: str, period: str = "day", limit: int = 120, adj: Optional[str] = None):
+    def get_kline(self, code: str, period: str = "day", limit: int = 120, adj: str | None = None):
         """Get K-line bars using tushare pro_bar
         period: day/week/month/5m/15m/30m/60m
         adj: None/qfq/hfq
@@ -395,7 +395,7 @@ class TushareAdapter(DataSourceAdapter):
             pass
         return items if items else None
 
-    def find_latest_trade_date(self) -> Optional[str]:
+    def find_latest_trade_date(self) -> str | None:
         """Find latest trade date by probing Tushare"""
         if not self.is_available():
             return None

@@ -3,20 +3,20 @@
 """
 
 import logging
-from typing import Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 
-from app.routers.auth_db import get_current_user
-from app.services.operation_log_service import get_operation_log_service
 from app.models.operation_log import (
-    OperationLogQuery,
-    OperationLogListResponse,
-    OperationLogStatsResponse,
     ClearLogsRequest,
     ClearLogsResponse,
-    OperationLogCreate
+    OperationLogCreate,
+    OperationLogListResponse,
+    OperationLogQuery,
+    OperationLogStatsResponse,
 )
+from app.routers.auth_db import get_current_user
+from app.services.operation_log_service import get_operation_log_service
 
 router = APIRouter(prefix="/logs", tags=["操作日志"])
 logger = logging.getLogger("webapi")

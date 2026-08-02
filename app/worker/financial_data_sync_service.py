@@ -5,15 +5,15 @@
 """
 import asyncio
 import logging
-from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any
 
 from app.core.database import get_mongo_db
 from app.services.financial_data_service import get_financial_data_service
-from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
 from tradingagents.dataflows.providers.china.akshare import get_akshare_provider
 from tradingagents.dataflows.providers.china.baostock import get_baostock_provider
+from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
 
 logger = logging.getLogger(__name__)
 
@@ -25,12 +25,12 @@ class FinancialSyncStats:
     success_count: int = 0
     error_count: int = 0
     skipped_count: int = 0
-    start_time: Optional[datetime] = None
-    end_time: Optional[datetime] = None
+    start_time: datetime | None = None
+    end_time: datetime | None = None
     duration: float = 0.0
-    errors: List[Dict[str, Any]] = field(default_factory=list)
+    errors: list[dict[str, Any]] = field(default_factory=list)
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         return {
             "total_symbols": self.total_symbols,
@@ -74,12 +74,12 @@ class FinancialDataSyncService:
     
     async def sync_financial_data(
         self,
-        symbols: List[str] = None,
-        data_sources: List[str] = None,
-        report_types: List[str] = None,
+        symbols: list[str] = None,
+        data_sources: list[str] = None,
+        report_types: list[str] = None,
         batch_size: int = 50,
         delay_seconds: float = 1.0
-    ) -> Dict[str, FinancialSyncStats]:
+    ) -> dict[str, FinancialSyncStats]:
         """
         同步财务数据
         
@@ -143,8 +143,8 @@ class FinancialDataSyncService:
     async def _sync_source_financial_data(
         self,
         data_source: str,
-        symbols: List[str],
-        report_types: List[str],
+        symbols: list[str],
+        report_types: list[str],
         batch_size: int,
         delay_seconds: float
     ) -> FinancialSyncStats:
@@ -217,7 +217,7 @@ class FinancialDataSyncService:
         symbol: str,
         data_source: str,
         provider: Any,
-        report_types: List[str]
+        report_types: list[str]
     ) -> bool:
         """同步单只股票的财务数据"""
         try:
@@ -245,7 +245,7 @@ class FinancialDataSyncService:
             logger.error(f"❌ {symbol} 财务数据同步异常 ({data_source}): {e}")
             raise
     
-    async def _get_stock_symbols(self) -> List[str]:
+    async def _get_stock_symbols(self) -> list[str]:
         """获取股票代码列表"""
         try:
             cursor = self.db.stock_basic_info.find(
@@ -268,7 +268,7 @@ class FinancialDataSyncService:
             logger.error(f"❌ 获取股票代码列表失败: {e}")
             return []
     
-    async def get_sync_statistics(self) -> Dict[str, Any]:
+    async def get_sync_statistics(self) -> dict[str, Any]:
         """获取同步统计信息"""
         try:
             if self.financial_service is None:
@@ -283,8 +283,8 @@ class FinancialDataSyncService:
     async def sync_single_stock(
         self,
         symbol: str,
-        data_sources: List[str] = None
-    ) -> Dict[str, bool]:
+        data_sources: list[str] = None
+    ) -> dict[str, bool]:
         """同步单只股票的财务数据"""
         if self.db is None:
             await self.initialize()

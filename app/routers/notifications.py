@@ -2,12 +2,12 @@
 通知 REST API
 """
 import logging
-from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.routers.auth_db import get_current_user
-from app.core.response import ok
 from app.core.database import get_redis_client
+from app.core.response import ok
+from app.routers.auth_db import get_current_user
 from app.services.notifications_service import get_notifications_service
 
 router = APIRouter()
@@ -16,8 +16,8 @@ logger = logging.getLogger("webapi.notifications")
 
 @router.get("/notifications")
 async def list_notifications(
-    status: Optional[str] = Query(None, description="状态: unread|read|all"),
-    type: Optional[str] = Query(None, description="类型: analysis|alert|system"),
+    status: str | None = Query(None, description="状态: unread|read|all"),
+    type: str | None = Query(None, description="类型: analysis|alert|system"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     user: dict = Depends(get_current_user)

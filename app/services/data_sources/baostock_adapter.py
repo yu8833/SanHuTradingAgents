@@ -1,9 +1,9 @@
 """
 BaoStock data source adapter
 """
-from typing import Optional
 import logging
 from datetime import datetime, timedelta
+
 import pandas as pd
 
 from .base import DataSourceAdapter
@@ -31,7 +31,7 @@ class BaoStockAdapter(DataSourceAdapter):
         except ImportError:
             return False
 
-    def get_stock_list(self) -> Optional[pd.DataFrame]:
+    def get_stock_list(self) -> pd.DataFrame | None:
         if not self.is_available():
             return None
         try:
@@ -83,7 +83,7 @@ class BaoStockAdapter(DataSourceAdapter):
                         industry_df['industry_clean'] = industry_df['industry'].apply(clean_industry_name)
 
                         # 创建行业映射字典 {code: industry_clean}
-                        industry_map = dict(zip(industry_df['code'], industry_df['industry_clean']))
+                        industry_map = dict(zip(industry_df['code'], industry_df['industry_clean'], strict=False))
                         # 将行业信息合并到主DataFrame
                         df['industry'] = df['code'].map(industry_map).fillna('')
                         logger.info(f"BaoStock: Successfully mapped industry info for {len(industry_map)} stocks")
@@ -104,7 +104,7 @@ class BaoStockAdapter(DataSourceAdapter):
             logger.error(f"BaoStock: Failed to fetch stock list: {e}")
             return None
 
-    def get_daily_basic(self, trade_date: str, max_stocks: int = None) -> Optional[pd.DataFrame]:
+    def get_daily_basic(self, trade_date: str, max_stocks: int = None) -> pd.DataFrame | None:
         """
         获取每日基础数据（包含PE、PB、总市值等）
 
@@ -219,7 +219,7 @@ class BaoStockAdapter(DataSourceAdapter):
             logger.error(f"BaoStock: Failed to fetch valuation data for {trade_date}: {e}")
             return None
 
-    def _safe_float(self, value) -> Optional[float]:
+    def _safe_float(self, value) -> float | None:
         try:
             if value is None or value == '' or value == 'None':
                 return None
@@ -236,7 +236,7 @@ class BaoStockAdapter(DataSourceAdapter):
             return None
         return None
 
-    def get_kline(self, code: str, period: str = "day", limit: int = 120, adj: Optional[str] = None):
+    def get_kline(self, code: str, period: str = "day", limit: int = 120, adj: str | None = None):
         """
         获取K线数据。
 
@@ -284,8 +284,9 @@ class BaoStockAdapter(DataSourceAdapter):
             adj_flag = adj_map.get(adj, "3") if adj else "3"
 
             # 4. 日期范围（最近2年足够覆盖limit条）
-            from app.core.config import settings
             from zoneinfo import ZoneInfo
+
+            from app.core.config import settings
             tz = ZoneInfo(settings.TIMEZONE)
             now = datetime.now(tz)
             end_date = now.strftime("%Y-%m-%d")
@@ -364,7 +365,7 @@ class BaoStockAdapter(DataSourceAdapter):
         Return None to allow fallback to higher-priority sources.
         """
 
-    def find_latest_trade_date(self) -> Optional[str]:
+    def find_latest_trade_date(self) -> str | None:
         yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
         logger.info(f"BaoStock: Using yesterday as trade date: {yesterday}")
         return yesterday

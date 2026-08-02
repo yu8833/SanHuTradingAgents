@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 统一股票数据服务（跨市场，支持多数据源）
 
@@ -16,7 +15,7 @@
 """
 
 import logging
-from typing import Dict, List, Optional
+
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 logger = logging.getLogger("webapi")
@@ -57,8 +56,8 @@ class UnifiedStockService:
         self, 
         market: str, 
         code: str, 
-        source: Optional[str] = None
-    ) -> Optional[Dict]:
+        source: str | None = None
+    ) -> dict | None:
         """
         获取股票基础信息（支持多数据源）
         
@@ -95,11 +94,11 @@ class UnifiedStockService:
             if not doc:
                 doc = await collection.find_one({"code": code}, {"_id": 0})
                 if doc:
-                    logger.debug(f"✅ 使用默认数据源（兼容模式）")
+                    logger.debug("✅ 使用默认数据源（兼容模式）")
         
         return doc
 
-    async def _get_source_priority(self, market: str) -> List[str]:
+    async def _get_source_priority(self, market: str) -> list[str]:
         """
         从数据库获取数据源优先级
         
@@ -141,7 +140,7 @@ class UnifiedStockService:
         logger.debug(f"📊 {market} 数据源优先级（默认）: {priority_list}")
         return priority_list
 
-    async def get_stock_quote(self, market: str, code: str) -> Optional[Dict]:
+    async def get_stock_quote(self, market: str, code: str) -> dict | None:
         """
         获取实时行情
         
@@ -161,7 +160,7 @@ class UnifiedStockService:
         market: str, 
         query: str, 
         limit: int = 20
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         搜索股票（去重，只返回每个股票的最优数据源）
         
@@ -222,10 +221,10 @@ class UnifiedStockService:
         self,
         market: str,
         code: str,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
         limit: int = 100
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         获取历史K线数据
         
@@ -253,7 +252,7 @@ class UnifiedStockService:
         cursor = collection.find(query, {"_id": 0}).sort("trade_date", -1).limit(limit)
         return await cursor.to_list(length=limit)
 
-    async def get_supported_markets(self) -> List[Dict]:
+    async def get_supported_markets(self) -> list[dict]:
         """
         获取支持的市场列表
         

@@ -3,16 +3,14 @@
 """
 
 import hashlib
-import time
 from datetime import datetime
-from typing import Optional, Dict, Any, List
-from pymongo import MongoClient
-from bson import ObjectId
 
 import bcrypt
+from bson import ObjectId
+from pymongo import MongoClient
 
 from app.core.config import settings
-from app.models.user import User, UserCreate, UserUpdate, UserResponse
+from app.models.user import User, UserCreate, UserResponse, UserUpdate
 
 # 尝试导入日志管理器
 try:
@@ -82,7 +80,7 @@ class UserService:
         # 未知格式
         return False
     
-    async def create_user(self, user_data: UserCreate) -> Optional[User]:
+    async def create_user(self, user_data: UserCreate) -> User | None:
         """创建用户"""
         try:
             # 检查用户名是否已存在
@@ -144,7 +142,7 @@ class UserService:
             logger.error(f"❌ 创建用户失败: {e}")
             return None
     
-    async def authenticate_user(self, username: str, password: str) -> Optional[User]:
+    async def authenticate_user(self, username: str, password: str) -> User | None:
         """用户认证"""
         try:
             logger.info(f"🔍 [authenticate_user] 开始认证用户: {username}")
@@ -196,7 +194,7 @@ class UserService:
             logger.error(f"❌ 用户认证失败: {e}")
             return None
     
-    async def get_user_by_username(self, username: str) -> Optional[User]:
+    async def get_user_by_username(self, username: str) -> User | None:
         """根据用户名获取用户"""
         try:
             user_doc = self.users_collection.find_one({"username": username})
@@ -207,7 +205,7 @@ class UserService:
             logger.error(f"❌ 获取用户失败: {e}")
             return None
     
-    async def get_user_by_id(self, user_id: str) -> Optional[User]:
+    async def get_user_by_id(self, user_id: str) -> User | None:
         """根据用户ID获取用户"""
         try:
             if not ObjectId.is_valid(user_id):
@@ -221,7 +219,7 @@ class UserService:
             logger.error(f"❌ 获取用户失败: {e}")
             return None
     
-    async def update_user(self, username: str, user_data: UserUpdate) -> Optional[User]:
+    async def update_user(self, username: str, user_data: UserUpdate) -> User | None:
         """更新用户信息"""
         try:
             update_data = {"updated_at": datetime.utcnow()}
@@ -320,7 +318,7 @@ class UserService:
             logger.error(f"❌ 重置密码失败: {e}")
             return False
     
-    async def create_admin_user(self, username: str = "admin", password: str = "admin123", email: str = "admin@tradingagents.cn") -> Optional[User]:
+    async def create_admin_user(self, username: str = "admin", password: str = "admin123", email: str = "admin@tradingagents.cn") -> User | None:
         """创建管理员用户"""
         try:
             # 检查是否已存在管理员
@@ -368,7 +366,7 @@ class UserService:
             logger.error(f"❌ 创建管理员用户失败: {e}")
             return None
     
-    async def list_users(self, skip: int = 0, limit: int = 100) -> List[UserResponse]:
+    async def list_users(self, skip: int = 0, limit: int = 100) -> list[UserResponse]:
         """获取用户列表"""
         try:
             cursor = self.users_collection.find().skip(skip).limit(limit)

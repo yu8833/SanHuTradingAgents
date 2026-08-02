@@ -5,14 +5,14 @@
 """
 import asyncio
 import logging
-from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import Any
 
 from app.services.historical_data_service import get_historical_data_service
-from app.worker.tushare_sync_service import TushareSyncService
 from app.worker.akshare_sync_service import AKShareSyncService
 from app.worker.baostock_sync_service import BaoStockSyncService
+from app.worker.tushare_sync_service import TushareSyncService
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ class MultiPeriodSyncStats:
     monthly_records: int = 0
     success_count: int = 0
     error_count: int = 0
-    errors: List[str] = None
+    errors: list[str] = None
     
     def __post_init__(self):
         if self.errors is None:
@@ -65,9 +65,9 @@ class MultiPeriodSyncService:
     
     async def sync_multi_period_data(
         self,
-        symbols: List[str] = None,
-        periods: List[str] = None,
-        data_sources: List[str] = None,
+        symbols: list[str] = None,
+        periods: list[str] = None,
+        data_sources: list[str] = None,
         start_date: str = None,
         end_date: str = None,
         all_history: bool = False
@@ -155,10 +155,10 @@ class MultiPeriodSyncService:
         self,
         data_source: str,
         period: str,
-        symbols: List[str],
+        symbols: list[str],
         start_date: str = None,
         end_date: str = None
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """同步特定周期的数据"""
         stats = {"records": 0, "success": 0, "errors": 0}
         
@@ -207,15 +207,15 @@ class MultiPeriodSyncService:
         service,
         data_source: str,
         period: str,
-        symbols: List[str],
+        symbols: list[str],
         start_date: str = None,
         end_date: str = None
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """同步批次周期数据"""
         stats = {"records": 0, "success": 0, "errors": 0}
 
         # 🔧 防御性检查: 确保日期不为空
-        from datetime import datetime, timedelta
+        from datetime import datetime
         if end_date is None:
             end_date = datetime.now().strftime('%Y-%m-%d')
         if start_date is None:
@@ -225,15 +225,7 @@ class MultiPeriodSyncService:
         for symbol in symbols:
             try:
                 # 获取历史数据
-                if data_source == "tushare":
-                    hist_data = await service.provider.get_historical_data(
-                        symbol, start_date, end_date, period
-                    )
-                elif data_source == "akshare":
-                    hist_data = await service.provider.get_historical_data(
-                        symbol, start_date, end_date, period
-                    )
-                elif data_source == "baostock":
+                if data_source == "tushare" or data_source == "akshare" or data_source == "baostock":
                     hist_data = await service.provider.get_historical_data(
                         symbol, start_date, end_date, period
                     )
@@ -261,7 +253,7 @@ class MultiPeriodSyncService:
         
         return stats
     
-    async def _get_all_symbols(self) -> List[str]:
+    async def _get_all_symbols(self) -> list[str]:
         """获取所有股票代码"""
         try:
             # 从数据库获取股票列表
@@ -304,7 +296,7 @@ class MultiPeriodSyncService:
             start_date = (datetime.now() - timedelta(days=365*5)).strftime('%Y-%m-%d')
             return start_date, end_date
     
-    async def get_sync_statistics(self) -> Dict[str, Any]:
+    async def get_sync_statistics(self) -> dict[str, Any]:
         """获取同步统计信息"""
         try:
             if self.historical_service is None:
@@ -366,7 +358,7 @@ async def get_multi_period_sync_service() -> MultiPeriodSyncService:
 
 
 # APScheduler任务函数
-async def run_multi_period_sync(periods: List[str] = None):
+async def run_multi_period_sync(periods: list[str] = None):
     """APScheduler任务：多周期数据同步"""
     try:
         service = await get_multi_period_sync_service()

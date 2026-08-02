@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 实际场景测试：验证Google工具调用处理器修复效果
 """
 
-import sys
 import os
+import sys
+
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from tradingagents.default_config import DEFAULT_CONFIG
-from tradingagents.agents.utils.google_tool_handler import GoogleToolCallHandler
 import logging
+
+from tradingagents.agents.utils.google_tool_handler import GoogleToolCallHandler
+from tradingagents.default_config import DEFAULT_CONFIG
 
 # 设置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -39,7 +40,7 @@ def test_configuration_status():
     toolkit_online_tools = toolkit.config.get('online_tools', True)
     print(f"🛠️ online_tools (toolkit): {toolkit_online_tools}")
     
-    print(f"\n✅ 配置检查完成")
+    print("\n✅ 配置检查完成")
     print(f"- OpenAI API: {'启用' if openai_enabled else '禁用'}")
     print(f"- 在线工具: {'启用' if online_tools else '禁用'}")
     
@@ -56,7 +57,6 @@ def test_social_media_analyst_tools():
     print("=" * 60)
     
     try:
-        from tradingagents.agents.social_media_analyst import SocialMediaAnalyst
         from tradingagents.agents.utils.agent_utils import Toolkit
         
         # 获取工具包
@@ -147,15 +147,15 @@ def test_google_tool_handler_improvements():
         
         # 验证工具调用
         if GoogleToolCallHandler._validate_tool_call(tool_call, i, "测试分析师"):
-            print(f"  ✅ 验证通过")
+            print("  ✅ 验证通过")
             validated_call = tool_call
         else:
-            print(f"  ⚠️ 验证失败，尝试修复...")
+            print("  ⚠️ 验证失败，尝试修复...")
             validated_call = GoogleToolCallHandler._fix_tool_call(tool_call, i, "测试分析师")
             if validated_call:
                 print(f"  🔧 修复成功: {validated_call}")
             else:
-                print(f"  ❌ 修复失败，跳过")
+                print("  ❌ 修复失败，跳过")
                 continue
         
         # 检查重复调用
@@ -171,7 +171,7 @@ def test_google_tool_handler_improvements():
         valid_tool_calls.append(validated_call)
         print(f"  ✅ 添加到执行列表: {tool_name}")
     
-    print(f"\n📊 处理结果:")
+    print("\n📊 处理结果:")
     print(f"  - 原始工具调用: {len(mock_tool_calls)}")
     print(f"  - 有效工具调用: {len(valid_tool_calls)}")
     print(f"  - 去重后工具调用: {len(valid_tool_calls)}")

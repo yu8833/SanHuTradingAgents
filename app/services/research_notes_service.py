@@ -3,10 +3,11 @@
 存储用户的研究记录、笔记等数据到MongoDB
 """
 
-from typing import List, Optional, Dict, Any
-from datetime import datetime
-from bson import ObjectId
 import logging
+from datetime import datetime
+from typing import Any
+
+from bson import ObjectId
 
 from app.core.database import get_mongo_db
 
@@ -26,7 +27,7 @@ class ResearchNotesService:
             self.db = get_mongo_db()
         return self.db
 
-    def _format_note(self, note: Dict[str, Any]) -> Dict[str, Any]:
+    def _format_note(self, note: dict[str, Any]) -> dict[str, Any]:
         note_id = note.get("_id")
         if isinstance(note_id, ObjectId):
             note_id = str(note_id)
@@ -53,11 +54,11 @@ class ResearchNotesService:
             "related_trade_id": note.get("related_trade_id"),
         }
 
-    async def get_user_notes(self, user_id: str, kind: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def get_user_notes(self, user_id: str, kind: str | None = None) -> list[dict[str, Any]]:
         """获取用户的研究笔记列表"""
         db = await self._get_db()
 
-        query: Dict[str, Any] = {"user_id": user_id}
+        query: dict[str, Any] = {"user_id": user_id}
         if kind:
             query["kind"] = kind
 
@@ -72,10 +73,10 @@ class ResearchNotesService:
         kind: str,
         title: str,
         content: str,
-        related_code: Optional[str] = None,
-        related_strategy: Optional[str] = None,
-        related_trade_id: Optional[str] = None,
-    ) -> Optional[Dict[str, Any]]:
+        related_code: str | None = None,
+        related_strategy: str | None = None,
+        related_trade_id: str | None = None,
+    ) -> dict[str, Any] | None:
         """添加研究笔记"""
         try:
             db = await self._get_db()
@@ -145,7 +146,7 @@ class ResearchNotesService:
         """清空用户所有研究笔记"""
         try:
             db = await self._get_db()
-            result = await db.research_notes.delete_many({"user_id": user_id})
+            await db.research_notes.delete_many({"user_id": user_id})
             return True
         except Exception as e:
             logger.error(f"清空研究笔记失败: {e}")

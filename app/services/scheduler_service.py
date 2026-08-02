@@ -1,25 +1,26 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """
 定时任务管理服务
 提供定时任务的查询、暂停、恢复、手动触发等功能
 """
 
 import asyncio
-from typing import List, Dict, Any, Optional, TYPE_CHECKING
 from datetime import datetime, timedelta, timezone
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.job import Job
+from typing import Any
+
 from apscheduler.events import (
-    EVENT_JOB_EXECUTED,
     EVENT_JOB_ERROR,
+    EVENT_JOB_EXECUTED,
     EVENT_JOB_MISSED,
     EVENT_JOB_SUBMITTED,
     JobExecutionEvent,
-    JobSubmissionEvent
+    JobSubmissionEvent,
 )
+from apscheduler.job import Job
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.core.database import get_mongo_db
+
 try:
     from tradingagents.utils.logging_manager import get_logger
 except ImportError:
@@ -59,6 +60,7 @@ def _get_sync_db():
     global _sync_mongo_client
     if _sync_mongo_client is None:
         from pymongo import MongoClient
+
         from app.core.config import settings
         _sync_mongo_client = MongoClient(settings.MONGO_URI)
     return _sync_mongo_client[settings.MONGO_DB]
@@ -99,7 +101,7 @@ class SchedulerService:
             self.db = get_mongo_db()
         return self.db
     
-    async def list_jobs(self) -> List[Dict[str, Any]]:
+    async def list_jobs(self) -> list[dict[str, Any]]:
         """
         获取所有定时任务列表
 
@@ -119,7 +121,7 @@ class SchedulerService:
         logger.info(f"📋 获取到 {len(jobs)} 个定时任务")
         return jobs
     
-    async def get_job(self, job_id: str) -> Optional[Dict[str, Any]]:
+    async def get_job(self, job_id: str) -> dict[str, Any] | None:
         """
         获取任务详情
 
@@ -184,7 +186,7 @@ class SchedulerService:
             await self._record_job_action(job_id, "resume", "failed", str(e))
             return False
     
-    async def trigger_job(self, job_id: str, kwargs: Optional[Dict[str, Any]] = None) -> bool:
+    async def trigger_job(self, job_id: str, kwargs: dict[str, Any] | None = None) -> bool:
         """
         手动触发任务执行
 
@@ -256,7 +258,7 @@ class SchedulerService:
         job_id: str,
         limit: int = 20,
         offset: int = 0
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         获取任务执行历史
         
@@ -306,9 +308,9 @@ class SchedulerService:
         self,
         limit: int = 50,
         offset: int = 0,
-        job_id: Optional[str] = None,
-        status: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
+        job_id: str | None = None,
+        status: str | None = None
+    ) -> list[dict[str, Any]]:
         """
         获取所有任务执行历史
         
@@ -345,8 +347,8 @@ class SchedulerService:
     
     async def count_all_history(
         self,
-        job_id: Optional[str] = None,
-        status: Optional[str] = None
+        job_id: str | None = None,
+        status: str | None = None
     ) -> int:
         """
         统计所有任务执行历史数量
@@ -376,12 +378,12 @@ class SchedulerService:
 
     async def get_job_executions(
         self,
-        job_id: Optional[str] = None,
-        status: Optional[str] = None,
-        is_manual: Optional[bool] = None,
+        job_id: str | None = None,
+        status: str | None = None,
+        is_manual: bool | None = None,
         limit: int = 50,
         offset: int = 0
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         获取任务执行历史
 
@@ -441,9 +443,9 @@ class SchedulerService:
 
     async def count_job_executions(
         self,
-        job_id: Optional[str] = None,
-        status: Optional[str] = None,
-        is_manual: Optional[bool] = None
+        job_id: str | None = None,
+        status: str | None = None,
+        is_manual: bool | None = None
     ) -> int:
         """
         统计任务执行历史数量
@@ -607,7 +609,7 @@ class SchedulerService:
             logger.error(f"❌ 删除执行记录失败: {e}")
             return False
 
-    async def get_job_execution_stats(self, job_id: str) -> Dict[str, Any]:
+    async def get_job_execution_stats(self, job_id: str) -> dict[str, Any]:
         """
         获取任务执行统计信息
 
@@ -665,7 +667,7 @@ class SchedulerService:
             logger.error(f"❌ 获取任务执行统计失败: {e}")
             return {}
     
-    async def get_stats(self) -> Dict[str, Any]:
+    async def get_stats(self) -> dict[str, Any]:
         """
         获取调度器统计信息
         
@@ -686,7 +688,7 @@ class SchedulerService:
             "scheduler_state": self.scheduler.state
         }
     
-    async def health_check(self) -> Dict[str, Any]:
+    async def health_check(self) -> dict[str, Any]:
         """
         调度器健康检查
         
@@ -700,7 +702,7 @@ class SchedulerService:
             "timestamp": get_utc8_now().isoformat()
         }
     
-    def _job_to_dict(self, job: Job, include_details: bool = False) -> Dict[str, Any]:
+    def _job_to_dict(self, job: Job, include_details: bool = False) -> dict[str, Any]:
         """
         将Job对象转换为字典
         
@@ -983,10 +985,7 @@ class SchedulerService:
             # 如果是完成状态（success/failed），先查找是否有对应的 running 记录
             if status in ["success", "failed"]:
                 # 长期运行任务（历史同步/财务同步）使用 24h 窗口匹配，普通任务 5 分钟
-                if job_id in self.LONG_RUNNING_JOBS:
-                    window_minutes = 24 * 60
-                else:
-                    window_minutes = 5
+                window_minutes = 24 * 60 if job_id in self.LONG_RUNNING_JOBS else 5
                 window_start = get_utc8_now() - timedelta(minutes=window_minutes)
                 existing_record = await db.scheduler_executions.find_one(
                     {
@@ -1088,7 +1087,7 @@ class SchedulerService:
             status: 执行状态 (success/failed)
         """
         try:
-            db = self._get_db()
+            self._get_db()
 
             # 获取任务的元数据
             metadata = await self._get_job_metadata(job_id)
@@ -1147,7 +1146,7 @@ class SchedulerService:
         except Exception as e:
             logger.error(f"❌ 更新任务 {job_id} 元数据字段 {field} 失败: {e}")
 
-    async def get_user_portfolio_context(self, user_id: str) -> Optional[Dict[str, Any]]:
+    async def get_user_portfolio_context(self, user_id: str) -> dict[str, Any] | None:
         """
         获取用户的持仓上下文
 
@@ -1188,7 +1187,7 @@ class SchedulerService:
             logger.error(f"❌ 获取用户 {user_id} 持仓上下文失败: {e}")
             return None
 
-    async def get_job_portfolio_context(self, job_id: str) -> Optional[Dict[str, Any]]:
+    async def get_job_portfolio_context(self, job_id: str) -> dict[str, Any] | None:
         """
         获取任务的持仓上下文
 
@@ -1207,7 +1206,7 @@ class SchedulerService:
             logger.error(f"❌ 获取任务 {job_id} 持仓上下文失败: {e}")
             return None
 
-    async def update_job_portfolio_context(self, job_id: str, portfolio_context: Dict[str, Any]) -> bool:
+    async def update_job_portfolio_context(self, job_id: str, portfolio_context: dict[str, Any]) -> bool:
         """
         更新任务的持仓上下文
 
@@ -1238,11 +1237,11 @@ class SchedulerService:
 
     async def batch_update_jobs(
         self,
-        job_ids: List[str],
-        enabled: Optional[bool] = None,
-        cron_expression: Optional[str] = None,
+        job_ids: list[str],
+        enabled: bool | None = None,
+        cron_expression: str | None = None,
         reset_failures: bool = False
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         批量更新任务
 
@@ -1282,6 +1281,7 @@ class SchedulerService:
                 # 更新 Cron 表达式
                 if cron_expression:
                     from apscheduler.triggers.cron import CronTrigger
+
                     from app.core.config import settings
                     trigger = CronTrigger.from_crontab(cron_expression, timezone=settings.TIMEZONE)
                     self.scheduler.reschedule_job(job_id, trigger=trigger)
@@ -1303,7 +1303,7 @@ class SchedulerService:
         logger.info(f"✅ 批量更新任务完成: 成功 {results['success']}/{results['total']}")
         return results
 
-    async def batch_delete_jobs(self, job_ids: List[str]) -> Dict[str, Any]:
+    async def batch_delete_jobs(self, job_ids: list[str]) -> dict[str, Any]:
         """
         批量删除任务
 
@@ -1348,9 +1348,9 @@ class SchedulerService:
 
     async def batch_trigger_jobs(
         self,
-        job_ids: List[str],
-        kwargs: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+        job_ids: list[str],
+        kwargs: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """
         批量触发任务
 
@@ -1390,9 +1390,9 @@ class SchedulerService:
         task_type: str = "analysis",
         cron_expression: str = "0 9 * * 1-5",
         analysis_type: str = "comprehensive",
-        tags: Optional[List[str]] = None,
+        tags: list[str] | None = None,
         include_portfolio_context: bool = True
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         从自选股批量创建定时任务
 
@@ -1556,7 +1556,7 @@ class SchedulerService:
         except Exception as e:
             logger.error(f"❌ 记录任务操作历史失败: {e}")
 
-    async def _get_job_metadata(self, job_id: str) -> Optional[Dict[str, Any]]:
+    async def _get_job_metadata(self, job_id: str) -> dict[str, Any] | None:
         """
         获取任务元数据（触发器名称和备注）
 
@@ -1580,8 +1580,8 @@ class SchedulerService:
     async def update_job_metadata(
         self,
         job_id: str,
-        display_name: Optional[str] = None,
-        description: Optional[str] = None
+        display_name: str | None = None,
+        description: str | None = None
     ) -> bool:
         """
         更新任务元数据
@@ -1627,8 +1627,8 @@ class SchedulerService:
 
 
 # 全局服务实例
-_scheduler_service: Optional[SchedulerService] = None
-_scheduler_instance: Optional[AsyncIOScheduler] = None
+_scheduler_service: SchedulerService | None = None
+_scheduler_instance: AsyncIOScheduler | None = None
 
 
 def set_scheduler_instance(scheduler: AsyncIOScheduler):

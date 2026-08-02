@@ -9,11 +9,11 @@ PDF 导出需要额外工具:
     - 或 LaTeX: https://www.latex-project.org/get/
 """
 
+import contextlib
 import logging
 import os
 import tempfile
-from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -188,7 +188,7 @@ class ReportExporter:
         logger.info(f"  - pandoc_available: {self.pandoc_available}")
         logger.info(f"  - pdfkit_available: {self.pdfkit_available}")
 
-    def generate_markdown_report(self, report_doc: Dict[str, Any]) -> str:
+    def generate_markdown_report(self, report_doc: dict[str, Any]) -> str:
         """生成 Markdown 格式报告（全中文标题）"""
         logger.info("📝 生成 Markdown 报告...")
 
@@ -490,7 +490,7 @@ pre, code {
 </style>
 """
     
-    def generate_docx_report(self, report_doc: Dict[str, Any]) -> bytes:
+    def generate_docx_report(self, report_doc: dict[str, Any]) -> bytes:
         """生成 Word 文档格式报告"""
         logger.info("📄 开始生成 Word 文档...")
 
@@ -827,9 +827,10 @@ pre, code {
 
     def _generate_pdf_with_pdfkit(self, html_content: str) -> bytes:
         """使用 pdfkit 生成 PDF（先尝试直接字符串方式，失败则使用命令行方式）"""
-        import pdfkit
-        import tempfile
         import subprocess
+        import tempfile
+
+        import pdfkit
 
         logger.info("🔧 使用 pdfkit + wkhtmltopdf 生成 PDF...")
 
@@ -903,15 +904,11 @@ pre, code {
         except Exception as e:
             # 清理临时文件（如果存在）
             if 'html_file' in locals():
-                try:
+                with contextlib.suppress(Exception):
                     os.unlink(html_file)
-                except Exception:
-                    pass
             if 'pdf_file' in locals():
-                try:
+                with contextlib.suppress(Exception):
                     os.unlink(pdf_file)
-                except Exception:
-                    pass
             logger.error(f"❌ PDF 生成失败（命令行方式）: {e}")
             raise
 
@@ -944,7 +941,7 @@ pre, code {
             if len(problematic_chars) > 10:
                 logger.warning(f"  ... 还有 {len(problematic_chars) - 10} 个")
     
-    def _clean_report_data(self, report_doc: Dict[str, Any]) -> Dict[str, Any]:
+    def _clean_report_data(self, report_doc: dict[str, Any]) -> dict[str, Any]:
         """递归清理报告数据，确保所有字符串都是有效的"""
         cleaned = {}
         for key, value in report_doc.items():
@@ -958,7 +955,7 @@ pre, code {
                 cleaned[key] = value
         return cleaned
     
-    def generate_pdf_report(self, report_doc: Dict[str, Any]) -> bytes:
+    def generate_pdf_report(self, report_doc: dict[str, Any]) -> bytes:
         """生成 PDF 格式报告（使用 stdin/stdout 传递数据，避免编码问题）"""
         import subprocess
         

@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 测试Google工具调用处理器修复效果
 """
 
-import sys
 import os
+import sys
+
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from tradingagents.agents.utils.google_tool_handler import GoogleToolCallHandler
 import logging
+
+from tradingagents.agents.utils.google_tool_handler import GoogleToolCallHandler
 
 # 设置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -30,7 +31,7 @@ def test_tool_call_validation():
     
     result = GoogleToolCallHandler._validate_tool_call(valid_tool_call, 0, "测试分析师")
     print(f"✅ 有效工具调用验证结果: {result}")
-    assert result == True, "有效工具调用应该通过验证"
+    assert result, "有效工具调用应该通过验证"
     
     # 测试无效的工具调用 - 缺少字段
     invalid_tool_call_1 = {
@@ -41,7 +42,7 @@ def test_tool_call_validation():
     
     result = GoogleToolCallHandler._validate_tool_call(invalid_tool_call_1, 1, "测试分析师")
     print(f"❌ 无效工具调用1验证结果: {result}")
-    assert result == False, "缺少字段的工具调用应该验证失败"
+    assert not result, "缺少字段的工具调用应该验证失败"
     
     # 测试无效的工具调用 - 错误类型
     invalid_tool_call_2 = {
@@ -52,7 +53,7 @@ def test_tool_call_validation():
     
     result = GoogleToolCallHandler._validate_tool_call(invalid_tool_call_2, 2, "测试分析师")
     print(f"❌ 无效工具调用2验证结果: {result}")
-    assert result == False, "错误类型的工具调用应该验证失败"
+    assert not result, "错误类型的工具调用应该验证失败"
     
     print("✅ 工具调用验证功能测试通过")
 

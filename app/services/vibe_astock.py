@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import math
 import os
 import random
@@ -18,7 +19,6 @@ import re
 import time
 import urllib.request
 from datetime import datetime, timedelta
-from pathlib import Path
 
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
 
@@ -576,10 +576,8 @@ def full_valuation(code: str) -> dict:
         y = str(row.get("年度", ""))
         if "2026" in y:
             eps_26 = _eps(row)
-            try:
+            with contextlib.suppress(TypeError, ValueError):
                 out["analyst_count"] = int(float(row.get("预测机构数") or 0))
-            except (TypeError, ValueError):
-                pass
         elif "2027" in y:
             eps_27 = _eps(row)
 

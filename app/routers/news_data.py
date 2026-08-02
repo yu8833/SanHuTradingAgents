@@ -2,15 +2,15 @@
 新闻数据API路由
 提供新闻数据查询、同步和管理接口
 """
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Query, status
-from typing import Optional, List, Dict, Any
-from datetime import datetime, timedelta
-from pydantic import BaseModel, Field
 import logging
+from datetime import datetime, timedelta
 
-from app.routers.auth_db import get_current_user
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
+
 from app.core.response import ok
-from app.services.news_data_service import get_news_data_service, NewsQueryParams
+from app.routers.auth_db import get_current_user
+from app.services.news_data_service import NewsQueryParams, get_news_data_service
 from app.worker.news_data_sync_service import get_news_data_sync_service
 
 router = APIRouter(prefix="/api/news-data", tags=["新闻数据"])
@@ -19,23 +19,23 @@ logger = logging.getLogger("webapi")
 
 class NewsQueryRequest(BaseModel):
     """新闻查询请求"""
-    symbol: Optional[str] = Field(None, description="股票代码")
-    symbols: Optional[List[str]] = Field(None, description="多个股票代码")
-    start_time: Optional[datetime] = Field(None, description="开始时间")
-    end_time: Optional[datetime] = Field(None, description="结束时间")
-    category: Optional[str] = Field(None, description="新闻类别")
-    sentiment: Optional[str] = Field(None, description="情绪分析")
-    importance: Optional[str] = Field(None, description="重要性")
-    data_source: Optional[str] = Field(None, description="数据源")
-    keywords: Optional[List[str]] = Field(None, description="关键词")
+    symbol: str | None = Field(None, description="股票代码")
+    symbols: list[str] | None = Field(None, description="多个股票代码")
+    start_time: datetime | None = Field(None, description="开始时间")
+    end_time: datetime | None = Field(None, description="结束时间")
+    category: str | None = Field(None, description="新闻类别")
+    sentiment: str | None = Field(None, description="情绪分析")
+    importance: str | None = Field(None, description="重要性")
+    data_source: str | None = Field(None, description="数据源")
+    keywords: list[str] | None = Field(None, description="关键词")
     limit: int = Field(50, description="返回数量限制")
     skip: int = Field(0, description="跳过数量")
 
 
 class NewsSyncRequest(BaseModel):
     """新闻同步请求"""
-    symbol: Optional[str] = Field(None, description="股票代码，为空则同步市场新闻")
-    data_sources: Optional[List[str]] = Field(None, description="数据源列表")
+    symbol: str | None = Field(None, description="股票代码，为空则同步市场新闻")
+    data_sources: list[str] | None = Field(None, description="数据源列表")
     hours_back: int = Field(24, description="回溯小时数")
     max_news_per_source: int = Field(50, description="每个数据源最大新闻数量")
 
@@ -45,8 +45,8 @@ async def query_stock_news(
     symbol: str,
     hours_back: int = Query(24, description="回溯小时数"),
     limit: int = Query(20, description="返回数量限制"),
-    category: Optional[str] = Query(None, description="新闻类别"),
-    sentiment: Optional[str] = Query(None, description="情绪分析"),
+    category: str | None = Query(None, description="新闻类别"),
+    sentiment: str | None = Query(None, description="情绪分析"),
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -182,7 +182,7 @@ async def query_news_advanced(
 
 @router.get("/latest", response_model=dict)
 async def get_latest_news(
-    symbol: Optional[str] = Query(None, description="股票代码，为空则获取所有新闻"),
+    symbol: str | None = Query(None, description="股票代码，为空则获取所有新闻"),
     limit: int = Query(10, description="返回数量限制"),
     hours_back: int = Query(24, description="回溯小时数"),
     current_user: dict = Depends(get_current_user)
@@ -228,7 +228,7 @@ async def get_latest_news(
 @router.get("/search", response_model=dict)
 async def search_news(
     query: str = Query(..., description="搜索关键词"),
-    symbol: Optional[str] = Query(None, description="股票代码过滤"),
+    symbol: str | None = Query(None, description="股票代码过滤"),
     limit: int = Query(20, description="返回数量限制"),
     current_user: dict = Depends(get_current_user)
 ):
@@ -271,7 +271,7 @@ async def search_news(
 
 @router.get("/statistics", response_model=dict)
 async def get_news_statistics(
-    symbol: Optional[str] = Query(None, description="股票代码"),
+    symbol: str | None = Query(None, description="股票代码"),
     days_back: int = Query(7, description="回溯天数"),
     current_user: dict = Depends(get_current_user)
 ):
@@ -381,7 +381,7 @@ async def start_news_sync(
 @router.post("/sync/single", response_model=dict)
 async def sync_single_stock_news(
     symbol: str,
-    data_sources: Optional[List[str]] = None,
+    data_sources: list[str] | None = None,
     hours_back: int = 24,
     max_news_per_source: int = 50,
     current_user: dict = Depends(get_current_user)
@@ -469,8 +469,8 @@ async def cleanup_old_news(
 async def health_check():
     """健康检查"""
     try:
-        service = await get_news_data_service()
-        sync_service = await get_news_data_sync_service()
+        await get_news_data_service()
+        await get_news_data_sync_service()
         
         return ok(data={
                 "service_status": "healthy",

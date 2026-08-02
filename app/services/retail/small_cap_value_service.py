@@ -18,9 +18,7 @@
 import asyncio
 import logging
 import time
-from typing import Any, Dict, List, Optional
-
-import numpy as np
+from typing import Any
 
 from app.services.retail.retail_screening_base import RetailScreeningBase
 
@@ -31,8 +29,8 @@ class SmallCapValueService(RetailScreeningBase):
     """小盘价值策略"""
 
     async def scan_small_cap_value(
-        self, params: Dict[str, Any] = None
-    ) -> Dict[str, Any]:
+        self, params: dict[str, Any] = None
+    ) -> dict[str, Any]:
         """
         扫描小盘价值股
 
@@ -83,7 +81,7 @@ class SmallCapValueService(RetailScreeningBase):
         logger.info(f"小盘价值扫描: {len(candidates)} 个候选股（硬性筛选后）")
 
         # 2.5 计算行业PE/PB统计值（用于行业中性化评分）
-        industry_stats: Dict[str, Dict[str, List[float]]] = {}
+        industry_stats: dict[str, dict[str, list[float]]] = {}
         for code in candidates:
             sv = screening_data.get(code, {})
             industry = sv.get("industry", "") or "未知"
@@ -136,9 +134,9 @@ class SmallCapValueService(RetailScreeningBase):
         }
 
     def _analyze_stock(
-        self, code: str, sv: dict, quotes: List[dict], max_pe: float, max_pb: float,
-        industry_stats: Optional[Dict[str, Dict[str, List[float]]]] = None
-    ) -> Optional[dict]:
+        self, code: str, sv: dict, quotes: list[dict], max_pe: float, max_pb: float,
+        industry_stats: dict[str, dict[str, list[float]]] | None = None
+    ) -> dict | None:
         """分析单只股票"""
         name = sv.get("name", "")
         industry = sv.get("industry", "") or "未知"
@@ -216,10 +214,7 @@ class SmallCapValueService(RetailScreeningBase):
         score_details["PB行业分位"] = round(pb_percentile, 2)
 
         # 市值评分（0-15分）：市值越小分越高（越靠近10亿越好）
-        if total_mv > 0:
-            mv_score = max(0, min(15, (30 - total_mv) / 20 * 15))
-        else:
-            mv_score = 0
+        mv_score = max(0, min(15, (30 - total_mv) / 20 * 15)) if total_mv > 0 else 0
         score += mv_score
         score_details["市值评分"] = round(mv_score, 1)
 
@@ -266,12 +261,11 @@ class SmallCapValueService(RetailScreeningBase):
             "score_details": score_details,
         }
 
-    async def backtest(self, params: Dict[str, Any] = None) -> Dict[str, Any]:
+    async def backtest(self, params: dict[str, Any] = None) -> dict[str, Any]:
         """回测"""
         params = params or {}
-        from datetime import datetime
 
-        async def scan_func(date_str: str) -> List[dict]:
+        async def scan_func(date_str: str) -> list[dict]:
             """回测扫描函数：使用历史数据，避免未来函数"""
             screening_data = await self._get_screening_view_for_date(date_str)
             max_pe = params.get("max_pe", 15)
@@ -296,7 +290,7 @@ class SmallCapValueService(RetailScreeningBase):
                 return []
 
             # 计算行业PE/PB统计值（用于行业中性化评分）
-            industry_stats: Dict[str, Dict[str, List[float]]] = {}
+            industry_stats: dict[str, dict[str, list[float]]] = {}
             for code in candidates:
                 sv = screening_data.get(code, {})
                 industry = sv.get("industry", "") or "未知"
@@ -324,7 +318,7 @@ class SmallCapValueService(RetailScreeningBase):
         return await self.run_backtest("small_cap_value", scan_func, params)
 
 
-_service: Optional[SmallCapValueService] = None
+_service: SmallCapValueService | None = None
 
 
 def get_small_cap_value_service() -> SmallCapValueService:

@@ -9,18 +9,17 @@
 
 import logging
 from datetime import datetime
-from typing import Dict, List, Optional
 
 from app.core.database import get_mongo_db
+from app.models.notification import NotificationCreate
+from app.services.notifications_service import get_notifications_service
 from app.services.portfolio_service import portfolio_service
 from app.services.retail.retail_strategy_service import get_retail_strategy_service
-from app.services.notifications_service import get_notifications_service
-from app.models.notification import NotificationCreate
 
 logger = logging.getLogger(__name__)
 
 # 缓存上次市场环境摘要，用于检测变化
-_last_regime_summary: Optional[str] = None
+_last_regime_summary: str | None = None
 
 
 def _is_trading_day() -> bool:
@@ -28,7 +27,7 @@ def _is_trading_day() -> bool:
     return datetime.now().weekday() < 5
 
 
-async def _get_all_user_ids_with_open_positions() -> List[str]:
+async def _get_all_user_ids_with_open_positions() -> list[str]:
     """获取所有有未平仓持仓的用户ID"""
     try:
         db = get_mongo_db()
@@ -40,7 +39,7 @@ async def _get_all_user_ids_with_open_positions() -> List[str]:
         return []
 
 
-async def _get_position_current_prices(symbols: List[str]) -> Dict[str, float]:
+async def _get_position_current_prices(symbols: list[str]) -> dict[str, float]:
     """批量获取持仓当前价"""
     if not symbols:
         return {}
@@ -107,8 +106,8 @@ async def check_all_users_exit_signals():
                     continue
 
                 # 构造退出检查输入
-                holdings_to_check: List[dict] = []
-                position_map: Dict[str, dict] = {}
+                holdings_to_check: list[dict] = []
+                position_map: dict[str, dict] = {}
                 for p in positions:
                     symbol = p["symbol"]
                     current_price = prices.get(symbol)
@@ -183,7 +182,7 @@ async def check_all_users_exit_signals():
         logger.error(f"❌ 持仓退出信号扫描失败: {e}", exc_info=True)
 
 
-async def _get_market_regime_data() -> Optional[dict]:
+async def _get_market_regime_data() -> dict | None:
     """
     获取市场环境检测所需的数据（自动采集）
 

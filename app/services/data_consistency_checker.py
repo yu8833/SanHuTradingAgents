@@ -3,11 +3,11 @@
 处理多数据源之间的数据不一致性问题
 """
 import logging
-import pandas as pd
-from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
-from datetime import datetime
+from typing import Any
+
 import numpy as np
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -17,18 +17,18 @@ class DataConsistencyResult:
     is_consistent: bool
     primary_source: str
     secondary_source: str
-    differences: Dict[str, Any]
+    differences: dict[str, Any]
     confidence_score: float
     recommended_action: str
-    details: Dict[str, Any]
+    details: dict[str, Any]
 
 @dataclass
 class FinancialMetricComparison:
     """财务指标比较结果"""
     metric_name: str
-    primary_value: Optional[float]
-    secondary_value: Optional[float]
-    difference_pct: Optional[float]
+    primary_value: float | None
+    secondary_value: float | None
+    difference_pct: float | None
     is_significant: bool
     tolerance: float
 
@@ -130,7 +130,7 @@ class DataConsistencyChecker:
                 details={'exception': str(e)}
             )
     
-    def _find_common_stocks(self, df1: pd.DataFrame, df2: pd.DataFrame) -> List[str]:
+    def _find_common_stocks(self, df1: pd.DataFrame, df2: pd.DataFrame) -> list[str]:
         """找到两个数据集中的共同股票"""
         # 尝试不同的股票代码列名
         code_cols = ['ts_code', 'symbol', 'code', 'stock_code']
@@ -150,9 +150,9 @@ class DataConsistencyChecker:
         self, 
         df1: pd.DataFrame, 
         df2: pd.DataFrame, 
-        common_stocks: List[str], 
+        common_stocks: list[str], 
         metric: str
-    ) -> Optional[FinancialMetricComparison]:
+    ) -> FinancialMetricComparison | None:
         """比较特定指标"""
         try:
             if metric not in df1.columns or metric not in df2.columns:
@@ -177,10 +177,7 @@ class DataConsistencyChecker:
             avg1 = np.mean(df1_values)
             avg2 = np.mean(df2_values)
             
-            if avg1 != 0:
-                diff_pct = abs(avg2 - avg1) / abs(avg1)
-            else:
-                diff_pct = float('inf') if avg2 != 0 else 0
+            diff_pct = abs(avg2 - avg1) / abs(avg1) if avg1 != 0 else float('inf') if avg2 != 0 else 0
             
             tolerance = self.tolerance_thresholds.get(metric, 0.1)
             is_significant = diff_pct > tolerance
@@ -198,7 +195,7 @@ class DataConsistencyChecker:
             logger.warning(f"⚠️ 比较指标{metric}失败: {e}")
             return None
     
-    def _get_stock_metric_value(self, df: pd.DataFrame, stock_code: str, metric: str) -> Optional[float]:
+    def _get_stock_metric_value(self, df: pd.DataFrame, stock_code: str, metric: str) -> float | None:
         """获取特定股票的指标值"""
         try:
             # 尝试不同的匹配方式
@@ -215,7 +212,7 @@ class DataConsistencyChecker:
     
     def _calculate_overall_consistency(
         self, 
-        comparisons: List[FinancialMetricComparison],
+        comparisons: list[FinancialMetricComparison],
         primary_source: str,
         secondary_source: str
     ) -> DataConsistencyResult:
@@ -292,7 +289,7 @@ class DataConsistencyChecker:
         primary_data: pd.DataFrame,
         secondary_data: pd.DataFrame,
         consistency_result: DataConsistencyResult
-    ) -> Tuple[pd.DataFrame, str]:
+    ) -> tuple[pd.DataFrame, str]:
         """
         根据一致性检查结果解决数据冲突
         

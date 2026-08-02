@@ -10,13 +10,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from app.models.user import User  # noqa: E402
 from app.routers import config as config_router  # noqa: E402
 from app.routers.auth import get_current_user  # noqa: E402
-from app.models.user import User  # noqa: E402
 from app.services.config_service import config_service  # noqa: E402
 
 
-@pytest.fixture()
+@pytest.fixture
 def test_app():
     app = FastAPI()
     app.include_router(config_router.router, prefix="/api")

@@ -4,6 +4,7 @@ Serialization helpers for MongoDB documents.
 from __future__ import annotations
 
 from datetime import datetime
+
 from bson import ObjectId
 
 

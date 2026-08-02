@@ -1,9 +1,10 @@
 """
 AKShare data source adapter
 """
-from typing import Optional, Dict, Any, List
 import logging
 from datetime import datetime, timedelta
+from typing import Any
+
 import pandas as pd
 
 from .base import DataSourceAdapter
@@ -46,8 +47,10 @@ class AKShareAdapter(DataSourceAdapter):
         if getattr(self, '_cached_available', None) is True and (now - getattr(self, '_available_cache_ts', 0.0)) < 300:
             return True
         try:
+            from concurrent.futures import ThreadPoolExecutor
+            from concurrent.futures import TimeoutError as FuturesTimeoutError
+
             import akshare as ak
-            from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
             def _fetch():
                 # 轻量级测试：尝试获取一只股票的实时行情
@@ -71,7 +74,7 @@ class AKShareAdapter(DataSourceAdapter):
         self._available_cache_ts = now
         return result
 
-    def get_stock_list(self) -> Optional[pd.DataFrame]:
+    def get_stock_list(self) -> pd.DataFrame | None:
         """获取股票列表（使用 AKShare 的 stock_info_a_code_name 接口获取真实股票名称）"""
         if not self.is_available():
             return None
@@ -151,12 +154,12 @@ class AKShareAdapter(DataSourceAdapter):
             logger.error(f"AKShare: Failed to fetch stock list: {e}")
             return None
 
-    def get_daily_basic(self, trade_date: str) -> Optional[pd.DataFrame]:
+    def get_daily_basic(self, trade_date: str) -> pd.DataFrame | None:
         """获取每日基础财务数据（快速版）"""
         if not self.is_available():
             return None
         try:
-            import akshare as ak  # noqa: F401
+            import akshare as ak
             logger.info(f"AKShare: Attempting to get basic financial data for {trade_date}")
 
             stock_df = self.get_stock_list()
@@ -222,7 +225,7 @@ class AKShareAdapter(DataSourceAdapter):
             logger.error(f"AKShare: Failed to fetch basic data for {trade_date}: {e}")
             return None
 
-    def _safe_float(self, value) -> Optional[float]:
+    def _safe_float(self, value) -> float | None:
         try:
             if value is None or value == '' or value == 'None':
                 return None
@@ -248,8 +251,10 @@ class AKShareAdapter(DataSourceAdapter):
             return None
 
         try:
+            from concurrent.futures import ThreadPoolExecutor
+            from concurrent.futures import TimeoutError as FuturesTimeoutError
+
             import akshare as ak  # type: ignore
-            from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
             # 定义数据源优先级列表
             sources = [source]
@@ -271,10 +276,10 @@ class AKShareAdapter(DataSourceAdapter):
                         """在子线程中获取数据"""
                         if src == "sina":
                             df = ak.stock_zh_a_spot()  # 新浪财经接口
-                            logger.info(f"使用 AKShare 新浪财经接口获取实时行情")
+                            logger.info("使用 AKShare 新浪财经接口获取实时行情")
                         else:  # 默认使用东方财富
                             df = ak.stock_zh_a_spot_em()  # 东方财富接口
-                            logger.info(f"使用 AKShare 东方财富接口获取实时行情")
+                            logger.info("使用 AKShare 东方财富接口获取实时行情")
                         return df
 
                     # 使用 ThreadPoolExecutor 添加超时保护
@@ -308,7 +313,7 @@ class AKShareAdapter(DataSourceAdapter):
                         last_error = Exception("missing columns")
                         continue
 
-                    result: Dict[str, Dict[str, Optional[float]]] = {}
+                    result: dict[str, dict[str, float | None]] = {}
                     for _, row in df.iterrows():  # type: ignore
                         code_raw = row.get(code_col)
                         if not code_raw:
@@ -346,9 +351,8 @@ class AKShareAdapter(DataSourceAdapter):
                         # 🔥 单位转换（区分数据源）：
                         # - 东方财富 (eastmoney)：成交量单位为手 → 股（×100）；成交额为元 → 万元（÷10000）
                         # - 新浪财经 (sina)：成交量单位为股（无需转换）；成交额为元 → 万元（÷10000）
-                        if src == "eastmoney":
-                            if vol is not None:
-                                vol = vol * 100  # 手 → 股
+                        if src == "eastmoney" and vol is not None:
+                            vol = vol * 100  # 手 → 股
                         # sina 的成交量单位已经是股，无需转换
                         
                         if amt is not None:
@@ -381,7 +385,7 @@ class AKShareAdapter(DataSourceAdapter):
             logger.error(f"获取AKShare实时快照失败: {e}")
             return None
 
-    def get_realtime_quote_single(self, code: str, timeout: int = 5) -> Optional[Dict[str, Any]]:
+    def get_realtime_quote_single(self, code: str, timeout: int = 5) -> dict[str, Any] | None:
         """
         🔥 单只股票快速查询（使用 stock_zh_a_minute 接口，约 1 秒）
         
@@ -395,8 +399,10 @@ class AKShareAdapter(DataSourceAdapter):
         if not self.is_available():
             return None
         try:
+            from concurrent.futures import ThreadPoolExecutor
+            from concurrent.futures import TimeoutError as FuturesTimeoutError
+
             import akshare as ak
-            from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
             
             code6 = str(code).zfill(6)
             logger.info(f"🔥 AKShare 单只股票快速查询: {code6}（超时: {timeout}秒）")
@@ -404,10 +410,7 @@ class AKShareAdapter(DataSourceAdapter):
             def _fetch_minute_data():
                 """获取分时数据"""
                 # 根据股票代码判断交易所前缀
-                if code6.startswith(('60', '68')):
-                    symbol_with_prefix = f"sh{code6}"
-                else:
-                    symbol_with_prefix = f"sz{code6}"
+                symbol_with_prefix = f"sh{code6}" if code6.startswith(('60', '68')) else f"sz{code6}"
                 
                 df = ak.stock_zh_a_minute(symbol=symbol_with_prefix, period="1", adjust="")
                 return df
@@ -422,7 +425,7 @@ class AKShareAdapter(DataSourceAdapter):
                     return None
             
             if df is None or getattr(df, "empty", True):
-                logger.warning(f"AKShare 单只股票查询返回空数据")
+                logger.warning("AKShare 单只股票查询返回空数据")
                 return None
             
             # 获取最后一行（最新的分时数据）
@@ -461,7 +464,7 @@ class AKShareAdapter(DataSourceAdapter):
             logger.error(f"AKShare 单只股票查询失败: {e}")
             return None
 
-    def get_kline(self, code: str, period: str = "day", limit: int = 120, adj: Optional[str] = None):
+    def get_kline(self, code: str, period: str = "day", limit: int = 120, adj: str | None = None):
         """AKShare K-line as fallback. Try daily/week/month via stock_zh_a_hist; minutes via stock_zh_a_minute."""
         if not self.is_available():
             return None
@@ -554,7 +557,7 @@ class AKShareAdapter(DataSourceAdapter):
             logger.error(f"AKShare get_news failed: {e}")
             return None
 
-    def find_latest_trade_date(self) -> Optional[str]:
+    def find_latest_trade_date(self) -> str | None:
         yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
         logger.info(f"AKShare: Using yesterday as trade date: {yesterday}")
         return yesterday

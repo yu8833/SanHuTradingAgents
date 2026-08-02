@@ -3,14 +3,14 @@
 将现有的TradingAgents分析功能包装成API服务
 """
 
-import asyncio
-import uuid
 import json
 import logging
-from datetime import datetime
-from typing import Dict, Any, List, Optional, Callable
-from pathlib import Path
 import sys
+import uuid
+from collections.abc import Callable
+from datetime import datetime
+from pathlib import Path
+from typing import Any
 
 # 添加项目根目录到路径
 project_root = Path(__file__).parent.parent.parent
@@ -18,28 +18,33 @@ sys.path.insert(0, str(project_root))
 
 # 初始化TradingAgents日志系统
 from tradingagents.utils.logging_init import init_logging
+
 init_logging()
 
-from tradingagents.graph.trading_graph import TradingAgentsGraph
-from tradingagents.default_config import DEFAULT_CONFIG
-from app.services.simple_analysis_service import create_analysis_config, get_provider_by_model_name
-from app.models.analysis import (
-    AnalysisParameters, AnalysisResult, AnalysisTask, AnalysisBatch,
-    AnalysisStatus, BatchStatus, SingleAnalysisRequest, BatchAnalysisRequest
-)
-from app.models.user import PyObjectId
 from bson import ObjectId
-from app.core.database import get_mongo_db
-from app.core.redis_client import get_redis_service, RedisKeys
-from app.services.queue_service import QueueService
-from app.core.database import get_redis_client
-from app.services.redis_progress_tracker import RedisProgressTracker
+
+from app.core.database import get_mongo_db, get_redis_client
+from app.core.redis_client import RedisKeys, get_redis_service
+from app.models.analysis import (
+    AnalysisBatch,
+    AnalysisParameters,
+    AnalysisResult,
+    AnalysisStatus,
+    AnalysisTask,
+    BatchAnalysisRequest,
+    BatchStatus,
+    SingleAnalysisRequest,
+)
+from app.models.config import UsageRecord
+from app.models.user import PyObjectId
 from app.services.config_provider import provider as config_provider
 from app.services.queue import DEFAULT_USER_CONCURRENT_LIMIT, GLOBAL_CONCURRENT_LIMIT, VISIBILITY_TIMEOUT_SECONDS
+from app.services.queue_service import QueueService
+from app.services.redis_progress_tracker import RedisProgressTracker
+from app.services.simple_analysis_service import create_analysis_config, get_provider_by_model_name
 from app.services.usage_statistics_service import UsageStatisticsService
-from app.models.config import UsageRecord
+from tradingagents.graph.trading_graph import TradingAgentsGraph
 
-import logging
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -50,7 +55,7 @@ _SUPPORTED_ANALYSTS = {"market", "social", "news", "fundamentals", "policy", "ho
 _ALL_ANALYSTS = ["market", "social", "news", "fundamentals", "policy", "hot_money", "lockup"]
 
 
-def _fill_analysts(raw_analysts: Optional[List[str]]) -> List[str]:
+def _fill_analysts(raw_analysts: list[str] | None) -> list[str]:
     """补全全部7个分析师（确保所有维度都有报告）"""
     filtered = []
     for a in (raw_analysts or list(_SUPPORTED_ANALYSTS)):
@@ -70,6 +75,7 @@ def _read_model_configs_from_mongo(quick_model: str, deep_model: str) -> tuple:
     """
     # 修复：使用 with 上下文管理器确保 MongoClient 正确关闭，避免连接泄漏
     from pymongo import MongoClient
+
     from app.core.config import settings
 
     try:
@@ -119,7 +125,7 @@ class AnalysisService:
         self.usage_service = UsageStatisticsService()
         self._trading_graph_cache = {}
         # 进度跟踪器缓存
-        self._progress_trackers: Dict[str, RedisProgressTracker] = {}
+        self._progress_trackers: dict[str, RedisProgressTracker] = {}
 
     def _convert_user_id(self, user_id: str) -> PyObjectId:
         """将字符串用户ID转换为PyObjectId"""
@@ -144,7 +150,7 @@ class AnalysisService:
             logger.warning(f"⚠️ 生成新的用户ID: {new_object_id}")
             return PyObjectId(new_object_id)
     
-    def _get_trading_graph(self, config: Dict[str, Any]) -> TradingAgentsGraph:
+    def _get_trading_graph(self, config: dict[str, Any]) -> TradingAgentsGraph:
         """获取或创建TradingAgents图实例（带缓存）- 与单股分析保持一致"""
         config_key = json.dumps(config, sort_keys=True)
 
@@ -165,7 +171,7 @@ class AnalysisService:
         """同步执行分析任务（在线程池中运行，带进度跟踪）"""
         try:
             # 在线程中重新初始化日志系统
-            from tradingagents.utils.logging_init import init_logging, get_logger
+            from tradingagents.utils.logging_init import get_logger, init_logging
             init_logging()
             thread_logger = get_logger('analysis_thread')
 
@@ -429,10 +435,10 @@ class AnalysisService:
         self,
         user_id: str,
         request: SingleAnalysisRequest
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """提交单股分析任务"""
         try:
-            logger.info(f"📝 开始提交单股分析任务")
+            logger.info("📝 开始提交单股分析任务")
             logger.info(f"👤 用户ID: {user_id} (类型: {type(user_id)})")
 
             # 获取股票代码 (兼容旧字段)
@@ -449,7 +455,7 @@ class AnalysisService:
             logger.info(f"🔄 转换后的用户ID: {converted_user_id} (类型: {type(converted_user_id)})")
 
             # 创建分析任务
-            logger.info(f"🏗️ 开始创建AnalysisTask对象...")
+            logger.info("🏗️ 开始创建AnalysisTask对象...")
 
             # 读取合并后的系统设置（ENV 优先 → DB），用于填充模型与并发/超时配置
             try:
@@ -481,22 +487,22 @@ class AnalysisService:
                 parameters=params,
                 status=AnalysisStatus.PENDING
             )
-            logger.info(f"✅ AnalysisTask对象创建成功")
+            logger.info("✅ AnalysisTask对象创建成功")
 
             # 保存任务到数据库
-            logger.info(f"💾 开始保存任务到数据库...")
+            logger.info("💾 开始保存任务到数据库...")
             db = get_mongo_db()
             task_dict = task.model_dump(by_alias=True)
             logger.info(f"📄 任务字典: {task_dict}")
             await db.analysis_tasks.insert_one(task_dict)
-            logger.info(f"✅ 任务已保存到数据库")
+            logger.info("✅ 任务已保存到数据库")
 
             # 单股分析：直接在后台执行（不阻塞API响应）
-            logger.info(f"🚀 开始在后台执行分析任务...")
+            logger.info("🚀 开始在后台执行分析任务...")
 
             # 创建后台任务，不等待完成
             import asyncio
-            background_task = asyncio.create_task(
+            asyncio.create_task(
                 self._execute_single_analysis_async(task)
             )
 
@@ -521,7 +527,7 @@ class AnalysisService:
         self, 
         user_id: str, 
         request: BatchAnalysisRequest
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """提交批量分析任务"""
         try:
             # 生成批次ID
@@ -622,7 +628,7 @@ class AnalysisService:
     async def execute_analysis_task(
         self, 
         task: AnalysisTask,
-        progress_callback: Optional[Callable[[int, str], None]] = None
+        progress_callback: Callable[[int, str], None] | None = None
     ) -> AnalysisResult:
         """执行单个分析任务"""
         try:
@@ -763,7 +769,7 @@ class AnalysisService:
         task_id: str,
         status: AnalysisStatus,
         progress: int,
-        result: Optional[AnalysisResult] = None,
+        result: AnalysisResult | None = None,
     ) -> None:
         """更新任务状态（委托至拆分的工具函数）"""
         try:
@@ -777,7 +783,7 @@ class AnalysisService:
         task_id: str,
         status: AnalysisStatus,
         progress_tracker: RedisProgressTracker,
-        result: Optional[AnalysisResult] = None,
+        result: AnalysisResult | None = None,
     ) -> None:
         """使用进度跟踪器更新任务状态（委托至拆分的工具函数）"""
         try:
@@ -786,7 +792,7 @@ class AnalysisService:
         except Exception as e:
             logger.error(f"更新任务状态失败: {task_id} - {e}")
 
-    async def get_task_status(self, task_id: str) -> Optional[Dict[str, Any]]:
+    async def get_task_status(self, task_id: str) -> dict[str, Any] | None:
         """获取任务状态"""
         try:
             # 先检查内存中的进度跟踪器
@@ -958,14 +964,14 @@ class AnalysisService:
             if success:
                 logger.info(f"💰 记录使用成本: {provider}/{model_name} - ¥{cost:.4f}")
             else:
-                logger.warning(f"⚠️  记录使用成本失败")
+                logger.warning("⚠️  记录使用成本失败")
 
         except Exception as e:
             logger.error(f"❌ 记录 token 使用失败: {e}")
 
 
 # 全局分析服务实例（延迟初始化）
-analysis_service: Optional[AnalysisService] = None
+analysis_service: AnalysisService | None = None
 
 
 def get_analysis_service() -> AnalysisService:

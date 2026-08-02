@@ -3,11 +3,11 @@
 策略模式实现速览模式和深度分析模式的解耦
 """
 
-import asyncio
 import logging
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, Callable, List
+from collections.abc import Callable
 from datetime import datetime
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -35,17 +35,17 @@ class AnalysisModeHandler(ABC):
         self.start_time = datetime.now()
 
     @abstractmethod
-    async def execute(self) -> Dict[str, Any]:
+    async def execute(self) -> dict[str, Any]:
         """执行分析"""
         pass
 
     @abstractmethod
-    async def save_result(self, result: Dict[str, Any]) -> bool:
+    async def save_result(self, result: dict[str, Any]) -> bool:
         """保存结果"""
         pass
 
     @abstractmethod
-    async def send_notification(self, result: Dict[str, Any]) -> bool:
+    async def send_notification(self, result: dict[str, Any]) -> bool:
         """发送通知"""
         pass
 
@@ -57,7 +57,7 @@ class AnalysisModeHandler(ABC):
 class QuickAnalysisHandler(AnalysisModeHandler):
     """快速分析处理器"""
 
-    async def execute(self) -> Dict[str, Any]:
+    async def execute(self) -> dict[str, Any]:
         """执行快速分析"""
         logger.info(f"🚀 [快速模式] 开始分析: {self.stock_code}")
 
@@ -87,10 +87,11 @@ class QuickAnalysisHandler(AnalysisModeHandler):
             logger.error(f"❌ [速览模式] 分析失败: {e}")
             raise
 
-    async def save_result(self, result: Dict[str, Any]) -> bool:
+    async def save_result(self, result: dict[str, Any]) -> bool:
         """保存速览分析结果"""
-        from app.services.simple_analysis_service import get_mongo_pool
         from datetime import datetime
+
+        from app.services.simple_analysis_service import get_mongo_pool
 
         try:
             db = get_mongo_pool().get_db()
@@ -129,7 +130,7 @@ class QuickAnalysisHandler(AnalysisModeHandler):
             logger.error(f"❌ [速览模式] 保存结果失败: {e}")
             return False
 
-    async def send_notification(self, result: Dict[str, Any]) -> bool:
+    async def send_notification(self, result: dict[str, Any]) -> bool:
         """发送快速分析完成通知"""
         try:
             from app.services.notifications_service import get_notifications_service
@@ -161,12 +162,12 @@ class DeepAnalysisHandler(AnalysisModeHandler):
         analysis_date: str,
         request_params: Any,
         update_progress: Callable,
-        quick_result_dict: Optional[Dict] = None
+        quick_result_dict: dict | None = None
     ):
         super().__init__(task_id, user_id, stock_code, stock_name, analysis_date, request_params, update_progress)
         self.quick_result_dict = quick_result_dict
 
-    async def execute(self) -> Dict[str, Any]:
+    async def execute(self) -> dict[str, Any]:
         """执行深度分析"""
         logger.info(f"🚀 [深度模式] 开始分析: {self.stock_code}")
 
@@ -204,7 +205,7 @@ class DeepAnalysisHandler(AnalysisModeHandler):
             quick_analysis_result=self.quick_result_dict
         )
 
-        logger.info(f"✅ [深度模式] propagate 执行完成")
+        logger.info("✅ [深度模式] propagate 执行完成")
 
         # 处理结果
         self.update_progress(90, "处理分析结果...", "result_processing")
@@ -227,7 +228,7 @@ class DeepAnalysisHandler(AnalysisModeHandler):
             'state': state if isinstance(state, dict) else vars(state) if hasattr(state, '__dict__') else str(state),
         }
 
-    def _extract_reports(self, state: Any) -> Dict[str, Any]:
+    def _extract_reports(self, state: Any) -> dict[str, Any]:
         """从state中提取报告"""
         reports = {}
 
@@ -255,7 +256,7 @@ class DeepAnalysisHandler(AnalysisModeHandler):
 
         return reports
 
-    def _extract_decision(self, decision: Any) -> Optional[Dict[str, Any]]:
+    def _extract_decision(self, decision: Any) -> dict[str, Any] | None:
         """从decision中提取决策信息"""
         if decision is None:
             return None
@@ -267,10 +268,11 @@ class DeepAnalysisHandler(AnalysisModeHandler):
 
         return str(decision)
 
-    async def save_result(self, result: Dict[str, Any]) -> bool:
+    async def save_result(self, result: dict[str, Any]) -> bool:
         """保存深度分析结果"""
-        from app.services.simple_analysis_service import get_mongo_pool
         from datetime import datetime
+
+        from app.services.simple_analysis_service import get_mongo_pool
 
         try:
             db = get_mongo_pool().get_db()
@@ -313,7 +315,7 @@ class DeepAnalysisHandler(AnalysisModeHandler):
             logger.error(f"❌ [深度模式] 保存结果失败: {e}")
             return False
 
-    async def send_notification(self, result: Dict[str, Any]) -> bool:
+    async def send_notification(self, result: dict[str, Any]) -> bool:
         """发送深度分析完成通知"""
         try:
             from app.services.notifications_service import get_notifications_service
@@ -349,7 +351,7 @@ class AnalysisModeFactory:
         analysis_date: str,
         request_params: Any,
         update_progress: Callable,
-        quick_result_dict: Optional[Dict] = None
+        quick_result_dict: dict | None = None
     ) -> AnalysisModeHandler:
         """创建分析模式处理器"""
 

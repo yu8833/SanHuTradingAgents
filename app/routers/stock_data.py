@@ -2,20 +2,11 @@
 股票数据API路由 - 基于扩展数据模型
 提供标准化的股票数据访问接口
 """
-from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi import status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from app.models import MarketQuotesResponse, StockBasicInfoResponse, StockListResponse
 from app.routers.auth_db import get_current_user
 from app.services.stock_data_service import get_stock_data_service
-from app.models import (
-    StockBasicInfoResponse,
-    MarketQuotesResponse,
-    StockListResponse,
-    StockBasicInfoExtended,
-    MarketQuotesExtended,
-    MarketType
-)
 
 router = APIRouter(prefix="/api/stock-data", tags=["股票数据"])
 
@@ -96,8 +87,8 @@ async def get_market_quotes(
 
 @router.get("/list", response_model=StockListResponse)
 async def get_stock_list(
-    market: Optional[str] = Query(None, description="市场筛选"),
-    industry: Optional[str] = Query(None, description="行业筛选"),
+    market: str | None = Query(None, description="市场筛选"),
+    industry: str | None = Query(None, description="行业筛选"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页大小"),
     current_user: dict = Depends(get_current_user)

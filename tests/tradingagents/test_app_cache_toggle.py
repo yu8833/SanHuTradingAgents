@@ -1,10 +1,8 @@
 import os
-import types
-import builtins
+from typing import Any
+
 import pandas as pd
 import pytest
-
-from typing import Any, Dict, Optional
 
 
 class DummyDBManager:
@@ -46,10 +44,10 @@ def test_basics_prefers_app_cache_when_enabled(monkeypatch):
 
     called = {"api": False}
 
-    def fake_from_mongo(stock_code: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def fake_from_mongo(stock_code: str | None = None) -> dict[str, Any] | None:
         return {"code": stock_code or "000001", "name": "平安银行", "source": "mongo"}
 
-    def fake_from_api(stock_code: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def fake_from_api(stock_code: str | None = None) -> dict[str, Any] | None:
         called["api"] = True
         return {"code": stock_code or "000001", "name": "平安银行", "source": "api"}
 
@@ -76,10 +74,10 @@ def test_basics_fallback_to_api_when_cache_miss(monkeypatch):
 
     called = {"api": False}
 
-    def miss_from_mongo(stock_code: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def miss_from_mongo(stock_code: str | None = None) -> dict[str, Any] | None:
         return None
 
-    def fake_from_api(stock_code: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def fake_from_api(stock_code: str | None = None) -> dict[str, Any] | None:
         called["api"] = True
         return {"code": stock_code or "000001", "name": "平安银行", "source": "api"}
 
@@ -108,11 +106,11 @@ def test_basics_direct_first_when_disabled(monkeypatch):
 
     order = []
 
-    def fake_from_api(stock_code: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def fake_from_api(stock_code: str | None = None) -> dict[str, Any] | None:
         order.append("api")
         return {"code": stock_code or "000001", "name": "平安银行", "source": "api"}
 
-    def fake_from_mongo(stock_code: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def fake_from_mongo(stock_code: str | None = None) -> dict[str, Any] | None:
         order.append("mongo")
         return {"code": stock_code or "000001", "name": "平安银行", "source": "mongo"}
 

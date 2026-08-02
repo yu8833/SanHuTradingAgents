@@ -23,13 +23,12 @@
 import asyncio
 import logging
 import time
-from datetime import date, datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import date, timedelta
+from typing import Any
 
 import pandas as pd
 
 from app.services import vibe_astock as astock
-from app.services.cache_layer import cached
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +95,7 @@ def _parse_amount(v) -> float:
         return 0.0
 
 
-def _recent_report_dates(today: date) -> List[str]:
+def _recent_report_dates(today: date) -> list[str]:
     """
     根据当前日期返回最近3个已披露季报的期末日期（YYYYMMDD 格式）。
 
@@ -123,9 +122,9 @@ class RiskScanner:
     """散户风险扫描器"""
 
     def __init__(self):
-        self._pledge_cache: Optional[pd.DataFrame] = None
+        self._pledge_cache: pd.DataFrame | None = None
         self._pledge_cache_time: float = 0
-        self._st_codes_cache: Optional[set] = None
+        self._st_codes_cache: set | None = None
         self._st_cache_time: float = 0
 
     # ------------------------------------------------------------------
@@ -199,7 +198,7 @@ class RiskScanner:
             logger.debug(f"获取{code}财务摘要失败: {e}")
             return {}
 
-    def _get_financial_abstract_history(self, code: str, periods: int = 3) -> List[dict]:
+    def _get_financial_abstract_history(self, code: str, periods: int = 3) -> list[dict]:
         """
         获取最近 N 期财务摘要（用于连续亏损判断）。
 
@@ -241,7 +240,7 @@ class RiskScanner:
                 return {}
             row = df.iloc[0].to_dict()  # 最新一期
 
-            def _g(keys: List[str]) -> Optional[str]:
+            def _g(keys: list[str]) -> str | None:
                 for k in keys:
                     if k in row and row[k] not in (None, "", "False"):
                         return row[k]
@@ -270,7 +269,7 @@ class RiskScanner:
     # 5类风险扫描
     # ------------------------------------------------------------------
 
-    def _scan_fraud_risk(self, code: str, abstract: dict, balance: dict) -> Optional[dict]:
+    def _scan_fraud_risk(self, code: str, abstract: dict, balance: dict) -> dict | None:
         """
         财务造假风险识别
 
@@ -370,7 +369,7 @@ class RiskScanner:
             "message": "；".join(s["message"] for s in signals),
         }
 
-    def _scan_goodwill_risk(self, code: str, balance: dict) -> Optional[dict]:
+    def _scan_goodwill_risk(self, code: str, balance: dict) -> dict | None:
         """
         商誉减值风险
 
@@ -410,7 +409,7 @@ class RiskScanner:
             "message": f"商誉占净资产 {gw_ratio*100:.1f}%，减值将大幅冲击利润",
         }
 
-    def _scan_pledge_risk(self, code: str) -> Optional[dict]:
+    def _scan_pledge_risk(self, code: str) -> dict | None:
         """
         大股东质押爆仓风险
 
@@ -455,7 +454,7 @@ class RiskScanner:
             logger.debug(f"扫描{code}质押风险失败: {e}")
             return None
 
-    def _scan_delisting_risk(self, code: str, stock_name: str = "") -> Optional[dict]:
+    def _scan_delisting_risk(self, code: str, stock_name: str = "") -> dict | None:
         """
         退市风险
 
@@ -514,7 +513,7 @@ class RiskScanner:
             "message": "；".join(s["message"] for s in signals),
         }
 
-    def _scan_lockup_risk(self, code: str) -> Optional[dict]:
+    def _scan_lockup_risk(self, code: str) -> dict | None:
         """
         解禁减持风险
 
@@ -661,8 +660,8 @@ class RiskScanner:
         return await asyncio.to_thread(self.scan_stock_risks, code, stock_name)
 
     def filter_risky_stocks(
-        self, stocks: List[Dict[str, Any]]
-    ) -> Tuple[List[Dict[str, Any]], Dict[str, dict]]:
+        self, stocks: list[dict[str, Any]]
+    ) -> tuple[list[dict[str, Any]], dict[str, dict]]:
         """
         批量过滤高风险股票
 
@@ -692,8 +691,8 @@ class RiskScanner:
         return safe_stocks, risk_details
 
     async def filter_risky_stocks_async(
-        self, stocks: List[Dict[str, Any]]
-    ) -> Tuple[List[Dict[str, Any]], Dict[str, dict]]:
+        self, stocks: list[dict[str, Any]]
+    ) -> tuple[list[dict[str, Any]], dict[str, dict]]:
         """异步批量过滤"""
         return await asyncio.to_thread(self.filter_risky_stocks, stocks)
 
@@ -702,7 +701,7 @@ class RiskScanner:
 # 单例
 # ---------------------------------------------------------------------------
 
-_scanner: Optional[RiskScanner] = None
+_scanner: RiskScanner | None = None
 
 
 def get_risk_scanner() -> RiskScanner:

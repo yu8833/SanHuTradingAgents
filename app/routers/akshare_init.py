@@ -2,19 +2,17 @@
 AKShare数据初始化API路由
 提供Web接口进行AKShare数据初始化和管理
 """
-import asyncio
 import logging
 from datetime import datetime
-from typing import Dict, Any, Optional
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.core.database import get_mongo_db
-from app.worker.akshare_init_service import get_akshare_init_service
-from app.worker.akshare_sync_service import get_akshare_sync_service
 from app.routers.auth_db import get_current_user
 from app.utils.timezone import now_tz
+from app.worker.akshare_init_service import get_akshare_init_service
+from app.worker.akshare_sync_service import get_akshare_sync_service
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +38,7 @@ class InitializationRequest(BaseModel):
 class SyncRequest(BaseModel):
     """同步请求模型"""
     force_update: bool = Field(default=False, description="是否强制更新")
-    symbols: Optional[list] = Field(default=None, description="指定股票代码列表")
+    symbols: list | None = Field(default=None, description="指定股票代码列表")
 
 
 @router.get("/status")

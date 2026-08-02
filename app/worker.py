@@ -12,15 +12,13 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 # Add project root to path for importing analysis runner
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
+from app.core.database import close_db, get_redis_client, init_db
 from app.core.logging_config import setup_logging
-from app.core.database import init_db, close_db, get_redis_client
-from app.core.config import settings
 
 # Redis keys (must match queue_service)
 READY_LIST = "qa:ready"
@@ -32,7 +30,7 @@ SET_FAILED = "qa:failed"
 logger = logging.getLogger("worker")
 
 
-async def publish_progress(task_id: str, message: str, step: Optional[int] = None, total_steps: Optional[int] = None):
+async def publish_progress(task_id: str, message: str, step: int | None = None, total_steps: int | None = None):
     """Publish progress updates to Redis pubsub for SSE streaming"""
     r = get_redis_client()
     progress_data = {
@@ -77,7 +75,7 @@ async def process_task(task_id: str) -> None:
                 params = {}
 
         symbol = data.get("symbol", "")
-        user_id = data.get("user", "")
+        data.get("user", "")
 
         # Extract analysis parameters with defaults
         analysts = params.get("analysts", ["Bull Analyst", "Bear Analyst", "Research Manager"])
@@ -89,7 +87,7 @@ async def process_task(task_id: str) -> None:
         analysis_date = params.get("analysis_date", datetime.now().strftime("%Y-%m-%d"))
 
         # Progress callback function
-        async def progress_callback(message: str, step: Optional[int] = None, total_steps: Optional[int] = None):
+        async def progress_callback(message: str, step: int | None = None, total_steps: int | None = None):
             await publish_progress(task_id, message, step, total_steps)
 
         await progress_callback("🚀 开始执行股票分析...")
@@ -188,7 +186,7 @@ async def worker_loop(stop_event: asyncio.Event):
     while not stop_event.is_set():
         try:
             # BLPOP returns (list, task_id) when an item is available
-            item: Optional[list] = await r.blpop(READY_LIST, timeout=5)
+            item: list | None = await r.blpop(READY_LIST, timeout=5)
             if not item:
                 continue
             _, task_id = item

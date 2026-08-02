@@ -1,3 +1,4 @@
+import contextlib
 import inspect
 from types import SimpleNamespace
 
@@ -46,10 +47,8 @@ def test_scheduler_adds_quotes_job(monkeypatch):
         # We don't need a running loop; just record and close the coroutine to avoid warnings
         state.create_task_called = True
         assert inspect.iscoroutine(coro)
-        try:
+        with contextlib.suppress(Exception):
             coro.close()
-        except Exception:
-            pass
         return None
 
     # Patch blocking init/close DB and basic sync service

@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +14,7 @@ logger = logging.getLogger(__name__)
 class QuotesService:
     """行情服务：通过 unified_quotes 获取实时行情数据"""
 
-    async def get_quotes(self, codes: List[str]) -> Dict[str, Dict[str, Optional[float]]]:
+    async def get_quotes(self, codes: list[str]) -> dict[str, dict[str, float | None]]:
         """获取一批股票的近实时快照（最新价、涨跌幅、成交额）。
 
         内部调用 unified_quotes.get_unified_quotes，复用统一缓存和数据源选择策略。
@@ -31,7 +30,7 @@ class QuotesService:
             if not raw:
                 return {}
 
-            result: Dict[str, Dict[str, Optional[float]]] = {}
+            result: dict[str, dict[str, float | None]] = {}
             for code, q in raw.items():
                 # 腾讯源字段: price, change_pct, amount_wan(万元)
                 # 统一映射为: close, pct_chg, amount(元)
@@ -50,13 +49,13 @@ class QuotesService:
             return {}
 
 
-def _get_unified_quotes(codes: List[str]) -> Dict[str, dict]:
+def _get_unified_quotes(codes: list[str]) -> dict[str, dict]:
     """同步调用统一行情服务"""
     from app.services.unified_quotes import get_unified_quotes
     return get_unified_quotes(codes)
 
 
-_quotes_service: Optional[QuotesService] = None
+_quotes_service: QuotesService | None = None
 
 
 def get_quotes_service() -> QuotesService:

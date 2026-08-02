@@ -2,20 +2,20 @@
 新闻数据服务
 提供统一的新闻数据存储、查询和管理功能
 """
-from typing import Optional, List, Dict, Any, Union
-from datetime import datetime, timedelta
-from dataclasses import dataclass
 import logging
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import Any
+
 from pymongo import ReplaceOne
 from pymongo.errors import BulkWriteError
-from bson import ObjectId
 
 from app.core.database import get_database
 
 logger = logging.getLogger(__name__)
 
 
-def convert_objectid_to_str(data: Union[Dict, List[Dict]]) -> Union[Dict, List[Dict]]:
+def convert_objectid_to_str(data: dict | list[dict]) -> dict | list[dict]:
     """
     转换 MongoDB ObjectId 为字符串，避免 JSON 序列化错误
 
@@ -40,15 +40,15 @@ def convert_objectid_to_str(data: Union[Dict, List[Dict]]) -> Union[Dict, List[D
 @dataclass
 class NewsQueryParams:
     """新闻查询参数"""
-    symbol: Optional[str] = None
-    symbols: Optional[List[str]] = None
-    start_time: Optional[datetime] = None
-    end_time: Optional[datetime] = None
-    category: Optional[str] = None
-    sentiment: Optional[str] = None
-    importance: Optional[str] = None
-    data_source: Optional[str] = None
-    keywords: Optional[List[str]] = None
+    symbol: str | None = None
+    symbols: list[str] | None = None
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+    category: str | None = None
+    sentiment: str | None = None
+    importance: str | None = None
+    data_source: str | None = None
+    keywords: list[str] | None = None
     limit: int = 50
     skip: int = 0
     sort_by: str = "publish_time"
@@ -65,8 +65,8 @@ class NewsStats:
     high_importance_count: int = 0
     medium_importance_count: int = 0
     low_importance_count: int = 0
-    categories: Dict[str, int] = None
-    sources: Dict[str, int] = None
+    categories: dict[str, int] = None
+    sources: dict[str, int] = None
     
     def __post_init__(self):
         if self.categories is None:
@@ -145,7 +145,7 @@ class NewsDataService:
     
     async def save_news_data(
         self,
-        news_data: Union[Dict[str, Any], List[Dict[str, Any]]],
+        news_data: dict[str, Any] | list[dict[str, Any]],
         data_source: str,
         market: str = "CN"
     ) -> int:
@@ -168,10 +168,7 @@ class NewsDataService:
             now = datetime.now()
             
             # 标准化数据
-            if isinstance(news_data, dict):
-                news_list = [news_data]
-            else:
-                news_list = news_data
+            news_list = [news_data] if isinstance(news_data, dict) else news_data
             
             if not news_list:
                 return 0
@@ -243,7 +240,7 @@ class NewsDataService:
 
     def save_news_data_sync(
         self,
-        news_data: Union[Dict[str, Any], List[Dict[str, Any]]],
+        news_data: dict[str, Any] | list[dict[str, Any]],
         data_source: str,
         market: str = "CN"
     ) -> int:
@@ -268,10 +265,7 @@ class NewsDataService:
             now = datetime.now()
 
             # 标准化数据
-            if isinstance(news_data, dict):
-                news_list = [news_data]
-            else:
-                news_list = news_data
+            news_list = [news_data] if isinstance(news_data, dict) else news_data
 
             if not news_list:
                 return 0
@@ -346,11 +340,11 @@ class NewsDataService:
 
     def _standardize_news_data(
         self,
-        news_data: Dict[str, Any],
+        news_data: dict[str, Any],
         data_source: str,
         market: str,
         now: datetime
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """标准化新闻数据"""
         
         # 提取基础信息
@@ -402,16 +396,15 @@ class NewsDataService:
         if not symbol:
             return None
         
-        if market == "CN":
-            if len(symbol) == 6:
-                if symbol.startswith(('60', '68')):
-                    return f"{symbol}.SH"
-                elif symbol.startswith(('00', '30')):
-                    return f"{symbol}.SZ"
+        if market == "CN" and len(symbol) == 6:
+            if symbol.startswith(('60', '68')):
+                return f"{symbol}.SH"
+            elif symbol.startswith(('00', '30')):
+                return f"{symbol}.SZ"
         
         return symbol
     
-    def _parse_datetime(self, dt_value) -> Optional[datetime]:
+    def _parse_datetime(self, dt_value) -> datetime | None:
         """解析日期时间"""
         if dt_value is None:
             return None
@@ -444,7 +437,7 @@ class NewsDataService:
         
         return datetime.now()
     
-    def _safe_float(self, value) -> Optional[float]:
+    def _safe_float(self, value) -> float | None:
         """安全转换为浮点数"""
         if value is None:
             return None
@@ -454,7 +447,7 @@ class NewsDataService:
         except (ValueError, TypeError):
             return None
     
-    async def query_news(self, params: NewsQueryParams) -> List[Dict[str, Any]]:
+    async def query_news(self, params: NewsQueryParams) -> list[dict[str, Any]]:
         """
         查询新闻数据
         
@@ -467,7 +460,7 @@ class NewsDataService:
         try:
             collection = self._get_collection()
 
-            self.logger.info(f"🔍 [query_news] 开始查询新闻数据")
+            self.logger.info("🔍 [query_news] 开始查询新闻数据")
             self.logger.info(f"   参数: symbol={params.symbol}, start_time={params.start_time}, end_time={params.end_time}, limit={params.limit}")
 
             # 构建查询条件
@@ -536,11 +529,11 @@ class NewsDataService:
             results = convert_objectid_to_str(results)
 
             if results:
-                self.logger.info(f"   前3条预览:")
+                self.logger.info("   前3条预览:")
                 for i, r in enumerate(results[:3], 1):
                     self.logger.info(f"      {i}. symbol={r.get('symbol')}, title={r.get('title', 'N/A')[:50]}..., publish_time={r.get('publish_time')}")
             else:
-                self.logger.warning(f"   ⚠️ 查询结果为空")
+                self.logger.warning("   ⚠️ 查询结果为空")
 
             self.logger.info(f"✅ [query_news] 查询完成，返回 {len(results)} 条记录")
             return results
@@ -554,7 +547,7 @@ class NewsDataService:
         symbol: str = None,
         limit: int = 10,
         hours_back: int = 24
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         获取最新新闻
         
@@ -713,7 +706,7 @@ class NewsDataService:
         query_text: str,
         symbol: str = None,
         limit: int = 20
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         全文搜索新闻
 

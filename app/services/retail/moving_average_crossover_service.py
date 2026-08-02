@@ -18,7 +18,7 @@ import asyncio
 import logging
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import numpy as np
 
@@ -31,8 +31,8 @@ class MovingAverageCrossoverService(RetailScreeningBase):
     """均线交叉策略"""
 
     async def scan_moving_average_crossover(
-        self, params: Dict[str, Any] = None
-    ) -> Dict[str, Any]:
+        self, params: dict[str, Any] = None
+    ) -> dict[str, Any]:
         """
         扫描均线交叉候选股
 
@@ -97,7 +97,7 @@ class MovingAverageCrossoverService(RetailScreeningBase):
             "scanned_count": len(candidates),
         }
 
-    def _calc_ma_vectorized(self, closes: np.ndarray, periods: List[int]) -> Dict[int, np.ndarray]:
+    def _calc_ma_vectorized(self, closes: np.ndarray, periods: list[int]) -> dict[int, np.ndarray]:
         """向量化计算多个周期的均线"""
         result = {}
         for period in periods:
@@ -107,7 +107,7 @@ class MovingAverageCrossoverService(RetailScreeningBase):
                 result[period] = np.array([])
         return result
 
-    def _calc_macd(self, closes: np.ndarray, fast: int = 12, slow: int = 26, signal: int = 9) -> Optional[tuple]:
+    def _calc_macd(self, closes: np.ndarray, fast: int = 12, slow: int = 26, signal: int = 9) -> tuple | None:
         """计算MACD指标"""
         if len(closes) < slow + signal:
             return None
@@ -133,8 +133,8 @@ class MovingAverageCrossoverService(RetailScreeningBase):
         self,
         code: str,
         sv: dict,
-        quotes: List[dict],
-    ) -> Optional[dict]:
+        quotes: list[dict],
+    ) -> dict | None:
         """分析单只股票"""
         name = sv.get("name", "")
         industry = sv.get("industry", "")
@@ -366,11 +366,11 @@ class MovingAverageCrossoverService(RetailScreeningBase):
             "market": market,
         }
 
-    async def backtest(self, params: Dict[str, Any] = None) -> Dict[str, Any]:
+    async def backtest(self, params: dict[str, Any] = None) -> dict[str, Any]:
         """回测"""
         params = params or {}
 
-        async def scan_func(date_str: str) -> List[dict]:
+        async def scan_func(date_str: str) -> list[dict]:
             screening_data = await self._get_screening_view_for_date(date_str)
             sorted_codes = sorted(
                 screening_data.keys(),
@@ -400,7 +400,7 @@ class MovingAverageCrossoverService(RetailScreeningBase):
         return await self.run_backtest("moving_average_crossover", scan_func, params)
 
 
-_service: Optional[MovingAverageCrossoverService] = None
+_service: MovingAverageCrossoverService | None = None
 
 
 def get_moving_average_crossover_service() -> MovingAverageCrossoverService:

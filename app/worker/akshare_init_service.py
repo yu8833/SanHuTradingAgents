@@ -2,11 +2,10 @@
 AKShare数据初始化服务
 用于首次部署时的完整数据初始化，包括基础数据、历史数据、财务数据等
 """
-import asyncio
 import logging
-from datetime import datetime, timedelta
-from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import Any
 
 from app.core.database import get_mongo_db
 from app.worker.akshare_sync_service import get_akshare_sync_service
@@ -18,7 +17,7 @@ logger = logging.getLogger(__name__)
 class AKShareInitializationStats:
     """AKShare初始化统计信息"""
     started_at: datetime
-    finished_at: Optional[datetime] = None
+    finished_at: datetime | None = None
     total_steps: int = 0
     completed_steps: int = 0
     current_step: str = ""
@@ -29,7 +28,7 @@ class AKShareInitializationStats:
     financial_records: int = 0
     quotes_count: int = 0
     news_count: int = 0
-    errors: List[Dict[str, Any]] = None
+    errors: list[dict[str, Any]] = None
 
     def __post_init__(self):
         if self.errors is None:
@@ -66,8 +65,8 @@ class AKShareInitService:
         skip_if_exists: bool = True,
         batch_size: int = 100,
         enable_multi_period: bool = False,
-        sync_items: List[str] = None
-    ) -> Dict[str, Any]:
+        sync_items: list[str] = None
+    ) -> dict[str, Any]:
         """
         运行完整的数据初始化
 
@@ -188,7 +187,7 @@ class AKShareInitService:
         basic_count = await self.db.stock_basic_info.count_documents({})
         quotes_count = await self.db.market_quotes.count_documents({})
         
-        logger.info(f"  当前数据状态:")
+        logger.info("  当前数据状态:")
         logger.info(f"    股票基础信息: {basic_count}条")
         logger.info(f"    行情数据: {quotes_count}条")
         
@@ -389,7 +388,7 @@ class AKShareInitService:
             "market_info": {"$exists": True}
         })
         
-        logger.info(f"  数据完整性验证:")
+        logger.info("  数据完整性验证:")
         logger.info(f"    股票基础信息: {basic_count}条")
         logger.info(f"    扩展字段覆盖: {extended_count}条 ({extended_count/basic_count*100:.1f}%)")
         logger.info(f"    行情数据: {quotes_count}条")
@@ -403,7 +402,7 @@ class AKShareInitService:
         self.stats.completed_steps += 1
         logger.info(f"✅ {self.stats.current_step}完成")
     
-    def _get_initialization_summary(self) -> Dict[str, Any]:
+    def _get_initialization_summary(self) -> dict[str, Any]:
         """获取初始化总结"""
         duration = 0
         if self.stats.finished_at:

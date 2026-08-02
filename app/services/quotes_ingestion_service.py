@@ -1,18 +1,25 @@
+import contextlib
 import logging
 import time
-from datetime import datetime, time as dtime, timedelta
-from typing import Dict, Optional, Tuple, List
-from zoneinfo import ZoneInfo
 from collections import deque
+from datetime import datetime, timedelta
+from datetime import time as dtime
+from zoneinfo import ZoneInfo
 
 from pymongo import UpdateOne
 
 from app.core.config import settings
 from app.core.database import get_mongo_db
 from app.core.numeric_sanitizer import (
-    sanitize_price as _s_price,
-    sanitize_pct_chg as _s_pct,
     sanitize_amount as _s_amount,
+)
+from app.core.numeric_sanitizer import (
+    sanitize_pct_chg as _s_pct,
+)
+from app.core.numeric_sanitizer import (
+    sanitize_price as _s_price,
+)
+from app.core.numeric_sanitizer import (
     sanitize_volume as _s_volume,
 )
 from app.services.data_sources.manager import DataSourceManager
@@ -33,7 +40,6 @@ class QuotesIngestionService:
     """
 
     def __init__(self, collection_name: str = "market_quotes") -> None:
-        from collections import deque
 
         self.collection_name = collection_name
         self.status_collection_name = "quotes_ingestion_status"  # 状态记录集合
@@ -103,9 +109,9 @@ class QuotesIngestionService:
     async def _record_sync_status(
         self,
         success: bool,
-        source: Optional[str] = None,
+        source: str | None = None,
         records_count: int = 0,
-        error_msg: Optional[str] = None
+        error_msg: str | None = None
     ) -> None:
         """
         记录同步状态
@@ -143,7 +149,7 @@ class QuotesIngestionService:
         except Exception as e:
             logger.warning(f"记录同步状态失败（忽略）: {e}")
 
-    async def get_sync_status(self) -> Dict[str, any]:
+    async def get_sync_status(self) -> dict[str, any]:
         """
         获取同步状态
 
@@ -227,6 +233,7 @@ class QuotesIngestionService:
 
         try:
             import os
+
             import tushare as ts
 
             token = os.getenv('TUSHARE_TOKEN', '').strip().strip('"').strip("'")
@@ -300,7 +307,7 @@ class QuotesIngestionService:
         """记录 Tushare 调用时间"""
         self._tushare_call_times.append(datetime.now(self.tz))
 
-    def _get_next_source(self) -> Tuple[str, Optional[str]]:
+    def _get_next_source(self) -> tuple[str, str | None]:
         """
         获取下一个数据源（轮换机制）
 
@@ -326,7 +333,7 @@ class QuotesIngestionService:
         else:  # akshare_sina
             return "akshare", "sina"
 
-    def _is_trading_time(self, now: Optional[datetime] = None) -> bool:
+    def _is_trading_time(self, now: datetime | None = None) -> bool:
         """
         判断是否在交易时间或收盘后缓冲期
 
@@ -363,7 +370,7 @@ class QuotesIngestionService:
         except Exception:
             return True
 
-    async def _collection_stale(self, latest_trade_date: Optional[str]) -> bool:
+    async def _collection_stale(self, latest_trade_date: str | None) -> bool:
         if not latest_trade_date:
             return False
         db = get_mongo_db()
@@ -378,7 +385,7 @@ class QuotesIngestionService:
         except Exception:
             return True
 
-    async def _bulk_upsert(self, quotes_map: Dict[str, Dict], trade_date: str, source: Optional[str] = None) -> None:
+    async def _bulk_upsert(self, quotes_map: dict[str, dict], trade_date: str, source: str | None = None) -> None:
         db = get_mongo_db()
         coll = db[self.collection_name]
         ops = []
@@ -433,7 +440,7 @@ class QuotesIngestionService:
         # 通知 SSE 订阅者行情已更新（前端通过 EventSource 接收信号后主动拉取最新行情）
         await self._publish_quotes_update_signal(trade_date, source, len(ops))
 
-    async def _invalidate_quotes_caches(self, updated_codes: List[str]) -> None:
+    async def _invalidate_quotes_caches(self, updated_codes: list[str]) -> None:
         """
         行情入库后失效本地缓存层：
         1) unified_quotes /sync_cache_layer 的 realtime 分类缓存（异步用 to_thread 调用同步版本）
@@ -444,7 +451,7 @@ class QuotesIngestionService:
         if not updated_codes:
             return
 
-        code6_list: List[str] = []
+        code6_list: list[str] = []
         for c in updated_codes:
             code6 = self._normalize_stock_code(c)
             if code6:
@@ -468,17 +475,15 @@ class QuotesIngestionService:
                         except Exception:
                             pass
                     # 完全匹配 category 型 key 不容易枚举，用 refresh 兜底
-                    try:
+                    with contextlib.suppress(Exception):
                         delete_cache_sync(f"stock:{c}", category="quotes")
-                    except Exception:
-                        pass
             except Exception as e:
                 logger.debug(f"清理 sync_cache_layer 单股票 key 失败（忽略）: {e}")
 
             # 2) KlineCache：用前缀 kline:{code}: 批量删除
             try:
-                from app.services.screening_service import KlineCache
                 from app.core.sync_redis import get_sync_redis
+                from app.services.screening_service import KlineCache
                 r = get_sync_redis()
                 if r is not None:
                     # 用 scan_iter 找前缀键（避免 keys() 阻塞）
@@ -522,8 +527,9 @@ class QuotesIngestionService:
         这样避免全量推送 5000 只股票数据，仅做"服务端 poke"。
         """
         try:
-            from app.core.database import get_redis_client
             import json
+
+            from app.core.database import get_redis_client
             r = get_redis_client()
             if r is None:
                 return
@@ -678,7 +684,7 @@ class QuotesIngestionService:
         except Exception as e:
             logger.warning(f"backfill 触发检查失败（忽略）: {e}")
 
-    def _fetch_quotes_from_source(self, source_type: str, akshare_api: Optional[str] = None) -> Tuple[Optional[Dict], Optional[str]]:
+    def _fetch_quotes_from_source(self, source_type: str, akshare_api: str | None = None) -> tuple[dict | None, str | None]:
         """
         从指定数据源获取行情
 

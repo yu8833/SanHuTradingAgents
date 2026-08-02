@@ -4,14 +4,14 @@ Tushare数据初始化API路由
 """
 import asyncio
 from datetime import datetime
-from typing import Dict, Any, Optional
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from app.routers.auth_db import get_current_user
 from app.core.database import get_mongo_db
-from app.worker.tushare_init_service import get_tushare_init_service
 from app.core.response import ok
+from app.routers.auth_db import get_current_user
+from app.worker.tushare_init_service import get_tushare_init_service
 
 router = APIRouter(prefix="/api/tushare-init", tags=["Tushare初始化"])
 
@@ -28,18 +28,18 @@ class DatabaseStatusResponse(BaseModel):
     basic_info_count: int = Field(description="基础信息数量")
     quotes_count: int = Field(description="行情数据数量")
     extended_coverage: float = Field(description="扩展字段覆盖率")
-    latest_basic_update: Optional[datetime] = Field(description="基础信息最新更新时间")
-    latest_quotes_update: Optional[datetime] = Field(description="行情数据最新更新时间")
+    latest_basic_update: datetime | None = Field(description="基础信息最新更新时间")
+    latest_quotes_update: datetime | None = Field(description="行情数据最新更新时间")
     needs_initialization: bool = Field(description="是否需要初始化")
 
 
 class InitializationStatusResponse(BaseModel):
     """初始化状态响应模型"""
     is_running: bool = Field(description="是否正在运行")
-    current_step: Optional[str] = Field(description="当前步骤")
-    progress: Optional[str] = Field(description="进度")
-    started_at: Optional[datetime] = Field(description="开始时间")
-    estimated_completion: Optional[datetime] = Field(description="预计完成时间")
+    current_step: str | None = Field(description="当前步骤")
+    progress: str | None = Field(description="进度")
+    started_at: datetime | None = Field(description="开始时间")
+    estimated_completion: datetime | None = Field(description="预计完成时间")
 
 
 # 全局初始化状态跟踪
@@ -234,7 +234,7 @@ async def _run_basic_initialization():
     
     try:
         service = await get_tushare_init_service()
-        result = await service.sync_service.sync_stock_basic_info(force_update=True)
+        await service.sync_service.sync_stock_basic_info(force_update=True)
         
         _initialization_status.update({
             "is_running": False,

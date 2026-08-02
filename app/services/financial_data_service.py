@@ -5,8 +5,8 @@
 """
 import logging
 from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional, Union
-import pandas as pd
+from typing import Any
+
 from pymongo import ReplaceOne
 
 from app.core.database import get_mongo_db
@@ -76,7 +76,7 @@ class FinancialDataService:
     async def save_financial_data(
         self,
         symbol: str,
-        financial_data: Dict[str, Any],
+        financial_data: dict[str, Any],
         data_source: str,
         market: str = "CN",
         report_period: str = None,
@@ -168,7 +168,7 @@ class FinancialDataService:
         data_source: str = None,
         report_type: str = None,
         limit: int = None
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         查询财务数据
         
@@ -219,7 +219,7 @@ class FinancialDataService:
         self,
         symbol: str,
         data_source: str = None
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """获取最新财务数据"""
         results = await self.get_financial_data(
             symbol=symbol,
@@ -229,7 +229,7 @@ class FinancialDataService:
         
         return results[0] if results else None
     
-    async def get_financial_statistics(self) -> Dict[str, Any]:
+    async def get_financial_statistics(self) -> dict[str, Any]:
         """获取财务数据统计信息"""
         if self.db is None:
             await self.initialize()
@@ -294,7 +294,7 @@ class FinancialDataService:
         market: str,
         report_period: str = None,
         report_type: str = "quarterly"
-    ) -> Optional[Union[Dict[str, Any], List[Dict[str, Any]]]]:
+    ) -> dict[str, Any] | list[dict[str, Any]] | None:
         """标准化财务数据"""
         try:
             now = datetime.now(timezone.utc)
@@ -335,12 +335,12 @@ class FinancialDataService:
     def _standardize_tushare_data(
         self,
         symbol: str,
-        financial_data: Dict[str, Any],
+        financial_data: dict[str, Any],
         market: str,
         report_period: str,
         report_type: str,
         now: datetime
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """标准化Tushare财务数据"""
         # Tushare数据已经在provider中进行了标准化，直接使用
         base_data = {
@@ -372,12 +372,12 @@ class FinancialDataService:
     def _standardize_akshare_data(
         self,
         symbol: str,
-        financial_data: Dict[str, Any],
+        financial_data: dict[str, Any],
         market: str,
         report_period: str,
         report_type: str,
         now: datetime
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """标准化AKShare财务数据"""
         # AKShare数据需要从多个数据集中提取关键指标
         base_data = {
@@ -400,12 +400,12 @@ class FinancialDataService:
     def _standardize_baostock_data(
         self,
         symbol: str,
-        financial_data: Dict[str, Any],
+        financial_data: dict[str, Any],
         market: str,
         report_period: str,
         report_type: str,
         now: datetime
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """标准化BaoStock财务数据"""
         base_data = {
             "code": symbol,  # 添加 code 字段以兼容唯一索引
@@ -433,7 +433,7 @@ class FinancialDataService:
                 return f"{symbol}.SZ"
         return symbol
     
-    def _extract_latest_period(self, financial_data: Dict[str, Any]) -> str:
+    def _extract_latest_period(self, financial_data: dict[str, Any]) -> str:
         """从AKShare数据中提取最新报告期"""
         # 尝试从各个数据集中提取报告期
         for key in ['main_indicators', 'balance_sheet', 'income_statement']:
@@ -449,7 +449,7 @@ class FinancialDataService:
         # 如果无法提取，使用当前季度
         return self._generate_current_period()
     
-    def _extract_akshare_indicators(self, financial_data: Dict[str, Any]) -> Dict[str, Any]:
+    def _extract_akshare_indicators(self, financial_data: dict[str, Any]) -> dict[str, Any]:
         """从AKShare数据中提取关键财务指标并进行勾稽校验"""
         indicators = {}
 
@@ -516,7 +516,7 @@ class FinancialDataService:
         
         return f"{year}{quarter_end_months[quarter]}{quarter_end_days[quarter]}"
     
-    def _safe_float(self, value) -> Optional[float]:
+    def _safe_float(self, value) -> float | None:
         """安全转换为浮点数"""
         if value is None:
             return None
@@ -530,10 +530,10 @@ class FinancialDataService:
 
     def validate_financial_consistency(
         self,
-        indicators: Dict[str, Any],
+        indicators: dict[str, Any],
         symbol: str = "",
         report_period: str = ""
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         财务数据勾稽校验。
         校验资产负债表和利润表的核心等式，确保数据准确性。

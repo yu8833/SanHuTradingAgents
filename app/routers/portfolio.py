@@ -4,17 +4,17 @@
 支持CSV导入实盘交易记录。
 """
 
-from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
-from pydantic import BaseModel
-import logging
-import io
 import csv
+import io
+import logging
 from datetime import datetime
 
-from app.routers.auth_db import get_current_user
-from app.services.portfolio_service import portfolio_service, Position, PositionUpdate
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from pydantic import BaseModel
+
 from app.core.response import ok
+from app.routers.auth_db import get_current_user
+from app.services.portfolio_service import Position, portfolio_service
 
 logger = logging.getLogger("webapi")
 
@@ -29,27 +29,27 @@ class AddPositionRequest(BaseModel):
     cost_price: float                # 成本价
     position_ratio: float            # 仓位占比 (0-1)
     buy_date: str                    # 买入日期，格式 "YYYY-MM-DD"
-    notes: Optional[str] = None      # 备注
-    strategy: Optional[str] = "default"  # 策略类型
-    stop_loss_price: Optional[float] = None   # 止损价
-    take_profit_price: Optional[float] = None  # 止盈价
-    thesis: Optional[str] = None     # 投资逻辑
+    notes: str | None = None      # 备注
+    strategy: str | None = "default"  # 策略类型
+    stop_loss_price: float | None = None   # 止损价
+    take_profit_price: float | None = None  # 止盈价
+    thesis: str | None = None     # 投资逻辑
 
 
 class UpdatePositionRequest(BaseModel):
     """更新持仓请求"""
-    quantity: Optional[int] = None
-    cost_price: Optional[float] = None
-    position_ratio: Optional[float] = None
-    notes: Optional[str] = None
-    stop_loss_price: Optional[float] = None
-    take_profit_price: Optional[float] = None
-    thesis: Optional[str] = None
+    quantity: int | None = None
+    cost_price: float | None = None
+    position_ratio: float | None = None
+    notes: str | None = None
+    stop_loss_price: float | None = None
+    take_profit_price: float | None = None
+    thesis: str | None = None
 
 
 class ImportPositionsRequest(BaseModel):
     """批量导入持仓请求"""
-    positions: List[AddPositionRequest]
+    positions: list[AddPositionRequest]
 
 
 class PositionResponse(BaseModel):
@@ -61,14 +61,14 @@ class PositionResponse(BaseModel):
     cost_price: float
     position_ratio: float
     buy_date: str
-    notes: Optional[str]
+    notes: str | None
     created_at: str
     updated_at: str
     # 汇总时包含的实时数据
-    current_price: Optional[float] = None
-    market_value: Optional[float] = None
-    profit_loss: Optional[float] = None
-    profit_loss_rate: Optional[float] = None
+    current_price: float | None = None
+    market_value: float | None = None
+    profit_loss: float | None = None
+    profit_loss_rate: float | None = None
 
 
 @router.get("/positions", response_model=dict)
@@ -313,7 +313,7 @@ async def import_positions_csv(
         # 字段别名映射
         def _pick(row, *keys):
             for k in keys:
-                for actual_key in row.keys():
+                for actual_key in row:
                     if actual_key.strip().lower() == k.lower():
                         val = row[actual_key]
                         return val.strip() if isinstance(val, str) else val
@@ -433,7 +433,7 @@ async def get_portfolio_summary(
 class ClosePositionRequest(BaseModel):
     """平仓请求"""
     exit_price: float                    # 平仓价
-    exit_date: Optional[str] = None      # 平仓日期（默认今天）
+    exit_date: str | None = None      # 平仓日期（默认今天）
     exit_reason: str = ""                # 平仓原因
 
 
@@ -502,7 +502,7 @@ async def get_positions_by_strategy(
 
 @router.get("/strategy/performance")
 async def get_strategy_performance(
-    strategy: Optional[str] = None,
+    strategy: str | None = None,
     user=Depends(get_current_user)
 ):
     """获取策略表现统计（胜率/盈亏比/平均收益）"""

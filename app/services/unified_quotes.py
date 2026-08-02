@@ -6,18 +6,17 @@
 - 使用统一同步缓存层
 """
 import logging
-from typing import Dict, List, Optional, Any
 
 logger = logging.getLogger(__name__)
 
 _TENCENT_THRESHOLD = 20
 
 
-def _get_cache_key(codes: List[str]) -> str:
+def _get_cache_key(codes: list[str]) -> str:
     return f"unified_quotes:{','.join(sorted(codes))}"
 
 
-def _merge_quotes(akshare_quotes: Dict[str, dict], tencent_quotes: Dict[str, dict]) -> Dict[str, dict]:
+def _merge_quotes(akshare_quotes: dict[str, dict], tencent_quotes: dict[str, dict]) -> dict[str, dict]:
     """合并两个数据源的行情数据，以腾讯数据为准，缺失的用AKShare补充"""
     result = {}
     all_codes = set(list(akshare_quotes.keys()) + list(tencent_quotes.keys()))
@@ -44,7 +43,7 @@ def _merge_quotes(akshare_quotes: Dict[str, dict], tencent_quotes: Dict[str, dic
     return result
 
 
-def _fetch_tencent_quotes(codes: List[str]) -> Dict[str, dict]:
+def _fetch_tencent_quotes(codes: list[str]) -> dict[str, dict]:
     """从腾讯接口获取行情"""
     try:
         from app.services import vibe_astock as astock
@@ -54,7 +53,7 @@ def _fetch_tencent_quotes(codes: List[str]) -> Dict[str, dict]:
         return {}
 
 
-def _fetch_akshare_quotes(codes: List[str]) -> Dict[str, dict]:
+def _fetch_akshare_quotes(codes: list[str]) -> dict[str, dict]:
     """从AKShare全市场快照获取行情"""
     try:
         import akshare as ak
@@ -88,7 +87,7 @@ def _fetch_akshare_quotes(codes: List[str]) -> Dict[str, dict]:
             logger.error(f"AKShare spot 缺少必要列: code={code_col}, price={price_col}")
             return {}
 
-        result: Dict[str, dict] = {}
+        result: dict[str, dict] = {}
         for _, row in df.iterrows():
             code_raw = row.get(code_col)
             if not code_raw:
@@ -111,7 +110,7 @@ def _fetch_akshare_quotes(codes: List[str]) -> Dict[str, dict]:
         return {}
 
 
-def get_unified_quotes(codes: List[str], prefer_source: str = "auto") -> Dict[str, dict]:
+def get_unified_quotes(codes: list[str], prefer_source: str = "auto") -> dict[str, dict]:
     """
     获取统一行情数据
 
@@ -137,10 +136,7 @@ def get_unified_quotes(codes: List[str], prefer_source: str = "auto") -> Dict[st
             return {code: cached_data[code] for code in codes}
 
     if prefer_source == "auto":
-        if len(codes) < _TENCENT_THRESHOLD:
-            prefer_source = "tencent"
-        else:
-            prefer_source = "akshare"
+        prefer_source = "tencent" if len(codes) < _TENCENT_THRESHOLD else "akshare"
 
     quotes = {}
 
@@ -174,13 +170,13 @@ def get_unified_quotes(codes: List[str], prefer_source: str = "auto") -> Dict[st
     return quotes
 
 
-def get_single_quote(code: str) -> Optional[dict]:
+def get_single_quote(code: str) -> dict | None:
     """获取单只股票行情"""
     quotes = get_unified_quotes([code], prefer_source="tencent")
     return quotes.get(code)
 
 
-def refresh_quotes_cache(codes: Optional[List[str]] = None) -> int:
+def refresh_quotes_cache(codes: list[str] | None = None) -> int:
     """强制刷新行情缓存"""
     from app.services.sync_cache_layer import set_cache_sync
 

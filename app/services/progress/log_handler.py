@@ -6,7 +6,7 @@
 import logging
 import re
 import threading
-from typing import Dict, Optional
+
 from .tracker import RedisProgressTracker
 
 logger = logging.getLogger("app.services.progress_log_handler")
@@ -17,7 +17,7 @@ class ProgressLogHandler(logging.Handler):
 
     def __init__(self):
         super().__init__()
-        self._trackers: Dict[str, RedisProgressTracker] = {}
+        self._trackers: dict[str, RedisProgressTracker] = {}
         self._lock = threading.Lock()
 
         # 日志模式匹配
@@ -101,7 +101,7 @@ class ProgressLogHandler(logging.Handler):
             # 不要让日志处理器的错误影响主程序
             logger.error(f"📊 [进度日志] 日志处理错误: {e}")
 
-    def _extract_progress_message(self, message: str) -> Optional[str]:
+    def _extract_progress_message(self, message: str) -> str | None:
         """从日志消息中提取进度信息"""
         message_lower = message.lower()
 
@@ -121,7 +121,7 @@ class ProgressLogHandler(logging.Handler):
 
         return None
 
-    def _extract_stock_symbol(self, message: str) -> Optional[str]:
+    def _extract_stock_symbol(self, message: str) -> str | None:
         """从消息中提取股票代码"""
         # 匹配常见的股票代码格式
         patterns = [

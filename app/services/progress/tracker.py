@@ -3,18 +3,15 @@
 - 暂时从旧模块导入 RedisProgressTracker 类
 - 在本模块内提供 get_progress_by_id 的实现（与旧实现一致，修正 cls 引用）
 """
-from typing import Any, Dict, Optional, List
 import json
-import os
 import logging
+import os
 import time
-
-
+from typing import Any
 
 logger = logging.getLogger("app.services.progress.tracker")
 
-from dataclasses import dataclass, asdict
-from datetime import datetime
+from dataclasses import asdict, dataclass
 
 
 @dataclass
@@ -24,8 +21,8 @@ class AnalysisStep:
     description: str
     status: str = "pending"  # pending, current, completed, failed
     weight: float = 0.1  # 权重，用于计算进度
-    start_time: Optional[float] = None
-    end_time: Optional[float] = None
+    start_time: float | None = None
+    end_time: float | None = None
 
 
 def safe_serialize(data):
@@ -46,7 +43,7 @@ def safe_serialize(data):
 class RedisProgressTracker:
     """Redis进度跟踪器"""
 
-    def __init__(self, task_id: str, analysts: List[str], llm_provider: str):
+    def __init__(self, task_id: str, analysts: list[str], llm_provider: str):
         self.task_id = task_id
         self.analysts = analysts
         from tradingagents.llm_clients.provider_keys import normalize_provider_key
@@ -95,7 +92,7 @@ class RedisProgressTracker:
             # 检查REDIS_ENABLED环境变量
             redis_enabled = os.getenv('REDIS_ENABLED', 'false').lower() == 'true'
             if not redis_enabled:
-                logger.info(f"📊 [Redis进度] Redis未启用，使用文件存储")
+                logger.info("📊 [Redis进度] Redis未启用，使用文件存储")
                 return False
 
             import redis
@@ -131,9 +128,9 @@ class RedisProgressTracker:
             logger.warning(f"📊 [Redis进度] Redis连接失败，使用文件存储: {e}")
             return False
 
-    def _generate_dynamic_steps(self) -> List[AnalysisStep]:
+    def _generate_dynamic_steps(self) -> list[AnalysisStep]:
         """根据分析师数量动态生成分析步骤"""
-        steps: List[AnalysisStep] = []
+        steps: list[AnalysisStep] = []
         # 1) 基础准备阶段 (10%)
         steps.extend([
             AnalysisStep("📋 准备阶段", "验证股票代码，检查数据源可用性", "pending", 0.03),
@@ -178,7 +175,7 @@ class RedisProgressTracker:
         """获取辩论轮次（使用默认配置）"""
         return 1
 
-    def _get_analyst_step_info(self, analyst: str) -> Dict[str, str]:
+    def _get_analyst_step_info(self, analyst: str) -> dict[str, str]:
         """获取分析师步骤信息（名称与描述）"""
         mapping = {
             'market': {"name": "📊 市场分析师", "description": "分析股价走势、成交量、技术指标等市场表现"},
@@ -289,9 +286,9 @@ class RedisProgressTracker:
             # 快速分析模式：预估总时长30秒
             self.progress_data['estimated_total_time'] = 30
             self.progress_data['_base_time_override'] = 30
-            logger.debug(f"[RedisProgress] Quick mode set, estimated_total_time=30s")
+            logger.debug("[RedisProgress] Quick mode set, estimated_total_time=30s")
     
-    def update_progress(self, progress_update: Any) -> Dict[str, Any]:
+    def update_progress(self, progress_update: Any) -> dict[str, Any]:
         """update progress and persist; accepts dict or plain message string"""
         try:
             if isinstance(progress_update, dict):
@@ -385,13 +382,13 @@ class RedisProgressTracker:
             logger.debug(f"[RedisProgress] detect current step failed: {e}")
             return 0
 
-    def _find_step_by_name(self, step_name: str) -> Optional[AnalysisStep]:
+    def _find_step_by_name(self, step_name: str) -> AnalysisStep | None:
         for step in self.analysis_steps:
             if step.name == step_name:
                 return step
         return None
 
-    def _find_step_by_pattern(self, pattern: str) -> Optional[AnalysisStep]:
+    def _find_step_by_pattern(self, pattern: str) -> AnalysisStep | None:
         for step in self.analysis_steps:
             if pattern in step.name:
                 return step
@@ -412,7 +409,7 @@ class RedisProgressTracker:
         except Exception as e:
             logger.error(f"[RedisProgress] save progress failed: {self.task_id} - {e}")
 
-    def mark_completed(self) -> Dict[str, Any]:
+    def mark_completed(self) -> dict[str, Any]:
         try:
             self.progress_data['progress_percentage'] = 100
             self.progress_data['status'] = 'completed'
@@ -428,7 +425,7 @@ class RedisProgressTracker:
             logger.error(f"[RedisProgress] mark completed failed: {self.task_id} - {e}")
             return self.progress_data
 
-    def mark_failed(self, reason: str = "") -> Dict[str, Any]:
+    def mark_failed(self, reason: str = "") -> dict[str, Any]:
         try:
             self.progress_data['status'] = 'failed'
             self.progress_data['failed'] = True
@@ -444,7 +441,7 @@ class RedisProgressTracker:
             logger.error(f"[RedisProgress] mark failed failed: {self.task_id} - {e}")
             return self.progress_data
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         try:
             return {
                 'task_id': self.task_id,
@@ -467,7 +464,7 @@ class RedisProgressTracker:
 
 
 
-def get_progress_by_id(task_id: str) -> Optional[Dict[str, Any]]:
+def get_progress_by_id(task_id: str) -> dict[str, Any] | None:
     """根据任务ID获取进度（与旧实现一致，修正 cls 引用）"""
     try:
         # 检查REDIS_ENABLED环境变量
@@ -517,7 +514,7 @@ def get_progress_by_id(task_id: str) -> Optional[Dict[str, Any]]:
         # 尝试从文件读取
         progress_file = f"./data/progress/{task_id}.json"
         if os.path.exists(progress_file):
-            with open(progress_file, 'r', encoding='utf-8') as f:
+            with open(progress_file, encoding='utf-8') as f:
                 progress_data = json.load(f)
                 progress_data = RedisProgressTracker._calculate_static_time_estimates(progress_data)
                 return progress_data
@@ -525,7 +522,7 @@ def get_progress_by_id(task_id: str) -> Optional[Dict[str, Any]]:
         # 尝试备用文件位置
         backup_file = f"./data/progress_{task_id}.json"
         if os.path.exists(backup_file):
-            with open(backup_file, 'r', encoding='utf-8') as f:
+            with open(backup_file, encoding='utf-8') as f:
                 progress_data = json.load(f)
                 progress_data = RedisProgressTracker._calculate_static_time_estimates(progress_data)
                 return progress_data

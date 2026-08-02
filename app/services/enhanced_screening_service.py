@@ -5,20 +5,21 @@
 
 import logging
 import time
-from typing import Any, Dict, List, Optional, Tuple
-from datetime import datetime
+from typing import Any
 
-from app.models.screening import FieldType, BASIC_FIELDS_INFO
+from app.models.screening import BASIC_FIELDS_INFO
 from app.services.database_screening_service import get_database_screening_service
-from app.services.screening_service import ScreeningService, ScreeningParams
+from app.services.screening_service import ScreeningParams, ScreeningService
 
 logger = logging.getLogger(__name__)
 
+from app.core.database import get_mongo_db
 from app.services.enhanced_screening.utils import (
     analyze_conditions as _analyze_conditions_util,
+)
+from app.services.enhanced_screening.utils import (
     convert_conditions_to_traditional_format as _convert_to_traditional_util,
 )
-from app.core.database import get_mongo_db
 
 
 class EnhancedScreeningService:
@@ -33,15 +34,15 @@ class EnhancedScreeningService:
 
     async def screen_stocks(
         self,
-        conditions: List[Dict[str, Any]],
+        conditions: list[dict[str, Any]],
         market: str = "CN",
-        date: Optional[str] = None,
+        date: str | None = None,
         adj: str = "qfq",
         limit: int = 50,
         offset: int = 0,
-        order_by: Optional[List[Dict[str, str]]] = None,
+        order_by: list[dict[str, str]] | None = None,
         use_database_optimization: bool = True
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         智能股票筛选
 
@@ -148,7 +149,7 @@ class EnhancedScreeningService:
                 "error": str(e)
             }
 
-    def _analyze_conditions(self, conditions: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def _analyze_conditions(self, conditions: list[dict[str, Any]]) -> dict[str, Any]:
         """Delegate condition analysis to utils."""
         analysis = _analyze_conditions_util(conditions)
         logger.info(f"📊 筛选条件分析: {analysis}")
@@ -156,11 +157,11 @@ class EnhancedScreeningService:
 
     async def _screen_with_database(
         self,
-        conditions: List[Dict[str, Any]],
+        conditions: list[dict[str, Any]],
         limit: int,
         offset: int,
-        order_by: Optional[List[Dict[str, str]]]
-    ) -> Tuple[List[Dict[str, Any]], int]:
+        order_by: list[dict[str, str]] | None
+    ) -> tuple[list[dict[str, Any]], int]:
         """使用数据库优化筛选"""
         logger.info("🚀 使用数据库优化筛选")
 
@@ -173,14 +174,14 @@ class EnhancedScreeningService:
 
     async def _screen_with_traditional_method(
         self,
-        conditions: List[Dict[str, Any]],
+        conditions: list[dict[str, Any]],
         market: str,
-        date: Optional[str],
+        date: str | None,
         adj: str,
         limit: int,
         offset: int,
-        order_by: Optional[List[Dict[str, str]]]
-    ) -> Dict[str, Any]:
+        order_by: list[dict[str, str]] | None
+    ) -> dict[str, Any]:
         """使用传统筛选方法"""
         logger.info("🔄 使用传统筛选方法")
 
@@ -204,12 +205,12 @@ class EnhancedScreeningService:
 
     def _convert_conditions_to_traditional_format(
         self,
-        conditions: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
+        conditions: list[dict[str, Any]]
+    ) -> dict[str, Any]:
         """Delegate condition conversion to utils."""
         return _convert_to_traditional_util(conditions)
 
-    async def _enrich_results_with_realtime_metrics(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    async def _enrich_results_with_realtime_metrics(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """
         为筛选结果添加PE/PB（使用静态数据，避免性能问题）
 
@@ -230,7 +231,7 @@ class EnhancedScreeningService:
 
         return items
 
-    async def get_field_info(self, field: str) -> Optional[Dict[str, Any]]:
+    async def get_field_info(self, field: str) -> dict[str, Any] | None:
         """
         获取字段信息
 
@@ -265,18 +266,18 @@ class EnhancedScreeningService:
 
         return None
 
-    async def get_all_supported_fields(self) -> List[Dict[str, Any]]:
+    async def get_all_supported_fields(self) -> list[dict[str, Any]]:
         """获取所有支持的字段信息"""
         fields = []
 
-        for field_name in BASIC_FIELDS_INFO.keys():
+        for field_name in BASIC_FIELDS_INFO:
             field_info = await self.get_field_info(field_name)
             if field_info:
                 fields.append(field_info)
 
         return fields
 
-    async def validate_conditions(self, conditions: List[Dict[str, Any]]) -> Dict[str, Any]:
+    async def validate_conditions(self, conditions: list[dict[str, Any]]) -> dict[str, Any]:
         """
         验证筛选条件
 
@@ -337,7 +338,7 @@ class EnhancedScreeningService:
 
 
 # 全局服务实例
-_enhanced_screening_service: Optional[EnhancedScreeningService] = None
+_enhanced_screening_service: EnhancedScreeningService | None = None
 
 
 def get_enhanced_screening_service() -> EnhancedScreeningService:

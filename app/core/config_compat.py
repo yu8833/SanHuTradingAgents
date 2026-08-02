@@ -7,13 +7,10 @@
 ⚠️ 此模块仅用于向后兼容，新代码应直接使用 ConfigService
 """
 
-import os
 import asyncio
-from typing import Dict, Any, Optional, List
-from functools import lru_cache
+import os
 import warnings
-
-from app.core.config import settings
+from typing import Any
 
 
 class ConfigManagerCompat:
@@ -55,7 +52,7 @@ class ConfigManagerCompat:
         # 默认值
         return "./data"
     
-    def load_settings(self) -> Dict[str, Any]:
+    def load_settings(self) -> dict[str, Any]:
         """
         加载系统设置
         
@@ -81,7 +78,7 @@ class ConfigManagerCompat:
         # 返回默认设置
         return self._get_default_settings()
     
-    def save_settings(self, settings_dict: Dict[str, Any]) -> bool:
+    def save_settings(self, settings_dict: dict[str, Any]) -> bool:
         """
         保存系统设置
         
@@ -97,7 +94,7 @@ class ConfigManagerCompat:
             loop = asyncio.get_event_loop()
             if loop.is_running():
                 # 如果事件循环正在运行，无法保存
-                warnings.warn("Cannot save settings in running event loop", RuntimeWarning)
+                warnings.warn("Cannot save settings in running event loop", RuntimeWarning, stacklevel=2)
                 return False
             else:
                 loop.run_until_complete(
@@ -105,10 +102,10 @@ class ConfigManagerCompat:
                 )
                 return True
         except Exception as e:
-            warnings.warn(f"Failed to save settings: {e}", RuntimeWarning)
+            warnings.warn(f"Failed to save settings: {e}", RuntimeWarning, stacklevel=2)
             return False
     
-    def get_models(self) -> List[Dict[str, Any]]:
+    def get_models(self) -> list[dict[str, Any]]:
         """
         获取模型配置列表
         
@@ -141,7 +138,7 @@ class ConfigManagerCompat:
         
         return []
     
-    def get_model_config(self, provider: str, model_name: str) -> Optional[Dict[str, Any]]:
+    def get_model_config(self, provider: str, model_name: str) -> dict[str, Any] | None:
         """
         获取指定模型的配置
         
@@ -158,7 +155,7 @@ class ConfigManagerCompat:
                 return model
         return None
     
-    def _get_default_settings(self) -> Dict[str, Any]:
+    def _get_default_settings(self) -> dict[str, Any]:
         """
         获取默认系统设置
         
@@ -225,7 +222,7 @@ class TokenTrackerCompat:
         # 注意：此兼容层仅提供内存缓存，不持久化到数据库
         # 如需持久化，请使用 app.services.llm_service 中的相关功能
     
-    def get_usage_summary(self) -> Dict[str, Any]:
+    def get_usage_summary(self) -> dict[str, Any]:
         """
         获取使用统计摘要
         

@@ -4,17 +4,17 @@
 
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Any
+
 from bson import ObjectId
 
 from app.core.database import get_mongo_db
 from app.models.operation_log import (
     OperationLogCreate,
-    OperationLogResponse,
     OperationLogQuery,
+    OperationLogResponse,
     OperationLogStats,
     convert_objectid_to_str,
-    ActionType
 )
 from app.utils.timezone import now_tz
 
@@ -32,8 +32,8 @@ class OperationLogService:
         user_id: str,
         username: str,
         log_data: OperationLogCreate,
-        ip_address: Optional[str] = None,
-        user_agent: Optional[str] = None
+        ip_address: str | None = None,
+        user_agent: str | None = None
     ) -> str:
         """创建操作日志"""
         try:
@@ -68,7 +68,7 @@ class OperationLogService:
             logger.error(f"创建操作日志失败: {e}")
             raise Exception(f"创建操作日志失败: {str(e)}")
     
-    async def get_logs(self, query: OperationLogQuery) -> Tuple[List[OperationLogResponse], int]:
+    async def get_logs(self, query: OperationLogQuery) -> tuple[list[OperationLogResponse], int]:
         """获取操作日志列表"""
         try:
             db = get_mongo_db()
@@ -194,7 +194,7 @@ class OperationLogService:
             logger.error(f"获取操作日志统计失败: {e}")
             raise Exception(f"获取操作日志统计失败: {str(e)}")
     
-    async def clear_logs(self, days: Optional[int] = None, action_type: Optional[str] = None) -> Dict[str, Any]:
+    async def clear_logs(self, days: int | None = None, action_type: str | None = None) -> dict[str, Any]:
         """清空操作日志"""
         try:
             db = get_mongo_db()
@@ -225,7 +225,7 @@ class OperationLogService:
             logger.error(f"清空操作日志失败: {e}")
             raise Exception(f"清空操作日志失败: {str(e)}")
     
-    async def get_log_by_id(self, log_id: str) -> Optional[OperationLogResponse]:
+    async def get_log_by_id(self, log_id: str) -> OperationLogResponse | None:
         """根据ID获取操作日志"""
         try:
             db = get_mongo_db()
@@ -243,7 +243,7 @@ class OperationLogService:
 
 
 # 全局服务实例
-_operation_log_service: Optional[OperationLogService] = None
+_operation_log_service: OperationLogService | None = None
 
 
 def get_operation_log_service() -> OperationLogService:
@@ -260,13 +260,13 @@ async def log_operation(
     username: str,
     action_type: str,
     action: str,
-    details: Optional[Dict[str, Any]] = None,
+    details: dict[str, Any] | None = None,
     success: bool = True,
-    error_message: Optional[str] = None,
-    duration_ms: Optional[int] = None,
-    ip_address: Optional[str] = None,
-    user_agent: Optional[str] = None,
-    session_id: Optional[str] = None
+    error_message: str | None = None,
+    duration_ms: int | None = None,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+    session_id: str | None = None
 ) -> str:
     """记录操作日志的便捷函数"""
     service = get_operation_log_service()

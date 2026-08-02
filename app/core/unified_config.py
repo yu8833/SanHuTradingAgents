@@ -5,15 +5,17 @@
 
 import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Union
-from datetime import datetime
-import asyncio
-from dataclasses import dataclass, asdict
+from typing import Any
 
 from app.models.config import (
-    LLMConfig, DataSourceConfig, DatabaseConfig, SystemConfig,
-    ModelProvider, DataSourceType, DatabaseType
+    DatabaseConfig,
+    DatabaseType,
+    DataSourceConfig,
+    DataSourceType,
+    LLMConfig,
+    SystemConfig,
 )
 
 
@@ -56,13 +58,13 @@ class UnifiedConfigManager:
         
         return current_mtime <= cached_mtime
     
-    def _load_json_file(self, file_path: Path, cache_key: str = None) -> Dict[str, Any]:
+    def _load_json_file(self, file_path: Path, cache_key: str = None) -> dict[str, Any]:
         """加载JSON文件，支持缓存"""
         if cache_key and self._is_cache_valid(cache_key, file_path):
             return self._cache[cache_key]
         
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, encoding='utf-8') as f:
                 data = json.load(f)
             
             if cache_key:
@@ -76,7 +78,7 @@ class UnifiedConfigManager:
             print(f"配置文件格式错误 {file_path}: {e}")
             return {}
     
-    def _save_json_file(self, file_path: Path, data: Dict[str, Any], cache_key: str = None):
+    def _save_json_file(self, file_path: Path, data: dict[str, Any], cache_key: str = None):
         """保存JSON文件"""
         # 确保目录存在
         file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -90,11 +92,11 @@ class UnifiedConfigManager:
     
     # ==================== 模型配置管理 ====================
     
-    def get_legacy_models(self) -> List[Dict[str, Any]]:
+    def get_legacy_models(self) -> list[dict[str, Any]]:
         """获取传统格式的模型配置"""
         return self._load_json_file(self.paths.models_json, "models")
     
-    def get_llm_configs(self) -> List[LLMConfig]:
+    def get_llm_configs(self) -> list[LLMConfig]:
         """获取标准化的LLM配置"""
         legacy_models = self.get_legacy_models()
         llm_configs = []
@@ -160,26 +162,26 @@ class UnifiedConfigManager:
     
     # ==================== 系统设置管理 ====================
     
-    def get_system_settings(self) -> Dict[str, Any]:
+    def get_system_settings(self) -> dict[str, Any]:
         """获取系统设置"""
         return self._load_json_file(self.paths.settings_json, "settings")
     
-    def save_system_settings(self, settings: Dict[str, Any]) -> bool:
+    def save_system_settings(self, settings: dict[str, Any]) -> bool:
         """保存系统设置（保留现有字段，添加新字段映射）"""
         try:
-            print(f"📝 [unified_config] save_system_settings 被调用")
+            print("📝 [unified_config] save_system_settings 被调用")
             print(f"📝 [unified_config] 接收到的 settings 包含 {len(settings)} 项")
 
             # 检查关键字段
             if "quick_analysis_model" in settings:
                 print(f"  ✓ [unified_config] 包含 quick_analysis_model: {settings['quick_analysis_model']}")
             else:
-                print(f"  ⚠️  [unified_config] 不包含 quick_analysis_model")
+                print("  ⚠️  [unified_config] 不包含 quick_analysis_model")
 
             if "deep_analysis_model" in settings:
                 print(f"  ✓ [unified_config] 包含 deep_analysis_model: {settings['deep_analysis_model']}")
             else:
-                print(f"  ⚠️  [unified_config] 不包含 deep_analysis_model")
+                print("  ⚠️  [unified_config] 不包含 deep_analysis_model")
 
             # 读取现有配置
             print(f"📖 [unified_config] 读取现有配置文件: {self.paths.settings_json}")
@@ -201,7 +203,7 @@ class UnifiedConfigManager:
                 print(f"  ✓ [unified_config] 映射 deep_analysis_model -> deep_think_llm: {settings['deep_analysis_model']}")
 
             # 打印最终要保存的配置
-            print(f"💾 [unified_config] 即将保存到文件:")
+            print("💾 [unified_config] 即将保存到文件:")
             if "quick_think_llm" in merged_settings:
                 print(f"  ✓ quick_think_llm: {merged_settings['quick_think_llm']}")
             if "deep_think_llm" in merged_settings:
@@ -214,7 +216,7 @@ class UnifiedConfigManager:
             # 保存合并后的配置
             print(f"💾 [unified_config] 保存到文件: {self.paths.settings_json}")
             self._save_json_file(self.paths.settings_json, merged_settings, "settings")
-            print(f"✅ [unified_config] 配置保存成功")
+            print("✅ [unified_config] 配置保存成功")
 
             return True
         except Exception as e:
@@ -256,7 +258,7 @@ class UnifiedConfigManager:
     
     # ==================== 数据源配置管理 ====================
     
-    def get_data_source_configs(self) -> List[DataSourceConfig]:
+    def get_data_source_configs(self) -> list[DataSourceConfig]:
         """获取数据源配置 - 优先从数据库读取，回退到硬编码（同步版本）"""
         try:
             # 🔥 优先从数据库读取配置（使用同步连接）
@@ -324,7 +326,7 @@ class UnifiedConfigManager:
         data_sources.sort(key=lambda x: x.priority, reverse=True)
         return data_sources
 
-    async def get_data_source_configs_async(self) -> List[DataSourceConfig]:
+    async def get_data_source_configs_async(self) -> list[DataSourceConfig]:
         """获取数据源配置 - 优先从数据库读取，回退到硬编码（异步版本）"""
         try:
             # 🔥 优先从数据库读取配置（使用异步连接）
@@ -405,7 +407,7 @@ class UnifiedConfigManager:
     
     # ==================== 数据库配置管理 ====================
     
-    def get_database_configs(self) -> List[DatabaseConfig]:
+    def get_database_configs(self) -> list[DatabaseConfig]:
         """获取数据库配置"""
         configs = []
 

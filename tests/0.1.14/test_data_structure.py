@@ -3,8 +3,9 @@
 测试数据结构脚本
 """
 
-import sys
 import os
+import sys
+
 sys.path.append(os.path.join(os.path.dirname(__file__), 'web'))
 
 def test_data_structure():
@@ -21,7 +22,7 @@ def test_data_structure():
         
         if results:
             result = results[0]
-            print(f"\n📋 第一个结果的数据结构:")
+            print("\n📋 第一个结果的数据结构:")
             print(f"   analysis_id: {result.get('analysis_id', 'missing')}")
             print(f"   source: {result.get('source', 'missing')}")
             print(f"   stock_symbol: {result.get('stock_symbol', 'missing')}")

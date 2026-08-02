@@ -1,13 +1,13 @@
-import re
-import logging
 import io
+import logging
+import re
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.middleware.request_id import RequestIDMiddleware
 from app.core.logging_config import setup_logging
 from app.core.logging_context import LoggingContextFilter
-
+from app.middleware.request_id import RequestIDMiddleware
 
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
@@ -46,7 +46,8 @@ def test_trace_id_header_and_logging():
 
         # Assert headers
         trace_id = resp.headers.get("X-Trace-ID")
-        assert trace_id and UUID_RE.match(trace_id)
+        assert trace_id
+        assert UUID_RE.match(trace_id)
         assert resp.headers.get("X-Request-ID") == trace_id
 
         # Assert our captured log contains trace_id

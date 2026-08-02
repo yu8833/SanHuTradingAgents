@@ -1,11 +1,11 @@
+import getpass
+import os
+import re
+import warnings
+from pathlib import Path
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import List
-import os
-import warnings
-import re
-import getpass
-from pathlib import Path
 
 # Legacy env var aliases (deprecated): map API_HOST/PORT/DEBUG -> HOST/PORT/DEBUG
 _LEGACY_ENV_ALIASES = {
@@ -27,8 +27,8 @@ class Settings(BaseSettings):
     DEBUG: bool = Field(default=True)
     HOST: str = Field(default="0.0.0.0")
     PORT: int = Field(default=8000)
-    ALLOWED_ORIGINS: List[str] = Field(default_factory=lambda: ["*"])
-    ALLOWED_HOSTS: List[str] = Field(default_factory=lambda: ["*"])
+    ALLOWED_ORIGINS: list[str] = Field(default_factory=lambda: ["*"])
+    ALLOWED_HOSTS: list[str] = Field(default_factory=lambda: ["*"])
 
     # MongoDB配置
     MONGODB_HOST: str = Field(default="localhost")
@@ -84,10 +84,7 @@ class Settings(BaseSettings):
     @property
     def MONGO_DB_IDENTITY(self) -> dict:
         scope = (self.MONGODB_DATABASE_SCOPE or "").strip().lower() or "auto"
-        if scope == "auto":
-            resolved_scope = "major_instance" if self.DEBUG else "explicit"
-        else:
-            resolved_scope = scope
+        resolved_scope = ("major_instance" if self.DEBUG else "explicit") if scope == "auto" else scope
 
         major = _read_major_version()
         instance = (self.MONGODB_DATABASE_INSTANCE or "").strip()

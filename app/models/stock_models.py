@@ -2,10 +2,11 @@
 股票数据模型 - 基于现有集合扩展
 采用方案B: 在现有集合基础上扩展字段，保持向后兼容
 """
-from datetime import datetime, date
-from typing import Optional, Dict, Any, List, Literal
-from pydantic import BaseModel, Field
+from datetime import datetime
+from typing import Any, Literal
+
 from bson import ObjectId
+from pydantic import BaseModel, Field
 
 
 def to_str_id(v: Any) -> str:
@@ -32,23 +33,23 @@ class MarketInfo(BaseModel):
     exchange_name: str = Field(..., description="交易所名称")
     currency: CurrencyType = Field(..., description="交易货币")
     timezone: str = Field(..., description="时区")
-    trading_hours: Optional[Dict[str, Any]] = Field(None, description="交易时间")
+    trading_hours: dict[str, Any] | None = Field(None, description="交易时间")
 
 
 class TechnicalIndicators(BaseModel):
     """技术指标结构 - 分类扩展设计"""
     # 趋势指标
-    trend: Optional[Dict[str, float]] = Field(None, description="趋势指标")
+    trend: dict[str, float] | None = Field(None, description="趋势指标")
     # 震荡指标  
-    oscillator: Optional[Dict[str, float]] = Field(None, description="震荡指标")
+    oscillator: dict[str, float] | None = Field(None, description="震荡指标")
     # 通道指标
-    channel: Optional[Dict[str, float]] = Field(None, description="通道指标")
+    channel: dict[str, float] | None = Field(None, description="通道指标")
     # 成交量指标
-    volume: Optional[Dict[str, float]] = Field(None, description="成交量指标")
+    volume: dict[str, float] | None = Field(None, description="成交量指标")
     # 波动率指标
-    volatility: Optional[Dict[str, float]] = Field(None, description="波动率指标")
+    volatility: dict[str, float] | None = Field(None, description="波动率指标")
     # 自定义指标
-    custom: Optional[Dict[str, Any]] = Field(None, description="自定义指标")
+    custom: dict[str, Any] | None = Field(None, description="自定义指标")
 
 
 class StockBasicInfoExtended(BaseModel):
@@ -62,59 +63,59 @@ class StockBasicInfoExtended(BaseModel):
     name: str = Field(..., description="股票名称")
 
     # === 兼容字段 (保持向后兼容) ===
-    code: Optional[str] = Field(None, description="6位股票代码(已废弃,使用symbol)")
+    code: str | None = Field(None, description="6位股票代码(已废弃,使用symbol)")
 
     # === 基础信息字段 ===
-    area: Optional[str] = Field(None, description="所在地区")
-    industry: Optional[str] = Field(None, description="行业")
-    market: Optional[str] = Field(None, description="交易所名称")
-    list_date: Optional[str] = Field(None, description="上市日期")
-    sse: Optional[str] = Field(None, description="板块")
-    sec: Optional[str] = Field(None, description="所属板块")
-    source: Optional[str] = Field(None, description="数据来源")
-    updated_at: Optional[datetime] = Field(None, description="更新时间")
+    area: str | None = Field(None, description="所在地区")
+    industry: str | None = Field(None, description="行业")
+    market: str | None = Field(None, description="交易所名称")
+    list_date: str | None = Field(None, description="上市日期")
+    sse: str | None = Field(None, description="板块")
+    sec: str | None = Field(None, description="所属板块")
+    source: str | None = Field(None, description="数据来源")
+    updated_at: datetime | None = Field(None, description="更新时间")
 
     # 市值字段
-    total_mv: Optional[float] = Field(None, description="总市值(亿元)")
-    circ_mv: Optional[float] = Field(None, description="流通市值(亿元)")
+    total_mv: float | None = Field(None, description="总市值(亿元)")
+    circ_mv: float | None = Field(None, description="流通市值(亿元)")
 
     # 财务指标
-    pe: Optional[float] = Field(None, description="市盈率")
-    pb: Optional[float] = Field(None, description="市净率")
-    pe_ttm: Optional[float] = Field(None, description="滚动市盈率")
-    pb_mrq: Optional[float] = Field(None, description="最新市净率")
-    roe: Optional[float] = Field(None, description="净资产收益率")
+    pe: float | None = Field(None, description="市盈率")
+    pb: float | None = Field(None, description="市净率")
+    pe_ttm: float | None = Field(None, description="滚动市盈率")
+    pb_mrq: float | None = Field(None, description="最新市净率")
+    roe: float | None = Field(None, description="净资产收益率")
 
     # 交易指标
-    turnover_rate: Optional[float] = Field(None, description="换手率%")
-    volume_ratio: Optional[float] = Field(None, description="量比")
+    turnover_rate: float | None = Field(None, description="换手率%")
+    volume_ratio: float | None = Field(None, description="量比")
 
     # === 扩展字段 ===
-    name_en: Optional[str] = Field(None, description="英文名称")
+    name_en: str | None = Field(None, description="英文名称")
     
     # 新增市场信息
-    market_info: Optional[MarketInfo] = Field(None, description="市场信息")
+    market_info: MarketInfo | None = Field(None, description="市场信息")
     
     # 新增标准化字段
-    board: Optional[str] = Field(None, description="板块标准化")
-    industry_code: Optional[str] = Field(None, description="行业代码")
-    sector: Optional[str] = Field(None, description="所属板块标准化（GICS行业）")
-    delist_date: Optional[str] = Field(None, description="退市日期")
-    status: Optional[StockStatus] = Field(None, description="上市状态")
-    is_hs: Optional[bool] = Field(None, description="是否沪深港通标的")
+    board: str | None = Field(None, description="板块标准化")
+    industry_code: str | None = Field(None, description="行业代码")
+    sector: str | None = Field(None, description="所属板块标准化（GICS行业）")
+    delist_date: str | None = Field(None, description="退市日期")
+    status: StockStatus | None = Field(None, description="上市状态")
+    is_hs: bool | None = Field(None, description="是否沪深港通标的")
 
     # 新增股本信息
-    total_shares: Optional[float] = Field(None, description="总股本")
-    float_shares: Optional[float] = Field(None, description="流通股本")
+    total_shares: float | None = Field(None, description="总股本")
+    float_shares: float | None = Field(None, description="流通股本")
 
     # 港股特有字段
-    lot_size: Optional[int] = Field(None, description="每手股数（港股特有）")
+    lot_size: int | None = Field(None, description="每手股数（港股特有）")
 
     # 货币字段
-    currency: Optional[CurrencyType] = Field(None, description="交易货币")
+    currency: CurrencyType | None = Field(None, description="交易货币")
     
     # 版本控制
-    data_version: Optional[int] = Field(None, description="数据版本")
+    data_version: int | None = Field(None, description="数据版本")
     
     class Config:
         # 允许额外字段，保持向后兼容
@@ -157,42 +158,42 @@ class MarketQuotesExtended(BaseModel):
     """
     # === 标准化字段 (主要字段) ===
     symbol: str = Field(..., description="6位股票代码", pattern=r"^\d{6}$")
-    full_symbol: Optional[str] = Field(None, description="完整标准化代码")
-    market: Optional[MarketType] = Field(None, description="市场标识")
+    full_symbol: str | None = Field(None, description="完整标准化代码")
+    market: MarketType | None = Field(None, description="市场标识")
 
     # === 兼容字段 (保持向后兼容) ===
-    code: Optional[str] = Field(None, description="6位股票代码(已废弃,使用symbol)")
+    code: str | None = Field(None, description="6位股票代码(已废弃,使用symbol)")
 
     # === 行情字段 ===
-    close: Optional[float] = Field(None, description="收盘价")
-    pct_chg: Optional[float] = Field(None, description="涨跌幅%")
-    amount: Optional[float] = Field(None, description="成交额")
-    open: Optional[float] = Field(None, description="开盘价")
-    high: Optional[float] = Field(None, description="最高价")
-    low: Optional[float] = Field(None, description="最低价")
-    pre_close: Optional[float] = Field(None, description="前收盘价")
-    trade_date: Optional[str] = Field(None, description="交易日期")
-    updated_at: Optional[datetime] = Field(None, description="更新时间")
+    close: float | None = Field(None, description="收盘价")
+    pct_chg: float | None = Field(None, description="涨跌幅%")
+    amount: float | None = Field(None, description="成交额")
+    open: float | None = Field(None, description="开盘价")
+    high: float | None = Field(None, description="最高价")
+    low: float | None = Field(None, description="最低价")
+    pre_close: float | None = Field(None, description="前收盘价")
+    trade_date: str | None = Field(None, description="交易日期")
+    updated_at: datetime | None = Field(None, description="更新时间")
     
     # 新增行情字段
-    current_price: Optional[float] = Field(None, description="当前价格(与close相同)")
-    change: Optional[float] = Field(None, description="涨跌额")
-    volume: Optional[float] = Field(None, description="成交量")
-    turnover_rate: Optional[float] = Field(None, description="换手率")
-    volume_ratio: Optional[float] = Field(None, description="量比")
+    current_price: float | None = Field(None, description="当前价格(与close相同)")
+    change: float | None = Field(None, description="涨跌额")
+    volume: float | None = Field(None, description="成交量")
+    turnover_rate: float | None = Field(None, description="换手率")
+    volume_ratio: float | None = Field(None, description="量比")
     
     # 五档行情
-    bid_prices: Optional[List[float]] = Field(None, description="买1-5价")
-    bid_volumes: Optional[List[float]] = Field(None, description="买1-5量")
-    ask_prices: Optional[List[float]] = Field(None, description="卖1-5价")
-    ask_volumes: Optional[List[float]] = Field(None, description="卖1-5量")
+    bid_prices: list[float] | None = Field(None, description="买1-5价")
+    bid_volumes: list[float] | None = Field(None, description="买1-5量")
+    ask_prices: list[float] | None = Field(None, description="卖1-5价")
+    ask_volumes: list[float] | None = Field(None, description="卖1-5量")
     
     # 时间戳
-    timestamp: Optional[datetime] = Field(None, description="行情时间戳")
+    timestamp: datetime | None = Field(None, description="行情时间戳")
     
     # 数据源和版本
-    data_source: Optional[str] = Field(None, description="数据来源")
-    data_version: Optional[int] = Field(None, description="数据版本")
+    data_source: str | None = Field(None, description="数据来源")
+    data_version: int | None = Field(None, description="数据版本")
     
     class Config:
         extra = "allow"
@@ -224,21 +225,21 @@ class MarketQuotesExtended(BaseModel):
 class StockBasicInfoResponse(BaseModel):
     """股票基础信息API响应模型"""
     success: bool = True
-    data: Optional[StockBasicInfoExtended] = None
+    data: StockBasicInfoExtended | None = None
     message: str = ""
 
 
 class MarketQuotesResponse(BaseModel):
     """实时行情API响应模型"""
     success: bool = True
-    data: Optional[MarketQuotesExtended] = None
+    data: MarketQuotesExtended | None = None
     message: str = ""
 
 
 class StockListResponse(BaseModel):
     """股票列表API响应模型"""
     success: bool = True
-    data: Optional[List[StockBasicInfoExtended]] = None
+    data: list[StockBasicInfoExtended] | None = None
     total: int = 0
     page: int = 1
     page_size: int = 20
@@ -256,32 +257,32 @@ class ScheduledTask(BaseModel):
     # 任务配置
     name: str = Field(..., description="任务名称")
     task_type: str = Field(..., description="任务类型，如 analysis, sync, report 等")
-    cron_expression: Optional[str] = Field(None, description="Cron 表达式")
+    cron_expression: str | None = Field(None, description="Cron 表达式")
     
     # 任务参数
-    symbols: Optional[List[str]] = Field(None, description="股票代码列表")
-    params: Optional[Dict[str, Any]] = Field(None, description="任务参数")
+    symbols: list[str] | None = Field(None, description="股票代码列表")
+    params: dict[str, Any] | None = Field(None, description="任务参数")
     
     # 状态信息
     enabled: bool = Field(True, description="是否启用")
     consecutive_failures: int = Field(0, description="连续失败次数")
     max_consecutive_failures: int = Field(3, description="最大连续失败次数，达到后自动禁用")
-    last_success_at: Optional[datetime] = Field(None, description="上次成功执行时间")
-    last_failure_at: Optional[datetime] = Field(None, description="上次失败执行时间")
+    last_success_at: datetime | None = Field(None, description="上次成功执行时间")
+    last_failure_at: datetime | None = Field(None, description="上次失败执行时间")
     
     # 持仓上下文
-    portfolio_context: Optional[Dict[str, Any]] = Field(None, description="持仓上下文（股票、成本价、仓位等）")
+    portfolio_context: dict[str, Any] | None = Field(None, description="持仓上下文（股票、成本价、仓位等）")
     
     # 用户关联
-    user_id: Optional[str] = Field(None, description="用户ID")
+    user_id: str | None = Field(None, description="用户ID")
     
     # 元数据
-    display_name: Optional[str] = Field(None, description="显示名称")
-    description: Optional[str] = Field(None, description="任务描述")
+    display_name: str | None = Field(None, description="显示名称")
+    description: str | None = Field(None, description="任务描述")
     
     # 时间戳
-    created_at: Optional[datetime] = Field(None, description="创建时间")
-    updated_at: Optional[datetime] = Field(None, description="更新时间")
+    created_at: datetime | None = Field(None, description="创建时间")
+    updated_at: datetime | None = Field(None, description="更新时间")
     
     class Config:
         from_attributes = True
@@ -307,20 +308,20 @@ class ScheduledTask(BaseModel):
 
 class BatchJobUpdateRequest(BaseModel):
     """批量更新任务请求"""
-    job_ids: List[str] = Field(..., description="任务ID列表", min_length=1)
-    enabled: Optional[bool] = Field(None, description="是否启用")
-    cron_expression: Optional[str] = Field(None, description="Cron 表达式")
-    consecutive_failures: Optional[int] = Field(None, description="重置连续失败计数")
+    job_ids: list[str] = Field(..., description="任务ID列表", min_length=1)
+    enabled: bool | None = Field(None, description="是否启用")
+    cron_expression: str | None = Field(None, description="Cron 表达式")
+    consecutive_failures: int | None = Field(None, description="重置连续失败计数")
 
 
 class BatchJobDeleteRequest(BaseModel):
     """批量删除任务请求"""
-    job_ids: List[str] = Field(..., description="任务ID列表", min_length=1)
+    job_ids: list[str] = Field(..., description="任务ID列表", min_length=1)
 
 
 class BatchJobTriggerRequest(BaseModel):
     """批量触发任务请求"""
-    job_ids: List[str] = Field(..., description="任务ID列表", min_length=1)
+    job_ids: list[str] = Field(..., description="任务ID列表", min_length=1)
     force: bool = Field(False, description="是否强制执行")
 
 
@@ -328,6 +329,6 @@ class CreateScheduledTaskFromFavoritesRequest(BaseModel):
     """从自选股创建定时任务请求"""
     task_type: str = Field("analysis", description="任务类型")
     cron_expression: str = Field(..., description="Cron 表达式")
-    analysis_type: Optional[str] = Field("comprehensive", description="分析类型")
-    tags: Optional[List[str]] = Field(None, description="自选股标签过滤")
+    analysis_type: str | None = Field("comprehensive", description="分析类型")
+    tags: list[str] | None = Field(None, description="自选股标签过滤")
     include_portfolio_context: bool = Field(True, description="是否包含持仓上下文")

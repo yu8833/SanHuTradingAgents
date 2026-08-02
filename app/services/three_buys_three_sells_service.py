@@ -19,27 +19,37 @@
 
 import asyncio
 import logging
-import numpy as np
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional, Any, Tuple
+from typing import Any
+
+import numpy as np
 
 from app.core.database import get_mongo_db
 from app.utils.technical_indicators import (
-    calc_ma_np, calc_ema_np, calc_macd_np, calc_bias_np,
-    calc_atr_np, calc_volume_ratio_np, calc_ma_slope_np,
-    calc_ma_convergence_np, is_zhongyang_np,
-    calc_slow_group_compression_np, classify_stock_type,
-    get_s1_threshold, calc_market_trend,
-    calc_fast_slow_separation_np, calc_strong_bull_duration_np
+    calc_atr_np,
+    calc_bias_np,
+    calc_ema_np,
+    calc_fast_slow_separation_np,
+    calc_ma_convergence_np,
+    calc_ma_np,
+    calc_ma_slope_np,
+    calc_macd_np,
+    calc_market_trend,
+    calc_slow_group_compression_np,
+    calc_strong_bull_duration_np,
+    calc_volume_ratio_np,
+    classify_stock_type,
+    get_s1_threshold,
+    is_zhongyang_np,
 )
 
 logger = logging.getLogger(__name__)
 
 
-def _validate_score_dimensions(dimensions: Dict[str, int], actual_score: int,
-                                  bonus: int = 0, service_name: str = "") -> Dict[str, Any]:
+def _validate_score_dimensions(dimensions: dict[str, int], actual_score: int,
+                                  bonus: int = 0, service_name: str = "") -> dict[str, Any]:
     """
     评分维度加总校验。
     确保各维度满分之和为100，实际得分在[0,100]之间。
@@ -102,7 +112,7 @@ class ThreeBuysThreeSellsService:
             self._dg_service = get_dg_prosperity_service()
         return self._dg_service
 
-    async def _get_all_stock_codes(self) -> List[dict]:
+    async def _get_all_stock_codes(self) -> list[dict]:
         """获取所有 A 股股票代码列表"""
         db = await self._get_db()
         collection = db["stock_basic_info"]
@@ -140,10 +150,10 @@ class ThreeBuysThreeSellsService:
 
     async def _batch_get_quotes(
         self,
-        stock_codes: List[str],
+        stock_codes: list[str],
         start_date: str,
         end_date: str
-    ) -> Dict[str, List[Dict[str, Any]]]:
+    ) -> dict[str, list[dict[str, Any]]]:
         """批量获取多只股票日线数据，按数据源优先级去重"""
         db = await self._get_db()
         collection = db["stock_daily_quotes"]
@@ -190,12 +200,12 @@ class ThreeBuysThreeSellsService:
 
     def _precompute_indicators(
         self,
-        kline_data: List[Dict[str, Any]],
+        kline_data: list[dict[str, Any]],
         stock_code: str,
         stock_name: str,
         industry: str = "",
         market_cap: float = 0
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """预计算单只股票所有技术指标（numpy 向量化）
 
         Returns:
@@ -336,7 +346,7 @@ class ThreeBuysThreeSellsService:
 
     # ===== 信号检测方法 =====
 
-    def _check_b1(self, ind: Dict[str, Any], idx: int, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _check_b1(self, ind: dict[str, Any], idx: int, params: dict[str, Any]) -> dict[str, Any] | None:
         """B1 左侧买点: BIAS(60) ∈ [-30%, -20%]
 
         enable_strict_b1=True时增加确认条件:
@@ -387,7 +397,7 @@ class ThreeBuysThreeSellsService:
             "position_pct": 0.33
         }
 
-    def _check_b2(self, ind: Dict[str, Any], idx: int, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _check_b2(self, ind: dict[str, Any], idx: int, params: dict[str, Any]) -> dict[str, Any] | None:
         """B2 突破买点: 放量 + 中阳 + 站上 MA55 & MA60 至少 2 条"""
         if idx < 60:
             return None
@@ -435,7 +445,7 @@ class ThreeBuysThreeSellsService:
             "position_pct": 0.67
         }
 
-    def _check_b3(self, ind: Dict[str, Any], idx: int, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _check_b3(self, ind: dict[str, Any], idx: int, params: dict[str, Any]) -> dict[str, Any] | None:
         """B3 回踩买点: 30日内BIAS曾>15%、MA13>MA55、当前BIAS∈±5% + 放量中阳支撑"""
         if idx < 60:
             return None
@@ -479,8 +489,8 @@ class ThreeBuysThreeSellsService:
         }
 
     def _check_gmma_b2(
-        self, ind: Dict[str, Any], idx: int, params: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
+        self, ind: dict[str, Any], idx: int, params: dict[str, Any]
+    ) -> dict[str, Any] | None:
         """GMMA版B2加仓信号: 强多5-25根+首次回踩快组下沿+收阳站回+放量+20日内涨幅>15%
 
         GMMA Pro实战手册定义的B2是加仓信号，捕捉健康上涨中的第一次像样回调。
@@ -540,7 +550,7 @@ class ThreeBuysThreeSellsService:
             "position_pct": 0.8
         }
 
-    def _get_volume_threshold(self, market_cap: float, params: Dict[str, Any]) -> float:
+    def _get_volume_threshold(self, market_cap: float, params: dict[str, Any]) -> float:
         """流动性自适应放量阈值: 大盘股1.3x，小盘股2.0x
 
         大盘股流动性好，1.3倍放量已足够确认；
@@ -559,7 +569,7 @@ class ThreeBuysThreeSellsService:
             ratio = (market_cap - 100) / 900
             return base * (1.33 - ratio * 0.46)
 
-    def _check_bottom_pickup(self, ind: Dict[str, Any], idx: int) -> bool:
+    def _check_bottom_pickup(self, ind: dict[str, Any], idx: int) -> bool:
         """抄底信号: 3天不新低 + 短期均线粘合向上"""
         if idx < 20:
             return False
@@ -581,12 +591,9 @@ class ThreeBuysThreeSellsService:
             return False
         ma5_rising = bool(ind["ma5"][idx] > ind["ma5"][idx - 3] and ind["ma5"][idx] > ind["ma5"][idx - 1])
         ma8_rising = bool(ind["ma8"][idx] > ind["ma8"][idx - 3] and ind["ma8"][idx] > ind["ma8"][idx - 1])
-        if not (ma5_rising and ma8_rising):
-            return False
+        return ma5_rising and ma8_rising
 
-        return True
-
-    def _check_macd_divergence(self, ind: Dict[str, Any], idx: int, window: int = 20) -> str:
+    def _check_macd_divergence(self, ind: dict[str, Any], idx: int, window: int = 20) -> str:
         """MACD 背离检测: 'top' 顶背离 / 'bottom' 底背离 / '' 无"""
         if idx < window + 5:
             return ""
@@ -611,7 +618,7 @@ class ThreeBuysThreeSellsService:
             return "bottom"
         return ""
 
-    def _check_volume_price_divergence(self, ind: Dict[str, Any], idx: int, window: int = 5) -> bool:
+    def _check_volume_price_divergence(self, ind: dict[str, Any], idx: int, window: int = 5) -> bool:
         """量价背离: 价涨量跌 + 在 MA60 上方"""
         if idx < window + 20:
             return False
@@ -623,7 +630,7 @@ class ThreeBuysThreeSellsService:
         volume_falling = avg_vol_recent < avg_vol_earlier * 0.9
         return bool(price_rising and volume_falling)
 
-    def _check_s1(self, ind: Dict[str, Any], idx: int, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _check_s1(self, ind: dict[str, Any], idx: int, params: dict[str, Any]) -> dict[str, Any] | None:
         """S1 减仓预警: BIAS 超过阈值 或 GMMA 慢组压缩 > 30%"""
         if idx < 60:
             return None
@@ -653,7 +660,7 @@ class ThreeBuysThreeSellsService:
             }
         return None
 
-    def _check_s2(self, ind: Dict[str, Any], idx: int, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _check_s2(self, ind: dict[str, Any], idx: int, params: dict[str, Any]) -> dict[str, Any] | None:
         """S2 主减仓: 连续N日跌破 MA5 & MA8 & MA13（全部）"""
         break_days = params.get("s2_break_days", 2)
         if idx < break_days + 13:
@@ -671,7 +678,7 @@ class ThreeBuysThreeSellsService:
             "sell_pct": 0.67
         }
 
-    def _check_s3(self, ind: Dict[str, Any], idx: int) -> Optional[Dict[str, Any]]:
+    def _check_s3(self, ind: dict[str, Any], idx: int) -> dict[str, Any] | None:
         """S3 清仓: 跌破 MA55 & MA60 且 MA60 拐头向下"""
         if idx < 65:
             return None
@@ -690,7 +697,7 @@ class ThreeBuysThreeSellsService:
             }
         return None
 
-    def _check_safety_net(self, ind: Dict[str, Any], idx: int, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _check_safety_net(self, ind: dict[str, Any], idx: int, params: dict[str, Any]) -> dict[str, Any] | None:
         """安全网: 单日跌幅 > ATR(14) × 3"""
         if idx < 14:
             return None
@@ -701,10 +708,7 @@ class ThreeBuysThreeSellsService:
         prev_close = ind["closes"][idx - 1] if idx > 0 else ind["closes"][idx]
         pct_drop = ind["pct_chgs"][idx]
 
-        if prev_close > 0:
-            atr_pct = atr / prev_close * 100
-        else:
-            atr_pct = 5.0
+        atr_pct = atr / prev_close * 100 if prev_close > 0 else 5.0
 
         if pct_drop < -atr_pct * 3:
             return {
@@ -717,7 +721,7 @@ class ThreeBuysThreeSellsService:
             }
         return None
 
-    def _check_gmma_strong_bull(self, ind: Dict[str, Any], idx: int) -> bool:
+    def _check_gmma_strong_bull(self, ind: dict[str, Any], idx: int) -> bool:
         """判断GMMA强多状态: 快组多头 + 慢组多头 + 快组在慢组之上
 
         强多状态是GMMA Pro系统中最核心的状态过滤:
@@ -734,13 +738,13 @@ class ThreeBuysThreeSellsService:
 
     def _check_trailing_stop(
         self,
-        ind: Dict[str, Any],
+        ind: dict[str, Any],
         idx: int,
         highest_price: float,
         buy_price: float,
         atr_multiplier: float = 2.5,
         min_profit_pct: float = 8.0
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """ATR移动止损: 盈利达到min_profit_pct后才启动，止损价 = 最高价 - ATR(14) × multiplier
 
         移动止损是趋势策略锁定利润的核心机制:
@@ -772,7 +776,7 @@ class ThreeBuysThreeSellsService:
             }
         return None
 
-    def _check_overheat(self, ind: Dict[str, Any], idx: int, params: Dict[str, Any]) -> bool:
+    def _check_overheat(self, ind: dict[str, Any], idx: int, params: dict[str, Any]) -> bool:
         """过热检查: 快慢分离度>15% 或 BIAS过高 → 禁止新建仓
 
         GMMA Pro速查卡: 分离度>15%警惕均值回归
@@ -790,7 +794,7 @@ class ThreeBuysThreeSellsService:
         self,
         market_trend: str,
         stock_trend: str,
-        params: Dict[str, Any]
+        params: dict[str, Any]
     ) -> float:
         """大盘×个股四象限仓位矩阵
 
@@ -818,7 +822,7 @@ class ThreeBuysThreeSellsService:
         self,
         market_trend: str,
         stock_trend: str,
-        params: Dict[str, Any]
+        params: dict[str, Any]
     ) -> float:
         """B1左侧买点的仓位系数（根据大盘趋势调节）
 
@@ -836,7 +840,7 @@ class ThreeBuysThreeSellsService:
         else:  # down
             return 0.3
 
-    def _judge_stock_trend(self, ind: Dict[str, Any], idx: int) -> str:
+    def _judge_stock_trend(self, ind: dict[str, Any], idx: int) -> str:
         """判断个股趋势: up=上升, down=下降, neutral=震荡"""
         if idx < 60:
             return "neutral"
@@ -855,12 +859,12 @@ class ThreeBuysThreeSellsService:
 
     def _calc_signal_score(
         self,
-        ind: Dict[str, Any],
+        ind: dict[str, Any],
         idx: int,
         signal_type: str,
         market_trend: str,
-        dg_info: Optional[dict]
-    ) -> Tuple[int, List[str], Dict[str, Any]]:
+        dg_info: dict | None
+    ) -> tuple[int, list[str], dict[str, Any]]:
         """信号强度评分（100 分制）
 
         维度: 成交量 / K线涨幅 / 均线形态 / 大盘配合 / MACD
@@ -868,7 +872,7 @@ class ThreeBuysThreeSellsService:
         """
         score = 0
         details = []
-        dimensions: Dict[str, int] = {}
+        dimensions: dict[str, int] = {}
 
         # 成交量（20分）
         vr = ind["volume_ratio"][idx]
@@ -963,17 +967,17 @@ class ThreeBuysThreeSellsService:
             if q == "double_click":
                 bonus = 10
                 score = min(100, score + bonus)
-                details.append(f"ΔG 戴维斯双击")
+                details.append("ΔG 戴维斯双击")
             elif q == "reversal":
-                details.append(f"ΔG 困境反转")
+                details.append("ΔG 困境反转")
             elif q == "peaking":
                 bonus = -10
                 score = max(0, score + bonus)
-                details.append(f"ΔG 景气见顶(减分)")
+                details.append("ΔG 景气见顶(减分)")
             elif q == "double_kill":
                 bonus = -30
                 score = max(0, score + bonus)
-                details.append(f"ΔG 戴维斯双杀(大减分)")
+                details.append("ΔG 戴维斯双杀(大减分)")
 
         final_score = min(100, score)
 
@@ -986,9 +990,8 @@ class ThreeBuysThreeSellsService:
 
     # ===== 扫描 =====
 
-    async def scan_three_buys_three_sells(self, params: Dict[str, Any]) -> Dict[str, Any]:
+    async def scan_three_buys_three_sells(self, params: dict[str, Any]) -> dict[str, Any]:
         """三买三卖策略扫描"""
-        import time
         start_time = time.time()
 
         logger.info(f"📊 三买三卖策略扫描开始，参数: {params}")
@@ -1025,7 +1028,7 @@ class ThreeBuysThreeSellsService:
         if len(idx_quotes) > 60:
             idx_ind = self._precompute_indicators(idx_quotes, "000001", "上证指数", "", 0)
             if idx_ind:
-                last = idx_ind["n"] - 1
+                idx_ind["n"] - 1
                 market_trend = calc_market_trend(
                     idx_ind["closes"], idx_ind["ma60"], idx_ind["ma20"]
                 )
@@ -1076,18 +1079,17 @@ class ThreeBuysThreeSellsService:
                     b1["position_pct"] = round(b1["position_pct"] * b1_multiplier, 4)
                     signals.append(b1)
                 # B2/B3/B2G 在启用GMMA过滤时需要强多状态，且不能过热
-                if not enable_gmma or gmma_strong_bull:
-                    if not overheated:
-                        b2 = self._check_b2(ind, last_idx, local_params)
-                        if b2:
-                            signals.append(b2)
-                        b3 = self._check_b3(ind, last_idx, local_params)
-                        if b3:
-                            signals.append(b3)
-                        # GMMA版B2（加仓信号）
-                        b2g = self._check_gmma_b2(ind, last_idx, local_params)
-                        if b2g:
-                            signals.append(b2g)
+                if (not enable_gmma or gmma_strong_bull) and not overheated:
+                    b2 = self._check_b2(ind, last_idx, local_params)
+                    if b2:
+                        signals.append(b2)
+                    b3 = self._check_b3(ind, last_idx, local_params)
+                    if b3:
+                        signals.append(b3)
+                    # GMMA版B2（加仓信号）
+                    b2g = self._check_gmma_b2(ind, last_idx, local_params)
+                    if b2g:
+                        signals.append(b2g)
 
                 s1 = self._check_s1(ind, last_idx, params)
                 if s1:
@@ -1209,12 +1211,12 @@ class ThreeBuysThreeSellsService:
 
     def _determine_sell_point(
         self,
-        ind: Dict[str, Any],
+        ind: dict[str, Any],
         buy_idx: int,
         buy_price: float,
         max_hold_days: int,
-        params: Dict[str, Any]
-    ) -> Tuple[int, float, str]:
+        params: dict[str, Any]
+    ) -> tuple[int, float, str]:
         """确定卖点（从买入日后开始找第一个卖出信号）
 
         Returns:
@@ -1261,9 +1263,8 @@ class ThreeBuysThreeSellsService:
 
     # ===== 回测 =====
 
-    async def backtest(self, params: Dict[str, Any] = None) -> Dict[str, Any]:
+    async def backtest(self, params: dict[str, Any] = None) -> dict[str, Any]:
         """三买三卖策略回测"""
-        import time
         start_time = time.time()
 
         if params is None:
@@ -1316,7 +1317,7 @@ class ThreeBuysThreeSellsService:
 
         logger.info(f"📊 三买三卖策略回测开始，参数: {params}")
 
-        db = await self._get_db()
+        await self._get_db()
 
         stock_list = await self._get_all_stock_codes()
         total_scanned = len(stock_list)
@@ -1348,8 +1349,8 @@ class ThreeBuysThreeSellsService:
 
         # 计算大盘环境
         logger.info("📊 计算市场环境指标...")
-        market_rise_ratio: Dict[str, float] = {}
-        market_trend_map: Dict[str, str] = {}
+        market_rise_ratio: dict[str, float] = {}
+        market_trend_map: dict[str, str] = {}
 
         idx_klines = quotes_by_stock.get("000001", [])
         idx_ind = None
@@ -1386,11 +1387,11 @@ class ThreeBuysThreeSellsService:
             else:
                 market_trend_map[td] = "neutral"
 
-        logger.info(f"📊 市场环境计算完成")
+        logger.info("📊 市场环境计算完成")
 
         # 预计算所有股票指标
         logger.info("📊 预计算指标...")
-        indicators_cache: Dict[str, Any] = {}
+        indicators_cache: dict[str, Any] = {}
         processed = 0
         for code in stock_codes:
             kline = quotes_by_stock.get(code, [])
@@ -1417,7 +1418,7 @@ class ThreeBuysThreeSellsService:
 
         # 收集每日信号
         logger.info("📊 收集每日信号...")
-        daily_signals: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        daily_signals: dict[str, list[dict[str, Any]]] = defaultdict(list)
 
         for code, ind in indicators_cache.items():
             date_to_idx = ind["date_to_idx"]
@@ -1455,15 +1456,12 @@ class ThreeBuysThreeSellsService:
                     (lambda: self._check_b1(ind, idx, local_params), "B1")
                 ]
 
-                b2g_included = False
-                if not enable_gmma or gmma_strong_bull:
-                    if not overheated:
-                        check_fns_m.append((lambda: self._check_b2(ind, idx, local_params), "B2"))
-                        check_fns_m.append((lambda: self._check_b3(ind, idx, local_params), "B3"))
-                        check_fns_m.append((lambda: self._check_gmma_b2(ind, idx, local_params), "B2G"))
-                        b2g_included = True
+                if (not enable_gmma or gmma_strong_bull) and not overheated:
+                    check_fns_m.append((lambda: self._check_b2(ind, idx, local_params), "B2"))
+                    check_fns_m.append((lambda: self._check_b3(ind, idx, local_params), "B3"))
+                    check_fns_m.append((lambda: self._check_gmma_b2(ind, idx, local_params), "B2G"))
 
-                for check_fn, sig_type_hint in check_fns_m:
+                for check_fn, _sig_type_hint in check_fns_m:
                     sig = check_fn()
                     if sig:
                         sig_type = sig["type"]
@@ -1498,14 +1496,14 @@ class ThreeBuysThreeSellsService:
         # 模拟交易
         logger.info("📊 模拟交易...")
         capital = initial_capital
-        positions: Dict[str, Dict[str, Any]] = {}
-        all_trades: List[Dict[str, Any]] = []
-        daily_results: List[Dict[str, Any]] = []
-        capital_history: List[float] = []
+        positions: dict[str, dict[str, Any]] = {}
+        all_trades: list[dict[str, Any]] = []
+        daily_results: list[dict[str, Any]] = []
+        capital_history: list[float] = []
         peak_capital = initial_capital
         max_drawdown = 0.0
 
-        for di, td in enumerate(backtest_dates):
+        for _di, td in enumerate(backtest_dates):
             # 先处理卖出 - 逐日检查卖出信号（支持S1分批止盈 + ATR移动止损）
             codes_to_sell = []
             for code, pos in positions.items():
@@ -1890,7 +1888,7 @@ class ThreeBuysThreeSellsService:
             total_fees += cost * 0.002  # 粗略估算买卖双边手续费
 
         # 按信号类型统计
-        signal_stats: Dict[str, Dict[str, Any]] = {}
+        signal_stats: dict[str, dict[str, Any]] = {}
         for t in all_trades:
             st = t["signal_type"]
             if st not in signal_stats:
@@ -1909,7 +1907,7 @@ class ThreeBuysThreeSellsService:
             }
 
         # 按卖出原因统计
-        sell_stats: Dict[str, Dict[str, Any]] = {}
+        sell_stats: dict[str, dict[str, Any]] = {}
         for t in all_trades:
             sr = t["sell_reason"]
             if sr not in sell_stats:

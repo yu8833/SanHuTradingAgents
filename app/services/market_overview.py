@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
 from app.services import vibe_astock as astock
 from app.services import vibe_gstock as gstock

@@ -4,8 +4,9 @@
 提供统一的历史K线数据查询接口
 """
 import logging
-from datetime import datetime, date
-from typing import Dict, Any, List, Optional
+from datetime import datetime
+from typing import Any
+
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
@@ -19,28 +20,28 @@ router = APIRouter(prefix="/api/historical-data", tags=["历史数据"])
 class HistoricalDataQuery(BaseModel):
     """历史数据查询请求"""
     symbol: str = Field(..., description="股票代码")
-    start_date: Optional[str] = Field(None, description="开始日期 (YYYY-MM-DD)")
-    end_date: Optional[str] = Field(None, description="结束日期 (YYYY-MM-DD)")
-    data_source: Optional[str] = Field(None, description="数据源 (tushare/akshare/baostock)")
-    period: Optional[str] = Field(None, description="数据周期 (daily/weekly/monthly)")
-    limit: Optional[int] = Field(None, ge=1, le=1000, description="限制返回数量")
+    start_date: str | None = Field(None, description="开始日期 (YYYY-MM-DD)")
+    end_date: str | None = Field(None, description="结束日期 (YYYY-MM-DD)")
+    data_source: str | None = Field(None, description="数据源 (tushare/akshare/baostock)")
+    period: str | None = Field(None, description="数据周期 (daily/weekly/monthly)")
+    limit: int | None = Field(None, ge=1, le=1000, description="限制返回数量")
 
 
 class HistoricalDataResponse(BaseModel):
     """历史数据响应"""
     success: bool
     message: str
-    data: Optional[Dict[str, Any]] = None
+    data: dict[str, Any] | None = None
 
 
 @router.get("/query/{symbol}", response_model=HistoricalDataResponse)
 async def get_historical_data(
     symbol: str,
-    start_date: Optional[str] = Query(None, description="开始日期 (YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="结束日期 (YYYY-MM-DD)"),
-    data_source: Optional[str] = Query(None, description="数据源 (tushare/akshare/baostock)"),
-    period: Optional[str] = Query(None, description="数据周期 (daily/weekly/monthly)"),
-    limit: Optional[int] = Query(None, ge=1, le=1000, description="限制返回数量")
+    start_date: str | None = Query(None, description="开始日期 (YYYY-MM-DD)"),
+    end_date: str | None = Query(None, description="结束日期 (YYYY-MM-DD)"),
+    data_source: str | None = Query(None, description="数据源 (tushare/akshare/baostock)"),
+    period: str | None = Query(None, description="数据周期 (daily/weekly/monthly)"),
+    limit: int | None = Query(None, ge=1, le=1000, description="限制返回数量")
 ):
     """
     查询股票历史数据

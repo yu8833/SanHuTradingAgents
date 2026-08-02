@@ -12,7 +12,7 @@
 
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from app.services.retail.retail_screening_base import RetailScreeningBase
 
@@ -26,8 +26,8 @@ class ConvertibleArbitrageService(RetailScreeningBase):
     DATA_SOURCE_CONNECTED = True
 
     async def scan_convertible_arbitrage(
-        self, params: Dict[str, Any] = None
-    ) -> Dict[str, Any]:
+        self, params: dict[str, Any] = None
+    ) -> dict[str, Any]:
         """
         扫描转债下修博弈候选
 
@@ -50,8 +50,8 @@ class ConvertibleArbitrageService(RetailScreeningBase):
 
         try:
             from app.services.retail.convertible_bond_data import (
-                get_all_convertible_bonds,
                 filter_down_revision_candidates,
+                get_all_convertible_bonds,
             )
 
             # 获取全市场可转债数据（带缓存）
@@ -98,7 +98,7 @@ class ConvertibleArbitrageService(RetailScreeningBase):
                 "data_source_status": "error",
             }
 
-    async def backtest(self, params: Dict[str, Any] = None) -> Dict[str, Any]:
+    async def backtest(self, params: dict[str, Any] = None) -> dict[str, Any]:
         """回测"""
         return {
             "message": "可转债策略暂不支持历史回测（缺少历史转债价格与转股价数据）",
@@ -125,7 +125,7 @@ class ConvertibleArbitrageService(RetailScreeningBase):
         }
 
 
-_service: Optional[ConvertibleArbitrageService] = None
+_service: ConvertibleArbitrageService | None = None
 
 
 def get_convertible_arbitrage_service() -> ConvertibleArbitrageService:

@@ -3,16 +3,14 @@
 """
 
 import logging
-import json
 import os
-from datetime import datetime
-from typing import Dict, Any, List
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from typing import Any
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from app.routers.auth_db import get_current_user
-from app.core.database import get_mongo_db, get_redis_client
 from app.services.database_service import DatabaseService
 
 router = APIRouter(prefix="/database", tags=["数据库管理"])
@@ -22,7 +20,7 @@ logger = logging.getLogger("webapi")
 class BackupRequest(BaseModel):
     """备份请求"""
     name: str
-    collections: List[str] = []  # 空列表表示备份所有集合
+    collections: list[str] = []  # 空列表表示备份所有集合
 
 class ImportRequest(BaseModel):
     """导入请求"""
@@ -32,22 +30,22 @@ class ImportRequest(BaseModel):
 
 class ExportRequest(BaseModel):
     """导出请求"""
-    collections: List[str] = []  # 空列表表示导出所有集合
+    collections: list[str] = []  # 空列表表示导出所有集合
     format: str = "json"  # json, csv
     sanitize: bool = False  # 是否脱敏（清空敏感字段，用于演示系统）
 
 # 响应模型
 class DatabaseStatusResponse(BaseModel):
     """数据库状态响应"""
-    mongodb: Dict[str, Any]
-    redis: Dict[str, Any]
+    mongodb: dict[str, Any]
+    redis: dict[str, Any]
 
 class DatabaseStatsResponse(BaseModel):
     """数据库统计响应"""
     total_collections: int
     total_documents: int
     total_size: int
-    collections: List[Dict[str, Any]]
+    collections: list[dict[str, Any]]
 
 class BackupResponse(BaseModel):
     """备份响应"""
@@ -55,7 +53,7 @@ class BackupResponse(BaseModel):
     name: str
     size: int
     created_at: str
-    collections: List[str]
+    collections: list[str]
 
 # 数据库服务实例
 database_service = DatabaseService()

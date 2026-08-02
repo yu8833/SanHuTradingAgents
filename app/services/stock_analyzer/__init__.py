@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 趋势交易分析器模块
 
@@ -6,13 +5,13 @@
 """
 
 from .stock_analyzer import (
+    BuySignal,
+    MACDStatus,
+    RSIStatus,
     StockTrendAnalyzer,
     TrendAnalysisResult,
     TrendStatus,
     VolumeStatus,
-    BuySignal,
-    MACDStatus,
-    RSIStatus,
     analyze_stock,
 )
 

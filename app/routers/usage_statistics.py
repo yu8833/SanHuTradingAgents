@@ -4,11 +4,11 @@
 
 import logging
 from datetime import datetime
-from typing import Optional, List, Dict, Any
-from fastapi import APIRouter, Depends, Query, HTTPException
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.routers.auth_db import get_current_user
-from app.models.config import UsageRecord, UsageStatistics
 from app.services.usage_statistics_service import usage_statistics_service
 
 logger = logging.getLogger("app.routers.usage_statistics")
@@ -18,14 +18,14 @@ router = APIRouter(prefix="/api/usage", tags=["使用统计"])
 
 @router.get("/records", summary="获取使用记录")
 async def get_usage_records(
-    provider: Optional[str] = Query(None, description="供应商"),
-    model_name: Optional[str] = Query(None, description="模型名称"),
-    start_date: Optional[str] = Query(None, description="开始日期(ISO格式)"),
-    end_date: Optional[str] = Query(None, description="结束日期(ISO格式)"),
+    provider: str | None = Query(None, description="供应商"),
+    model_name: str | None = Query(None, description="模型名称"),
+    start_date: str | None = Query(None, description="开始日期(ISO格式)"),
+    end_date: str | None = Query(None, description="结束日期(ISO格式)"),
     limit: int = Query(20, ge=1, le=1000, description="返回记录数"),
     offset: int = Query(0, ge=0, description="偏移量"),
     current_user: dict = Depends(get_current_user)
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """获取使用记录"""
     try:
         # 解析日期
@@ -58,10 +58,10 @@ async def get_usage_records(
 @router.get("/statistics", summary="获取使用统计")
 async def get_usage_statistics(
     days: int = Query(7, ge=1, le=365, description="统计天数"),
-    provider: Optional[str] = Query(None, description="供应商"),
-    model_name: Optional[str] = Query(None, description="模型名称"),
+    provider: str | None = Query(None, description="供应商"),
+    model_name: str | None = Query(None, description="模型名称"),
     current_user: dict = Depends(get_current_user)
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """获取使用统计"""
     try:
         stats = await usage_statistics_service.get_usage_statistics(
@@ -84,7 +84,7 @@ async def get_usage_statistics(
 async def get_cost_by_provider(
     days: int = Query(7, ge=1, le=365, description="统计天数"),
     current_user: dict = Depends(get_current_user)
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """按供应商统计成本"""
     try:
         cost_data = await usage_statistics_service.get_cost_by_provider(days=days)
@@ -103,7 +103,7 @@ async def get_cost_by_provider(
 async def get_cost_by_model(
     days: int = Query(7, ge=1, le=365, description="统计天数"),
     current_user: dict = Depends(get_current_user)
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """按模型统计成本"""
     try:
         cost_data = await usage_statistics_service.get_cost_by_model(days=days)
@@ -122,7 +122,7 @@ async def get_cost_by_model(
 async def get_daily_cost(
     days: int = Query(7, ge=1, le=365, description="统计天数"),
     current_user: dict = Depends(get_current_user)
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """每日成本统计"""
     try:
         cost_data = await usage_statistics_service.get_daily_cost(days=days)
@@ -141,14 +141,14 @@ async def get_daily_cost(
 async def delete_old_records(
     days: int = Query(90, ge=30, le=365, description="保留天数"),
     current_user: dict = Depends(get_current_user)
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """删除旧记录"""
     try:
         deleted_count = await usage_statistics_service.delete_old_records(days=days)
 
         return {
             "success": True,
-            "message": f"删除旧记录成功",
+            "message": "删除旧记录成功",
             "data": {"deleted_count": deleted_count}
         }
     except Exception as e:

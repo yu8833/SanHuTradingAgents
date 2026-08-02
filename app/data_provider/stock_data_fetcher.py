@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 ===================================
 简化版数据获取模块
@@ -13,8 +12,6 @@
 """
 
 import logging
-from datetime import datetime, timedelta
-from typing import Optional
 
 import pandas as pd
 
@@ -59,6 +56,7 @@ class StockDataFetcher:
             DataFrame with columns: date, open, high, low, close, volume
         """
         import json as json_lib
+
         import requests
         
         # 确定市场前缀
@@ -111,7 +109,7 @@ class StockDataFetcher:
         code: str,
         period: str = "daily",
         limit: int = 100,
-        end_date: Optional[str] = None,
+        end_date: str | None = None,
     ) -> pd.DataFrame:
         """
         获取股票 K 线数据
@@ -177,7 +175,7 @@ class StockDataFetcher:
         
         return df
     
-    def _items_to_dataframe(self, items: list) -> Optional[pd.DataFrame]:
+    def _items_to_dataframe(self, items: list) -> pd.DataFrame | None:
         """将 DataSourceManager 返回的 items 转换为标准 DataFrame"""
         if not items:
             return None
@@ -208,7 +206,7 @@ class StockDataFetcher:
         code: str,
         period: str = "daily",
         limit: int = 100,
-    ) -> Optional[pd.DataFrame]:
+    ) -> pd.DataFrame | None:
         """
         使用 mootdx 获取 K 线数据
         
@@ -342,7 +340,7 @@ class StockDataFetcher:
         # 取前6位
         return code[:6]
     
-    def get_realtime_quote(self, code: str) -> Optional[dict]:
+    def get_realtime_quote(self, code: str) -> dict | None:
         """
         获取实时行情数据
         
@@ -382,7 +380,7 @@ class StockDataFetcher:
         
         return None
     
-    def _parse_sina_quote(self, text: str) -> Optional[dict]:
+    def _parse_sina_quote(self, text: str) -> dict | None:
         """解析新浪实时行情返回的文本"""
         import re
         
@@ -436,7 +434,7 @@ class StockDataFetcher:
 
 
 # 单例模式
-_fetcher: Optional[StockDataFetcher] = None
+_fetcher: StockDataFetcher | None = None
 
 
 def get_stock_data_fetcher() -> StockDataFetcher:
@@ -462,7 +460,7 @@ def get_kline(code: str, period: str = "daily", limit: int = 100) -> pd.DataFram
     return get_stock_data_fetcher().get_kline(code, period, limit)
 
 
-def get_realtime_quote(code: str) -> Optional[dict]:
+def get_realtime_quote(code: str) -> dict | None:
     """
     便捷函数：获取实时行情
     

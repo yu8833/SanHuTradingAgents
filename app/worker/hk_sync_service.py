@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 港股数据服务（按需获取+缓存模式）
 
@@ -15,22 +14,22 @@
 - 缓存时长可配置（默认24小时）
 """
 
-import asyncio
 import logging
-from datetime import datetime, timedelta
-from typing import List, Dict, Optional, Any
-from pymongo import UpdateOne
 
 # 导入港股数据提供器
 import sys
+from datetime import datetime
 from pathlib import Path
+
+from pymongo import UpdateOne
+
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
+from app.core.config import settings
+from app.core.database import get_mongo_db
 from tradingagents.dataflows.providers.hk.hk_stock import HKStockProvider
 from tradingagents.dataflows.providers.hk.improved_hk import ImprovedHKStockProvider
-from app.core.database import get_mongo_db
-from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +60,7 @@ class HKDataService:
         """初始化同步服务"""
         logger.info("✅ 港股同步服务初始化完成")
 
-    def _get_hk_stock_list_from_akshare(self) -> List[str]:
+    def _get_hk_stock_list_from_akshare(self) -> list[str]:
         """
         从 AKShare 获取所有港股列表
 
@@ -69,8 +68,9 @@ class HKDataService:
             List[str]: 港股代码列表
         """
         try:
-            import akshare as ak
             from datetime import datetime, timedelta
+
+            import akshare as ak
 
             # 检查缓存是否有效
             if (self.hk_stock_list and self._stock_list_cache_time and
@@ -107,7 +107,7 @@ class HKDataService:
             logger.info("📋 使用备用港股列表")
             return self._get_fallback_stock_list()
 
-    def _get_fallback_stock_list(self) -> List[str]:
+    def _get_fallback_stock_list(self) -> list[str]:
         """
         获取备用港股列表（主要港股标的）
 
@@ -141,7 +141,7 @@ class HKDataService:
         self,
         source: str,
         force_update: bool = False
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         """
         从指定数据源同步港股基础信息
 
@@ -232,7 +232,7 @@ class HKDataService:
 
         return result
 
-    async def _sync_basic_info_from_akshare_batch(self, force_update: bool = False) -> Dict[str, int]:
+    async def _sync_basic_info_from_akshare_batch(self, force_update: bool = False) -> dict[str, int]:
         """
         从 AKShare 批量同步港股基础信息（一次 API 调用获取所有数据）
 
@@ -243,8 +243,9 @@ class HKDataService:
             Dict: 同步统计信息 {updated: int, inserted: int, failed: int}
         """
         try:
-            import akshare as ak
             from datetime import datetime
+
+            import akshare as ak
 
             logger.info("🇭🇰 开始批量同步港股基础信息 (数据源: akshare)")
 
@@ -339,7 +340,7 @@ class HKDataService:
             logger.error(f"❌ AKShare 批量同步失败: {e}")
             return {"updated": 0, "inserted": 0, "failed": 0}
 
-    def _normalize_stock_info(self, stock_info: Dict, source: str) -> Dict:
+    def _normalize_stock_info(self, stock_info: dict, source: str) -> dict:
         """
         标准化股票信息格式
         
@@ -376,7 +377,7 @@ class HKDataService:
     async def sync_quotes_from_source(
         self,
         source: str = "yfinance"
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         """
         从指定数据源同步港股实时行情
         

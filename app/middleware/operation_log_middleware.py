@@ -3,15 +3,15 @@
 自动记录用户的API操作日志
 """
 
-import time
-import json
 import logging
-from typing import Optional, Dict, Any
+import time
+from typing import Any
+
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from app.services.operation_log_service import log_operation
 from app.models.operation_log import ActionType
+from app.services.operation_log_service import log_operation
 
 logger = logging.getLogger("webapi")
 
@@ -27,7 +27,7 @@ def set_operation_log_enabled(flag: bool) -> None:
 class OperationLogMiddleware(BaseHTTPMiddleware):
     """操作日志记录中间件"""
 
-    def __init__(self, app, skip_paths: Optional[list] = None):
+    def __init__(self, app, skip_paths: list | None = None):
         super().__init__(app)
         # 跳过记录日志的路径
         self.skip_paths = skip_paths or [
@@ -113,10 +113,7 @@ class OperationLogMiddleware(BaseHTTPMiddleware):
             return True
 
         # 只记录特定HTTP方法
-        if request.method not in ["POST", "PUT", "DELETE", "PATCH"]:
-            return True
-
-        return False
+        return request.method not in ["POST", "PUT", "DELETE", "PATCH"]
 
     def _get_client_ip(self, request: Request) -> str:
         """获取客户端IP地址"""
@@ -135,7 +132,7 @@ class OperationLogMiddleware(BaseHTTPMiddleware):
 
         return "unknown"
 
-    async def _get_user_info(self, request: Request) -> Optional[Dict[str, Any]]:
+    async def _get_user_info(self, request: Request) -> dict[str, Any] | None:
         """获取用户信息"""
         try:
             # 从请求状态中获取用户信息（由认证中间件设置）
@@ -229,7 +226,7 @@ class OperationLogMiddleware(BaseHTTPMiddleware):
 
     async def _log_operation(
         self,
-        user_info: Dict[str, Any],
+        user_info: dict[str, Any],
         method: str,
         path: str,
         response: Response,
@@ -282,13 +279,13 @@ class OperationLogMiddleware(BaseHTTPMiddleware):
 # 便捷函数：手动记录操作日志
 async def manual_log_operation(
     request: Request,
-    user_info: Dict[str, Any],
+    user_info: dict[str, Any],
     action_type: str,
     action: str,
-    details: Optional[Dict[str, Any]] = None,
+    details: dict[str, Any] | None = None,
     success: bool = True,
-    error_message: Optional[str] = None,
-    duration_ms: Optional[int] = None
+    error_message: str | None = None,
+    duration_ms: int | None = None
 ):
     """手动记录操作日志"""
     try:

@@ -18,9 +18,10 @@
 
 import logging
 from datetime import datetime
-from typing import List, Optional, Dict, Any
-from pydantic import BaseModel
+from typing import Any
+
 from bson import ObjectId
+from pydantic import BaseModel
 
 from app.core.database import get_mongo_db
 
@@ -29,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 class Position(BaseModel):
     """持仓数据模型"""
-    id: Optional[str] = None
+    id: str | None = None
     user_id: str
     symbol: str                      # 股票代码，如 "600519"（paper_positions 用 code 字段存储）
     stock_name: str                  # 股票名称
@@ -37,16 +38,16 @@ class Position(BaseModel):
     cost_price: float                # 成本价（paper_positions 用 avg_cost 字段存储）
     position_ratio: float            # 仓位占比 (0-1)
     buy_date: str                    # 买入日期
-    notes: Optional[str] = None      # 备注
+    notes: str | None = None      # 备注
     # 散户策略扩展字段（作为元数据存储在 paper_positions 上）
-    strategy: Optional[str] = "default"
-    stop_loss_price: Optional[float] = None
-    take_profit_price: Optional[float] = None
-    thesis: Optional[str] = None
-    status: Optional[str] = "open"
-    exit_price: Optional[float] = None
-    exit_date: Optional[str] = None
-    exit_reason: Optional[str] = None
+    strategy: str | None = "default"
+    stop_loss_price: float | None = None
+    take_profit_price: float | None = None
+    thesis: str | None = None
+    status: str | None = "open"
+    exit_price: float | None = None
+    exit_date: str | None = None
+    exit_reason: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -56,13 +57,13 @@ class Position(BaseModel):
 
 class PositionUpdate(BaseModel):
     """持仓更新模型"""
-    quantity: Optional[int] = None
-    cost_price: Optional[float] = None
-    position_ratio: Optional[float] = None
-    notes: Optional[str] = None
-    stop_loss_price: Optional[float] = None
-    take_profit_price: Optional[float] = None
-    thesis: Optional[str] = None
+    quantity: int | None = None
+    cost_price: float | None = None
+    position_ratio: float | None = None
+    notes: str | None = None
+    stop_loss_price: float | None = None
+    take_profit_price: float | None = None
+    thesis: str | None = None
 
 
 class PortfolioService:
@@ -82,7 +83,7 @@ class PortfolioService:
     # ------------------------------------------------------------------
     # 序列化：paper_positions 文档 → API 输出格式
     # ------------------------------------------------------------------
-    def _serialize_position(self, doc: Dict[str, Any]) -> Dict[str, Any]:
+    def _serialize_position(self, doc: dict[str, Any]) -> dict[str, Any]:
         """
         将 paper_positions 文档序列化为 API 输出格式。
         字段映射：code→symbol, avg_cost→cost_price
@@ -214,7 +215,7 @@ class PortfolioService:
             logger.error(f"❌ 创建持仓失败: {e}", exc_info=True)
             raise Exception(f"创建持仓失败: {str(e)}")
 
-    async def get_positions(self, user_id: str) -> List[Dict[str, Any]]:
+    async def get_positions(self, user_id: str) -> list[dict[str, Any]]:
         """获取用户所有持仓（quantity > 0 的未平仓持仓）"""
         try:
             db = await self._get_db()
@@ -232,7 +233,7 @@ class PortfolioService:
             logger.error(f"❌ 获取持仓列表失败: {e}", exc_info=True)
             raise Exception(f"获取持仓列表失败: {str(e)}")
 
-    async def update_position(self, position_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    async def update_position(self, position_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
         """
         更新持仓元数据（止损/止盈/投资逻辑等）
 
@@ -299,9 +300,9 @@ class PortfolioService:
         self,
         position_id: str,
         exit_price: float,
-        exit_date: Optional[str] = None,
+        exit_date: str | None = None,
         exit_reason: str = ""
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """
         平仓（将数量归零，保留元数据用于历史追踪）
 
@@ -342,7 +343,7 @@ class PortfolioService:
             logger.error(f"❌ 平仓失败: {e}", exc_info=True)
             raise Exception(f"平仓失败: {str(e)}")
 
-    async def get_open_positions(self, user_id: str) -> List[Dict[str, Any]]:
+    async def get_open_positions(self, user_id: str) -> list[dict[str, Any]]:
         """获取用户所有未平仓持仓（quantity > 0）"""
         try:
             db = await self._get_db()
@@ -359,7 +360,7 @@ class PortfolioService:
 
     async def get_positions_by_strategy(
         self, user_id: str, strategy: str
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """按策略类型获取持仓"""
         try:
             db = await self._get_db()
@@ -376,8 +377,8 @@ class PortfolioService:
             raise Exception(f"按策略获取持仓失败: {str(e)}")
 
     async def get_closed_positions(
-        self, user_id: str, strategy: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
+        self, user_id: str, strategy: str | None = None
+    ) -> list[dict[str, Any]]:
         """
         获取已平仓记录（用于策略表现统计）
 
@@ -386,7 +387,7 @@ class PortfolioService:
         """
         try:
             db = await self._get_db()
-            query: Dict[str, Any] = {
+            query: dict[str, Any] = {
                 "user_id": user_id,
                 "side": "sell",
                 "pnl": {"$ne": 0.0},
@@ -419,8 +420,8 @@ class PortfolioService:
             raise Exception(f"获取已平仓持仓失败: {str(e)}")
 
     async def get_strategy_performance(
-        self, user_id: str, strategy: Optional[str] = None
-    ) -> Dict[str, Any]:
+        self, user_id: str, strategy: str | None = None
+    ) -> dict[str, Any]:
         """
         获取策略表现统计（胜率/盈亏比/平均收益等）
 
@@ -429,7 +430,7 @@ class PortfolioService:
         """
         try:
             db = await self._get_db()
-            query: Dict[str, Any] = {
+            query: dict[str, Any] = {
                 "user_id": user_id,
                 "side": "sell",
             }
@@ -483,7 +484,7 @@ class PortfolioService:
             logger.error(f"❌ 获取策略表现失败: {e}", exc_info=True)
             raise Exception(f"获取策略表现失败: {str(e)}")
 
-    async def import_positions(self, positions: List[Position]) -> int:
+    async def import_positions(self, positions: list[Position]) -> int:
         """批量导入持仓（写入 paper_positions，附带策略元数据）"""
         try:
             db = await self._get_db()
@@ -527,7 +528,7 @@ class PortfolioService:
             logger.error(f"❌ 批量导入持仓失败: {e}", exc_info=True)
             raise Exception(f"批量导入持仓失败: {str(e)}")
 
-    async def get_position_summary(self, user_id: str) -> Dict[str, Any]:
+    async def get_position_summary(self, user_id: str) -> dict[str, Any]:
         """获取持仓汇总（持仓数量、总成本、市值、盈亏等）"""
         try:
             positions = await self.get_positions(user_id)

@@ -18,7 +18,7 @@ import asyncio
 import logging
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import numpy as np
 
@@ -31,8 +31,8 @@ class VolumePriceService(RetailScreeningBase):
     """量价配合策略"""
 
     async def scan_volume_price(
-        self, params: Dict[str, Any] = None
-    ) -> Dict[str, Any]:
+        self, params: dict[str, Any] = None
+    ) -> dict[str, Any]:
         """
         扫描量价配合候选股
 
@@ -113,8 +113,8 @@ class VolumePriceService(RetailScreeningBase):
         self,
         code: str,
         sv: dict,
-        quotes: List[dict],
-    ) -> Optional[dict]:
+        quotes: list[dict],
+    ) -> dict | None:
         """分析单只股票"""
         name = sv.get("name", "")
         industry = sv.get("industry", "")
@@ -317,11 +317,11 @@ class VolumePriceService(RetailScreeningBase):
             "market": market,
         }
 
-    async def backtest(self, params: Dict[str, Any] = None) -> Dict[str, Any]:
+    async def backtest(self, params: dict[str, Any] = None) -> dict[str, Any]:
         """回测"""
         params = params or {}
 
-        async def scan_func(date_str: str) -> List[dict]:
+        async def scan_func(date_str: str) -> list[dict]:
             screening_data = await self._get_screening_view_for_date(date_str)
             sorted_codes = sorted(
                 screening_data.keys(),
@@ -351,7 +351,7 @@ class VolumePriceService(RetailScreeningBase):
         return await self.run_backtest("volume_price", scan_func, params)
 
 
-_service: Optional[VolumePriceService] = None
+_service: VolumePriceService | None = None
 
 
 def get_volume_price_service() -> VolumePriceService:

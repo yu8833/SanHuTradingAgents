@@ -4,8 +4,8 @@
 模拟分析完成后的保存过程
 """
 
-import sys
 import os
+import sys
 from datetime import datetime
 
 # 添加项目路径
@@ -81,14 +81,14 @@ def test_save_analysis_result():
         research_depth = 3
         result_data = create_mock_analysis_results()
         
-        print(f"📝 测试数据:")
+        print("📝 测试数据:")
         print(f"   分析ID: {analysis_id}")
         print(f"   股票代码: {stock_symbol}")
         print(f"   分析师: {analysts}")
         print(f"   研究深度: {research_depth}")
         
         # 执行保存
-        print(f"\n💾 开始保存分析结果...")
+        print("\n💾 开始保存分析结果...")
         success = save_analysis_result(
             analysis_id=analysis_id,
             stock_symbol=stock_symbol,
@@ -102,7 +102,7 @@ def test_save_analysis_result():
             print("✅ 分析结果保存成功！")
             
             # 检查文件是否创建
-            print(f"\n📁 检查保存的文件:")
+            print("\n📁 检查保存的文件:")
             
             # 检查JSON文件
             from web.components.analysis_results import get_analysis_results_dir
@@ -159,7 +159,7 @@ def test_save_analysis_result():
 
 def test_mongodb_save():
     """测试MongoDB保存"""
-    print(f"\n🗄️ 测试MongoDB保存...")
+    print("\n🗄️ 测试MongoDB保存...")
     
     try:
         from web.utils.mongodb_report_manager import mongodb_report_manager
@@ -201,7 +201,7 @@ def main():
     # 测试MongoDB保存
     mongodb_success = test_mongodb_save()
     
-    print(f"\n🎉 测试完成")
+    print("\n🎉 测试完成")
     print(f"📄 文件保存: {'✅ 成功' if save_success else '❌ 失败'}")
     print(f"🗄️ MongoDB保存: {'✅ 成功' if mongodb_success else '❌ 失败'}")
 

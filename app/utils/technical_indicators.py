@@ -17,8 +17,8 @@
 - calc_slow_group_compression_np: GMMA 慢组压缩度
 """
 
+
 import numpy as np
-from typing import List, Optional, Tuple
 
 
 def calc_ma_np(closes: np.ndarray, period: int) -> np.ndarray:
@@ -69,7 +69,7 @@ def calc_macd_np(
     fast: int = 12,
     slow: int = 26,
     signal: int = 9
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """计算 MACD 指标
 
     Args:
@@ -190,7 +190,7 @@ def calc_ma_slope_np(ma_arr: np.ndarray, window: int = 5) -> np.ndarray:
     return slope
 
 
-def calc_ma_convergence_np(ma_list: List[np.ndarray]) -> np.ndarray:
+def calc_ma_convergence_np(ma_list: list[np.ndarray]) -> np.ndarray:
     """计算均线粘合度（多条均线之间的最大间距百分比）
 
     Args:

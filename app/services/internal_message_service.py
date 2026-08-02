@@ -2,20 +2,20 @@
 内部消息数据服务
 提供统一的内部消息存储、查询和管理功能
 """
-from typing import Optional, List, Dict, Any, Union
-from datetime import datetime, timedelta
-from dataclasses import dataclass, field
 import logging
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any
+
 from pymongo import ReplaceOne
 from pymongo.errors import BulkWriteError
-from bson import ObjectId
 
 from app.core.database import get_database
 
 logger = logging.getLogger(__name__)
 
 
-def convert_objectid_to_str(data: Union[Dict, List[Dict]]) -> Union[Dict, List[Dict]]:
+def convert_objectid_to_str(data: dict | list[dict]) -> dict | list[dict]:
     """
     转换 MongoDB ObjectId 为字符串，避免 JSON 序列化错误
 
@@ -40,21 +40,21 @@ def convert_objectid_to_str(data: Union[Dict, List[Dict]]) -> Union[Dict, List[D
 @dataclass
 class InternalMessageQueryParams:
     """内部消息查询参数"""
-    symbol: Optional[str] = None
-    symbols: Optional[List[str]] = None
-    message_type: Optional[str] = None  # research_report/insider_info/analyst_note/meeting_minutes/internal_analysis
-    category: Optional[str] = None  # fundamental_analysis/technical_analysis/market_sentiment/risk_assessment
-    source_type: Optional[str] = None  # internal_research/insider/analyst/meeting/system_analysis
-    department: Optional[str] = None
-    author: Optional[str] = None
-    start_time: Optional[datetime] = None
-    end_time: Optional[datetime] = None
-    importance: Optional[str] = None
-    access_level: Optional[str] = None  # public/internal/restricted/confidential
-    min_confidence: Optional[float] = None
-    rating: Optional[str] = None  # strong_buy/buy/hold/sell/strong_sell
-    keywords: Optional[List[str]] = None
-    tags: Optional[List[str]] = None
+    symbol: str | None = None
+    symbols: list[str] | None = None
+    message_type: str | None = None  # research_report/insider_info/analyst_note/meeting_minutes/internal_analysis
+    category: str | None = None  # fundamental_analysis/technical_analysis/market_sentiment/risk_assessment
+    source_type: str | None = None  # internal_research/insider/analyst/meeting/system_analysis
+    department: str | None = None
+    author: str | None = None
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+    importance: str | None = None
+    access_level: str | None = None  # public/internal/restricted/confidential
+    min_confidence: float | None = None
+    rating: str | None = None  # strong_buy/buy/hold/sell/strong_sell
+    keywords: list[str] | None = None
+    tags: list[str] | None = None
     limit: int = 50
     skip: int = 0
     sort_by: str = "created_time"
@@ -65,11 +65,11 @@ class InternalMessageQueryParams:
 class InternalMessageStats:
     """内部消息统计信息"""
     total_count: int = 0
-    message_types: Dict[str, int] = field(default_factory=dict)
-    categories: Dict[str, int] = field(default_factory=dict)
-    departments: Dict[str, int] = field(default_factory=dict)
-    importance_levels: Dict[str, int] = field(default_factory=dict)
-    ratings: Dict[str, int] = field(default_factory=dict)
+    message_types: dict[str, int] = field(default_factory=dict)
+    categories: dict[str, int] = field(default_factory=dict)
+    departments: dict[str, int] = field(default_factory=dict)
+    importance_levels: dict[str, int] = field(default_factory=dict)
+    ratings: dict[str, int] = field(default_factory=dict)
     avg_confidence: float = 0.0
     recent_count: int = 0  # 最近24小时
 
@@ -100,8 +100,8 @@ class InternalMessageService:
     
     async def save_internal_messages(
         self, 
-        messages: List[Dict[str, Any]]
-    ) -> Dict[str, int]:
+        messages: list[dict[str, Any]]
+    ) -> dict[str, int]:
         """
         批量保存内部消息
         
@@ -158,7 +158,7 @@ class InternalMessageService:
     async def query_internal_messages(
         self, 
         params: InternalMessageQueryParams
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         查询内部消息
         
@@ -248,7 +248,7 @@ class InternalMessageService:
         message_type: str = None,
         access_level: str = None,
         limit: int = 20
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """获取最新内部消息"""
         params = InternalMessageQueryParams(
             symbol=symbol,
@@ -266,7 +266,7 @@ class InternalMessageService:
         symbol: str = None,
         access_level: str = None,
         limit: int = 50
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """全文搜索内部消息"""
         try:
             collection = await self._get_collection()
@@ -302,7 +302,7 @@ class InternalMessageService:
         symbol: str = None,
         department: str = None,
         limit: int = 20
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """获取研究报告"""
         params = InternalMessageQueryParams(
             symbol=symbol,
@@ -319,7 +319,7 @@ class InternalMessageService:
         symbol: str = None,
         author: str = None,
         limit: int = 20
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """获取分析师笔记"""
         params = InternalMessageQueryParams(
             symbol=symbol,

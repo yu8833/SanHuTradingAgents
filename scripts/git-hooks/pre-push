@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# ============================================================
+# L3 防线：git push 前自动执行 ruff + pytest（全部在容器里跑）
+#
+# 触发方式：
+#   1. 推荐： git config core.hooksPath scripts/git-hooks
+#   2. 手动： cp scripts/git-hooks/pre-push .git/hooks/pre-push && chmod +x .git/hooks/pre-push
+# 临时跳过：
+#   git push --no-verify   （不推荐，CI 仍会拦住）
+#
+# 逻辑：
+#   1) 确保 backend/mongodb/redis 容器已启动并健康
+#   2) 构建 test 镜像（首次慢，后续用缓存）
+#   3) ruff check app/ tests/ cli/
+#   4) pytest -m "unit or regression"  —— 不依赖外部服务，秒级
+#   5) pytest -m smoke                  —— 需要 backend 健康，冒烟核心端点
+#   6) 任何一步失败都终止 push，输出失败原因
+# ============================================================
+
+set -e
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+cd "${PROJECT_ROOT}"
+
+echo -e "${YELLOW}[pre-push] 开始 push 前质量检查（全部在容器中执行）...${NC}"
+echo ""
+
+# ---- Step 0: 确保基础服务健康 ----
+echo -e "${YELLOW}[0/4] 检查 docker-compose 服务状态...${NC}"
+
+# 检查 docker 是否可用
+if ! command -v docker >/dev/null 2>&1; then
+    echo -e "${RED}❌ 未找到 docker 命令，无法在容器中执行测试。${NC}"
+    echo "请先安装 Docker。"
+    exit 1
+fi
+
+# 检查 backend 是否健康
+BACKEND_HEALTHY=$(docker inspect --format='{{.State.Health.Status}}' tradingagents-backend 2>/dev/null || echo "not_found")
+if [ "$BACKEND_HEALTHY" != "healthy" ]; then
+    echo -e "${YELLOW}⚠️  backend 容器未运行或未健康，正在启动...${NC}"
+    docker compose up -d backend mongodb redis 2>&1 | tail -10
+    echo -e "${YELLOW}等待 backend 健康（最多 3 分钟）...${NC}"
+    for i in $(seq 1 36); do
+        BACKEND_HEALTHY=$(docker inspect --format='{{.State.Health.Status}}' tradingagents-backend 2>/dev/null || echo "not_found")
+        if [ "$BACKEND_HEALTHY" = "healthy" ]; then
+            echo -e "${GREEN}✅ backend 已健康${NC}"
+            break
+        fi
+        sleep 5
+        echo "  已等待 $((i*5))s，当前状态: $BACKEND_HEALTHY"
+    done
+fi
+
+if [ "$BACKEND_HEALTHY" != "healthy" ]; then
+    echo -e "${RED}❌ backend 容器未能在 3 分钟内变为健康状态。${NC}"
+    echo "请手动检查：docker compose logs backend"
+    echo "跳过 push 前检查（CI 仍会跑完整测试）。"
+    exit 1
+fi
+echo ""
+
+# ---- Step 1: 构建 test 镜像 ----
+echo -e "${YELLOW}[1/4] 构建 test 镜像（使用缓存）...${NC}"
+if ! docker compose build test 2>&1 | tail -5; then
+    echo -e "${RED}❌ test 镜像构建失败。${NC}"
+    echo "请检查 Dockerfile.test。"
+    exit 1
+fi
+echo -e "${GREEN}✅ test 镜像就绪${NC}"
+echo ""
+
+# ---- Step 2: ruff lint（警告模式，不阻止 push） ----
+echo -e "${YELLOW}[2/4] 运行 ruff lint（容器内，warn 模式）...${NC}"
+set +e
+RUFF_OUTPUT=$(docker compose run --rm --no-deps test ruff check app/ tests/ --output-format=concise 2>&1)
+RUFF_EXIT=$?
+set -e
+echo "${RUFF_OUTPUT}" | tail -20
+if [ ${RUFF_EXIT} -ne 0 ]; then
+    # 统计问题数量
+    ERR_COUNT=$(echo "${RUFF_OUTPUT}" | grep -c "Found" || true)
+    echo ""
+    echo -e "${YELLOW}⚠️  ruff lint 发现风格问题（${ERR_COUNT:-若干} 处），已放行但请尽快修复。"
+    echo "    可执行：docker compose run --rm test ruff check --fix --unsafe-fixes app/ tests/${NC}"
+else
+    echo -e "${GREEN}✅ ruff lint 全通过${NC}"
+fi
+echo ""
+
+# ---- Step 3: unit + regression ----
+echo -e "${YELLOW}[3/4] 运行 unit + regression 测试（容器内）...${NC}"
+if ! docker compose run --rm test python -m pytest \
+      -m "unit or regression" \
+      --ignore=tests/_archive \
+      --tb=short --strict-markers --timeout=120 -v; then
+    echo ""
+    echo -e "${RED}❌ 单元/防回归测试失败，push 已终止。"
+    echo "请查看上方输出定位失败的测试。"
+    echo "如果是 regression 测试失败，说明对应 bug 复发了，请立即修复。${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✅ unit + regression 全部通过${NC}"
+echo ""
+
+# ---- Step 4: smoke ----
+echo -e "${YELLOW}[4/4] 运行冒烟测试（容器内，对 backend:8000）...${NC}"
+if ! docker compose run --rm test python -m pytest \
+      tests/smoke/ -m smoke \
+      --ignore=tests/_archive \
+      --tb=short --strict-markers --timeout=60 -v; then
+    echo ""
+    echo -e "${RED}❌ 冒烟测试失败，push 已终止。"
+    echo "核心端点有问题，请先修复。${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✅ 冒烟测试全部通过${NC}"
+echo ""
+
+echo -e "${GREEN}🎉 [pre-push] 所有检查通过，允许 push。${NC}"
+exit 0

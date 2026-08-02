@@ -3,10 +3,11 @@ WebSocket 通知系统
 使用 Redis PubSub 支持多 Worker 部署
 """
 import asyncio
-import json
+import contextlib
 import logging
 from datetime import datetime
-from fastapi import APIRouter, WebSocket, Query
+
+from fastapi import APIRouter, Query, WebSocket
 
 from app.services.auth_service import AuthService
 from app.services.user_service import user_service
@@ -94,10 +95,8 @@ async def websocket_notifications_endpoint(
     finally:
         if 'heartbeat_task' in locals():
             heartbeat_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await heartbeat_task
-            except asyncio.CancelledError:
-                pass
         
         await manager.disconnect(websocket, user_id)
 

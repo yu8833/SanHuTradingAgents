@@ -11,17 +11,18 @@
 
 import asyncio
 import logging
-import numpy as np
-import pandas as pd
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional, Any, Tuple
+from typing import Any
+
+import numpy as np
+
 from app.core.database import get_mongo_db
 
 logger = logging.getLogger(__name__)
 
 
-def _validate_limit_up_score(dimensions: Dict[str, float], actual_score: float,
-                               service_name: str = "limit_up_pullback") -> Dict[str, Any]:
+def _validate_limit_up_score(dimensions: dict[str, float], actual_score: float,
+                               service_name: str = "limit_up_pullback") -> dict[str, Any]:
     """
     涨停回调评分维度校验。
     记录各维度得分，校验实际得分在[0,100]之间。
@@ -58,7 +59,7 @@ class LimitUpPullbackService:
             self.db = get_mongo_db()
         return self.db
 
-    async def _get_all_stock_codes(self) -> List[dict]:
+    async def _get_all_stock_codes(self) -> list[dict]:
         """获取所有A股股票代码列表"""
         db = await self._get_db()
         collection = db["stock_basic_info"]
@@ -85,7 +86,7 @@ class LimitUpPullbackService:
                 })
         return result
 
-    async def _get_daily_kline(self, stock_code: str, days: int = 60) -> List[Dict[str, Any]]:
+    async def _get_daily_kline(self, stock_code: str, days: int = 60) -> list[dict[str, Any]]:
         """获取股票日线数据
         
         Args:
@@ -150,7 +151,7 @@ class LimitUpPullbackService:
         else:
             return 9.5   # 普通主板
 
-    def _is_limit_up(self, kline: Dict[str, Any], stock_code: str = "", stock_name: str = "", prev_close: float = None) -> bool:
+    def _is_limit_up(self, kline: dict[str, Any], stock_code: str = "", stock_name: str = "", prev_close: float = None) -> bool:
         """判断是否为涨停（区分板块）"""
         threshold = self._get_limit_up_threshold(stock_code, stock_name)
         pct_chg = kline.get("pct_chg")
@@ -164,7 +165,7 @@ class LimitUpPullbackService:
 
         return False
 
-    def _calculate_ma(self, closes: List[float], period: int) -> List[Optional[float]]:
+    def _calculate_ma(self, closes: list[float], period: int) -> list[float | None]:
         """计算移动平均线"""
         mas = []
         for i in range(len(closes)):
@@ -174,7 +175,7 @@ class LimitUpPullbackService:
                 mas.append(float(np.mean(closes[i - period + 1:i + 1])))
         return mas
 
-    def _calculate_volume_ratio(self, volumes: List[float], idx: int, period: int = 5) -> float:
+    def _calculate_volume_ratio(self, volumes: list[float], idx: int, period: int = 5) -> float:
         """计算量比（当日成交量 / 前N日平均成交量）"""
         if idx < period or idx >= len(volumes):
             return 1.0
@@ -187,7 +188,7 @@ class LimitUpPullbackService:
         
         return float(current_vol / avg_vol)
 
-    def _calculate_atr(self, highs: List[float], lows: List[float], closes: List[float], period: int = 14) -> List[float]:
+    def _calculate_atr(self, highs: list[float], lows: list[float], closes: list[float], period: int = 14) -> list[float]:
         """计算标准14日ATR（Wilder's Average True Range）"""
         n = len(closes)
         atr = [0.0] * n
@@ -226,9 +227,9 @@ class LimitUpPullbackService:
         self, 
         stock_code: str, 
         stock_name: str,
-        kline_data: List[Dict[str, Any]],
-        params: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
+        kline_data: list[dict[str, Any]],
+        params: dict[str, Any]
+    ) -> dict[str, Any] | None:
         """分析单只股票是否符合涨停回调策略
         
         Args:
@@ -334,11 +335,11 @@ class LimitUpPullbackService:
 
         pullback_closes = [closes[i] for i in pullback_indices]
         pullback_volumes = [volumes[i] for i in pullback_indices]
-        pullback_lows = [lows[i] for i in pullback_indices]
-        pullback_pcts = [pct_chgs[i] for i in pullback_indices]
+        [lows[i] for i in pullback_indices]
+        [pct_chgs[i] for i in pullback_indices]
 
         # 计算回调幅度
-        max_close_in_pullback = max(pullback_closes)
+        max(pullback_closes)
         min_close_in_pullback = min(pullback_closes)
         current_close = closes[current_idx]
         
@@ -359,9 +360,8 @@ class LimitUpPullbackService:
         ma10_broken_days = 0
         if above_ma10:
             for idx in pullback_indices:
-                if ma10[idx] is not None:
-                    if closes[idx] < ma10[idx]:
-                        ma10_broken_days += 1
+                if ma10[idx] is not None and closes[idx] < ma10[idx]:
+                    ma10_broken_days += 1
             # 允许1天收盘跌破（盘中洗盘），超过则不符合
             if ma10_broken_days > 1:
                 return None
@@ -393,7 +393,7 @@ class LimitUpPullbackService:
         ground_day_open = opens[min_volume_idx_in_pullback]
         ground_day_close = closes[min_volume_idx_in_pullback]
         ground_day_low = lows[min_volume_idx_in_pullback]
-        ground_day_high = highs[min_volume_idx_in_pullback]
+        highs[min_volume_idx_in_pullback]
 
         # 下影线长度 = min(open, close) - low
         lower_shadow = min(ground_day_open, ground_day_close) - ground_day_low
@@ -429,14 +429,13 @@ class LimitUpPullbackService:
 
         # ========== 次日阳线确认 ==========
         # 战法标准：地量+下影线之后，次日收阳线也可作为确认信号
-        next_day_bullish = False
         if min_volume_idx_in_pullback + 1 <= current_idx:
             next_day_idx = min_volume_idx_in_pullback + 1
             next_day_close = closes[next_day_idx]
             next_day_open = opens[next_day_idx]
             # 次日收阳线（收盘>开盘）且收盘高于地量日收盘
             if next_day_close > next_day_open and next_day_close > ground_day_close:
-                next_day_bullish = True
+                pass
 
         # ========== 地量日其他指标 ==========
         # 地量日是第几天
@@ -459,7 +458,7 @@ class LimitUpPullbackService:
         fake_breakout = False
 
         if breakout_ma5 and ma5[current_idx] is not None and ma5[current_idx - 1] is not None:
-            prev_close = closes[current_idx - 1]
+            closes[current_idx - 1]
             # 5日线方向判断（走平或上翘）：斜率≥0为走平或上翘
             ma5_slope = ma5[current_idx] - ma5[current_idx - 1]
             ma5_flat_or_up = ma5_slope >= 0
@@ -499,7 +498,7 @@ class LimitUpPullbackService:
         # ========== 综合评分（调整后） ==========
         score = 0.0
         score_details = []
-        dimensions: Dict[str, float] = {}
+        dimensions: dict[str, float] = {}
 
         # 缩量评分（20分）
         shrink_score = max(0, 20 * (1 - volume_shrink_ratio))
@@ -564,7 +563,7 @@ class LimitUpPullbackService:
             score += breakout_score
             score_details.append(f"突破5日线: 放量{breakout_volume:.1f}倍 → {breakout_score:.1f}分")
         elif fake_breakout:
-            score_details.append(f"假突破过滤: 上影线过长，不确认右侧")
+            score_details.append("假突破过滤: 上影线过长，不确认右侧")
         dimensions["突破5日线"] = breakout_score
 
         # 评分维度校验
@@ -651,7 +650,7 @@ class LimitUpPullbackService:
 
     def _determine_sell_point(
         self,
-        kline_data: List[Dict[str, Any]],
+        kline_data: list[dict[str, Any]],
         buy_idx: int,
         limit_up_close: float,
         limit_up_idx: int,
@@ -748,20 +747,19 @@ class LimitUpPullbackService:
                         return check_idx, "高位止盈"
 
             # 卖点5：移动止盈 - 跌破移动止盈价
-            if trailing_stop_active and trailing_stop_price > 0:
-                if current_close < trailing_stop_price:
-                    if ma5[check_idx] is not None and current_close < ma5[check_idx]:
-                        return check_idx, "5日线止盈"
-                    else:
-                        return check_idx, "ATR止盈"
+            if trailing_stop_active and trailing_stop_price > 0 and current_close < trailing_stop_price:
+                if ma5[check_idx] is not None and current_close < ma5[check_idx]:
+                    return check_idx, "5日线止盈"
+                else:
+                    return check_idx, "ATR止盈"
 
         sell_idx = min(buy_idx + max_hold_days, len(kline_data) - 1)
         return sell_idx, "到期卖出"
 
     async def scan_limit_up_pullback(
         self,
-        params: Dict[str, Any] = None
-    ) -> Dict[str, Any]:
+        params: dict[str, Any] = None
+    ) -> dict[str, Any]:
         """扫描符合涨停回调策略的股票
         【性能优化】使用批量数据查询，将数据库查询从5000+次减少到2次
         
@@ -947,11 +945,11 @@ class LimitUpPullbackService:
 
     def _precompute_stock_indicators(
         self,
-        kline_data: List[Dict[str, Any]],
+        kline_data: list[dict[str, Any]],
         stock_code: str,
         stock_name: str,
-        params: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
+        params: dict[str, Any]
+    ) -> dict[str, Any] | None:
         """预计算单只股票的所有指标，用于回测加速
 
         Returns:
@@ -1040,16 +1038,16 @@ class LimitUpPullbackService:
 
     def _analyze_at_idx(
         self,
-        indicators: Dict[str, Any],
+        indicators: dict[str, Any],
         current_idx: int,
         stock_code: str,
         stock_name: str,
-        params: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
+        params: dict[str, Any]
+    ) -> dict[str, Any] | None:
         if current_idx < 20:
             return None
 
-        n = indicators["n"]
+        indicators["n"]
         dates = indicators["dates"]
         opens = indicators["opens"]
         closes = indicators["closes"]
@@ -1160,13 +1158,12 @@ class LimitUpPullbackService:
         space_position_ok = space_position_ok or ma10_bounce_ok
 
         # 次日阳线确认
-        next_day_bullish = False
         if min_vol_idx_in_pullback + 1 <= current_idx:
             next_day_idx = min_vol_idx_in_pullback + 1
             next_day_close = closes[next_day_idx]
             next_day_open = opens[next_day_idx]
             if next_day_close > next_day_open and next_day_close > ground_day_close:
-                next_day_bullish = True
+                pass
 
         days_since_ground_day = current_idx - min_vol_idx_in_pullback
         ground_day_low_price = lows[min_vol_idx_in_pullback]
@@ -1178,7 +1175,7 @@ class LimitUpPullbackService:
         fake_breakout = False
 
         if breakout_ma5 and not np.isnan(ma5[current_idx]) and not np.isnan(ma5[current_idx - 1]):
-            prev_close = closes[current_idx - 1]
+            closes[current_idx - 1]
             ma5_slope = ma5[current_idx] - ma5[current_idx - 1]
             ma5_flat_or_up = ma5_slope >= 0
 
@@ -1265,7 +1262,7 @@ class LimitUpPullbackService:
             score += breakout_score
             score_details.append(f"突破5日线: 放量{breakout_volume:.1f}倍 → {breakout_score:.1f}分")
         elif fake_breakout:
-            score_details.append(f"假突破过滤: 上影线过长，不确认右侧")
+            score_details.append("假突破过滤: 上影线过长，不确认右侧")
 
         # 评分维度汇总（用于 score_validation 校验）
         dimensions = {
@@ -1342,7 +1339,7 @@ class LimitUpPullbackService:
 
     def _sell_point_fast(
         self,
-        indicators: Dict[str, Any],
+        indicators: dict[str, Any],
         buy_idx: int,
         limit_up_close: float,
         limit_up_idx: int,
@@ -1362,10 +1359,10 @@ class LimitUpPullbackService:
         volumes = indicators["volumes"]
         highs = indicators["highs"]
         opens = indicators["opens"]
-        lows = indicators["lows"]
+        indicators["lows"]
         ma5 = indicators["ma5"]
         ma10 = indicators["ma10"]
-        ma20 = indicators["ma20"]
+        indicators["ma20"]
         atr14 = indicators["atr14"]
 
         if buy_idx >= n - 1:
@@ -1424,27 +1421,26 @@ class LimitUpPullbackService:
                         return check_idx, "高位止盈"
 
             # 卖点5：移动止盈 - 跌破移动止盈价（5日线和ATR止盈取较高者）
-            if trailing_stop_active and trailing_stop_price > 0:
-                if current_close < trailing_stop_price:
-                    # 判断是哪种止盈
-                    if not np.isnan(ma5[check_idx]) and current_close < ma5[check_idx]:
-                        return check_idx, "5日线止盈"
-                    else:
-                        return check_idx, "ATR止盈"
+            if trailing_stop_active and trailing_stop_price > 0 and current_close < trailing_stop_price:
+                # 判断是哪种止盈
+                if not np.isnan(ma5[check_idx]) and current_close < ma5[check_idx]:
+                    return check_idx, "5日线止盈"
+                else:
+                    return check_idx, "ATR止盈"
 
         sell_idx = min(buy_idx + max_hold_days, n - 1)
         return sell_idx, "到期卖出"
 
     def _check_daily_sell_signal(
         self,
-        indicators: Dict[str, Any],
+        indicators: dict[str, Any],
         check_idx: int,
-        pos_state: Dict[str, Any],
+        pos_state: dict[str, Any],
         buy_price: float,
         limit_up_close: float,
         limit_up_idx: int,
         max_hold_days: int = 20
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """逐日检查卖出信号（用于逐日盯市回测）
 
         检查并更新持仓状态，如触发卖出则返回卖出信息。
@@ -1537,8 +1533,8 @@ class LimitUpPullbackService:
 
     async def backtest(
         self,
-        params: Dict[str, Any] = None
-    ) -> Dict[str, Any]:
+        params: dict[str, Any] = None
+    ) -> dict[str, Any]:
         """涨停回调策略回测（性能优化版）
 
         优化点：
@@ -1680,7 +1676,7 @@ class LimitUpPullbackService:
 
         # 计算每日市场涨跌比例（大盘环境过滤）
         logger.info("📊 计算市场环境指标...")
-        market_rise_ratio: Dict[str, float] = {}
+        market_rise_ratio: dict[str, float] = {}
         for td in trade_dates:
             rise_count = 0
             total_count = 0
@@ -1702,8 +1698,8 @@ class LimitUpPullbackService:
         logger.info(f"📊 回测天数: {len(backtest_dates)}")
 
         # ===== 核心优化：预计算+按日期收集信号 =====
-        daily_signals: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-        indicators_cache: Dict[str, Any] = {}
+        daily_signals: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        indicators_cache: dict[str, Any] = {}
 
         precompute_start = time.time()
         processed_stocks = 0
@@ -1752,15 +1748,15 @@ class LimitUpPullbackService:
         all_trades = []
         capital_history = []
 
-        holdings: Dict[str, dict] = {}
-        recent_buys: Dict[str, str] = {}
+        holdings: dict[str, dict] = {}
+        recent_buys: dict[str, str] = {}
         capital = float(initial_capital)
         peak_capital = float(initial_capital)
         max_drawdown = 0.0
 
         sorted_dates = sorted(backtest_dates)
 
-        for date_idx, current_date in enumerate(sorted_dates):
+        for _date_idx, current_date in enumerate(sorted_dates):
             # ========== 1. 处理卖出 ==========
             codes_to_sell = []
             for code, pos in holdings.items():
@@ -2051,7 +2047,7 @@ class LimitUpPullbackService:
             total_fees += cost_basis * (fee_rate * 2 + slippage_pct * 2)
 
         # 按信号类型统计
-        signal_stats: Dict[str, Dict[str, Any]] = {}
+        signal_stats: dict[str, dict[str, Any]] = {}
         for t in all_trades:
             st = t["signal_type"]
             if st not in signal_stats:
@@ -2070,7 +2066,7 @@ class LimitUpPullbackService:
             }
 
         # 按卖出原因统计
-        sell_stats: Dict[str, Dict[str, Any]] = {}
+        sell_stats: dict[str, dict[str, Any]] = {}
         for t in all_trades:
             sr = t["sell_reason"]
             if sr not in sell_stats:

@@ -88,25 +88,16 @@ def test_tool_selection_scenarios():
                   f"realtime_data={realtime_data_enabled}")
             
             # 市场数据工具选择
-            if realtime_data_enabled:
-                market_primary = "get_YFin_data_online"
-            else:
-                market_primary = "get_YFin_data"
+            market_primary = "get_YFin_data_online" if realtime_data_enabled else "get_YFin_data"
             
             # 新闻工具选择
             if online_news_enabled:
-                if online_tools_enabled:
-                    news_primary = "get_global_news_openai"
-                else:
-                    news_primary = "get_google_news"
+                news_primary = "get_global_news_openai" if online_tools_enabled else "get_google_news"
             else:
                 news_primary = "get_finnhub_news"
             
             # 社交媒体工具选择
-            if online_tools_enabled:
-                social_primary = "get_stock_news_openai"
-            else:
-                social_primary = "get_reddit_stock_info"
+            social_primary = "get_stock_news_openai" if online_tools_enabled else "get_reddit_stock_info"
             
             # 验证结果
             expected = scenario['expected']
@@ -116,7 +107,7 @@ def test_tool_selection_scenarios():
                 "social_primary": social_primary
             }
             
-            print(f"   结果:")
+            print("   结果:")
             for tool_type, tool_name in results.items():
                 expected_tool = expected[tool_type]
                 status = "✅" if tool_name == expected_tool else "❌"
@@ -129,7 +120,7 @@ def test_tool_selection_scenarios():
 
 def test_trading_graph_integration():
     """测试TradingGraph集成"""
-    print(f"\n🔗 测试TradingGraph集成")
+    print("\n🔗 测试TradingGraph集成")
     print("=" * 70)
     
     try:
@@ -198,7 +189,7 @@ def test_trading_graph_integration():
 
 def test_us_stock_data_independence():
     """测试美股数据获取的独立性"""
-    print(f"\n🇺🇸 测试美股数据获取独立性")
+    print("\n🇺🇸 测试美股数据获取独立性")
     print("=" * 70)
     
     print("验证美股数据获取不再依赖OpenAI配置...")
@@ -234,6 +225,7 @@ def test_us_stock_data_independence():
                 
                 # 重新加载配置
                 from importlib import reload
+
                 import tradingagents.default_config
                 reload(tradingagents.default_config)
                 
@@ -265,7 +257,7 @@ def main():
     test_trading_graph_integration()
     test_us_stock_data_independence()
     
-    print(f"\n🎉 测试完成！")
+    print("\n🎉 测试完成！")
     print("💡 现在美股数据获取基于专门的配置字段，不再依赖OpenAI配置")
 
 if __name__ == "__main__":

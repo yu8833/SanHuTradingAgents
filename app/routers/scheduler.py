@@ -1,19 +1,17 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """
 定时任务管理路由
 提供定时任务的查询、暂停、恢复、手动触发等功能
 """
 
-from fastapi import APIRouter, HTTPException, Depends, Query
-from typing import List, Dict, Any, Optional
-from datetime import datetime
-from pydantic import BaseModel, Field
-import logging
+from typing import Any
 
-from app.routers.auth_db import get_current_user
-from app.services.scheduler_service import get_scheduler_service, SchedulerService
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
+
 from app.core.response import ok
+from app.routers.auth_db import get_current_user
+from app.services.scheduler_service import SchedulerService, get_scheduler_service
 
 router = APIRouter(prefix="/api/scheduler", tags=["scheduler"])
 
@@ -21,20 +19,20 @@ router = APIRouter(prefix="/api/scheduler", tags=["scheduler"])
 class JobTriggerRequest(BaseModel):
     """手动触发任务请求"""
     job_id: str
-    kwargs: Optional[Dict[str, Any]] = None
+    kwargs: dict[str, Any] | None = None
 
 
 class JobUpdateRequest(BaseModel):
     """更新任务请求"""
     job_id: str
-    enabled: Optional[bool] = None
-    cron: Optional[str] = None
+    enabled: bool | None = None
+    cron: str | None = None
 
 
 class JobMetadataUpdateRequest(BaseModel):
     """更新任务元数据请求"""
-    display_name: Optional[str] = None
-    description: Optional[str] = None
+    display_name: str | None = None
+    description: str | None = None
 
 
 @router.get("/jobs")
@@ -261,8 +259,8 @@ async def get_job_history(
 async def get_all_history(
     limit: int = Query(50, ge=1, le=200, description="返回数量限制"),
     offset: int = Query(0, ge=0, description="偏移量"),
-    job_id: Optional[str] = Query(None, description="任务ID过滤"),
-    status: Optional[str] = Query(None, description="状态过滤: success/failed"),
+    job_id: str | None = Query(None, description="任务ID过滤"),
+    status: str | None = Query(None, description="状态过滤: success/failed"),
     user: dict = Depends(get_current_user),
     service: SchedulerService = Depends(get_scheduler_service)
 ):
@@ -340,9 +338,9 @@ async def scheduler_health_check(
 async def get_job_executions(
     user: dict = Depends(get_current_user),
     service: SchedulerService = Depends(get_scheduler_service),
-    job_id: Optional[str] = Query(None, description="任务ID过滤"),
-    status: Optional[str] = Query(None, description="状态过滤（success/failed/missed/running）"),
-    is_manual: Optional[bool] = Query(None, description="是否手动触发（true=手动，false=自动，None=全部）"),
+    job_id: str | None = Query(None, description="任务ID过滤"),
+    status: str | None = Query(None, description="状态过滤（success/failed/missed/running）"),
+    is_manual: bool | None = Query(None, description="是否手动触发（true=手动，false=自动，None=全部）"),
     limit: int = Query(50, ge=1, le=200, description="返回数量限制"),
     offset: int = Query(0, ge=0, description="偏移量")
 ):
@@ -383,8 +381,8 @@ async def get_single_job_executions(
     job_id: str,
     user: dict = Depends(get_current_user),
     service: SchedulerService = Depends(get_scheduler_service),
-    status: Optional[str] = Query(None, description="状态过滤（success/failed/missed/running）"),
-    is_manual: Optional[bool] = Query(None, description="是否手动触发（true=手动，false=自动，None=全部）"),
+    status: str | None = Query(None, description="状态过滤（success/failed/missed/running）"),
+    is_manual: bool | None = Query(None, description="是否手动触发（true=手动，false=自动，None=全部）"),
     limit: int = Query(50, ge=1, le=200, description="返回数量限制"),
     offset: int = Query(0, ge=0, description="偏移量")
 ):
@@ -534,20 +532,20 @@ async def delete_execution(
 
 class BatchUpdateRequest(BaseModel):
     """批量更新任务请求"""
-    job_ids: List[str] = Field(..., description="任务ID列表", min_length=1, max_length=100)
-    enabled: Optional[bool] = Field(None, description="是否启用")
-    cron_expression: Optional[str] = Field(None, description="Cron 表达式")
+    job_ids: list[str] = Field(..., description="任务ID列表", min_length=1, max_length=100)
+    enabled: bool | None = Field(None, description="是否启用")
+    cron_expression: str | None = Field(None, description="Cron 表达式")
     reset_failures: bool = Field(False, description="是否重置失败计数")
 
 
 class BatchDeleteRequest(BaseModel):
     """批量删除任务请求"""
-    job_ids: List[str] = Field(..., description="任务ID列表", min_length=1, max_length=100)
+    job_ids: list[str] = Field(..., description="任务ID列表", min_length=1, max_length=100)
 
 
 class BatchTriggerRequest(BaseModel):
     """批量触发任务请求"""
-    job_ids: List[str] = Field(..., description="任务ID列表", min_length=1, max_length=100)
+    job_ids: list[str] = Field(..., description="任务ID列表", min_length=1, max_length=100)
     force: bool = Field(False, description="是否强制执行")
 
 
@@ -555,8 +553,8 @@ class CreateFromFavoritesRequest(BaseModel):
     """从自选股创建定时任务请求"""
     task_type: str = Field("analysis", description="任务类型")
     cron_expression: str = Field(..., description="Cron 表达式")
-    analysis_type: Optional[str] = Field("comprehensive", description="分析类型")
-    tags: Optional[List[str]] = Field(None, description="自选股标签过滤")
+    analysis_type: str | None = Field("comprehensive", description="分析类型")
+    tags: list[str] | None = Field(None, description="自选股标签过滤")
     include_portfolio_context: bool = Field(True, description="是否包含持仓上下文")
 
 
@@ -781,7 +779,7 @@ async def list_jobs_with_metadata(
 
 @router.post("/data-integrity/check")
 async def trigger_data_integrity_check(
-    trade_date: Optional[str] = Query(None, description="指定交易日期 (YYYY-MM-DD)，留空自动检测"),
+    trade_date: str | None = Query(None, description="指定交易日期 (YYYY-MM-DD)，留空自动检测"),
     auto_remediate: bool = Query(True, description="是否自动补数"),
     remediate_source: str = Query("akshare", description="补数数据源"),
     user: dict = Depends(get_current_user),

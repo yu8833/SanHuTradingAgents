@@ -5,16 +5,15 @@
 
 import time
 from datetime import datetime
-from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Header, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel
 
-from app.services.auth_service import AuthService
-from app.services.user_service import user_service
-from app.models.user import UserCreate, UserUpdate
-from app.services.operation_log_service import log_operation
 from app.models.operation_log import ActionType
+from app.models.user import UserCreate
+from app.services.auth_service import AuthService
+from app.services.operation_log_service import log_operation
+from app.services.user_service import user_service
 
 # 尝试导入日志管理器
 try:
@@ -76,14 +75,14 @@ class RegisterRequest(BaseModel):
 
 class UpdateUserStatusRequest(BaseModel):
     """更新用户状态请求"""
-    is_active: Optional[bool] = None
-    is_admin: Optional[bool] = None
-    daily_quota: Optional[int] = None
-    concurrent_limit: Optional[int] = None
+    is_active: bool | None = None
+    is_admin: bool | None = None
+    daily_quota: int | None = None
+    concurrent_limit: int | None = None
 
-async def get_current_user(authorization: Optional[str] = Header(default=None)) -> dict:
+async def get_current_user(authorization: str | None = Header(default=None)) -> dict:
     """获取当前用户信息"""
-    logger.debug(f"🔐 认证检查开始")
+    logger.debug("🔐 认证检查开始")
     logger.debug(f"📋 Authorization header: {authorization[:50] if authorization else 'None'}...")
 
     if not authorization:
@@ -215,7 +214,7 @@ async def login(payload: LoginRequest, request: Request):
     try:
         # 验证输入
         if not payload.username or not payload.password:
-            logger.warning(f"❌ 登录失败 - 用户名或密码为空")
+            logger.warning("❌ 登录失败 - 用户名或密码为空")
             await log_operation(
                 user_id="unknown",
                 username=payload.username or "unknown",
@@ -308,7 +307,7 @@ async def login(payload: LoginRequest, request: Request):
 async def refresh_token(payload: RefreshTokenRequest):
     """刷新访问令牌"""
     try:
-        logger.debug(f"🔄 收到refresh token请求")
+        logger.debug("🔄 收到refresh token请求")
         logger.debug(f"📝 Refresh token长度: {len(payload.refresh_token) if payload.refresh_token else 0}")
 
         if not payload.refresh_token:
@@ -335,7 +334,7 @@ async def refresh_token(payload: RefreshTokenRequest):
         new_token = AuthService.create_access_token(sub=token_data.sub)
         new_refresh_token = AuthService.create_access_token(sub=token_data.sub, expires_delta=60*60*24*7)
 
-        logger.debug(f"🎉 新token生成成功")
+        logger.debug("🎉 新token生成成功")
 
         return {
             "success": True,
@@ -404,7 +403,7 @@ async def update_me(
 ):
     """更新当前用户信息"""
     try:
-        from app.models.user import UserUpdate, UserPreferences
+        from app.models.user import UserPreferences, UserUpdate
 
         # 构建更新数据
         update_data = {}
@@ -539,6 +538,7 @@ async def create_user(
         # 如果需要设置为管理员
         if payload.is_admin:
             from pymongo import MongoClient
+
             from app.core.config import settings
             # 修复：使用 with 语句确保 MongoClient 正确关闭，避免连接泄漏
             with MongoClient(settings.MONGO_URI) as client:
@@ -631,6 +631,7 @@ async def update_user_status(
 
         # 直接更新数据库
         from pymongo import MongoClient
+
         from app.core.config import settings
         client = MongoClient(settings.MONGO_URI)
         db = client[settings.MONGO_DB]
@@ -682,6 +683,7 @@ async def delete_user(
 
         # 删除用户
         from pymongo import MongoClient
+
         from app.core.config import settings
         client = MongoClient(settings.MONGO_URI)
         db = client[settings.MONGO_DB]

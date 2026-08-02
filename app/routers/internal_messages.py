@@ -2,17 +2,17 @@
 内部消息数据API路由
 提供内部消息的查询、搜索和管理接口
 """
-from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Query
+from typing import Any
+
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app.services.internal_message_service import (
-    get_internal_message_service,
-    InternalMessageQueryParams,
-    InternalMessageStats
-)
 from app.core.response import ok
+from app.services.internal_message_service import (
+    InternalMessageQueryParams,
+    get_internal_message_service,
+)
 
 router = APIRouter(prefix="/api/internal-messages", tags=["internal-messages"])
 
@@ -23,26 +23,26 @@ class InternalMessage(BaseModel):
     message_type: str  # research_report/insider_info/analyst_note/meeting_minutes/internal_analysis
     title: str
     content: str
-    summary: Optional[str] = ""
-    source: Dict[str, Any]
+    summary: str | None = ""
+    source: dict[str, Any]
     category: str
-    subcategory: Optional[str] = ""
-    tags: Optional[List[str]] = []
+    subcategory: str | None = ""
+    tags: list[str] | None = []
     importance: str = "medium"
     impact_scope: str = "stock_specific"
     time_sensitivity: str = "medium_term"
     confidence_level: float = Field(0.5, ge=0.0, le=1.0)
-    sentiment: Optional[str] = "neutral"
-    sentiment_score: Optional[float] = 0.0
-    keywords: Optional[List[str]] = []
-    risk_factors: Optional[List[str]] = []
-    opportunities: Optional[List[str]] = []
-    related_data: Optional[Dict[str, Any]] = {}
+    sentiment: str | None = "neutral"
+    sentiment_score: float | None = 0.0
+    keywords: list[str] | None = []
+    risk_factors: list[str] | None = []
+    opportunities: list[str] | None = []
+    related_data: dict[str, Any] | None = {}
     access_level: str = "internal"
-    permissions: Optional[List[str]] = []
+    permissions: list[str] | None = []
     created_time: datetime
-    effective_time: Optional[datetime] = None
-    expiry_time: Optional[datetime] = None
+    effective_time: datetime | None = None
+    expiry_time: datetime | None = None
     language: str = "zh-CN"
     data_source: str = "internal_system"
 
@@ -50,26 +50,26 @@ class InternalMessage(BaseModel):
 class InternalMessageBatchRequest(BaseModel):
     """批量保存内部消息请求"""
     symbol: str = Field(..., description="股票代码")
-    messages: List[InternalMessage] = Field(..., description="内部消息列表")
+    messages: list[InternalMessage] = Field(..., description="内部消息列表")
 
 
 class InternalMessageQueryRequest(BaseModel):
     """内部消息查询请求"""
-    symbol: Optional[str] = None
-    symbols: Optional[List[str]] = None
-    message_type: Optional[str] = None
-    category: Optional[str] = None
-    source_type: Optional[str] = None
-    department: Optional[str] = None
-    author: Optional[str] = None
-    start_time: Optional[datetime] = None
-    end_time: Optional[datetime] = None
-    importance: Optional[str] = None
-    access_level: Optional[str] = None
-    min_confidence: Optional[float] = None
-    rating: Optional[str] = None
-    keywords: Optional[List[str]] = None
-    tags: Optional[List[str]] = None
+    symbol: str | None = None
+    symbols: list[str] | None = None
+    message_type: str | None = None
+    category: str | None = None
+    source_type: str | None = None
+    department: str | None = None
+    author: str | None = None
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+    importance: str | None = None
+    access_level: str | None = None
+    min_confidence: float | None = None
+    rating: str | None = None
+    keywords: list[str] | None = None
+    tags: list[str] | None = None
     limit: int = Field(50, ge=1, le=1000)
     skip: int = Field(0, ge=0)
 
@@ -143,8 +143,8 @@ async def query_internal_messages(request: InternalMessageQueryRequest):
 @router.get("/latest/{symbol}", response_model=dict)
 async def get_latest_messages(
     symbol: str,
-    message_type: Optional[str] = Query(None, description="消息类型"),
-    access_level: Optional[str] = Query(None, description="访问级别"),
+    message_type: str | None = Query(None, description="消息类型"),
+    access_level: str | None = Query(None, description="访问级别"),
     limit: int = Query(20, ge=1, le=100, description="返回数量")
 ):
     """获取最新内部消息"""
@@ -169,8 +169,8 @@ async def get_latest_messages(
 @router.get("/search", response_model=dict)
 async def search_messages(
     query: str = Query(..., description="搜索关键词"),
-    symbol: Optional[str] = Query(None, description="股票代码"),
-    access_level: Optional[str] = Query(None, description="访问级别"),
+    symbol: str | None = Query(None, description="股票代码"),
+    access_level: str | None = Query(None, description="访问级别"),
     limit: int = Query(50, ge=1, le=200, description="返回数量")
 ):
     """全文搜索内部消息"""
@@ -195,7 +195,7 @@ async def search_messages(
 @router.get("/research-reports/{symbol}", response_model=dict)
 async def get_research_reports(
     symbol: str,
-    department: Optional[str] = Query(None, description="部门"),
+    department: str | None = Query(None, description="部门"),
     limit: int = Query(20, ge=1, le=100, description="返回数量")
 ):
     """获取研究报告"""
@@ -219,7 +219,7 @@ async def get_research_reports(
 @router.get("/analyst-notes/{symbol}", response_model=dict)
 async def get_analyst_notes(
     symbol: str,
-    author: Optional[str] = Query(None, description="分析师"),
+    author: str | None = Query(None, description="分析师"),
     limit: int = Query(20, ge=1, le=100, description="返回数量")
 ):
     """获取分析师笔记"""
@@ -242,7 +242,7 @@ async def get_analyst_notes(
 
 @router.get("/statistics", response_model=dict)
 async def get_statistics(
-    symbol: Optional[str] = Query(None, description="股票代码"),
+    symbol: str | None = Query(None, description="股票代码"),
     hours_back: int = Query(24, ge=1, le=168, description="回溯小时数")
 ):
     """获取内部消息统计信息"""

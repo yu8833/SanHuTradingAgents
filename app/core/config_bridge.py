@@ -3,11 +3,11 @@
 将统一配置系统的配置桥接到环境变量，供 TradingAgents 核心库使用
 """
 
-import os
+import contextlib
 import json
 import logging
+import os
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger("app.config_bridge")
 
@@ -27,7 +27,6 @@ def bridge_config_to_env():
     """
     try:
         from app.core.unified_config import unified_config
-        from app.services.config_service import config_service
 
         logger.info("🔧 开始桥接配置到环境变量...")
         bridged_count = 0
@@ -64,6 +63,7 @@ def bridge_config_to_env():
         try:
             # 使用同步 MongoDB 客户端读取厂家配置
             from pymongo import MongoClient
+
             from app.core.config import settings
             from app.models.config import LLMProvider
 
@@ -126,10 +126,8 @@ def bridge_config_to_env():
         finally:
             # 修复：确保 MongoClient 在任何情况下都被关闭，避免连接泄漏
             if client is not None:
-                try:
+                with contextlib.suppress(Exception):
                     client.close()
-                except Exception:
-                    pass
 
         # 2. 桥接默认模型配置
         default_model = unified_config.get_default_model()
@@ -157,6 +155,7 @@ def bridge_config_to_env():
         try:
             # 使用同步 MongoDB 客户端读取系统配置
             from pymongo import MongoClient
+
             from app.core.config import settings
             from app.models.config import SystemConfig
 
@@ -186,10 +185,8 @@ def bridge_config_to_env():
         finally:
             # 修复：确保 MongoClient 在任何情况下都被关闭，避免连接泄漏
             if client is not None:
-                try:
+                with contextlib.suppress(Exception):
                     client.close()
-                except Exception:
-                    pass
 
         for ds_config in data_source_configs:
             if ds_config.enabled and ds_config.api_key:
@@ -207,14 +204,14 @@ def bridge_config_to_env():
                         _tushare_token_source = 'database'
                         logger.info(f"  ✓ 使用数据库中的 TUSHARE_TOKEN (长度: {len(ds_config.api_key)})")
                         if existing_token and existing_token != ds_config.api_key:
-                            logger.info(f"  ℹ️  已覆盖 .env 文件中的 TUSHARE_TOKEN")
+                            logger.info("  ℹ️  已覆盖 .env 文件中的 TUSHARE_TOKEN")
                     # 降级到 .env 文件配置
                     elif existing_token and not existing_token.startswith("your_"):
                         _tushare_token_source = 'env'
                         logger.info(f"  ✓ 使用 .env 文件中的 TUSHARE_TOKEN (长度: {len(existing_token)})")
-                        logger.info(f"  ℹ️  数据库中未配置有效的 TUSHARE_TOKEN，使用 .env 降级方案")
+                        logger.info("  ℹ️  数据库中未配置有效的 TUSHARE_TOKEN，使用 .env 降级方案")
                     else:
-                        logger.warning(f"  ⚠️  TUSHARE_TOKEN 在数据库和 .env 中都未配置有效值")
+                        logger.warning("  ⚠️  TUSHARE_TOKEN 在数据库和 .env 中都未配置有效值")
                         continue
                     bridged_count += 1
 
@@ -236,13 +233,13 @@ def bridge_config_to_env():
                         os.environ['FINNHUB_API_KEY'] = ds_config.api_key
                         logger.info(f"  ✓ 使用数据库中的 FINNHUB_API_KEY (长度: {len(ds_config.api_key)})")
                         if existing_key and existing_key != ds_config.api_key:
-                            logger.info(f"  ℹ️  已覆盖 .env 文件中的 FINNHUB_API_KEY")
+                            logger.info("  ℹ️  已覆盖 .env 文件中的 FINNHUB_API_KEY")
                     # 降级到 .env 文件配置
                     elif existing_key and not existing_key.startswith("your_"):
                         logger.info(f"  ✓ 使用 .env 文件中的 FINNHUB_API_KEY (长度: {len(existing_key)})")
-                        logger.info(f"  ℹ️  数据库中未配置有效的 FINNHUB_API_KEY，使用 .env 降级方案")
+                        logger.info("  ℹ️  数据库中未配置有效的 FINNHUB_API_KEY，使用 .env 降级方案")
                     else:
-                        logger.warning(f"  ⚠️  FINNHUB_API_KEY 在数据库和 .env 中都未配置有效值")
+                        logger.warning("  ⚠️  FINNHUB_API_KEY 在数据库和 .env 中都未配置有效值")
                         continue
                     bridged_count += 1
 
@@ -389,6 +386,7 @@ def _bridge_system_settings() -> int:
     try:
         # 使用同步的 MongoDB 客户端
         from pymongo import MongoClient
+
         from app.core.config import settings
 
         # 创建同步客户端
@@ -482,29 +480,29 @@ def _bridge_system_settings() -> int:
 
         # 同步到文件系统（供 unified_config 使用）
         try:
-            print(f"🔄 [config_bridge] 准备同步系统设置到文件系统")
+            print("🔄 [config_bridge] 准备同步系统设置到文件系统")
             print(f"🔄 [config_bridge] system_settings 包含 {len(system_settings)} 项")
 
             # 检查关键字段
             if "quick_analysis_model" in system_settings:
                 print(f"  ✓ [config_bridge] 包含 quick_analysis_model: {system_settings['quick_analysis_model']}")
             else:
-                print(f"  ⚠️  [config_bridge] 不包含 quick_analysis_model")
+                print("  ⚠️  [config_bridge] 不包含 quick_analysis_model")
 
             if "deep_analysis_model" in system_settings:
                 print(f"  ✓ [config_bridge] 包含 deep_analysis_model: {system_settings['deep_analysis_model']}")
             else:
-                print(f"  ⚠️  [config_bridge] 不包含 deep_analysis_model")
+                print("  ⚠️  [config_bridge] 不包含 deep_analysis_model")
 
             from app.core.unified_config import unified_config
             result = unified_config.save_system_settings(system_settings)
 
             if result:
-                logger.info(f"  ✓ 系统设置已同步到文件系统")
-                print(f"✅ [config_bridge] 系统设置同步成功")
+                logger.info("  ✓ 系统设置已同步到文件系统")
+                print("✅ [config_bridge] 系统设置同步成功")
             else:
-                logger.warning(f"  ⚠️  系统设置同步返回 False")
-                print(f"⚠️  [config_bridge] 系统设置同步返回 False")
+                logger.warning("  ⚠️  系统设置同步返回 False")
+                print("⚠️  [config_bridge] 系统设置同步返回 False")
         except Exception as e:
             logger.warning(f"  ⚠️  同步系统设置到文件系统失败: {e}")
             print(f"❌ [config_bridge] 同步系统设置到文件系统失败: {e}")
@@ -518,7 +516,7 @@ def _bridge_system_settings() -> int:
         return 0
 
 
-def get_bridged_api_key(provider: str) -> Optional[str]:
+def get_bridged_api_key(provider: str) -> str | None:
     """
     获取桥接的 API 密钥
     
@@ -532,7 +530,7 @@ def get_bridged_api_key(provider: str) -> Optional[str]:
     return os.environ.get(env_key)
 
 
-def get_bridged_model(model_type: str = "default") -> Optional[str]:
+def get_bridged_model(model_type: str = "default") -> str | None:
     """
     获取桥接的模型名称
     
@@ -699,7 +697,6 @@ async def _sync_pricing_config_from_db():
     """
     try:
         from app.core.database import get_mongo_db
-        from app.models.config import LLMConfig
 
         db = get_mongo_db()
 

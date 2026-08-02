@@ -2,15 +2,14 @@
 自选股管理API路由
 """
 
-from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
 import logging
 
-from app.routers.auth_db import get_current_user
-from app.models.user import User, FavoriteStock
-from app.services.favorites_service import favorites_service
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
+
 from app.core.response import ok
+from app.routers.auth_db import get_current_user
+from app.services.favorites_service import favorites_service
 
 logger = logging.getLogger("webapi")
 
@@ -22,18 +21,18 @@ class AddFavoriteRequest(BaseModel):
     stock_code: str
     stock_name: str
     market: str = "A股"
-    tags: List[str] = []
+    tags: list[str] = []
     notes: str = ""
-    alert_price_high: Optional[float] = None
-    alert_price_low: Optional[float] = None
+    alert_price_high: float | None = None
+    alert_price_low: float | None = None
 
 
 class UpdateFavoriteRequest(BaseModel):
     """更新自选股请求"""
-    tags: Optional[List[str]] = None
-    notes: Optional[str] = None
-    alert_price_high: Optional[float] = None
-    alert_price_low: Optional[float] = None
+    tags: list[str] | None = None
+    notes: str | None = None
+    alert_price_high: float | None = None
+    alert_price_low: float | None = None
 
 
 class FavoriteStockResponse(BaseModel):
@@ -42,14 +41,14 @@ class FavoriteStockResponse(BaseModel):
     stock_name: str
     market: str
     added_at: str
-    tags: List[str]
+    tags: list[str]
     notes: str
-    alert_price_high: Optional[float]
-    alert_price_low: Optional[float]
+    alert_price_high: float | None
+    alert_price_low: float | None
     # 实时数据
-    current_price: Optional[float] = None
-    change_percent: Optional[float] = None
-    volume: Optional[int] = None
+    current_price: float | None = None
+    change_percent: float | None = None
+    volume: int | None = None
 
 
 @router.get("/", response_model=dict)
@@ -91,7 +90,7 @@ async def add_favorite(
             )
 
         # 添加到自选股
-        logger.info(f"➕ 开始添加自选股...")
+        logger.info("➕ 开始添加自选股...")
         success = await favorites_service.add_favorite(
             user_id=current_user["id"],
             stock_code=request.stock_code,
@@ -108,7 +107,7 @@ async def add_favorite(
         if success:
             return ok({"stock_code": request.stock_code}, "添加成功")
         else:
-            logger.error(f"❌ 添加失败: success=False")
+            logger.error("❌ 添加失败: success=False")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="添加失败"

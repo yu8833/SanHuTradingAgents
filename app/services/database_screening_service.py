@@ -4,10 +4,10 @@
 """
 
 import logging
-from typing import Any, Dict, List, Optional, Tuple
-from datetime import datetime
+from typing import Any
 
 from app.core.database import get_mongo_db
+
 # from app.models.screening import ScreeningCondition  # 避免循环导入
 
 logger = logging.getLogger(__name__)
@@ -67,7 +67,7 @@ class DatabaseScreeningService:
             "contains": "$regex",   # 字符串包含
         }
     
-    async def can_handle_conditions(self, conditions: List[Dict[str, Any]]) -> bool:
+    async def can_handle_conditions(self, conditions: list[dict[str, Any]]) -> bool:
         """
         检查是否可以完全通过数据库筛选处理这些条件
         
@@ -95,12 +95,12 @@ class DatabaseScreeningService:
     
     async def screen_stocks(
         self,
-        conditions: List[Dict[str, Any]],
+        conditions: list[dict[str, Any]],
         limit: int = 50,
         offset: int = 0,
-        order_by: Optional[List[Dict[str, str]]] = None,
-        source: Optional[str] = None
-    ) -> Tuple[List[Dict[str, Any]], int]:
+        order_by: list[dict[str, str]] | None = None,
+        source: str | None = None
+    ) -> tuple[list[dict[str, Any]], int]:
         """
         基于数据库进行股票筛选
 
@@ -153,7 +153,7 @@ class DatabaseScreeningService:
 
                 if not selected_source:
                     # 🔥 所有指定数据源都没有数据，不限制 source 字段
-                    logger.warning(f"⚠️ [database_screening] 所有指定数据源都没有数据，不限制 source 字段")
+                    logger.warning("⚠️ [database_screening] 所有指定数据源都没有数据，不限制 source 字段")
                     selected_source = None
 
                 source = selected_source
@@ -205,7 +205,7 @@ class DatabaseScreeningService:
             logger.error(f"❌ 数据库筛选失败: {e}")
             raise Exception(f"数据库筛选失败: {str(e)}")
     
-    async def _build_query(self, conditions: List[Dict[str, Any]]) -> Dict[str, Any]:
+    async def _build_query(self, conditions: list[dict[str, Any]]) -> dict[str, Any]:
         """构建MongoDB查询条件"""
         query = {}
 
@@ -245,7 +245,7 @@ class DatabaseScreeningService:
             
         return query
     
-    def _build_sort_conditions(self, order_by: Optional[List[Dict[str, str]]]) -> List[Tuple[str, int]]:
+    def _build_sort_conditions(self, order_by: list[dict[str, str]] | None) -> list[tuple[str, int]]:
         """构建排序条件"""
         if not order_by:
             # 默认按总市值降序排序
@@ -267,7 +267,7 @@ class DatabaseScreeningService:
         
         return sort_conditions
     
-    async def _enrich_with_financial_data(self, results: List[Dict[str, Any]], codes: List[str]) -> None:
+    async def _enrich_with_financial_data(self, results: list[dict[str, Any]], codes: list[str]) -> None:
         """
         批量查询财务数据并填充到结果中
 
@@ -338,7 +338,7 @@ class DatabaseScreeningService:
             logger.warning(f"⚠️ 填充财务数据失败: {e}")
             # 不抛出异常，允许继续返回基础数据
 
-    def _format_result(self, doc: Dict[str, Any]) -> Dict[str, Any]:
+    def _format_result(self, doc: dict[str, Any]) -> dict[str, Any]:
         """格式化查询结果，统一使用后端字段名"""
         # 根据股票代码推断市场类型
         code = doc.get("code", "")
@@ -404,7 +404,7 @@ class DatabaseScreeningService:
         # 移除None值
         return {k: v for k, v in result.items() if v is not None}
     
-    async def get_field_statistics(self, field: str) -> Dict[str, Any]:
+    async def get_field_statistics(self, field: str) -> dict[str, Any]:
         """
         获取字段的统计信息
         
@@ -453,7 +453,7 @@ class DatabaseScreeningService:
             logger.error(f"获取字段统计失败: {e}")
             return {"field": field, "error": str(e)}
     
-    def _separate_conditions(self, conditions: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    def _separate_conditions(self, conditions: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """
         分离基础信息条件和实时行情条件
 
@@ -480,10 +480,10 @@ class DatabaseScreeningService:
 
     async def _filter_by_quotes(
         self,
-        results: List[Dict[str, Any]],
-        codes: List[str],
-        quote_conditions: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
+        results: list[dict[str, Any]],
+        codes: list[str],
+        quote_conditions: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
         """
         根据实时行情数据进行二次筛选
 
@@ -552,10 +552,9 @@ class DatabaseScreeningService:
                         if not (field_value >= value):
                             match = False
                             break
-                    elif operator == "<=":
-                        if not (field_value <= value):
-                            match = False
-                            break
+                    elif operator == "<=" and not (field_value <= value):
+                        match = False
+                        break
 
                 if match:
                     # 将实时行情数据合并到结果中
@@ -570,7 +569,7 @@ class DatabaseScreeningService:
             # 如果失败，返回原始结果
             return results
 
-    async def get_available_values(self, field: str, limit: int = 100) -> List[str]:
+    async def get_available_values(self, field: str, limit: int = 100) -> list[str]:
         """
         获取字段的可选值列表（用于枚举类型字段）
         
@@ -604,7 +603,7 @@ class DatabaseScreeningService:
 
 
 # 全局服务实例
-_database_screening_service: Optional[DatabaseScreeningService] = None
+_database_screening_service: DatabaseScreeningService | None = None
 
 
 def get_database_screening_service() -> DatabaseScreeningService:

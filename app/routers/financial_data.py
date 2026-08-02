@@ -4,13 +4,14 @@
 提供财务数据查询和同步管理接口
 """
 import logging
-from typing import Dict, Any, List, Optional
-from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
+from typing import Any
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app.worker.financial_data_sync_service import get_financial_sync_service
-from app.services.financial_data_service import get_financial_data_service
 from app.core.response import ok
+from app.services.financial_data_service import get_financial_data_service
+from app.worker.financial_data_sync_service import get_financial_sync_service
 
 logger = logging.getLogger(__name__)
 
@@ -21,12 +22,12 @@ router = APIRouter(prefix="/api/financial-data", tags=["财务数据"])
 
 class FinancialSyncRequest(BaseModel):
     """财务数据同步请求"""
-    symbols: Optional[List[str]] = Field(None, description="股票代码列表，为空则同步所有股票")
-    data_sources: Optional[List[str]] = Field(
+    symbols: list[str] | None = Field(None, description="股票代码列表，为空则同步所有股票")
+    data_sources: list[str] | None = Field(
         ["tushare", "akshare", "baostock"], 
         description="数据源列表"
     )
-    report_types: Optional[List[str]] = Field(
+    report_types: list[str] | None = Field(
         ["quarterly"], 
         description="报告类型列表 (quarterly/annual)"
     )
@@ -37,7 +38,7 @@ class FinancialSyncRequest(BaseModel):
 class SingleStockSyncRequest(BaseModel):
     """单股票财务数据同步请求"""
     symbol: str = Field(..., description="股票代码")
-    data_sources: Optional[List[str]] = Field(
+    data_sources: list[str] | None = Field(
         ["tushare", "akshare", "baostock"], 
         description="数据源列表"
     )
@@ -49,10 +50,10 @@ class SingleStockSyncRequest(BaseModel):
 @router.get("/query/{symbol}", summary="查询股票财务数据")
 async def query_financial_data(
     symbol: str,
-    report_period: Optional[str] = Query(None, description="报告期筛选 (YYYYMMDD)"),
-    data_source: Optional[str] = Query(None, description="数据源筛选"),
-    report_type: Optional[str] = Query(None, description="报告类型筛选"),
-    limit: Optional[int] = Query(10, description="限制返回数量", ge=1, le=100)
+    report_period: str | None = Query(None, description="报告期筛选 (YYYYMMDD)"),
+    data_source: str | None = Query(None, description="数据源筛选"),
+    report_type: str | None = Query(None, description="报告类型筛选"),
+    limit: int | None = Query(10, description="限制返回数量", ge=1, le=100)
 ) -> dict:
     """
     查询股票财务数据
@@ -90,7 +91,7 @@ async def query_financial_data(
 @router.get("/latest/{symbol}", summary="获取最新财务数据")
 async def get_latest_financial_data(
     symbol: str,
-    data_source: Optional[str] = Query(None, description="数据源筛选")
+    data_source: str | None = Query(None, description="数据源筛选")
 ) -> dict:
     """
     获取股票最新财务数据
@@ -248,7 +249,7 @@ async def health_check() -> dict:
     try:
         # 检查服务初始化状态
         service = await get_financial_data_service()
-        sync_service = await get_financial_sync_service()
+        await get_financial_sync_service()
         
         # 简单的数据库连接测试
         stats = await service.get_financial_statistics()
@@ -303,4 +304,3 @@ async def _execute_financial_sync(
 
 
 # 导入datetime用于时间戳
-from datetime import datetime

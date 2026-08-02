@@ -3,10 +3,10 @@
 BaoStock初始化API路由
 提供BaoStock数据初始化的RESTful API接口
 """
-import asyncio
 import logging
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Any
+
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field
 
@@ -37,11 +37,11 @@ class InitializationResponse(BaseModel):
     """初始化响应模型"""
     success: bool
     message: str
-    task_id: Optional[str] = None
-    data: Optional[Dict[str, Any]] = None
+    task_id: str | None = None
+    data: dict[str, Any] | None = None
 
 
-@router.get("/status", response_model=Dict[str, Any])
+@router.get("/status", response_model=dict[str, Any])
 async def get_database_status():
     """获取数据库状态"""
     try:
@@ -59,7 +59,7 @@ async def get_database_status():
         raise HTTPException(status_code=500, detail=f"获取数据库状态失败: {e}")
 
 
-@router.get("/connection-test", response_model=Dict[str, Any])
+@router.get("/connection-test", response_model=dict[str, Any])
 async def test_baostock_connection():
     """测试BaoStock连接"""
     try:
@@ -174,7 +174,7 @@ async def start_basic_initialization(background_tasks: BackgroundTasks):
         raise HTTPException(status_code=500, detail=f"启动初始化失败: {e}")
 
 
-@router.get("/initialization-status", response_model=Dict[str, Any])
+@router.get("/initialization-status", response_model=dict[str, Any])
 async def get_initialization_status():
     """获取初始化状态"""
     global _initialization_status
@@ -218,7 +218,7 @@ async def get_initialization_status():
         raise HTTPException(status_code=500, detail=f"获取状态失败: {e}")
 
 
-@router.post("/stop", response_model=Dict[str, Any])
+@router.post("/stop", response_model=dict[str, Any])
 async def stop_initialization():
     """停止初始化任务"""
     global _initialization_status
@@ -312,7 +312,7 @@ async def _run_basic_initialization_task(task_id: str):
         })
 
 
-@router.get("/service-status", response_model=Dict[str, Any])
+@router.get("/service-status", response_model=dict[str, Any])
 async def get_service_status():
     """获取BaoStock服务状态"""
     try:

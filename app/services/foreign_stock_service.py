@@ -4,13 +4,11 @@
 🔥 按照数据库配置的数据源优先级调用API
 🔥 请求去重机制：防止并发请求重复调用API
 """
-from typing import Optional, Dict, List, Tuple
-from datetime import datetime, timedelta
-import logging
-import json
-import re
 import asyncio
+import json
+import logging
 from collections import defaultdict
+from datetime import datetime, timedelta
 
 # 复用现有缓存系统
 from tradingagents.dataflows.cache import get_cache
@@ -56,7 +54,7 @@ class ForeignStockService:
 
         logger.info("✅ ForeignStockService 初始化完成（已启用请求去重）")
     
-    async def get_quote(self, market: str, code: str, force_refresh: bool = False) -> Dict:
+    async def get_quote(self, market: str, code: str, force_refresh: bool = False) -> dict:
         """
         获取实时行情
         
@@ -81,7 +79,7 @@ class ForeignStockService:
         else:
             raise ValueError(f"不支持的市场类型: {market}")
     
-    async def get_basic_info(self, market: str, code: str, force_refresh: bool = False) -> Dict:
+    async def get_basic_info(self, market: str, code: str, force_refresh: bool = False) -> dict:
         """
         获取基础信息
         
@@ -101,7 +99,7 @@ class ForeignStockService:
             raise ValueError(f"不支持的市场类型: {market}")
     
     async def get_kline(self, market: str, code: str, period: str = 'day', 
-                       limit: int = 120, force_refresh: bool = False) -> List[Dict]:
+                       limit: int = 120, force_refresh: bool = False) -> list[dict]:
         """
         获取K线数据
         
@@ -122,7 +120,7 @@ class ForeignStockService:
         else:
             raise ValueError(f"不支持的市场类型: {market}")
     
-    async def _get_hk_quote(self, code: str, force_refresh: bool = False) -> Dict:
+    async def _get_hk_quote(self, code: str, force_refresh: bool = False) -> dict:
         """
         获取港股实时行情（带请求去重）
         🔥 按照数据库配置的数据源优先级调用API
@@ -200,7 +198,7 @@ class ForeignStockService:
                     valid_priority.append(source_name)
 
             if not valid_priority:
-                logger.warning(f"⚠️ 数据库中没有配置有效的港股数据源，使用默认顺序")
+                logger.warning("⚠️ 数据库中没有配置有效的港股数据源，使用默认顺序")
                 valid_priority = ['yahoo_finance', 'akshare']
 
             logger.info(f"📊 [HK有效数据源] {valid_priority} (股票: {code})")
@@ -236,7 +234,7 @@ class ForeignStockService:
 
             return formatted_data
 
-    async def _get_source_priority(self, market: str) -> List[str]:
+    async def _get_source_priority(self, market: str) -> list[str]:
         """
         从数据库获取数据源优先级（统一方法）
         🔥 复用 UnifiedStockService 的实现
@@ -273,14 +271,14 @@ class ForeignStockService:
         logger.info(f"📊 [{market}数据源优先级] 使用默认: {priority_list}")
         return priority_list
 
-    def _get_hk_quote_from_yfinance(self, code: str) -> Dict:
+    def _get_hk_quote_from_yfinance(self, code: str) -> dict:
         """从yfinance获取港股行情"""
         quote_data = self.hk_provider.get_real_time_price(code)
         if not quote_data:
             raise Exception("无数据")
         return quote_data
 
-    def _get_hk_quote_from_akshare(self, code: str) -> Dict:
+    def _get_hk_quote_from_akshare(self, code: str) -> dict:
         """从AKShare获取港股行情"""
         from tradingagents.dataflows.providers.hk.improved_hk import get_hk_stock_info_akshare
         info = get_hk_stock_info_akshare(code)
@@ -293,7 +291,7 @@ class ForeignStockService:
 
         return info
     
-    async def _get_us_quote(self, code: str, force_refresh: bool = False) -> Dict:
+    async def _get_us_quote(self, code: str, force_refresh: bool = False) -> dict:
         """
         获取美股实时行情（带请求去重）
         🔥 按照数据库配置的数据源优先级调用API
@@ -421,7 +419,7 @@ class ForeignStockService:
 
             return formatted_data
 
-    def _get_us_quote_from_yfinance(self, code: str) -> Dict:
+    def _get_us_quote_from_yfinance(self, code: str) -> dict:
         """从yfinance获取美股行情"""
         import yfinance as yf
 
@@ -446,10 +444,10 @@ class ForeignStockService:
             'currency': info.get('currency', 'USD')
         }
 
-    def _get_us_quote_from_alpha_vantage(self, code: str) -> Dict:
+    def _get_us_quote_from_alpha_vantage(self, code: str) -> dict:
         """从Alpha Vantage获取美股行情"""
         try:
-            from tradingagents.dataflows.providers.us.alpha_vantage_common import get_api_key, _make_api_request
+            from tradingagents.dataflows.providers.us.alpha_vantage_common import _make_api_request, get_api_key
 
             # 获取 API Key
             api_key = get_api_key()
@@ -489,11 +487,12 @@ class ForeignStockService:
             logger.error(f"❌ Alpha Vantage获取美股行情失败: {e}")
             raise
 
-    def _get_us_quote_from_finnhub(self, code: str) -> Dict:
+    def _get_us_quote_from_finnhub(self, code: str) -> dict:
         """从Finnhub获取美股行情"""
         try:
-            import finnhub
             import os
+
+            import finnhub
 
             # 获取 API Key
             api_key = os.getenv('FINNHUB_API_KEY')
@@ -526,7 +525,7 @@ class ForeignStockService:
             logger.error(f"❌ Finnhub获取美股行情失败: {e}")
             raise
     
-    async def _get_hk_info(self, code: str, force_refresh: bool = False) -> Dict:
+    async def _get_hk_info(self, code: str, force_refresh: bool = False) -> dict:
         """
         获取港股基础信息
         🔥 按照数据库配置的数据源优先级调用API
@@ -605,7 +604,7 @@ class ForeignStockService:
 
         return formatted_data
 
-    async def _get_us_info(self, code: str, force_refresh: bool = False) -> Dict:
+    async def _get_us_info(self, code: str, force_refresh: bool = False) -> dict:
         """
         获取美股基础信息
         🔥 按照数据库配置的数据源优先级调用API
@@ -708,7 +707,7 @@ class ForeignStockService:
 
         return formatted_data
 
-    async def _get_hk_kline(self, code: str, period: str, limit: int, force_refresh: bool = False) -> List[Dict]:
+    async def _get_hk_kline(self, code: str, period: str, limit: int, force_refresh: bool = False) -> list[dict]:
         """
         获取港股K线数据
         🔥 按照数据库配置的数据源优先级调用API
@@ -785,7 +784,7 @@ class ForeignStockService:
 
         return kline_data
 
-    async def _get_us_kline(self, code: str, period: str, limit: int, force_refresh: bool = False) -> List[Dict]:
+    async def _get_us_kline(self, code: str, period: str, limit: int, force_refresh: bool = False) -> list[dict]:
         """
         获取美股K线数据
         🔥 按照数据库配置的数据源优先级调用API
@@ -862,7 +861,7 @@ class ForeignStockService:
 
         return kline_data
     
-    def _format_hk_quote(self, data: Dict, code: str, source: str) -> Dict:
+    def _format_hk_quote(self, data: dict, code: str, source: str) -> dict:
         """格式化港股行情数据"""
         return {
             'code': code,
@@ -879,7 +878,7 @@ class ForeignStockService:
             'updated_at': datetime.now().isoformat()
         }
 
-    def _format_hk_info(self, data: Dict, code: str, source: str) -> Dict:
+    def _format_hk_info(self, data: dict, code: str, source: str) -> dict:
         """格式化港股基础信息"""
         market_cap = data.get('market_cap')
         return {
@@ -907,14 +906,11 @@ class ForeignStockService:
             'updated_at': datetime.now().isoformat()
         }
 
-    def _parse_cached_data(self, cached_data: str, market: str, code: str) -> Dict:
+    def _parse_cached_data(self, cached_data: str, market: str, code: str) -> dict:
         """解析缓存的数据"""
         try:
             # 尝试解析JSON
-            if isinstance(cached_data, str):
-                data = json.loads(cached_data)
-            else:
-                data = cached_data
+            data = json.loads(cached_data) if isinstance(cached_data, str) else cached_data
 
             # 确保包含必要字段
             if isinstance(data, dict):
@@ -928,14 +924,11 @@ class ForeignStockService:
             # 返回空数据，触发重新获取
             return None
 
-    def _parse_cached_kline(self, cached_data: str) -> List[Dict]:
+    def _parse_cached_kline(self, cached_data: str) -> list[dict]:
         """解析缓存的K线数据"""
         try:
             # 尝试解析JSON
-            if isinstance(cached_data, str):
-                data = json.loads(cached_data)
-            else:
-                data = cached_data
+            data = json.loads(cached_data) if isinstance(cached_data, str) else cached_data
 
             # 确保是列表
             if isinstance(data, list):
@@ -947,7 +940,7 @@ class ForeignStockService:
             # 返回空列表，触发重新获取
             return []
 
-    def _get_us_info_from_yfinance(self, code: str) -> Dict:
+    def _get_us_info_from_yfinance(self, code: str) -> dict:
         """从yfinance获取美股基础信息"""
         import yfinance as yf
 
@@ -977,9 +970,9 @@ class ForeignStockService:
         except (ValueError, TypeError):
             return default
 
-    def _get_us_info_from_alpha_vantage(self, code: str) -> Dict:
+    def _get_us_info_from_alpha_vantage(self, code: str) -> dict:
         """从Alpha Vantage获取美股基础信息"""
-        from tradingagents.dataflows.providers.us.alpha_vantage_common import get_api_key, _make_api_request
+        from tradingagents.dataflows.providers.us.alpha_vantage_common import _make_api_request, get_api_key
 
         # 获取 API Key
         api_key = get_api_key()
@@ -1004,10 +997,11 @@ class ForeignStockService:
             'currency': 'USD',
         }
 
-    def _get_us_info_from_finnhub(self, code: str) -> Dict:
+    def _get_us_info_from_finnhub(self, code: str) -> dict:
         """从Finnhub获取美股基础信息"""
-        import finnhub
         import os
+
+        import finnhub
 
         # 获取 API Key
         api_key = os.getenv('FINNHUB_API_KEY')
@@ -1034,7 +1028,7 @@ class ForeignStockService:
             'currency': profile.get('currency', 'USD'),
         }
 
-    def _get_us_kline_from_yfinance(self, code: str, period: str, limit: int) -> List[Dict]:
+    def _get_us_kline_from_yfinance(self, code: str, period: str, limit: int) -> list[dict]:
         """从yfinance获取美股K线数据"""
         import yfinance as yf
 
@@ -1073,10 +1067,11 @@ class ForeignStockService:
 
         return kline_data
 
-    def _get_us_kline_from_alpha_vantage(self, code: str, period: str, limit: int) -> List[Dict]:
+    def _get_us_kline_from_alpha_vantage(self, code: str, period: str, limit: int) -> list[dict]:
         """从Alpha Vantage获取美股K线数据"""
-        from tradingagents.dataflows.providers.us.alpha_vantage_common import get_api_key, _make_api_request
         import pandas as pd
+
+        from tradingagents.dataflows.providers.us.alpha_vantage_common import _make_api_request, get_api_key
 
         # 获取 API Key
         api_key = get_api_key()
@@ -1131,11 +1126,12 @@ class ForeignStockService:
 
         return kline_data
 
-    def _get_us_kline_from_finnhub(self, code: str, period: str, limit: int) -> List[Dict]:
+    def _get_us_kline_from_finnhub(self, code: str, period: str, limit: int) -> list[dict]:
         """从Finnhub获取美股K线数据"""
-        import finnhub
         import os
-        from datetime import datetime, timedelta
+        from datetime import datetime
+
+        import finnhub
 
         # 获取 API Key
         api_key = os.getenv('FINNHUB_API_KEY')
@@ -1201,7 +1197,7 @@ class ForeignStockService:
 
         return kline_data
 
-    async def get_hk_news(self, code: str, days: int = 2, limit: int = 50) -> Dict:
+    async def get_hk_news(self, code: str, days: int = 2, limit: int = 50) -> dict:
         """
         获取港股新闻
 
@@ -1213,7 +1209,6 @@ class ForeignStockService:
         Returns:
             包含新闻列表和数据源的字典
         """
-        from datetime import datetime, timedelta
 
         logger.info(f"📰 开始获取港股新闻: {code}, days={days}, limit={limit}")
 
@@ -1297,7 +1292,7 @@ class ForeignStockService:
 
         return result
 
-    async def get_us_news(self, code: str, days: int = 2, limit: int = 50) -> Dict:
+    async def get_us_news(self, code: str, days: int = 2, limit: int = 50) -> dict:
         """
         获取美股新闻
 
@@ -1309,7 +1304,6 @@ class ForeignStockService:
         Returns:
             包含新闻列表和数据源的字典
         """
-        from datetime import datetime, timedelta
 
         logger.info(f"📰 开始获取美股新闻: {code}, days={days}, limit={limit}")
 
@@ -1393,10 +1387,11 @@ class ForeignStockService:
 
         return result
 
-    def _get_us_news_from_alpha_vantage(self, code: str, days: int, limit: int) -> List[Dict]:
+    def _get_us_news_from_alpha_vantage(self, code: str, days: int, limit: int) -> list[dict]:
         """从Alpha Vantage获取美股新闻"""
-        from tradingagents.dataflows.providers.us.alpha_vantage_common import get_api_key, _make_api_request
-        from datetime import datetime, timedelta
+        from datetime import datetime
+
+        from tradingagents.dataflows.providers.us.alpha_vantage_common import _make_api_request, get_api_key
 
         # 获取 API Key
         api_key = get_api_key()
@@ -1456,11 +1451,12 @@ class ForeignStockService:
 
         return news_list
 
-    def _get_us_news_from_finnhub(self, code: str, days: int, limit: int) -> List[Dict]:
+    def _get_us_news_from_finnhub(self, code: str, days: int, limit: int) -> list[dict]:
         """从Finnhub获取美股新闻"""
-        import finnhub
         import os
-        from datetime import datetime, timedelta
+        from datetime import datetime
+
+        import finnhub
 
         # 获取 API Key
         api_key = os.getenv('FINNHUB_API_KEY')
@@ -1503,11 +1499,12 @@ class ForeignStockService:
 
         return news_list
 
-    def _get_hk_news_from_finnhub(self, code: str, days: int, limit: int) -> List[Dict]:
+    def _get_hk_news_from_finnhub(self, code: str, days: int, limit: int) -> list[dict]:
         """从Finnhub获取港股新闻"""
-        import finnhub
         import os
-        from datetime import datetime, timedelta
+        from datetime import datetime
+
+        import finnhub
 
         # 获取 API Key
         api_key = os.getenv('FINNHUB_API_KEY')
@@ -1553,11 +1550,11 @@ class ForeignStockService:
 
         return news_list
 
-    def _get_hk_info_from_akshare(self, code: str) -> Dict:
+    def _get_hk_info_from_akshare(self, code: str) -> dict:
         """从AKShare获取港股基础信息和财务指标"""
         from tradingagents.dataflows.providers.hk.improved_hk import (
+            get_hk_financial_indicators,
             get_hk_stock_info_akshare,
-            get_hk_financial_indicators
         )
 
         # 1. 获取基础信息（包含当前价格）
@@ -1612,7 +1609,7 @@ class ForeignStockService:
             'debt_ratio': financial_indicators.get('debt_asset_ratio'),  # 资产负债率
         }
 
-    def _get_hk_info_from_yfinance(self, code: str) -> Dict:
+    def _get_hk_info_from_yfinance(self, code: str) -> dict:
         """从Yahoo Finance获取港股基础信息"""
         import yfinance as yf
 
@@ -1630,10 +1627,11 @@ class ForeignStockService:
             'currency': info.get('currency', 'HKD'),
         }
 
-    def _get_hk_info_from_finnhub(self, code: str) -> Dict:
+    def _get_hk_info_from_finnhub(self, code: str) -> dict:
         """从Finnhub获取港股基础信息"""
-        import finnhub
         import os
+
+        import finnhub
 
         # 获取 API Key
         api_key = os.getenv('FINNHUB_API_KEY')
@@ -1663,11 +1661,11 @@ class ForeignStockService:
             'currency': profile.get('currency', 'HKD'),
         }
 
-    def _get_hk_kline_from_akshare(self, code: str, period: str, limit: int) -> List[Dict]:
+    def _get_hk_kline_from_akshare(self, code: str, period: str, limit: int) -> list[dict]:
         """从AKShare获取港股K线数据"""
+
         import akshare as ak
-        import pandas as pd
-        from datetime import datetime, timedelta
+
         from tradingagents.dataflows.providers.hk.improved_hk import get_improved_hk_provider
 
         # 标准化代码
@@ -1700,10 +1698,9 @@ class ForeignStockService:
 
         return kline_data
 
-    def _get_hk_kline_from_yfinance(self, code: str, period: str, limit: int) -> List[Dict]:
+    def _get_hk_kline_from_yfinance(self, code: str, period: str, limit: int) -> list[dict]:
         """从Yahoo Finance获取港股K线数据"""
         import yfinance as yf
-        import pandas as pd
 
         ticker = yf.Ticker(f"{code}.HK")
 
@@ -1740,11 +1737,12 @@ class ForeignStockService:
 
         return kline_data[-limit:]  # 返回最后limit条
 
-    def _get_hk_kline_from_finnhub(self, code: str, period: str, limit: int) -> List[Dict]:
+    def _get_hk_kline_from_finnhub(self, code: str, period: str, limit: int) -> list[dict]:
         """从Finnhub获取港股K线数据"""
-        import finnhub
         import os
-        from datetime import datetime, timedelta
+        from datetime import datetime
+
+        import finnhub
 
         # 获取 API Key
         api_key = os.getenv('FINNHUB_API_KEY')
@@ -1796,11 +1794,12 @@ class ForeignStockService:
 
         return kline_data[-limit:]  # 返回最后limit条
 
-    def _get_hk_news_from_akshare(self, code: str, days: int, limit: int) -> List[Dict]:
+    def _get_hk_news_from_akshare(self, code: str, days: int, limit: int) -> list[dict]:
         """从AKShare获取港股新闻"""
         try:
+            from datetime import datetime
+
             import akshare as ak
-            from datetime import datetime, timedelta
 
             # AKShare 的港股新闻接口
             # 注意：AKShare 可能没有专门的港股新闻接口，这里使用通用新闻接口
@@ -1817,9 +1816,9 @@ class ForeignStockService:
                 for _, row in df.head(limit).iterrows():
                     pub_time = row['发布时间'] if '发布时间' in row else datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                     news_list.append({
-                        'title': row['新闻标题'] if '新闻标题' in row else '',
-                        'summary': row['新闻内容'] if '新闻内容' in row else '',
-                        'url': row['新闻链接'] if '新闻链接' in row else '',
+                        'title': row.get('新闻标题', ''),
+                        'summary': row.get('新闻内容', ''),
+                        'url': row.get('新闻链接', ''),
                         'source': 'AKShare-东方财富',
                         'publish_time': pub_time,
                         'sentiment': None,

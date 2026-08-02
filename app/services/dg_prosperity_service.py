@@ -10,9 +10,10 @@
 如果 Tushare 不可用或数据缺失，返回 None，不影响策略运行。
 """
 
+import contextlib
 import logging
 from datetime import datetime
-from typing import List, Dict, Optional, Any
+
 from app.core.database import get_mongo_db
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,7 @@ QUADRANT_COLORS = {
 }
 
 
-def classify_quadrant(g: Optional[float], dg: Optional[float]) -> str:
+def classify_quadrant(g: float | None, dg: float | None) -> str:
     """根据 G 和 ΔG 判定景气象限
 
     Args:
@@ -63,7 +64,7 @@ class DgProsperityService:
     def __init__(self):
         self.db = None
         self._tushare_pro = None
-        self._cache: Dict[str, dict] = {}
+        self._cache: dict[str, dict] = {}
 
     async def _get_db(self):
         if self.db is None:
@@ -75,8 +76,9 @@ class DgProsperityService:
         if self._tushare_pro is not None:
             return self._tushare_pro
         try:
-            import tushare as ts
             import os
+
+            import tushare as ts
             token = os.getenv('TUSHARE_TOKEN', '').strip().strip('"').strip("'")
             if not token:
                 return None
@@ -87,7 +89,7 @@ class DgProsperityService:
             logger.warning(f"[DgProsperity] Tushare 初始化失败: {e}")
             return None
 
-    async def get_quadrant_batch(self, codes: List[str]) -> Dict[str, dict]:
+    async def get_quadrant_batch(self, codes: list[str]) -> dict[str, dict]:
         """批量获取多只股票的 ΔG 象限数据
 
         Args:
@@ -110,7 +112,7 @@ class DgProsperityService:
             return {c: self._empty_quadrant() for c in codes_str}
 
         # 按 code 取最新季度
-        latest: Dict[str, dict] = {}
+        latest: dict[str, dict] = {}
         for doc in docs:
             code = doc.get("code", "")
             period = doc.get("report_period", "")
@@ -149,7 +151,7 @@ class DgProsperityService:
             "available": False
         }
 
-    async def refresh_quarterly(self, codes: Optional[List[str]] = None) -> dict:
+    async def refresh_quarterly(self, codes: list[str] | None = None) -> dict:
         """季度刷新 ΔG 数据（从 Tushare fina_indicator 拉取）
 
         Args:
@@ -186,7 +188,7 @@ class DgProsperityService:
         # 最近 8 个季度（2 年）
         today = datetime.now()
         quarters = []
-        for i in range(8):
+        for _i in range(8):
             q_date = today
             while q_date.month not in (3, 6, 9, 12):
                 q_date = q_date.replace(day=1)
@@ -212,7 +214,7 @@ class DgProsperityService:
         # 按季度批量拉取（Tushare fina_indicator 按 code 或 period 批量）
         try:
             for period in quarters:
-                year_q = period.replace("Q", "")
+                period.replace("Q", "")
                 # 构造 Tushare 的 period 格式：20240930 等
                 end_dates = {
                     "Q1": "0331",
@@ -289,13 +291,11 @@ class DgProsperityService:
                 curr_g = docs_sorted[i].get("g")
                 if prev_g is not None and curr_g is not None:
                     dg = curr_g - prev_g
-                    try:
+                    with contextlib.suppress(Exception):
                         await collection.update_one(
                             {"_id": docs_sorted[i]["_id"]},
                             {"$set": {"dg": float(dg)}}
                         )
-                    except Exception:
-                        pass
 
     async def get_sector_dg(self, industry: str) -> dict:
         """获取行业平均 ΔG（宏观层面判断）"""
@@ -303,7 +303,7 @@ class DgProsperityService:
         return self._empty_quadrant()
 
 
-_dg_service_instance: Optional[DgProsperityService] = None
+_dg_service_instance: DgProsperityService | None = None
 
 
 def get_dg_prosperity_service() -> DgProsperityService:

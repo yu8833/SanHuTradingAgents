@@ -18,7 +18,7 @@ import asyncio
 import logging
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import numpy as np
 
@@ -31,8 +31,8 @@ class MacdDivergenceService(RetailScreeningBase):
     """MACD背离策略"""
 
     async def scan_macd_divergence(
-        self, params: Dict[str, Any] = None
-    ) -> Dict[str, Any]:
+        self, params: dict[str, Any] = None
+    ) -> dict[str, Any]:
         """
         扫描MACD背离候选股
 
@@ -107,7 +107,7 @@ class MacdDivergenceService(RetailScreeningBase):
             ema[i] = alpha * data[i] + (1 - alpha) * ema[i - 1]
         return ema
 
-    def _calc_macd(self, closes: np.ndarray, fast: int = 12, slow: int = 26, signal: int = 9) -> Optional[tuple]:
+    def _calc_macd(self, closes: np.ndarray, fast: int = 12, slow: int = 26, signal: int = 9) -> tuple | None:
         """计算MACD指标"""
         if len(closes) < slow + signal:
             return None
@@ -120,7 +120,7 @@ class MacdDivergenceService(RetailScreeningBase):
 
         return macd_line, signal_line, histogram
 
-    def _calc_ma(self, closes: np.ndarray, period: int) -> Optional[np.ndarray]:
+    def _calc_ma(self, closes: np.ndarray, period: int) -> np.ndarray | None:
         """计算均线"""
         if len(closes) < period:
             return None
@@ -131,7 +131,7 @@ class MacdDivergenceService(RetailScreeningBase):
         closes: np.ndarray,
         macd_histogram: np.ndarray,
         window: int = 30,
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """
         检测MACD背离信号
 
@@ -221,8 +221,8 @@ class MacdDivergenceService(RetailScreeningBase):
         self,
         code: str,
         sv: dict,
-        quotes: List[dict],
-    ) -> Optional[dict]:
+        quotes: list[dict],
+    ) -> dict | None:
         """分析单只股票"""
         name = sv.get("name", "")
         industry = sv.get("industry", "")
@@ -402,11 +402,11 @@ class MacdDivergenceService(RetailScreeningBase):
             "market": market,
         }
 
-    async def backtest(self, params: Dict[str, Any] = None) -> Dict[str, Any]:
+    async def backtest(self, params: dict[str, Any] = None) -> dict[str, Any]:
         """回测"""
         params = params or {}
 
-        async def scan_func(date_str: str) -> List[dict]:
+        async def scan_func(date_str: str) -> list[dict]:
             screening_data = await self._get_screening_view_for_date(date_str)
             sorted_codes = sorted(
                 screening_data.keys(),
@@ -436,7 +436,7 @@ class MacdDivergenceService(RetailScreeningBase):
         return await self.run_backtest("macd_divergence", scan_func, params)
 
 
-_service: Optional[MacdDivergenceService] = None
+_service: MacdDivergenceService | None = None
 
 
 def get_macd_divergence_service() -> MacdDivergenceService:

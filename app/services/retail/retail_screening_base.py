@@ -8,10 +8,11 @@
 """
 
 import asyncio
+import contextlib
 import logging
 import time
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -46,7 +47,7 @@ class RetailScreeningBase:
             self._db = get_mongo_db()
         return self._db
 
-    async def _get_stock_list(self, force_refresh: bool = False) -> List[dict]:
+    async def _get_stock_list(self, force_refresh: bool = False) -> list[dict]:
         """获取A股股票列表（带缓存，5分钟过期）"""
         now = time.time()
         if (
@@ -74,8 +75,8 @@ class RetailScreeningBase:
         return stocks
 
     async def _get_screening_view_batch(
-        self, codes: Optional[List[str]] = None
-    ) -> Dict[str, dict]:
+        self, codes: list[str] | None = None
+    ) -> dict[str, dict]:
         """
         从 stock_screening_view 获取最新行情+估值数据
         返回 {code: {pe, pb, total_mv, circ_mv, turnover_rate, close, pct_chg, ...}}
@@ -108,8 +109,8 @@ class RetailScreeningBase:
         return {d["code"]: d for d in docs if d.get("code")}
 
     async def _get_screening_view_for_date(
-        self, date_str: str, codes: Optional[List[str]] = None
-    ) -> Dict[str, dict]:
+        self, date_str: str, codes: list[str] | None = None
+    ) -> dict[str, dict]:
         """
         从 stock_daily_quotes 获取指定日期的历史行情数据，模拟当时的筛选视图
         用于回测，避免未来函数
@@ -157,7 +158,7 @@ class RetailScreeningBase:
         # 1.5 按 data_source 优先级去重（tushare > sina > baostock > akshare）
         # 同一只股票同一天可能存在多个数据源的记录，只保留优先级最高的一份
         source_priority = {"tushare": 4, "sina": 3, "baostock": 2, "akshare": 1}
-        deduped_quotes: Dict[str, dict] = {}
+        deduped_quotes: dict[str, dict] = {}
         for qd in quotes_docs:
             code = qd.get("code")
             if not code:
@@ -225,9 +226,9 @@ class RetailScreeningBase:
     async def _get_daily_quotes(
         self,
         code: str,
-        end_date: Optional[str] = None,
+        end_date: str | None = None,
         days: int = 250,
-    ) -> List[dict]:
+    ) -> list[dict]:
         """
         获取个股日线数据（按日期倒序，最近days天）
 
@@ -282,12 +283,12 @@ class RetailScreeningBase:
 
     async def _batch_get_quotes(
         self,
-        codes: List[str],
+        codes: list[str],
         end_date: str,
         days: int = 60,
         concurrency: int = 100,
         batch_size: int = 500,
-    ) -> Dict[str, List[dict]]:
+    ) -> dict[str, list[dict]]:
         """
         批量获取多只股票的日线数据（分片并发 $in 查询）
 
@@ -318,7 +319,7 @@ class RetailScreeningBase:
         semaphore = asyncio.Semaphore(max(1, concurrency))
         source_priority = {"tushare": 4, "sina": 3, "baostock": 2, "akshare": 1}
 
-        async def _query_chunk(chunk: List[str]) -> Dict[str, List[dict]]:
+        async def _query_chunk(chunk: list[str]) -> dict[str, list[dict]]:
             async with semaphore:
                 db = await self._get_db()
                 cursor = db["stock_daily_quotes"].find(
@@ -345,7 +346,7 @@ class RetailScreeningBase:
 
                 docs = await cursor.to_list(length=None)
 
-                by_code: Dict[str, Dict[str, dict]] = {}
+                by_code: dict[str, dict[str, dict]] = {}
                 for d in docs:
                     code = d.get("code")
                     if not code:
@@ -358,7 +359,7 @@ class RetailScreeningBase:
                     ) > source_priority.get(bucket[dt].get("data_source", ""), 0):
                         bucket[dt] = d
 
-                result: Dict[str, List[dict]] = {}
+                result: dict[str, list[dict]] = {}
                 for code, bucket in by_code.items():
                     sorted_quotes = sorted(
                         bucket.values(), key=lambda x: x["trade_date"], reverse=True
@@ -367,14 +368,14 @@ class RetailScreeningBase:
                 return result
 
         chunk_results = await asyncio.gather(*[_query_chunk(c) for c in chunks])
-        merged: Dict[str, List[dict]] = {}
+        merged: dict[str, list[dict]] = {}
         for r in chunk_results:
             merged.update(r)
         return merged
 
     # ---- 通用工具 ----
 
-    def _calc_ma(self, closes: np.ndarray, period: int) -> Optional[float]:
+    def _calc_ma(self, closes: np.ndarray, period: int) -> float | None:
         """计算均线"""
         if len(closes) < period:
             return None
@@ -405,9 +406,9 @@ class RetailScreeningBase:
 
     async def _apply_risk_filter(
         self,
-        items: List[dict],
-        screening_data: Optional[Dict[str, dict]] = None,
-    ) -> List[dict]:
+        items: list[dict],
+        screening_data: dict[str, dict] | None = None,
+    ) -> list[dict]:
         """
         对扫描结果做风险过滤
 
@@ -435,7 +436,7 @@ class RetailScreeningBase:
             # 信号量控制并发上限，避免数据源限流。
             semaphore = asyncio.Semaphore(10)
 
-            async def scan_one(item: dict) -> Tuple[dict, Optional[dict]]:
+            async def scan_one(item: dict) -> tuple[dict, dict | None]:
                 code = item.get("code", "")
                 if not code:
                     return item, None
@@ -508,8 +509,8 @@ class RetailScreeningBase:
         self,
         strategy_name: str,
         scan_func,
-        params: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
         """
         通用回测引擎
 
@@ -560,8 +561,8 @@ class RetailScreeningBase:
         scan_dates = trade_dates[::scan_interval]
 
         # ========== 预计算市场环境（每天的上涨股票比例）==========
-        logger.info(f"📊 预计算市场环境数据...")
-        market_rise_ratio: Dict[str, float] = {}
+        logger.info("📊 预计算市场环境数据...")
+        market_rise_ratio: dict[str, float] = {}
         for dt in trade_dates:
             try:
                 screening_data = await self._get_screening_view_for_date(dt)
@@ -574,9 +575,9 @@ class RetailScreeningBase:
             except Exception as e:
                 logger.warning(f"计算 {dt} 市场环境失败: {e}")
                 market_rise_ratio[dt] = 0.5
-        logger.info(f"✅ 市场环境预计算完成")
+        logger.info("✅ 市场环境预计算完成")
 
-        for i, date_str in enumerate(trade_dates):
+        for _i, date_str in enumerate(trade_dates):
             # 1. 检查持仓是否触发卖出
             # 性能优化：单次批量查询所有持仓当日行情，替代逐持仓 N 次查询
             new_holdings = []
@@ -593,13 +594,11 @@ class RetailScreeningBase:
 
                 current_price = quotes[-1]["close"]
                 holding_day_count = 0
-                try:
+                with contextlib.suppress(Exception):
                     holding_day_count = (
                         datetime.strptime(date_str, "%Y-%m-%d")
                         - datetime.strptime(h["buy_date"], "%Y-%m-%d")
                     ).days
-                except Exception:
-                    pass
 
                 # 卖出条件：到期 或 止损10% 或 止盈30%
                 pnl_pct = (current_price - h["buy_price"]) / h["buy_price"]

@@ -3,11 +3,12 @@
 防止API滥用，实现用户级和端点级速率限制
 """
 
-from fastapi import Request, Response, HTTPException
-from starlette.middleware.base import BaseHTTPMiddleware
 import logging
-from typing import Callable, Dict, Optional
-from core.redis_client import get_redis_service, RedisKeys
+from collections.abc import Callable
+
+from core.redis_client import RedisKeys, get_redis_service
+from fastapi import HTTPException, Request, Response
+from starlette.middleware.base import BaseHTTPMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +81,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 detail={
                     "error": {
                         "code": "RATE_LIMIT_EXCEEDED",
-                        "message": f"请求过于频繁，请稍后重试",
+                        "message": "请求过于频繁，请稍后重试",
                         "rate_limit": rate_limit,
                         "current_count": current_count,
                         "reset_time": 60

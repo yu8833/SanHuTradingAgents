@@ -7,13 +7,14 @@
 
 import logging
 from datetime import datetime
-from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field
+from typing import Any
+
 from bson import ObjectId
+from pydantic import BaseModel, Field
 
 from app.core.database import get_mongo_db
-from app.services.notifications_service import get_notifications_service
 from app.models.notification import NotificationCreate
+from app.services.notifications_service import get_notifications_service
 
 logger = logging.getLogger(__name__)
 
@@ -32,18 +33,18 @@ ALERT_TYPE_CONSECUTIVE_DOWN = "consecutive_down" # 连跌天数
 
 class AlertRule(BaseModel):
     """预警规则"""
-    id: Optional[str] = None
+    id: str | None = None
     user_id: str
     code: str                    # 股票代码
     stock_name: str = ""
     alert_type: str              # price_above/price_below/pct_up/pct_down
     threshold: float             # 阈值（价格或百分比）
-    note: Optional[str] = None
+    note: str | None = None
     enabled: bool = True
     triggered: bool = False      # 是否已触发（触发后置true，避免重复推送；重置后可再次触发）
-    triggered_at: Optional[str] = None
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
+    triggered_at: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
 
 
 class AlertRuleCreate(BaseModel):
@@ -51,14 +52,14 @@ class AlertRuleCreate(BaseModel):
     stock_name: str = ""
     alert_type: str = Field(..., description="price_above/price_below/pct_up/pct_down")
     threshold: float
-    note: Optional[str] = None
+    note: str | None = None
 
 
 class AlertRuleUpdate(BaseModel):
-    threshold: Optional[float] = None
-    note: Optional[str] = None
-    enabled: Optional[bool] = None
-    triggered: Optional[bool] = None  # 手动重置时设为 False
+    threshold: float | None = None
+    note: str | None = None
+    enabled: bool | None = None
+    triggered: bool | None = None  # 手动重置时设为 False
 
 
 class StockAlertService:
@@ -73,7 +74,7 @@ class StockAlertService:
             self.db = get_mongo_db()
         return self.db
 
-    def _serialize(self, doc: Dict[str, Any]) -> Dict[str, Any]:
+    def _serialize(self, doc: dict[str, Any]) -> dict[str, Any]:
         if doc is None:
             return None
         result = dict(doc)
@@ -82,7 +83,7 @@ class StockAlertService:
             del result["_id"]
         return result
 
-    async def create_alert(self, user_id: str, rule: AlertRuleCreate) -> Dict[str, Any]:
+    async def create_alert(self, user_id: str, rule: AlertRuleCreate) -> dict[str, Any]:
         """创建预警规则"""
         try:
             db = await self._get_db()
@@ -108,11 +109,11 @@ class StockAlertService:
             logger.error(f"❌ 创建预警失败: {e}", exc_info=True)
             raise
 
-    async def get_alerts(self, user_id: str, code: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def get_alerts(self, user_id: str, code: str | None = None) -> list[dict[str, Any]]:
         """获取用户的预警规则"""
         try:
             db = await self._get_db()
-            query: Dict[str, Any] = {"user_id": user_id}
+            query: dict[str, Any] = {"user_id": user_id}
             if code:
                 query["code"] = code
             cursor = db[self.collection_name].find(query).sort("created_at", -1)
@@ -122,7 +123,7 @@ class StockAlertService:
             logger.error(f"❌ 获取预警列表失败: {e}", exc_info=True)
             raise
 
-    async def update_alert(self, alert_id: str, updates: AlertRuleUpdate) -> Optional[Dict[str, Any]]:
+    async def update_alert(self, alert_id: str, updates: AlertRuleUpdate) -> dict[str, Any] | None:
         """更新预警规则"""
         try:
             db = await self._get_db()
@@ -288,7 +289,7 @@ class StockAlertService:
         except Exception as e:
             logger.error(f"❌ 预警检查失败: {e}", exc_info=True)
 
-    async def _batch_get_prices(self, codes: List[str]) -> Dict[str, Dict[str, Any]]:
+    async def _batch_get_prices(self, codes: list[str]) -> dict[str, dict[str, Any]]:
         """批量获取股票最新价和涨跌幅"""
         if not codes:
             return {}

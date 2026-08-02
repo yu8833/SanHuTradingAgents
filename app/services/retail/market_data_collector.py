@@ -13,7 +13,6 @@
 
 import logging
 from datetime import datetime, timedelta
-from typing import Optional
 
 import numpy as np
 
@@ -41,7 +40,7 @@ def _safe_akshare():
         return None
 
 
-def _fetch_index_daily(symbol: str) -> Optional[object]:
+def _fetch_index_daily(symbol: str) -> object | None:
     """获取指数日线数据（pandas DataFrame）"""
     ak = _safe_akshare()
     if ak is None:

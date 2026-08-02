@@ -2,23 +2,24 @@
 模型能力管理API路由
 """
 
-from fastapi import APIRouter, HTTPException, Depends
-from typing import List, Dict, Any, Optional
+import logging
+from typing import Any
+
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from app.services.model_capability_service import get_model_capability_service
 from app.constants.model_capabilities import (
-    DEFAULT_MODEL_CAPABILITIES,
     CAPABILITY_DESCRIPTIONS,
-    ModelRole,
+    DEFAULT_MODEL_CAPABILITIES,
     ModelFeature,
+    ModelRole,
+    get_feature_badge,
     get_model_capability_badge,
     get_role_badge,
-    get_feature_badge
 )
+from app.core.response import ok
 from app.core.unified_config import unified_config
-from app.core.response import ok, fail
-import logging
+from app.services.model_capability_service import get_model_capability_service
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +32,10 @@ class ModelCapabilityInfo(BaseModel):
     """模型能力信息"""
     model_name: str
     capability_level: int
-    suitable_roles: List[str]
-    features: List[str]
-    performance_metrics: Optional[Dict[str, Any]] = None
-    description: Optional[str] = None
+    suitable_roles: list[str]
+    features: list[str]
+    performance_metrics: dict[str, Any] | None = None
+    description: str | None = None
 
 
 class ModelRecommendationResponse(BaseModel):
@@ -55,8 +56,8 @@ class ModelValidationRequest(BaseModel):
 class ModelValidationResponse(BaseModel):
     """模型验证响应"""
     valid: bool
-    warnings: List[str]
-    recommendations: List[str]
+    warnings: list[str]
+    recommendations: list[str]
 
 
 class BatchInitRequest(BaseModel):

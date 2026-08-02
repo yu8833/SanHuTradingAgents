@@ -184,9 +184,9 @@ def test_ui_behavior():
         print(f"   预期显示指南: {scenario['expected_show_guide']}")
         
         if actual_show_guide == scenario['expected_show_guide']:
-            print(f"   ✅ 测试通过")
+            print("   ✅ 测试通过")
         else:
-            print(f"   ❌ 测试失败")
+            print("   ❌ 测试失败")
     
     return True
 

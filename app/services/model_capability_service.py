@@ -4,16 +4,11 @@
 提供模型能力评估、验证和推荐功能。
 """
 
-from typing import Tuple, Dict, Optional, List, Any
-from app.constants.model_capabilities import (
-    DEFAULT_MODEL_CAPABILITIES,
-    CAPABILITY_DESCRIPTIONS,
-    ModelRole,
-    ModelFeature
-)
-from app.core.unified_config import unified_config
 import logging
-import re
+from typing import Any
+
+from app.constants.model_capabilities import DEFAULT_MODEL_CAPABILITIES, ModelFeature, ModelRole
+from app.core.unified_config import unified_config
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +16,7 @@ logger = logging.getLogger(__name__)
 class ModelCapabilityService:
     """模型能力管理服务"""
 
-    def _parse_aggregator_model_name(self, model_name: str) -> Tuple[Optional[str], str]:
+    def _parse_aggregator_model_name(self, model_name: str) -> tuple[str | None, str]:
         """
         解析聚合渠道的模型名称
 
@@ -61,7 +56,7 @@ class ModelCapabilityService:
 
         return None, model_name
 
-    def _get_model_capability_with_mapping(self, model_name: str) -> Tuple[int, Optional[str]]:
+    def _get_model_capability_with_mapping(self, model_name: str) -> tuple[int, str | None]:
         """
         获取模型能力等级（支持聚合渠道映射）
 
@@ -110,7 +105,7 @@ class ModelCapabilityService:
 
         return capability
     
-    def get_model_config(self, model_name: str) -> Dict[str, Any]:
+    def get_model_config(self, model_name: str) -> dict[str, Any]:
         """
         获取模型的完整配置信息（支持聚合渠道模型映射）
 
@@ -123,8 +118,8 @@ class ModelCapabilityService:
         # 1. 优先从 MongoDB 数据库配置读取（使用同步客户端）
         try:
             from pymongo import MongoClient
+
             from app.core.config import settings
-            from app.models.config import SystemConfig
 
             # 使用同步 MongoDB 客户端
             client = MongoClient(settings.MONGO_URI)
@@ -210,13 +205,12 @@ class ModelCapabilityService:
 
         # 3. 尝试聚合渠道模型映射
         provider, original_model = self._parse_aggregator_model_name(model_name)
-        if original_model and original_model != model_name:
-            if original_model in DEFAULT_MODEL_CAPABILITIES:
-                logger.info(f"🔄 聚合渠道模型映射: {model_name} -> {original_model}")
-                config = DEFAULT_MODEL_CAPABILITIES[original_model].copy()
-                config["model_name"] = model_name  # 保持原始模型名
-                config["_mapped_from"] = original_model  # 记录映射来源
-                return config
+        if original_model and original_model != model_name and original_model in DEFAULT_MODEL_CAPABILITIES:
+            logger.info(f"🔄 聚合渠道模型映射: {model_name} -> {original_model}")
+            config = DEFAULT_MODEL_CAPABILITIES[original_model].copy()
+            config["model_name"] = model_name  # 保持原始模型名
+            config["_mapped_from"] = original_model  # 记录映射来源
+            return config
 
         # 4. 返回默认配置
         logger.warning(f"未找到模型 {model_name} 的配置，使用默认配置")
@@ -232,7 +226,7 @@ class ModelCapabilityService:
         self,
         quick_model: str,
         deep_model: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         验证模型对是否满足基本要求
 
@@ -287,7 +281,7 @@ class ModelCapabilityService:
 
         return result
 
-    def recommend_default_models(self) -> Tuple[str, str]:
+    def recommend_default_models(self) -> tuple[str, str]:
         """
         推荐默认模型对
 
@@ -296,7 +290,7 @@ class ModelCapabilityService:
         """
         return self._get_default_models()
 
-    def recommend_models(self) -> Tuple[str, str]:
+    def recommend_models(self) -> tuple[str, str]:
         """
         推荐合适的模型对（从已启用的模型中筛选最佳组合）
 
@@ -375,7 +369,7 @@ class ModelCapabilityService:
 
         return quick_model, deep_model
     
-    def _get_default_models(self) -> Tuple[str, str]:
+    def _get_default_models(self) -> tuple[str, str]:
         """获取默认模型对"""
         try:
             quick_model = unified_config.get_quick_analysis_model()

@@ -4,12 +4,14 @@
 - 将 trace_id 写入 logging 的 contextvars，使所有日志自动带出
 """
 
+import contextlib
+import logging
+import time
+import uuid
+from collections.abc import Callable
+
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
-import uuid
-import time
-import logging
-from typing import Callable
 
 from app.core.logging_context import trace_id_var
 
@@ -69,7 +71,5 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
 
         finally:
             # 清理 contextvar，避免泄露到后续请求
-            try:
+            with contextlib.suppress(Exception):
                 trace_id_var.reset(token)
-            except Exception:
-                pass

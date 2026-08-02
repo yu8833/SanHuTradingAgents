@@ -17,7 +17,7 @@ import re
 import urllib.request
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 
 from app.services.cache_layer import cached as cache_layer_cached

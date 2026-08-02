@@ -2,8 +2,10 @@
 用户自定义标签服务
 """
 from __future__ import annotations
-from typing import List, Optional, Dict, Any
+
 from datetime import datetime
+from typing import Any
+
 from bson import ObjectId
 
 from app.core.database import get_mongo_db
@@ -32,7 +34,7 @@ class TagsService:
         # 统一为字符串存储，便于兼容开源版(admin)与未来ObjectId
         return str(user_id)
 
-    def _format_doc(self, doc: Dict[str, Any]) -> Dict[str, Any]:
+    def _format_doc(self, doc: dict[str, Any]) -> dict[str, Any]:
         return {
             "id": str(doc.get("_id")),
             "name": doc.get("name"),
@@ -42,7 +44,7 @@ class TagsService:
             "updated_at": (doc.get("updated_at") or datetime.utcnow()).isoformat(),
         }
 
-    async def list_tags(self, user_id: str) -> List[Dict[str, Any]]:
+    async def list_tags(self, user_id: str) -> list[dict[str, Any]]:
         db = await self._get_db()
         await self.ensure_indexes()
         cursor = db.user_tags.find({"user_id": self._normalize_user_id(user_id)}).sort([
@@ -51,7 +53,7 @@ class TagsService:
         docs = await cursor.to_list(length=None)
         return [self._format_doc(d) for d in docs]
 
-    async def create_tag(self, user_id: str, name: str, color: Optional[str] = None, sort_order: int = 0) -> Dict[str, Any]:
+    async def create_tag(self, user_id: str, name: str, color: str | None = None, sort_order: int = 0) -> dict[str, Any]:
         db = await self._get_db()
         await self.ensure_indexes()
         now = datetime.utcnow()
@@ -67,10 +69,10 @@ class TagsService:
         doc["_id"] = result.inserted_id
         return self._format_doc(doc)
 
-    async def update_tag(self, user_id: str, tag_id: str, *, name: Optional[str] = None, color: Optional[str] = None, sort_order: Optional[int] = None) -> bool:
+    async def update_tag(self, user_id: str, tag_id: str, *, name: str | None = None, color: str | None = None, sort_order: int | None = None) -> bool:
         db = await self._get_db()
         await self.ensure_indexes()
-        update: Dict[str, Any] = {"updated_at": datetime.utcnow()}
+        update: dict[str, Any] = {"updated_at": datetime.utcnow()}
         if name is not None:
             update["name"] = name.strip()
         if color is not None:

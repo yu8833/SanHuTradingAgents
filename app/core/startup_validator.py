@@ -4,9 +4,9 @@
 验证系统启动所需的必需配置项，提供友好的错误提示。
 """
 
-import os
 import logging
-from typing import List, Dict, Any, Optional
+import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 
@@ -28,19 +28,19 @@ class ConfigItem:
     key: str                    # 配置键名
     level: ConfigLevel          # 配置级别
     description: str            # 配置描述
-    example: Optional[str] = None  # 配置示例
-    help_url: Optional[str] = None  # 帮助链接
-    validator: Optional[callable] = None  # 自定义验证函数
+    example: str | None = None  # 配置示例
+    help_url: str | None = None  # 帮助链接
+    validator: Callable[[str], bool] | None = None  # 自定义验证函数 str -> bool
 
 
 @dataclass
 class ValidationResult:
     """验证结果"""
     success: bool               # 是否验证成功
-    missing_required: List[ConfigItem]  # 缺少的必需配置
-    missing_recommended: List[ConfigItem]  # 缺少的推荐配置
-    invalid_configs: List[tuple[ConfigItem, str]]  # 无效的配置（配置项，错误信息）
-    warnings: List[str]         # 警告信息
+    missing_required: list[ConfigItem]  # 缺少的必需配置
+    missing_recommended: list[ConfigItem]  # 缺少的推荐配置
+    invalid_configs: list[tuple[ConfigItem, str]]  # 无效的配置（配置项，错误信息）
+    warnings: list[str]         # 警告信息
 
 
 class StartupValidator:
@@ -152,10 +152,7 @@ class StartupValidator:
             return False
 
         # 检查长度（大多数 API Key 都 > 10 个字符）
-        if len(api_key) <= 10:
-            return False
-
-        return True
+        return not len(api_key) <= 10
 
     def validate(self) -> ValidationResult:
         """

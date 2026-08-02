@@ -1,26 +1,26 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Header
-from fastapi.responses import StreamingResponse
 import asyncio
+import contextlib
 import json
 import logging
 import time
-from typing import Optional
 
-from app.routers.auth_db import get_current_user
-from app.core.database import get_redis_client
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi.responses import StreamingResponse
+
 from app.core.config import settings
+from app.core.database import get_redis_client
+from app.routers.auth_db import get_current_user
 from app.services.auth_service import AuthService
+from app.services.queue_service import QueueService, get_queue_service
 from app.services.user_service import user_service
-
-from app.services.queue_service import get_queue_service, QueueService
 
 router = APIRouter()
 logger = logging.getLogger("webapi.sse")
 
 
 async def get_current_user_for_sse(
-    authorization: Optional[str] = None,
-    token: Optional[str] = None
+    authorization: str | None = None,
+    token: str | None = None
 ) -> dict:
     """
     SSE 专用认证：支持 Authorization header 或 ?token= query 参数。
@@ -82,7 +82,7 @@ async def task_progress_generator(task_id: str, user_id: str):
             logger.error(f"❌ [SSE-Task] 订阅频道失败: {subscribe_error}")
             try:
                 await pubsub.close()
-                logger.info(f"🧹 [SSE-Task] 订阅失败后已关闭 PubSub 连接")
+                logger.info("🧹 [SSE-Task] 订阅失败后已关闭 PubSub 连接")
             except Exception as close_error:
                 logger.error(f"❌ [SSE-Task] 关闭 PubSub 连接失败: {close_error}")
             # 重新抛出异常，让外层 except 处理
@@ -168,12 +168,12 @@ async def batch_progress_generator(batch_id: str, user_id: str):
                 # Get current batch status
                 batch_data = await svc.get_batch(batch_id)
                 if not batch_data:
-                    yield f"event: error\ndata: {{\"error\": \"批次不存在\"}}\n\n"
+                    yield "event: error\ndata: {\"error\": \"批次不存在\"}\n\n"
                     break
 
                 # Check if batch belongs to user
                 if batch_data.get("user") != user_id:
-                    yield f"event: error\ndata: {{\"error\": \"无权限访问此批次\"}}\n\n"
+                    yield "event: error\ndata: {\"error\": \"无权限访问此批次\"}\n\n"
                     break
 
                 # Calculate batch progress based on task statuses
@@ -325,13 +325,11 @@ async def quotes_update_generator(user_id: str):
         pubsub = r.pubsub()
         try:
             await pubsub.subscribe(channel)
-            yield f"event: connected\ndata: {{\"message\": \"已连接实时行情信号流\"}}\n\n"
+            yield "event: connected\ndata: {\"message\": \"已连接实时行情信号流\"}\n\n"
         except Exception as subscribe_error:
             logger.error(f"❌ [SSE-Quotes] 订阅频道失败: {subscribe_error}")
-            try:
+            with contextlib.suppress(Exception):
                 await pubsub.close()
-            except Exception:
-                pass
             raise
 
         idle_elapsed = 0.0
@@ -366,7 +364,7 @@ async def quotes_update_generator(user_id: str):
         yield f"event: error\ndata: {{\"error\": \"连接异常: {str(e)}\"}}\n\n"
     finally:
         if pubsub:
-            logger.info(f"🧹 [SSE-Quotes] 清理 PubSub 连接")
+            logger.info("🧹 [SSE-Quotes] 清理 PubSub 连接")
             try:
                 await pubsub.unsubscribe(channel)
             except Exception as e:
@@ -379,8 +377,8 @@ async def quotes_update_generator(user_id: str):
 
 @router.get("/quotes")
 async def stream_quotes_update(
-    token: Optional[str] = Query(default=None, description="SSE 认证 token（EventSource 不支持自定义 header）"),
-    authorization: Optional[str] = Header(default=None),
+    token: str | None = Query(default=None, description="SSE 认证 token（EventSource 不支持自定义 header）"),
+    authorization: str | None = Header(default=None),
 ):
     """
     实时行情更新信号 SSE 端点。

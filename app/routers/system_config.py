@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from typing import Any, Dict
-import re
 import logging
+import re
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.config import settings
 from app.routers.auth_db import get_current_user
@@ -37,20 +38,20 @@ def _mask_value(key: str, value: Any) -> Any:
     return value
 
 
-def _build_summary() -> Dict[str, Any]:
+def _build_summary() -> dict[str, Any]:
     raw = settings.model_dump()
     # Attach derived URLs
     raw["MONGO_URI"] = settings.MONGO_URI
     raw["REDIS_URL"] = settings.REDIS_URL
 
-    summary: Dict[str, Any] = {}
+    summary: dict[str, Any] = {}
     for k, v in raw.items():
         summary[k] = _mask_value(k, v)
     return summary
 
 
 @router.get("/config/summary", tags=["system"], summary="配置概要（已屏蔽敏感项，需管理员）")
-async def get_config_summary(current_user: dict = Depends(get_current_user)) -> Dict[str, Any]:
+async def get_config_summary(current_user: dict = Depends(get_current_user)) -> dict[str, Any]:
     """
     返回当前生效的设置概要。敏感字段将以 *** 掩码显示。
     访问控制：需管理员身份。
@@ -72,8 +73,8 @@ async def validate_config():
 
     注意：此接口会先从 MongoDB 重载配置到环境变量，然后再验证。
     """
-    from app.core.startup_validator import StartupValidator
     from app.core.config_bridge import bridge_config_to_env
+    from app.core.startup_validator import StartupValidator
     from app.services.config_service import config_service
 
     try:
@@ -96,16 +97,13 @@ async def validate_config():
         }
 
         try:
-            from app.utils.api_key_utils import (
-                is_valid_api_key,
-                get_env_api_key_for_provider
-            )
-
             # 🔥 修改：直接从数据库读取原始数据，避免使用 get_llm_providers() 返回的已修改数据
             # get_llm_providers() 会将环境变量的 Key 赋值给 provider.api_key，导致无法区分来源
             from pymongo import MongoClient
+
             from app.core.config import settings
             from app.models.config import LLMProvider
+            from app.utils.api_key_utils import get_env_api_key_for_provider, is_valid_api_key
 
             # 创建同步 MongoDB 客户端
             client = MongoClient(settings.MONGO_URI)
@@ -170,10 +168,7 @@ async def validate_config():
                 mongodb_validation["llm_providers"].append(validation_item)
 
             # 验证数据源配置
-            from app.utils.api_key_utils import (
-                is_valid_api_key,
-                get_env_api_key_for_datasource
-            )
+            from app.utils.api_key_utils import get_env_api_key_for_datasource, is_valid_api_key
 
             system_config = await config_service.get_system_config()
             if system_config and system_config.data_source_configs:

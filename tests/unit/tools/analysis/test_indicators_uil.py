@@ -1,6 +1,5 @@
-import math
-import pandas as pd
 import numpy as np
+import pandas as pd
 
 from tradingagents.tools.analysis.indicators import (
     IndicatorSpec,
@@ -46,5 +45,6 @@ def test_compute_many_basic_columns():
 def test_no_inplace_modification():
     df = make_df(40)
     out = compute_many(df, [IndicatorSpec('ma', {'n': 5})])
-    assert 'ma5' in out.columns and 'ma5' not in df.columns
+    assert 'ma5' in out.columns
+    assert 'ma5' not in df.columns
 

@@ -4,16 +4,16 @@
 """
 
 import asyncio
-import sys
 import os
+import sys
 from datetime import datetime
 
 # 添加项目根目录到Python路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from app.core.database import init_db, get_mongo_db
-from app.models.config import LLMProvider
+from app.core.database import get_mongo_db, init_db
 from tradingagents.llm_clients.provider_keys import canonical_aliases
+
 
 async def init_providers():
     """初始化大模型厂家数据"""

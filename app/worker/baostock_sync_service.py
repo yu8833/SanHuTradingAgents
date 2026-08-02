@@ -5,12 +5,11 @@ BaoStock数据同步服务
 """
 import asyncio
 import logging
-from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import Any
 
 from app.core.config import get_settings
-from app.core.database import get_database
 from app.services.historical_data_service import get_historical_data_service
 from tradingagents.dataflows.providers.china.baostock import BaoStockProvider
 
@@ -24,7 +23,7 @@ class BaoStockSyncStats:
     quotes_count: int = 0
     historical_records: int = 0
     financial_records: int = 0
-    errors: List[str] = None
+    errors: list[str] = None
     
     def __post_init__(self):
         if self.errors is None:
@@ -114,7 +113,7 @@ class BaoStockSyncService:
             stats.errors.append(str(e))
             return stats
     
-    async def _sync_basic_info_batch(self, stock_batch: List[Dict[str, Any]]) -> BaoStockSyncStats:
+    async def _sync_basic_info_batch(self, stock_batch: list[dict[str, Any]]) -> BaoStockSyncStats:
         """同步基础信息批次（包含估值数据和总市值）"""
         stats = BaoStockSyncStats()
 
@@ -169,7 +168,7 @@ class BaoStockSyncService:
 
         return stats
     
-    async def _get_total_shares(self, code: str) -> Optional[float]:
+    async def _get_total_shares(self, code: str) -> float | None:
         """
         获取股票总股本（万股）
 
@@ -218,7 +217,7 @@ class BaoStockSyncService:
             logger.debug(f"获取{code}总股本失败: {e}")
             return None
 
-    def _safe_float(self, value) -> Optional[float]:
+    def _safe_float(self, value) -> float | None:
         """安全转换为浮点数"""
         try:
             if value is None or value == '' or value == 'None':
@@ -227,7 +226,7 @@ class BaoStockSyncService:
         except (ValueError, TypeError):
             return None
 
-    async def _update_stock_basic_info(self, basic_info: Dict[str, Any]):
+    async def _update_stock_basic_info(self, basic_info: dict[str, Any]):
         """更新股票基础信息到数据库"""
         try:
             collection = self.db.stock_basic_info
@@ -322,7 +321,7 @@ class BaoStockSyncService:
             stats.errors.append(str(e))
             return stats
     
-    async def _sync_quotes_batch(self, code_batch: List[str]) -> BaoStockSyncStats:
+    async def _sync_quotes_batch(self, code_batch: list[str]) -> BaoStockSyncStats:
         """同步日K线批次"""
         stats = BaoStockSyncStats()
 
@@ -343,7 +342,7 @@ class BaoStockSyncService:
 
         return stats
 
-    async def _update_stock_quotes(self, quotes: Dict[str, Any]):
+    async def _update_stock_quotes(self, quotes: dict[str, Any]):
         """更新股票日K线到数据库"""
         try:
             collection = self.db.market_quotes
@@ -450,7 +449,7 @@ class BaoStockSyncService:
     
     async def _sync_historical_batch(
         self,
-        code_batch: List[str],
+        code_batch: list[str],
         days: int,
         end_date: str,
         period: str = "daily",
@@ -584,7 +583,7 @@ class BaoStockSyncService:
             # 出错时返回30天前，确保不漏数据
             return (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
 
-    async def check_service_status(self) -> Dict[str, Any]:
+    async def check_service_status(self) -> dict[str, Any]:
         """检查服务状态"""
         try:
             # 测试BaoStock连接
