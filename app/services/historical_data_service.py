@@ -113,14 +113,16 @@ class HistoricalDataService:
 
             # ⏱️ 性能监控：单位转换
             convert_start = datetime.now()
-            # 🔥 统一单位转换（按数据源）—— 目标：amount=万元，volume=股
+            # 🔥 统一单位转换（按数据源）—— 目标：amount=元，volume=股
+            # 全局统一口径：amount 永远是元，volume 永远是股
+            # 前端 fmtAmount / fmtVolume 即按此标准展示
             # Tushare 原始单位：amount=千元，volume=手
             if data_source == "tushare":
-                # 千元 → 万元（×0.1）
+                # 千元 → 元（×1000）
                 if 'amount' in data.columns:
-                    data['amount'] = data['amount'] * 0.1
+                    data['amount'] = data['amount'] * 1000.0
                 elif 'turnover' in data.columns:
-                    data['turnover'] = data['turnover'] * 0.1
+                    data['turnover'] = data['turnover'] * 1000.0
 
                 # 手 → 股
                 if 'volume' in data.columns:
@@ -130,11 +132,7 @@ class HistoricalDataService:
 
             # AKShare 原始单位：amount=元，volume=手（stock_zh_a_spot_em / stock_zh_a_hist）
             elif data_source == "akshare":
-                # 元 → 万元
-                if 'amount' in data.columns:
-                    data['amount'] = data['amount'] / 10000.0
-                elif 'turnover' in data.columns:
-                    data['turnover'] = data['turnover'] / 10000.0
+                # amount 已经是元，无需转换
 
                 # 手 → 股
                 if 'volume' in data.columns:
@@ -144,13 +142,8 @@ class HistoricalDataService:
 
             # BaoStock 原始单位：amount=元，volume=股
             elif data_source == "baostock":
-                # 元 → 万元
-                if 'amount' in data.columns:
-                    data['amount'] = data['amount'] / 10000.0
-                elif 'turnover' in data.columns:
-                    data['turnover'] = data['turnover'] / 10000.0
-
-                # volume 已经是股，无需转换
+                # amount 已经是元，volume 已经是股，均无需转换
+                pass
 
             # 🔥 港股/美股数据：添加 pre_close 字段（从前一天的 close 获取）
             if market in ["HK", "US"] and 'pre_close' not in data.columns and 'close' in data.columns:
@@ -289,7 +282,13 @@ class HistoricalDataService:
         period: str = "daily",
         date_index = None
     ) -> dict[str, Any]:
-        """标准化单条记录"""
+        """标准化单条记录
+
+        🔥 数据契约层（入库公理）：
+        - 公理A（OHLC大小关系）：high >= max(open, close) 且 low <= min(open, close) 且 high >= low
+        - 公理B（非负性）：open/high/low/close/volume/amount > 0
+        不满足时自动修正并记录警告日志，避免脏数据流入下游回测引擎。
+        """
         now = datetime.utcnow()
 
         # 获取日期 - 优先从列中获取，如果索引是日期类型才使用索引
@@ -319,24 +318,61 @@ class HistoricalDataService:
             "data_source": data_source,
             "created_at": now,
             "updated_at": now,
-            "version": 1
+            "version": 1,
+            "_validation_warnings": []  # 入库修正记录（用于排查数据问题）
         }
-        
+
         # OHLCV数据（单位转换已在 DataFrame 层面完成）
         # 修复 #B5：使用统一的数值清洗口径，拒绝脏数据（NaN/负值/超范围）写入
         amount_value = sanitize_amount(row.get('amount') or row.get('turnover'))
         volume_value = sanitize_volume(row.get('volume') or row.get('vol'))
 
+        o = sanitize_price(row.get('open'))
+        h = sanitize_price(row.get('high'))
+        low_p = sanitize_price(row.get('low'))
+        c = sanitize_price(row.get('close'))
+
+        # ===== 数据契约公理A：OHLC 大小关系自动修正 =====
+        prices = [p for p in [o, h, low_p, c] if isinstance(p, (int, float)) and p > 0]
+        if prices and c is not None and c > 0:
+            # high 必须是四价中的最高值
+            correct_high = max(prices)
+            if isinstance(h, (int, float)) and h < correct_high:
+                doc["_validation_warnings"].append(f"high修正:{h}→{correct_high}")
+                h = correct_high
+            # low 必须是四价中的最低值
+            correct_low = min(prices)
+            if isinstance(low_p, (int, float)) and low_p > correct_low:
+                doc["_validation_warnings"].append(f"low修正:{low_p}→{correct_low}")
+                low_p = correct_low
+            # 如果 high < low，以 close 为基准兜底
+            if isinstance(h, (int, float)) and isinstance(low_p, (int, float)) and h < low_p:
+                doc["_validation_warnings"].append(f"high<low 兜底:{h}/{low_p}→{c}")
+                h = max(h, c)
+                low_p = min(low_p, c)
+        else:
+            # 价格异常（全是None或<=0）：以 close 兜底
+            if c is None or c <= 0:
+                c = 0.0
+            o = h = low_p = c if c > 0 else None
+
         doc.update({
-            "open": sanitize_price(row.get('open')),
-            "high": sanitize_price(row.get('high')),
-            "low": sanitize_price(row.get('low')),
-            "close": sanitize_price(row.get('close')),
+            "open": o,
+            "high": h,
+            "low": low_p,
+            "close": c,
             "pre_close": sanitize_price(row.get('pre_close') or row.get('preclose')),
             "volume": volume_value,
             "amount": amount_value
         })
-        
+
+        # 记录入库修正警告（如果有）
+        if doc["_validation_warnings"]:
+            logger.warning(
+                f"📊 [入库数据修正] {symbol}@{trade_date} "
+                f"source={data_source}: {'; '.join(doc['_validation_warnings'])}"
+            )
+
         # 计算涨跌数据
         if doc["close"] and doc["pre_close"]:
             doc["change"] = round(doc["close"] - doc["pre_close"], 4)
@@ -346,7 +382,7 @@ class HistoricalDataService:
                 row.get('change'), min_value=-1_000_000, max_value=1_000_000, round_digits=4
             )
             doc["pct_chg"] = sanitize_pct_chg(row.get('pct_chg') or row.get('change_percent'))
-        
+
         # 可选字段
         optional_fields = {
             "turnover_rate": sanitize_turnover_rate(row.get('turnover_rate') or row.get('turn')),
@@ -358,11 +394,11 @@ class HistoricalDataService:
             "tradestatus": row.get('tradestatus'),
             "isST": row.get('isST')
         }
-        
+
         for key, value in optional_fields.items():
             if value is not None:
                 doc[key] = value
-        
+
         return doc
     
     def _get_full_symbol(self, symbol: str, market: str) -> str:

@@ -15,6 +15,9 @@
 | 007 | AI 对话接口 401: token key 不一致 | vibe.ts `chatStream` 写死 `localStorage.getItem('token')`，而全站统一使用 `'auth-token'`，导致 LLM 请求无认证 | frontend/src/api/vibe.ts | test_bug_007_vibe_token_key.e2e.py | (待查) | ✅ |
 | 008 | 历史行情导入静默失败，stock_daily_quotes 数据不全 | 跨集合查询 `trade_date` 格式不一致：一方存 "YYYY-MM-DD"，另一方返回 "YYYYMMDD"，导致查不到数据 | app/services/quotes_ingestion_service.py | test_bug_008_trade_date_format.py | (待查) | ✅ |
 | 009 | **后端无法启动**：startup_validator.py 抛出 TypeError | Python 3.10 下把内建函数 `callable`（不是类型）直接写在 union `callable | None`，注解求值时报 `unsupported operand for |`。应使用 `collections.abc.Callable` | app/core/startup_validator.py | test_bug_009_callable_type_hint.py | (本轮) | ✅ |
+| 010 | 股票详情页周末显示"数据已过期2天"误导用户 | 前端 `getDataExpiredDays` 用自然日差值判断过期，后端未返回 `stale_days`。项目中有 6+ 处碎片化的"周末判断"但全部只查 `weekday()` 不查节假日。 | frontend/src/views/Stocks/Detail.vue, app/utils/trading_time.py | test_bug_010_holiday_check.py | (本轮) | ✅ |
+| 011 | 回测交易价格与K线数据不一致（603186卖出价超出当天 [low, high]） | 分批减仓后最终清仓时 sell_price=跨日期加权均价avg_sell，该均价无法落在清仓日当天K线区间；同时入库层缺少OHLC校验。 | app/services/three_buys_three_sells_service.py | test_bug_011_data_contract.py | (本轮) | ✅ |
+| 012 | **688669 成交额显示 2.41 万，实际应为 241.29 万**：全局 amount/volume 单位混乱** | 缺少「数据契约」缺失：每条链路各自做单位转换（Tushare千元→万元直接入库、AKShare元÷10000→万元、Tushare rt_k×0.1→万元、Tushare pro_bar×0.1→万元），前端 fmtAmount 再按"元"除10000，多次乘除叠加 → 数值错乱。统一口径：后端入库/API返回 amount=永远是元，volume永远是股；临时中间变量 amount_wan(万元)仅用在 quotes_service 内立即 ×10000 转元输出；前端 Screening 阈值×10000 改为元量级。 | historical_data_service.py, tushare_adapter.py(rt_k+pro_bar), akshare_adapter.py, unified_quotes.py, quotes_service.py, database_screening_service.py, Screening/index.vue | test_bug_012_amount_unit_conversion.py | (本轮) | ✅ |
 
 ---
 

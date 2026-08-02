@@ -704,8 +704,10 @@ def _augment_with_realtime(df: pd.DataFrame, rt: Dict[str, Any]) -> pd.DataFrame
 
     today = datetime.now().date()
 
-    # 检查是否工作日（周一到周五）
-    is_weekday = today.weekday() < 5
+    # 检查是否交易日（排除周末和节假日）
+    from app.utils.trading_time import is_trading_day
+
+    is_weekday = is_trading_day(today)
 
     # 检查实时行情数据的日期是否与今日匹配
     rt_date_str = rt.get("date", "")

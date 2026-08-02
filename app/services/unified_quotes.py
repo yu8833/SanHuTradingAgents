@@ -17,7 +17,13 @@ def _get_cache_key(codes: list[str]) -> str:
 
 
 def _merge_quotes(akshare_quotes: dict[str, dict], tencent_quotes: dict[str, dict]) -> dict[str, dict]:
-    """合并两个数据源的行情数据，以腾讯数据为准，缺失的用AKShare补充"""
+    """合并两个数据源的行情数据，以腾讯数据为准，缺失的用AKShare补充
+
+    🔥 统一字段口径（调用方约定）：
+    - 腾讯源：amount_wan = 万元（tencent_quote 直接返回）
+    - AKShare源：amount = 元（适配器按全局"amount=元"口径输出），
+      合并到 amount_wan 时需要 ÷10000 转换为万元
+    """
     result = {}
     all_codes = set(list(akshare_quotes.keys()) + list(tencent_quotes.keys()))
     for code in all_codes:
@@ -26,12 +32,15 @@ def _merge_quotes(akshare_quotes: dict[str, dict], tencent_quotes: dict[str, dic
         if tq:
             result[code] = dict(tq)
         else:
+            ak_amount = aq.get("amount")
+            # AKShare 的 amount 是元，转成万元填充 amount_wan
+            amount_wan = (ak_amount / 10000.0) if ak_amount is not None else None
             result[code] = {
                 "name": aq.get("name", ""),
                 "price": aq.get("close"),
                 "change_pct": aq.get("pct_chg"),
                 "change_amt": None,
-                "amount_wan": aq.get("amount"),
+                "amount_wan": amount_wan,
                 "is_st": False,
                 "pe_ttm": None,
                 "pb": None,

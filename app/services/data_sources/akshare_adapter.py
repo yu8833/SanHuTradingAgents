@@ -349,14 +349,13 @@ class AKShareAdapter(DataSourceAdapter):
                         vol = self._safe_float(row.get(volume_col)) if volume_col else None
                         
                         # 🔥 单位转换（区分数据源）：
-                        # - 东方财富 (eastmoney)：成交量单位为手 → 股（×100）；成交额为元 → 万元（÷10000）
-                        # - 新浪财经 (sina)：成交量单位为股（无需转换）；成交额为元 → 万元（÷10000）
+                        # 全局统一口径：amount=元，volume=股
+                        # - 东方财富 (eastmoney)：成交量单位为手 → 股（×100）；成交额已经是元，无需转换
+                        # - 新浪财经 (sina)：成交量单位已经是股（无需转换）；成交额已经是元，无需转换
                         if src == "eastmoney" and vol is not None:
                             vol = vol * 100  # 手 → 股
                         # sina 的成交量单位已经是股，无需转换
-                        
-                        if amt is not None:
-                            amt = amt / 10000.0  # 元 → 万元（两个数据源一致）
+                        # amount 已经是元，两个数据源均无需转换
 
                         result[code] = {
                             "close": close,
@@ -438,11 +437,11 @@ class AKShareAdapter(DataSourceAdapter):
             volume = self._safe_float(last_row.get('volume') or last_row.get('成交量'))
             amount = self._safe_float(last_row.get('amount') or last_row.get('成交额'))
             
-            # 单位转换：成交量 手 -> 股（×100），成交额 元 -> 万元（÷10000）
+            # 🔥 全局统一口径：amount=元，volume=股
+            # 单位转换：成交量 手 -> 股（×100）；成交额已经是元，无需转换
             if volume is not None:
                 volume = volume * 100
-            if amount is not None:
-                amount = amount / 10000.0
+            # amount 已经是元，无需转换
             
             # 🔥 先返回基本数据，涨跌幅和昨收价稍后计算（由调用方处理）
             # 这样可以保持快速查询的特性（约 1 秒）
@@ -486,8 +485,9 @@ class AKShareAdapter(DataSourceAdapter):
                         "high": self._safe_float(row.get('最高') or row.get('high')),
                         "low": self._safe_float(row.get('最低') or row.get('low')),
                         "close": self._safe_float(row.get('收盘') or row.get('close')),
+                        # 🔥 全局统一口径：volume=股（手×100），amount=元（AKShare 已经是元，无需转换）
                         "volume": (lambda v: v * 100 if v is not None else None)(self._safe_float(row.get('成交量') or row.get('volume'))),
-                        "amount": (lambda a: a / 10000.0 if a is not None else None)(self._safe_float(row.get('成交额') or row.get('amount'))),
+                        "amount": self._safe_float(row.get('成交额') or row.get('amount')),
                     })
                 return items
             else:
@@ -506,8 +506,9 @@ class AKShareAdapter(DataSourceAdapter):
                         "high": self._safe_float(row.get('最高') or row.get('high')),
                         "low": self._safe_float(row.get('最低') or row.get('low')),
                         "close": self._safe_float(row.get('收盘') or row.get('close')),
+                        # 🔥 全局统一口径：volume=股（手×100），amount=元（AKShare 已经是元，无需转换）
                         "volume": (lambda v: v * 100 if v is not None else None)(self._safe_float(row.get('成交量') or row.get('volume'))),
-                        "amount": (lambda a: a / 10000.0 if a is not None else None)(self._safe_float(row.get('成交额') or row.get('amount'))),
+                        "amount": self._safe_float(row.get('成交额') or row.get('amount')),
                     })
                 return items
         except Exception as e:

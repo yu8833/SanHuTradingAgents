@@ -48,7 +48,7 @@ class DatabaseScreeningService:
 
             # 实时行情字段（需要从 market_quotes 关联查询）
             "pct_chg": "pct_chg",              # 涨跌幅%
-            "amount": "amount",                # 成交额（万元）
+            "amount": "amount",                # 成交额（元，全局统一口径）
             "close": "close",                  # 收盘价
             "volume": "volume",                # 成交量
         }

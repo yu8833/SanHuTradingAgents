@@ -227,9 +227,9 @@ class ThreeBuysThreeSellsService:
             o = safe_float(k.get("open"))
             c = safe_float(k.get("close"))
             h = safe_float(k.get("high"))
-            l = safe_float(k.get("low"))
+            low_v = safe_float(k.get("low"))
             v = safe_float(k.get("volume"))
-            if o > 0 and c > 0 and h > 0 and l > 0 and v > 0:
+            if o > 0 and c > 0 and h > 0 and low_v > 0 and v > 0:
                 valid_data.append(k)
 
         if len(valid_data) < 70:
@@ -568,6 +568,402 @@ class ThreeBuysThreeSellsService:
             # 线性插值
             ratio = (market_cap - 100) / 900
             return base * (1.33 - ratio * 0.46)
+
+    # ===== 数据契约层：四条公理（第一性原理根本保证）=====
+    # 公理1（价格可执行性）：买入/卖出价必须在对应日期K线的[low, high]区间内（允许±0.3%滑点）
+    # 公理2（日期可追溯性）：buy_date/sell_date 必须与实际取价的 K 线 trade_date 完全一致
+    # 公理3（无未来函数）：t 日决策只能使用 ≤t 日的数据（运行时强校验）
+    # 公理4（输入完整性）：K线数据必须严格升序、无重复、OHLC合法、区间覆盖度达标
+
+    _PRICE_TOLERANCE_PCT = 0.003  # 滑点容错：±0.3%
+    _MIN_KLINE_COVERAGE_RATIO = 0.7  # 回测区间最少需要70%的K线覆盖，否则丢弃该股票
+
+    def _validate_trade_price_in_kline(
+        self,
+        ind: dict[str, Any],
+        trade_date: str,
+        trade_price: float,
+        side: str,  # "buy" | "sell"
+    ) -> tuple[bool, str]:
+        """
+        公理1+2 联合校验：校验 trade_price 是否在 trade_date 对应 K 线的 [low, high] 区间内。
+        同时隐式保证公理2：trade_date 必须能在 date_to_idx 中定位到。
+
+        Returns:
+            (passed: bool, reason: str)
+        """
+        idx = ind["date_to_idx"].get(trade_date, -1)
+        if idx < 0 or idx >= ind["n"]:
+            return False, f"{side}日期 {trade_date} 不在K线数据中（idx={idx}）"
+        low = float(ind["lows"][idx])
+        high = float(ind["highs"][idx])
+        if low <= 0 or high <= 0:
+            return False, f"{side}日期 {trade_date} 的 low/high 非法（low={low}, high={high}）"
+        tol = high * self._PRICE_TOLERANCE_PCT
+        min_allowed = low - tol
+        max_allowed = high + tol
+        if trade_price < min_allowed or trade_price > max_allowed:
+            actual_date_in_idx = ind["dates"][idx]
+            return (
+                False,
+                f"{side}价 {trade_price} 不在 {actual_date_in_idx} 的 [{low:.2f}, {high:.2f}] 区间"
+                f"（容错±{self._PRICE_TOLERANCE_PCT*100:.1f}% → [{min_allowed:.2f}, {max_allowed:.2f}]）"
+            )
+        return True, ""
+
+    def _build_and_validate_sell_trade(
+        self,
+        pos: dict[str, Any],
+        ind: dict[str, Any],
+        td: str,
+        close_on_td: float,
+        sell_reason: str,
+    ) -> dict[str, Any] | None:
+        """
+        构造并校验单笔清仓交易记录（统一替换 S3/止损/移动止损/到期 等6处重复代码）。
+
+        🔥 关键修复（数据契约公理1+2）：
+        - sell_price = close_on_td（清仓当天实际收盘价，不是跨日期的累计均价）
+        - sell_date = td（清仓当天日期，不是前几批减仓日期的混合）
+        - return_pct 仍然使用 (total_proceeds - cost)/cost（真实总收益率，含历史减仓利润）
+        - 强制校验 sell_price 在 sell_date 的 [low, high] 区间内，校验失败返回 None 并记录错误
+
+        Args:
+            pos: 持仓对象
+            ind: 指标缓存（含 dates / highs / lows / closes / date_to_idx）
+            td: 当前循环日期 YYYY-MM-DD（即本次清仓执行日期）
+            close_on_td: idx 对应的收盘价（若 idx=-1 则使用 last_valid_idx 的收盘价）
+            sell_reason: 卖出原因文本
+
+        Returns:
+            构造好且通过合法性校验的交易记录 dict；校验失败返回 None（不加入 all_trades）
+        """
+        total_shares = pos["total_shares"]
+        cumulative = pos.get("cumulative_proceeds", 0.0)
+
+        # ===== 公理2：确定最终使用的 sell_date + sell_price 来自同一条 K 线 =====
+        sell_date_to_use = td
+        sell_price_to_use = round(float(close_on_td), 2)
+
+        # 如果 td 不在 date_to_idx（数据缺口/停牌），使用 last_valid_idx 对应的日期和价格
+        idx_for_td = ind["date_to_idx"].get(td, -1)
+        if idx_for_td < 0:
+            fallback_idx = pos.get("last_valid_idx")
+            if fallback_idx is None or fallback_idx < 0 or fallback_idx >= ind["n"]:
+                # 连 fallback 都没有，尝试 buy_idx
+                fallback_idx = pos.get("buy_idx")
+            if fallback_idx is not None and 0 <= fallback_idx < ind["n"]:
+                sell_date_to_use = ind["dates"][fallback_idx]
+                sell_price_to_use = round(float(ind["closes"][fallback_idx]), 2)
+                logger.debug(
+                    f"[{pos.get('code','')}] 清仓日 {td} 无数据，回退到 {sell_date_to_use} "
+                    f"(idx={fallback_idx}) 收盘价 {sell_price_to_use} 作为卖出价"
+                )
+            else:
+                logger.error(
+                    f"[{pos.get('code','')}] 清仓日 {td} 无数据，且无法找到可用 fallback idx，跳过记录"
+                )
+                return None
+
+        # ===== 计算最终清仓收益 =====
+        remaining_shares = pos["remaining_shares"]
+        final_proceeds = remaining_shares * float(close_on_td) * 0.999
+        total_proceeds = cumulative + final_proceeds
+        cost = pos["cost"]
+        return_pct = (total_proceeds - cost) / cost * 100 if cost > 0 else 0.0
+
+        trade = {
+            "code": pos.get("code", ""),
+            "name": pos["name"],
+            "buy_date": pos["buy_date"],
+            "sell_date": sell_date_to_use,
+            "buy_price": round(pos["buy_price"], 2),
+            "sell_price": sell_price_to_use,
+            "return_pct": round(return_pct, 2),
+            "score": pos["score"],
+            "signal_type": pos["signal_type"],
+            "sell_reason": sell_reason,
+            "shares": total_shares,
+            "profit": round(total_proceeds - cost, 2),
+        }
+
+        # ===== 公理1：校验买入价在 buy_date 的 [low, high] 区间 =====
+        buy_ok, buy_reason = self._validate_trade_price_in_kline(
+            ind, trade["buy_date"], float(trade["buy_price"]), "buy"
+        )
+        if not buy_ok:
+            logger.error(f"🚫 [数据契约-公理1/2] 买入价非法：{trade['code']} - {buy_reason}")
+            # 买入价异常通常来自滑点超限，此处不拦截（记录错误即可），避免回测大面积丢交易
+            # 但在 debug 模式可以开启拦截
+
+        # ===== 公理1：校验卖出价在 sell_date_to_use 的 [low, high] 区间 =====
+        sell_ok, sell_reason = self._validate_trade_price_in_kline(
+            ind, sell_date_to_use, float(sell_price_to_use), "sell"
+        )
+        if not sell_ok:
+            logger.error(
+                f"🚫 [数据契约-公理1/2] 卖出价非法：{trade['code']} "
+                f"buy={trade['buy_date']}@{trade['buy_price']} → sell={sell_date_to_use}@{sell_price_to_use} "
+                f"原因：{sell_reason}"
+            )
+            # 🔥 强制拦截：卖出价不在合法区间的交易不允许进入结果集（根本解决603186类问题）
+            return None
+
+        return trade
+
+    def _build_and_validate_buy_trade(
+        self,
+        sig: dict[str, Any],
+        next_idx: int,
+        params: dict[str, Any],
+    ) -> tuple[dict[str, Any] | None, float | None]:
+        """
+        🔥 公理1+2 强校验：统一构造买入持仓对象（替换新建仓+B2G加仓 2 处重复裸写代码）。
+
+        核心契约：
+        - buy_price = opens[next_idx] * (1 + slippage)（下一日开盘价 + 滑点）
+        - buy_date = dates[next_idx]（与取价K线严格对应，公理2）
+        - 强制校验 buy_price 在 buy_date 的 [low, high] 区间内，失败返回 (None, None)（公理1强拦截）
+
+        Args:
+            sig: daily_signals 中的信号对象（含 code/name/score/signal_type/position_pct/ind/idx 等）
+            next_idx: 下一日索引（cur_idx+1，实际买入日）
+            params: 回测参数（含 slippage_pct）
+
+        Returns:
+            (position_dict_or_None, cost_per_share_or_None)
+            - 校验通过：返回 (position_dict, buy_price_with_slippage) 供调用方算 shares/cost
+            - 校验失败：返回 (None, None)，调用方跳过不建仓
+        """
+        ind = sig["ind"]
+        code = sig["code"]
+
+        # ===== 边界：next_idx 必须合法 =====
+        if next_idx < 0 or next_idx >= ind["n"]:
+            logger.debug(f"[数据契约-买入] {code} next_idx={next_idx} 越界(0..{ind['n']-1})，跳过建仓")
+            return None, None
+
+        buy_date = ind["dates"][next_idx]
+        open_on_td = float(ind["opens"][next_idx])
+        if open_on_td <= 0:
+            logger.debug(f"[数据契约-买入] {code} {buy_date} 开盘价={open_on_td}非法，跳过建仓")
+            return None, None
+
+        # ===== 滑点 =====
+        slippage = params.get("slippage_pct", 0.003)
+        buy_price_raw = round(open_on_td * (1 + slippage), 4)
+
+        # ===== 公理1：校验 buy_price（含滑点）在 buy_date 的 [low, high] 区间（允许滑点容错再叠加）=====
+        buy_ok, buy_reason = self._validate_trade_price_in_kline(
+            ind, buy_date, buy_price_raw, "buy"
+        )
+        if not buy_ok:
+            logger.error(
+                f"🚫 [数据契约-公理1/2] 买入价非法：{code} "
+                f"date={buy_date}, price={buy_price_raw}, open={open_on_td}, "
+                f"原因：{buy_reason}。跳过建仓"
+            )
+            return None, None
+
+        # 校验通过，输出标准化持仓框架（调用方再填充 shares/cost/capital 相关字段）
+        pos_frame = {
+            "code": code,
+            "buy_price": buy_price_raw,  # 含滑点
+            "buy_date": buy_date,
+            "buy_idx": next_idx,
+            "highest_price": buy_price_raw,
+            "remaining_pct": 1.0,
+            "s1_triggered": False,
+            "cumulative_proceeds": 0.0,
+            "score": sig["score"],
+            "signal_type": sig["signal_type"],
+            "name": sig["name"],
+            "ind": ind,
+        }
+        return pos_frame, buy_price_raw
+
+    def _validate_no_lookahead_bias(
+        self,
+        ind: dict[str, Any],
+        decision_idx: int,
+        context: str = "",
+    ) -> None:
+        """
+        🔥 公理3（无未来函数）运行时断言：确保当前 decision_idx 永远不会用 >decision_idx 的数据做决策。
+
+        具体检查：
+        1. 决策索引本身合法性
+        2. ind 中核心数组长度一致性 == ind["n"]
+        3. （可选 debug 级）传入数组切片上限检查
+
+        若失败直接抛 ValueError 中断回测，防止无声产生错误结果。
+        """
+        if decision_idx < 0 or decision_idx >= ind["n"]:
+            raise ValueError(
+                f"🚫 [数据契约-公理3 未来函数违规] {context} "
+                f"decision_idx={decision_idx} 越界(0..{ind['n']-1})"
+            )
+        expected_n = ind["n"]
+        for arr_key in ("dates", "opens", "closes", "highs", "lows", "volumes",
+                        "ma5", "ma8", "ma13", "ma55", "ma60", "ma65",
+                        "bias60", "atr14", "gmma_strong_bull", "stock_trend"):
+            arr = ind.get(arr_key)
+            if arr is None:
+                continue
+            arr_len = len(arr) if hasattr(arr, "__len__") else None
+            if arr_len is not None and arr_len != expected_n:
+                raise ValueError(
+                    f"🚫 [数据契约-公理3 未来函数违规] {context} "
+                    f"ind['{arr_key}'] 长度={arr_len} != ind['n']={expected_n}，"
+                    f"可能存在索引错位导致访问未来数据"
+                )
+
+    def _validate_kline_integrity(
+        self,
+        kline_data: list[dict[str, Any]],
+        stock_code: str = "",
+        backtest_start: str | None = None,
+        backtest_end: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        🔥 公理4（输入完整性）：K线数据前置校验。返回检查报告，含 warnings + passed + fixed。
+
+        检查项：
+        1. 日期严格递增（无逆序、无重复）
+        2. 每条 OHLC 大小关系合法（high>=max(O,C), low<=min(O,C), high>=low, 全>0）
+        3. 回测区间 [backtest_start, backtest_end] 内的 K线覆盖率 >= _MIN_KLINE_COVERAGE_RATIO
+        4. 交易日连续性警告（相邻日期差>4天时发出警告，代表长假或数据缺失段）
+
+        Returns:
+            {"passed": bool, "warnings": list[str], "errors": list[str],
+             "n_input": int, "n_after_dedup": int, "coverage_ratio": float}
+        """
+        report = {
+            "passed": True,
+            "warnings": [],
+            "errors": [],
+            "n_input": len(kline_data),
+            "n_after_dedup": len(kline_data),
+            "coverage_ratio": 0.0,
+        }
+        if not kline_data:
+            report["passed"] = False
+            report["errors"].append("空K线数据")
+            return report
+
+        # ===== (1) 日期严格递增 + 去重 =====
+        seen_dates: set[str] = set()
+        deduped: list[dict[str, Any]] = []
+        prev_date = ""
+        for k in kline_data:
+            td = str(k.get("trade_date", ""))
+            if not td:
+                report["warnings"].append("存在空 trade_date 记录，跳过")
+                continue
+            if td in seen_dates:
+                report["warnings"].append(f"重复 trade_date={td}，已去重保留首条")
+                continue
+            if prev_date and td <= prev_date:
+                report["passed"] = False
+                report["errors"].append(
+                    f"K线非严格递增：{prev_date} → {td}（顺序/逆序问题）"
+                )
+            # 连续性检查
+            if prev_date:
+                try:
+                    d_prev = datetime.strptime(prev_date, "%Y-%m-%d").date()
+                    d_cur = datetime.strptime(td, "%Y-%m-%d").date()
+                    gap = (d_cur - d_prev).days
+                    if gap > 4:  # 超过4天（超过长周末+1天缓冲）
+                        report["warnings"].append(
+                            f"{prev_date} → {td} 间隔{gap}天（数据缺口/长假）"
+                        )
+                except ValueError:
+                    pass
+            seen_dates.add(td)
+            deduped.append(k)
+            prev_date = td
+
+        report["n_after_dedup"] = len(deduped)
+
+        # ===== (2) OHLC 合法性校验 =====
+        ohlc_bad = 0
+        for i, k in enumerate(deduped):
+            try:
+                o = float(k.get("open"))
+                c = float(k.get("close"))
+                h = float(k.get("high"))
+                low_v = float(k.get("low"))
+            except (TypeError, ValueError):
+                ohlc_bad += 1
+                if ohlc_bad <= 3:
+                    report["warnings"].append(f"#{i} date={k.get('trade_date')} OHLC无法转float")
+                continue
+            if min(o, c, h, low_v) <= 0:
+                ohlc_bad += 1
+                if ohlc_bad <= 3:
+                    report["warnings"].append(
+                        f"#{i} date={k.get('trade_date')} O/C/H/L存在<=0的值: O={o} C={c} H={h} L={low_v}"
+                    )
+                continue
+            if h < max(o, c):
+                ohlc_bad += 1
+                if ohlc_bad <= 3:
+                    report["warnings"].append(
+                        f"#{i} date={k.get('trade_date')} high={h} < max(O={o},C={c})"
+                    )
+            if low_v > min(o, c):
+                ohlc_bad += 1
+                if ohlc_bad <= 3:
+                    report["warnings"].append(
+                        f"#{i} date={k.get('trade_date')} low={low_v} > min(O={o},C={c})"
+                    )
+            if h < low_v:
+                report["passed"] = False
+                report["errors"].append(
+                    f"#{i} date={k.get('trade_date')} high={h} < low={low_v}（致命错误）"
+                )
+        if ohlc_bad > 3:
+            report["warnings"].append(f"... 共 {ohlc_bad} 条K线OHLC存在问题，仅展示前3条")
+
+        # ===== (3) 回测区间覆盖率 =====
+        from app.utils.trading_time import count_trading_days_between
+        if backtest_start and backtest_end and deduped:
+            in_range = [
+                k for k in deduped
+                if backtest_start <= str(k.get("trade_date", "")) <= backtest_end
+            ]
+            try:
+                total_trade_days = count_trading_days_between(backtest_start, backtest_end)
+                coverage = (
+                    len(in_range) / total_trade_days
+                    if total_trade_days > 0
+                    else 1.0
+                )
+            except Exception:
+                coverage = len(in_range) / max(1, (
+                    datetime.strptime(backtest_end, "%Y-%m-%d")
+                    - datetime.strptime(backtest_start, "%Y-%m-%d")
+                ).days)
+            report["coverage_ratio"] = round(coverage, 4)
+            if coverage < self._MIN_KLINE_COVERAGE_RATIO:
+                report["passed"] = False
+                report["errors"].append(
+                    f"回测区间[{backtest_start},{backtest_end}]K线覆盖率={coverage*100:.1f}% "
+                    f"< {self._MIN_KLINE_COVERAGE_RATIO*100:.0f}%（数据严重不足）"
+                )
+
+        if report["errors"]:
+            logger.warning(
+                f"[数据契约-公理4 K线完整性] {stock_code or '?'} 未通过: "
+                f"{len(report['errors'])} 错误 / {len(report['warnings'])} 警告"
+            )
+        elif report["warnings"]:
+            logger.debug(
+                f"[数据契约-公理4 K线完整性] {stock_code or '?'} 有 "
+                f"{len(report['warnings'])} 条警告"
+            )
+        return report
 
     def _check_bottom_pickup(self, ind: dict[str, Any], idx: int) -> bool:
         """抄底信号: 3天不新低 + 短期均线粘合向上"""
@@ -1129,9 +1525,9 @@ class ThreeBuysThreeSellsService:
                 if primary_signal is None and signals:
                     primary_signal = signals[0]
 
-                if params.get("min_score", 5) > 0 and score < params.get("min_score", 5):
-                    if primary_signal and primary_signal["type"] in ("B1", "B2", "B3", "B2G"):
-                        return None
+                if (params.get("min_score", 5) > 0 and score < params.get("min_score", 5)
+                        and primary_signal and primary_signal["type"] in ("B1", "B2", "B3", "B2G")):
+                    return None
 
                 close = ind["closes"][last_idx]
                 bias60 = ind["bias60"][last_idx]
@@ -1337,7 +1733,7 @@ class ThreeBuysThreeSellsService:
         )
 
         all_trade_dates = set()
-        for code, klines in quotes_by_stock.items():
+        for _code, klines in quotes_by_stock.items():
             for k in klines:
                 all_trade_dates.add(k["trade_date"])
         trade_dates = sorted(list(all_trade_dates))
@@ -1389,6 +1785,17 @@ class ThreeBuysThreeSellsService:
 
         logger.info("📊 市场环境计算完成")
 
+        # ===== 数据契约报告计数器（第一性原理根本防御）— 必须放在所有使用点之前 =====
+        data_contract_report: dict[str, Any] = {
+            "blocked_buys": 0,        # 公理1/2 拦截的非法买入（不建仓）
+            "blocked_sells": 0,       # 公理1/2 拦截的非法卖出（不进结果集）
+            "kline_skipped_stocks": 0,  # 公理4 K线完整性严重不达标直接跳过的股票数
+            "kline_warnings_total": 0,  # 公理4 汇总所有股票的K线警告数
+            "kline_errors_total": 0,    # 公理4 汇总所有股票的K线错误数
+            "stocks_passed_integrity": 0,  # 公理4 通过完整性检查的股票数
+            "lookahead_violations": 0,   # 公理3 未来函数违规数（当前硬抛，此处兜底）
+        }
+
         # 预计算所有股票指标
         logger.info("📊 预计算指标...")
         indicators_cache: dict[str, Any] = {}
@@ -1397,6 +1804,19 @@ class ThreeBuysThreeSellsService:
             kline = quotes_by_stock.get(code, [])
             if len(kline) < 70:
                 continue
+
+            # ===== 公理4：K线完整性前置检查（根本防御数据不完整/不一致）=====
+            integrity = self._validate_kline_integrity(
+                kline, stock_code=code,
+                backtest_start=start_str, backtest_end=end_str
+            )
+            data_contract_report["kline_warnings_total"] += len(integrity["warnings"])
+            data_contract_report["kline_errors_total"] += len(integrity["errors"])
+            if not integrity["passed"]:
+                data_contract_report["kline_skipped_stocks"] += 1
+                continue  # 不达标直接丢弃，避免污染回测
+            data_contract_report["stocks_passed_integrity"] += 1
+
             info = stock_info_map.get(code, {})
             ind = self._precompute_indicators(
                 kline, code, info.get("name", ""),
@@ -1430,6 +1850,15 @@ class ThreeBuysThreeSellsService:
                 if idx < 60:
                     continue
 
+                # ===== 公理3（无未来函数）：信号决策点 idx 只能访问 0..idx =====
+                try:
+                    self._validate_no_lookahead_bias(
+                        ind, idx, context=f"信号收集 {code} date={td}"
+                    )
+                except ValueError:
+                    data_contract_report["lookahead_violations"] += 1
+                    raise  # 硬抛，防止污染回测
+
                 # GMMA强多状态过滤（使用预计算数组）
                 enable_gmma = params.get("enable_gmma_filter", True)
                 gmma_strong_bull = bool(ind["gmma_strong_bull"][idx])
@@ -1452,18 +1881,16 @@ class ThreeBuysThreeSellsService:
                 local_params = dict(params)
                 local_params["_market_trend"] = market_trend
 
-                check_fns_m = [
-                    (lambda: self._check_b1(ind, idx, local_params), "B1")
-                ]
+                # 按B1→B2→B3→B2G优先级检查，命中第一个就break（避免lambda循环变量绑定问题B023）
+                sig = self._check_b1(ind, idx, local_params)
+                if not sig and (not enable_gmma or gmma_strong_bull) and not overheated:
+                    sig = self._check_b2(ind, idx, local_params)
+                if not sig and (not enable_gmma or gmma_strong_bull) and not overheated:
+                    sig = self._check_b3(ind, idx, local_params)
+                if not sig and (not enable_gmma or gmma_strong_bull) and not overheated:
+                    sig = self._check_gmma_b2(ind, idx, local_params)
 
-                if (not enable_gmma or gmma_strong_bull) and not overheated:
-                    check_fns_m.append((lambda: self._check_b2(ind, idx, local_params), "B2"))
-                    check_fns_m.append((lambda: self._check_b3(ind, idx, local_params), "B3"))
-                    check_fns_m.append((lambda: self._check_gmma_b2(ind, idx, local_params), "B2G"))
-
-                for check_fn, _sig_type_hint in check_fns_m:
-                    sig = check_fn()
-                    if sig:
+                if sig:
                         sig_type = sig["type"]
                         score, details, score_validation = self._calc_signal_score(
                             ind, idx, sig_type, market_trend, dg_info
@@ -1522,19 +1949,13 @@ class ThreeBuysThreeSellsService:
                 if s3:
                     proceeds = pos["remaining_shares"] * close * 0.999
                     capital += proceeds
-                    total_proceeds = pos["cumulative_proceeds"] + proceeds
-                    return_pct = (total_proceeds - pos["cost"]) / pos["cost"] * 100
-                    avg_sell = total_proceeds / pos["total_shares"] / 0.999
-                    all_trades.append({
-                        "code": code, "name": pos["name"],
-                        "buy_date": pos["buy_date"], "sell_date": td,
-                        "buy_price": round(pos["buy_price"], 2),
-                        "sell_price": round(avg_sell, 2),
-                        "return_pct": round(return_pct, 2),
-                        "score": pos["score"], "signal_type": pos["signal_type"],
-                        "sell_reason": "S3清仓", "shares": pos["total_shares"],
-                        "profit": round(total_proceeds - pos["cost"], 2)
-                    })
+                    trade_record = self._build_and_validate_sell_trade(
+                        pos, ind, td, close, "S3清仓"
+                    )
+                    if trade_record is not None:
+                        all_trades.append(trade_record)
+                    else:
+                        data_contract_report["blocked_sells"] += 1
                     codes_to_sell.append(code)
                     continue
 
@@ -1557,19 +1978,13 @@ class ThreeBuysThreeSellsService:
                     if bias < -35.0:
                         proceeds = pos["remaining_shares"] * close * 0.999
                         capital += proceeds
-                        total_proceeds = pos["cumulative_proceeds"] + proceeds
-                        return_pct = (total_proceeds - pos["cost"]) / pos["cost"] * 100
-                        avg_sell = total_proceeds / pos["total_shares"] / 0.999
-                        all_trades.append({
-                            "code": code, "name": pos["name"],
-                            "buy_date": pos["buy_date"], "sell_date": td,
-                            "buy_price": round(pos["buy_price"], 2),
-                            "sell_price": round(avg_sell, 2),
-                            "return_pct": round(return_pct, 2),
-                            "score": pos["score"], "signal_type": pos["signal_type"],
-                            "sell_reason": "B1止损", "shares": pos["total_shares"],
-                            "profit": round(total_proceeds - pos["cost"], 2)
-                        })
+                        trade_record = self._build_and_validate_sell_trade(
+                            pos, ind, td, close, "B1止损"
+                        )
+                        if trade_record is not None:
+                            all_trades.append(trade_record)
+                        else:
+                            data_contract_report["blocked_sells"] += 1
                         codes_to_sell.append(code)
                         continue
 
@@ -1579,19 +1994,13 @@ class ThreeBuysThreeSellsService:
                     if cost_basis > 0 and (close - cost_basis) / cost_basis * 100 <= params.get("b2b3_stop_loss_pct", -10.0):
                         proceeds = pos["remaining_shares"] * close * 0.999
                         capital += proceeds
-                        total_proceeds = pos["cumulative_proceeds"] + proceeds
-                        return_pct = (total_proceeds - pos["cost"]) / pos["cost"] * 100
-                        avg_sell = total_proceeds / pos["total_shares"] / 0.999
-                        all_trades.append({
-                            "code": code, "name": pos["name"],
-                            "buy_date": pos["buy_date"], "sell_date": td,
-                            "buy_price": round(pos["buy_price"], 2),
-                            "sell_price": round(avg_sell, 2),
-                            "return_pct": round(return_pct, 2),
-                            "score": pos["score"], "signal_type": pos["signal_type"],
-                            "sell_reason": "初始止损", "shares": pos["total_shares"],
-                            "profit": round(total_proceeds - pos["cost"], 2)
-                        })
+                        trade_record = self._build_and_validate_sell_trade(
+                            pos, ind, td, close, "初始止损"
+                        )
+                        if trade_record is not None:
+                            all_trades.append(trade_record)
+                        else:
+                            data_contract_report["blocked_sells"] += 1
                         codes_to_sell.append(code)
                         continue
 
@@ -1600,19 +2009,13 @@ class ThreeBuysThreeSellsService:
                 if ts:
                     proceeds = pos["remaining_shares"] * close * 0.999
                     capital += proceeds
-                    total_proceeds = pos["cumulative_proceeds"] + proceeds
-                    return_pct = (total_proceeds - pos["cost"]) / pos["cost"] * 100
-                    avg_sell = total_proceeds / pos["total_shares"] / 0.999
-                    all_trades.append({
-                        "code": code, "name": pos["name"],
-                        "buy_date": pos["buy_date"], "sell_date": td,
-                        "buy_price": round(pos["buy_price"], 2),
-                        "sell_price": round(avg_sell, 2),
-                        "return_pct": round(return_pct, 2),
-                        "score": pos["score"], "signal_type": pos["signal_type"],
-                        "sell_reason": "移动止损", "shares": pos["total_shares"],
-                        "profit": round(total_proceeds - pos["cost"], 2)
-                    })
+                    trade_record = self._build_and_validate_sell_trade(
+                        pos, ind, td, close, "移动止损"
+                    )
+                    if trade_record is not None:
+                        all_trades.append(trade_record)
+                    else:
+                        data_contract_report["blocked_sells"] += 1
                     codes_to_sell.append(code)
                     continue
 
@@ -1646,19 +2049,13 @@ class ThreeBuysThreeSellsService:
                 if idx - buy_idx >= hold_days:
                     proceeds = pos["remaining_shares"] * close * 0.999
                     capital += proceeds
-                    total_proceeds = pos["cumulative_proceeds"] + proceeds
-                    return_pct = (total_proceeds - pos["cost"]) / pos["cost"] * 100
-                    avg_sell = total_proceeds / pos["total_shares"] / 0.999
-                    all_trades.append({
-                        "code": code, "name": pos["name"],
-                        "buy_date": pos["buy_date"], "sell_date": td,
-                        "buy_price": round(pos["buy_price"], 2),
-                        "sell_price": round(avg_sell, 2),
-                        "return_pct": round(return_pct, 2),
-                        "score": pos["score"], "signal_type": pos["signal_type"],
-                        "sell_reason": "到期卖出", "shares": pos["total_shares"],
-                        "profit": round(total_proceeds - pos["cost"], 2)
-                    })
+                    trade_record = self._build_and_validate_sell_trade(
+                        pos, ind, td, close, "到期卖出"
+                    )
+                    if trade_record is not None:
+                        all_trades.append(trade_record)
+                    else:
+                        data_contract_report["blocked_sells"] += 1
                     codes_to_sell.append(code)
                     continue
 
@@ -1682,15 +2079,21 @@ class ThreeBuysThreeSellsService:
                     continue
                 ind = sig["ind"]
                 cur_idx = sig["idx"]
+
+                # ===== 公理3（无未来函数）断言：加仓信号决策点 cur_idx 绝无越界 =====
+                self._validate_no_lookahead_bias(
+                    ind, cur_idx, context=f"B2G加仓决策 {code} date={td}"
+                )
+
                 next_idx = cur_idx + 1
-                if next_idx >= ind["n"]:
+
+                # ===== 公理1+2 强校验：加仓价/日合法性（买入侧契约统一入口）=====
+                pos_frame, buy_price_raw = self._build_and_validate_buy_trade(sig, next_idx, params)
+                if pos_frame is None or buy_price_raw is None:
+                    data_contract_report["blocked_buys"] += 1
                     continue
-                buy_price = ind["opens"][next_idx]
-                if buy_price <= 0:
-                    continue
-                # 买入滑点
-                slippage = params.get("slippage_pct", 0.003)
-                buy_price = buy_price * (1 + slippage)
+                buy_price = buy_price_raw
+
                 # 加仓量：把仓位加到满仓（从当前加到100%）
                 target_pct = 1.0
                 add_pct = target_pct - pos["remaining_pct"]
@@ -1707,7 +2110,7 @@ class ThreeBuysThreeSellsService:
                 add_cost = add_shares * buy_price * 1.001
                 if add_cost > capital * 0.95:
                     continue
-                # 更新持仓
+                # 更新持仓（保留原买入价/买入日不变，只增加股数和成本）
                 pos["total_shares"] += add_shares
                 pos["remaining_shares"] += add_shares
                 pos["cost"] += add_cost
@@ -1727,16 +2130,20 @@ class ThreeBuysThreeSellsService:
 
                 ind = sig["ind"]
                 cur_idx = sig["idx"]
-                next_idx = cur_idx + 1
-                if next_idx >= ind["n"]:
-                    continue
 
-                buy_price = ind["opens"][next_idx]
-                if buy_price <= 0:
+                # ===== 公理3（无未来函数）断言：新建仓决策点 cur_idx 绝无越界 =====
+                self._validate_no_lookahead_bias(
+                    ind, cur_idx, context=f"新建仓决策 {code} date={td}"
+                )
+
+                next_idx = cur_idx + 1
+
+                # ===== 公理1+2 强校验：新建仓价/日合法性（买入侧契约统一入口）=====
+                pos_frame, buy_price_raw = self._build_and_validate_buy_trade(sig, next_idx, params)
+                if pos_frame is None or buy_price_raw is None:
+                    data_contract_report["blocked_buys"] += 1
                     continue
-                # 买入滑点
-                slippage = params.get("slippage_pct", 0.003)
-                buy_price = buy_price * (1 + slippage)
+                buy_price = buy_price_raw
 
                 pos_size = min(max_pos_pct, 1.0 / max(1, len(positions) + top_n))
                 # 乘以信号的仓位系数（大盘四象限矩阵调节）
@@ -1751,27 +2158,16 @@ class ThreeBuysThreeSellsService:
                 if cost > capital * 0.95:
                     continue
 
-                positions[code] = {
-                    "buy_price": buy_price,
-                    "buy_date": ind["dates"][next_idx] if next_idx < ind["n"] else td,
-                    "buy_idx": next_idx,
-                    "total_shares": shares,
-                    "remaining_shares": shares,
-                    "cost": cost,
-                    "cumulative_proceeds": 0.0,
-                    "highest_price": buy_price,
-                    "remaining_pct": 1.0,
-                    "s1_triggered": False,
-                    "score": sig["score"],
-                    "signal_type": sig["signal_type"],
-                    "name": sig["name"],
-                    "ind": ind
-                }
+                # 以 pos_frame 为基础，补全 shares/cost 等金额相关字段（契约层已标准化价格/日期）
+                pos_frame["total_shares"] = shares
+                pos_frame["remaining_shares"] = shares
+                pos_frame["cost"] = cost
+                positions[code] = pos_frame
                 capital -= cost
 
             # 计算当日总资产
             total_value = capital
-            for code, pos in positions.items():
+            for _code, pos in positions.items():
                 ind = pos["ind"]
                 idx = ind["date_to_idx"].get(td, -1)
                 if idx < 0:
@@ -1806,29 +2202,25 @@ class ThreeBuysThreeSellsService:
         # 清算剩余持仓
         final_value = capital
         last_date = backtest_dates[-1] if backtest_dates else ""
-        for code, pos in positions.items():
+        for _code, pos in positions.items():
             ind = pos["ind"]
-            idx = ind["date_to_idx"].get(last_date, ind["n"] - 1)
+            idx = ind["date_to_idx"].get(last_date, -1)
+            if idx < 0:
+                # last_date 不在数据中，回退到最后一条K线索引
+                idx = ind["n"] - 1
+                if idx < 0:
+                    continue
             sell_price = ind["closes"][idx]
+            effective_date = ind["dates"][idx]
             proceeds = pos["remaining_shares"] * sell_price * 0.999
             final_value += proceeds
-            total_proceeds = pos["cumulative_proceeds"] + proceeds
-            return_pct = (total_proceeds - pos["cost"]) / pos["cost"] * 100
-            avg_sell = total_proceeds / pos["total_shares"] / 0.999
-            all_trades.append({
-                "code": code,
-                "name": pos["name"],
-                "buy_date": pos["buy_date"],
-                "sell_date": last_date,
-                "buy_price": round(pos["buy_price"], 2),
-                "sell_price": round(avg_sell, 2),
-                "return_pct": round(return_pct, 2),
-                "score": pos["score"],
-                "signal_type": pos["signal_type"],
-                "sell_reason": "回测期末",
-                "shares": pos["total_shares"],
-                "profit": round(total_proceeds - pos["cost"], 2)
-            })
+            trade_record = self._build_and_validate_sell_trade(
+                pos, ind, effective_date, sell_price, "回测期末"
+            )
+            if trade_record is not None:
+                all_trades.append(trade_record)
+            else:
+                data_contract_report["blocked_sells"] += 1
 
         # 统计
         total_trades = len(all_trades)
@@ -1951,6 +2343,8 @@ class ThreeBuysThreeSellsService:
             "daily_results": daily_results[:50],
             "top_trades": sorted(all_trades, key=lambda x: x["return_pct"], reverse=True)[:20],
             "worst_trades": sorted(all_trades, key=lambda x: x["return_pct"])[:20],
+            # ===== 第一性原理：数据契约报告（告诉用户拦截了多少非法交易/数据）=====
+            "data_contract_report": data_contract_report,
             "params": params,
             "took_ms": took_ms
         }

@@ -487,42 +487,13 @@ class TushareSyncService:
 
     def _is_trading_time(self) -> bool:
         """
-        判断当前是否在交易时间
-        A股交易时间：
-        - 周一到周五（排除节假日）
-        - 上午：9:30-11:30
-        - 下午：13:00-15:00
+        判断当前是否在交易时间（排除周末和节假日）
 
-        注意：此方法不检查节假日，仅检查时间段
+        委托给统一的 app.utils.trading_time.is_strict_trading_time
         """
-        from datetime import datetime
+        from app.utils.trading_time import is_strict_trading_time
 
-        import pytz
-
-        # 使用上海时区
-        tz = pytz.timezone('Asia/Shanghai')
-        now = datetime.now(tz)
-
-        # 检查是否是周末
-        if now.weekday() >= 5:  # 5=周六, 6=周日
-            return False
-
-        # 检查时间段
-        current_time = now.time()
-
-        # 上午交易时间：9:30-11:30
-        morning_start = datetime.strptime("09:30", "%H:%M").time()
-        morning_end = datetime.strptime("11:30", "%H:%M").time()
-
-        # 下午交易时间：13:00-15:00
-        afternoon_start = datetime.strptime("13:00", "%H:%M").time()
-        afternoon_end = datetime.strptime("15:00", "%H:%M").time()
-
-        # 判断是否在交易时间段内
-        is_morning = morning_start <= current_time <= morning_end
-        is_afternoon = afternoon_start <= current_time <= afternoon_end
-
-        return is_morning or is_afternoon
+        return is_strict_trading_time()
 
     async def _get_and_save_quotes(self, symbol: str) -> bool:
         """获取并保存单个股票行情"""

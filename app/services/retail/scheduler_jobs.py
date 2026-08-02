@@ -23,8 +23,10 @@ _last_regime_summary: str | None = None
 
 
 def _is_trading_day() -> bool:
-    """简单交易日判断（周末跳过，节假日由行情数据空值兜底）"""
-    return datetime.now().weekday() < 5
+    """交易日判断（排除周末和节假日，使用统一的 trading_time 模块）"""
+    from app.utils.trading_time import is_trading_day
+
+    return is_trading_day(datetime.now())
 
 
 async def _get_all_user_ids_with_open_positions() -> list[str]:

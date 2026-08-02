@@ -1550,12 +1550,12 @@ const performScreening = async () => {
       children.push({ field: 'pct_chg', op: 'between', value: [lo, hi] })
     }
 
-    // 成交量条件（映射为成交额范围，单位：万元，与数据库一致）
+    // 成交量条件（映射为成交额范围，单位：元，与数据库一致）
     if (filters.volumeLevel) {
       const volumeRangeMap: Record<string, [number, number]> = {
-        high: [100000, Number.MAX_SAFE_INTEGER],    // 高成交量：>10亿元 = 100000万元
-        medium: [30000, 100000],                     // 中等成交量：3亿-10亿元 = 30000-100000万元
-        low: [0, 30000]                              // 低成交量：<3亿元 = 30000万元
+        high: [1000000000, Number.MAX_SAFE_INTEGER],  // 高成交量：>10亿元 = 1,000,000,000 元
+        medium: [300000000, 1000000000],               // 中等成交量：3亿-10亿元 = 300,000,000 - 1,000,000,000 元
+        low: [0, 300000000]                            // 低成交量：<3亿元 = <300,000,000 元
       }
       const volumeRange = volumeRangeMap[filters.volumeLevel]
       if (volumeRange) {

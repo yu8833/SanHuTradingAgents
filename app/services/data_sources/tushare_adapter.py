@@ -189,8 +189,8 @@ class TushareAdapter(DataSourceAdapter):
                 close = float(row.get('close')) if row.get('close') is not None else None
                 pre_close = float(row.get('pre_close')) if row.get('pre_close') is not None else None
                 amount_raw = float(row.get('amount')) if row.get('amount') is not None else None
-                # amount 单位转换：Tushare rt_k 官方 amount 单位为 千元 → 统一为 万元（×0.1）
-                amount = amount_raw * 0.1 if amount_raw is not None else None
+                # amount 单位转换：Tushare rt_k 官方 amount 单位为 千元 → 统一为 元（×1000）
+                amount = amount_raw * 1000.0 if amount_raw is not None else None
                 # pct_chg may not be provided; compute if possible
                 pct_chg = None
                 if 'pct_chg' in df.columns and row.get('pct_chg') is not None:
@@ -310,8 +310,9 @@ class TushareAdapter(DataSourceAdapter):
                         "high": float(row.get('high')) if row.get('high') is not None else None,
                         "low": float(row.get('low')) if row.get('low') is not None else None,
                         "close": float(row.get('close')) if row.get('close') is not None else None,
+                        # 🔥 全局统一口径：volume=股（手×100），amount=元（Tushare pro_bar amount为千元，×1000）
                         "volume": (lambda v: v * 100 if v is not None else None)(float(row.get('vol')) if row.get('vol') is not None else None),
-                        "amount": (lambda a: a * 0.1 if a is not None else None)(float(row.get('amount')) if row.get('amount') is not None else None),
+                        "amount": (lambda a: a * 1000.0 if a is not None else None)(float(row.get('amount')) if row.get('amount') is not None else None),
                     })
                 except Exception:
                     continue

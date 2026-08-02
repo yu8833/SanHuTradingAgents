@@ -490,6 +490,15 @@ async def get_quote(
         "updated_at": (q or {}).get("updated_at"),
     }
 
+    # 计算交易日过期天数（排除周末和节假日）
+    try:
+        from app.utils.trading_time import calc_stale_days
+
+        data["stale_days"] = calc_stale_days(data.get("trade_date"))
+    except Exception as e:
+        logger.warning(f"⚠️ 计算过期天数失败: {e}")
+        data["stale_days"] = 0
+
     # 🔥 数据约束验证：清理行情数据中的异常值
     try:
         from tradingagents.dataflows.data_validator import validate_stock_data
@@ -949,17 +958,9 @@ async def get_kline(
             )
 
             # 判断是否在交易时间内或收盘后缓冲期
-            current_time = now.time()
-            is_weekday = now.weekday() < 5  # 周一到周五
+            from app.utils.trading_time import is_trading_time as check_trading_time
 
-            # 交易时间：9:30-11:30, 13:00-15:00
-            # 收盘后缓冲期：15:00-15:30（确保获取到收盘价）
-            is_trading_time = (
-                is_weekday and (
-                    (dtime(9, 30) <= current_time <= dtime(11, 30)) or
-                    (dtime(13, 0) <= current_time <= dtime(15, 30))
-                )
-            )
+            is_trading_time = check_trading_time(now)
 
             # 🔥 只在交易时间或收盘后缓冲期内才添加实时数据
             # 非交易日（周末、节假日）不添加实时数据

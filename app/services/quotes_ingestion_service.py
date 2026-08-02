@@ -3,7 +3,6 @@ import logging
 import time
 from collections import deque
 from datetime import datetime, timedelta
-from datetime import time as dtime
 from zoneinfo import ZoneInfo
 
 from pymongo import UpdateOne
@@ -337,29 +336,12 @@ class QuotesIngestionService:
         """
         判断是否在交易时间或收盘后缓冲期
 
-        交易时间：
-        - 上午：9:30-11:30
-        - 下午：13:00-15:00
-        - 收盘后缓冲期：15:00-15:30（确保获取到收盘价）
-
-        收盘后缓冲期说明：
-        - 交易时间结束后继续获取30分钟
-        - 假设6分钟一次，可以增加3次同步机会（15:06, 15:12, 15:18）
-        - 大大降低错过收盘价的风险
+        委托给统一的 app.utils.trading_time.is_trading_time
+        （包含周末和节假日检查）
         """
-        now = now or datetime.now(self.tz)
-        # 工作日 Mon-Fri
-        if now.weekday() > 4:
-            return False
-        t = now.time()
-        # 上交所/深交所常规交易时段
-        morning = dtime(9, 30)
-        noon = dtime(11, 30)
-        afternoon_start = dtime(13, 0)
-        # 收盘后缓冲期（延长30分钟到15:30）
-        buffer_end = dtime(15, 30)
+        from app.utils.trading_time import is_trading_time
 
-        return (morning <= t <= noon) or (afternoon_start <= t <= buffer_end)
+        return is_trading_time(now)
 
     async def _collection_empty(self) -> bool:
         db = get_mongo_db()

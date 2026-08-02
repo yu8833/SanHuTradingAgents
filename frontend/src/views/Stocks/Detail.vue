@@ -143,7 +143,7 @@
           style="margin-top: 8px;"
         >
           <template #title>
-            ⚠️ 数据已过期 {{ getDataExpiredDays(quote.tradeDate) }} 天（数据日期：{{ quote.tradeDate }}）
+            ⚠️ 数据已过期 {{ getDataExpiredDays(quote.tradeDate) }} 个交易日（数据日期：{{ quote.tradeDate }}）
           </template>
           <div style="font-size: 12px;">
             当前显示的数据可能不是最新的，建议点击"同步数据"获取最新行情。
@@ -783,7 +783,8 @@ const quote = reactive({
   tradeDate: null as string | null,  // 交易日期（用于成交量、成交额）
   turnoverDate: null as string | null,  // 换手率数据日期
   amplitudeDate: null as string | null,  // 振幅数据日期
-  updatedAt: null as string | null  // 🔥 数据更新时间
+  updatedAt: null as string | null,  // 🔥 数据更新时间
+  staleDays: 0  // 后端计算的交易日过期天数（0=最新）
 })
 
 const lastRefreshAt = ref<Date | null>(null)
@@ -808,29 +809,17 @@ function formatDateTag(dateStr: string | null): string {
   return dateStr
 }
 
-// 🔥 计算数据过期天数
-function getDataExpiredDays(dateStr: string | null): number {
-  if (!dateStr) return 0
-  const cleaned = dateStr.replace(/-/g, '')
-  if (cleaned.length !== 8) return 0
-  const targetDate = new Date(
-    parseInt(cleaned.substring(0, 4)),
-    parseInt(cleaned.substring(4, 6)) - 1,
-    parseInt(cleaned.substring(6, 8))
-  )
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  targetDate.setHours(0, 0, 0, 0)
-  const diffMs = today.getTime() - targetDate.getTime()
-  return Math.floor(diffMs / (1000 * 60 * 60 * 24))
+// 🔥 获取数据过期交易日天数（后端已排除周末和节假日）
+function getDataExpiredDays(_dateStr: string | null): number {
+  return quote.staleDays
 }
 
 // 🔥 数据过期警告文本
 function getDataExpiredWarning(dateStr: string | null): string {
   const days = getDataExpiredDays(dateStr)
   if (days <= 1) return `数据日期: ${dateStr}`
-  if (days <= 7) return `⚠️ 数据已过期${days}天（${dateStr}），可能不是最新行情`
-  return `❌ 数据已过期${days}天（${dateStr}），建议立即同步数据`
+  if (days <= 7) return `⚠️ 数据已过期${days}个交易日（${dateStr}），可能不是最新行情`
+  return `❌ 数据已过期${days}个交易日（${dateStr}），建议立即同步数据`
 }
 
 // 🔥 数据过期标签类型
@@ -1032,6 +1021,7 @@ async function fetchQuote(forceRefresh = false) {
     quote.turnoverDate = d.turnover_rate_date || d.trade_date || null
     quote.amplitudeDate = d.amplitude_date || d.trade_date || null
     quote.updatedAt = d.updated_at || null  // 🔥 数据更新时间
+    quote.staleDays = d.stale_days ?? 0  // 后端计算的交易日过期天数
 
     if (d.name) stockName.value = d.name
     if (d.market) market.value = d.market

@@ -882,22 +882,11 @@ async def check_data_freshness(user: dict = Depends(get_current_user)):
         db = get_mongo_db()
         today = datetime.now()
 
-        def is_trade_day(date):
-            if date.weekday() >= 5:
-                return False
-            try:
-                import chinese_calendar
-                return chinese_calendar.is_workday(date)
-            except ImportError:
-                return True
-            except Exception:
-                return True
+        from app.utils.trading_time import get_latest_trade_day, is_trading_day
 
-        expected_date = today
-        while not is_trade_day(expected_date):
-            expected_date -= timedelta(days=1)
+        expected_date = get_latest_trade_day(today)
         expected_date_str = expected_date.strftime("%Y-%m-%d")
-        is_trading_day = is_trade_day(today)
+        is_today_trading_day = is_trading_day(today)
         current_hour = today.hour
 
         # --- 1. 股票基础信息 ---
@@ -953,7 +942,7 @@ async def check_data_freshness(user: dict = Depends(get_current_user)):
             try:
                 quotes_dt = datetime.strptime(quotes_latest_date, "%Y-%m-%d")
                 quotes_stale_days = (expected_date - quotes_dt).days
-                if is_trading_day and current_hour < 16:
+                if is_today_trading_day and current_hour < 16:
                     yesterday = (today - timedelta(days=1)).strftime("%Y-%m-%d")
                     quotes_is_fresh = quotes_dt >= datetime.strptime(yesterday, "%Y-%m-%d")
                 else:
