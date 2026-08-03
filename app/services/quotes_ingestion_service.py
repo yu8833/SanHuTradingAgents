@@ -527,23 +527,28 @@ class QuotesIngestionService:
         except Exception as e:
             logger.warning(f"发布行情更新信号失败（不影响主流程）: {e}")
 
-    async def backfill_from_historical_data(self) -> None:
+    async def backfill_from_historical_data(self, force: bool = False) -> None:
         """
         从历史数据集合导入前一天的收盘数据到 market_quotes
         - 如果 market_quotes 集合为空，导入所有数据
         - 如果 market_quotes 集合不为空，检查并修复缺失的成交量字段
+        - force=True 时，强制从 stock_daily_quotes 重建全部 market_quotes 记录
+          （用于单位转换修复等数据修复场景，避免"不陈旧"的脏数据滞留）
         """
         try:
             # 检查 market_quotes 是否为空
             is_empty = await self._collection_empty()
 
-            if not is_empty:
+            if not is_empty and not force:
                 # 集合不为空，检查是否有成交量缺失的记录
                 logger.info("✅ market_quotes 集合不为空，检查是否需要修复成交量...")
                 await self._fix_missing_volume()
                 return
 
-            logger.info("📊 market_quotes 集合为空，开始从历史数据导入")
+            if force:
+                logger.info("🔧 force=True，强制从 stock_daily_quotes 重建 market_quotes")
+            else:
+                logger.info("📊 market_quotes 集合为空，开始从历史数据导入")
 
             db = get_mongo_db()
             manager = DataSourceManager()
@@ -628,6 +633,65 @@ class QuotesIngestionService:
             logger.error(f"❌ 从历史数据导入失败: {e}")
             import traceback
             logger.error(f"堆栈跟踪:\n{traceback.format_exc()}")
+
+    async def verify_and_repair_market_quotes(self) -> bool:
+        """
+        校验 market_quotes 与 stock_daily_quotes 的 amount/volume 一致性，
+        若发现系统性单位偏差（如 bug-012 遗留的 amount÷100000、volume×100），
+        自动触发 force rebuild 修复。
+
+        Returns:
+            True: 一致（或修复后一致）；False: 无法修复
+        """
+        try:
+            db = get_mongo_db()
+            # 找最新交易日
+            latest_doc = await db["stock_daily_quotes"].find_one(
+                {"period": "daily"}, sort=[("trade_date", -1)]
+            )
+            if not latest_doc:
+                logger.warning("⚠️ stock_daily_quotes 为空，跳过一致性校验")
+                return True
+            latest_td = latest_doc.get("trade_date")  # "2026-07-31"
+
+            # 抽样 20 只股票对比
+            sample_mq = await db["market_quotes"].find({}, {"_id": 0}).limit(20).to_list(length=20)
+            if not sample_mq:
+                logger.info("✅ market_quotes 为空，跳过一致性校验")
+                return True
+
+            mismatch_count = 0
+            for mq in sample_mq:
+                code = mq.get("code")
+                if not code:
+                    continue
+                sq = await db["stock_daily_quotes"].find_one({"code": code, "trade_date": latest_td})
+                if not sq:
+                    continue
+                mq_amt = mq.get("amount")
+                sq_amt = sq.get("amount")
+                mq_vol = mq.get("volume")
+                sq_vol = sq.get("volume")
+                if not all([mq_amt, sq_amt, mq_vol, sq_vol]):
+                    continue
+                # 容差 1% 判断是否一致
+                if abs(mq_amt - sq_amt) / sq_amt > 0.01 or abs(mq_vol - sq_vol) / sq_vol > 0.01:
+                    mismatch_count += 1
+
+            if mismatch_count > len(sample_mq) // 2:
+                logger.warning(
+                    f"⚠️ 检测到 market_quotes 数据异常（{mismatch_count}/{len(sample_mq)} 不一致），"
+                    f"触发强制重建"
+                )
+                await self.backfill_from_historical_data(force=True)
+                logger.info("✅ market_quotes 强制重建完成")
+                return True
+            else:
+                logger.info(f"✅ market_quotes 一致性校验通过（{mismatch_count}/{len(sample_mq)} 不一致）")
+                return True
+        except Exception as e:
+            logger.error(f"❌ market_quotes 一致性校验失败: {e}")
+            return False
 
     async def backfill_last_close_snapshot(self) -> None:
         """一次性补齐上一笔收盘快照（用于冷启动或数据陈旧）。允许在休市期调用。"""

@@ -113,37 +113,12 @@ class HistoricalDataService:
 
             # ⏱️ 性能监控：单位转换
             convert_start = datetime.now()
-            # 🔥 统一单位转换（按数据源）—— 目标：amount=元，volume=股
-            # 全局统一口径：amount 永远是元，volume 永远是股
-            # 前端 fmtAmount / fmtVolume 即按此标准展示
-            # Tushare 原始单位：amount=千元，volume=手
-            if data_source == "tushare":
-                # 千元 → 元（×1000）
-                if 'amount' in data.columns:
-                    data['amount'] = data['amount'] * 1000.0
-                elif 'turnover' in data.columns:
-                    data['turnover'] = data['turnover'] * 1000.0
-
-                # 手 → 股
-                if 'volume' in data.columns:
-                    data['volume'] = data['volume'] * 100
-                elif 'vol' in data.columns:
-                    data['vol'] = data['vol'] * 100
-
-            # AKShare 原始单位：amount=元，volume=手（stock_zh_a_spot_em / stock_zh_a_hist）
-            elif data_source == "akshare":
-                # amount 已经是元，无需转换
-
-                # 手 → 股
-                if 'volume' in data.columns:
-                    data['volume'] = data['volume'] * 100
-                elif 'vol' in data.columns:
-                    data['vol'] = data['vol'] * 100
-
-            # BaoStock 原始单位：amount=元，volume=股
-            elif data_source == "baostock":
-                # amount 已经是元，volume 已经是股，均无需转换
-                pass
+            # 🔥 单位转换说明（bug-012 修复）
+            # 数据源 adapter 的 get_kline() 已经把 vol/amount 转换为标准单位（volume=股, amount=元）：
+            #   - tushare_adapter.get_kline(): vol(手)×100→股, amount(千元)×1000→元
+            #   - akshare_adapter.get_kline(): volume(手)×100→股, amount(元)不转换
+            # 因此 save_historical_data 不再做任何单位转换，避免双重转换导致数据放大 100 倍。
+            # 注意：sina 数据不走 adapter get_kline，入库时已是标准单位（股/万元），无需转换。
 
             # 🔥 港股/美股数据：添加 pre_close 字段（从前一天的 close 获取）
             if market in ["HK", "US"] and 'pre_close' not in data.columns and 'close' in data.columns:

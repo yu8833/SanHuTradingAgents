@@ -296,6 +296,8 @@ async def lifespan(app: FastAPI):
             qi = QuotesIngestionService()
             await qi.ensure_indexes()
             await qi.backfill_last_close_snapshot_if_needed()
+            # 启动期：校验 market_quotes 数据一致性，自动修复单位异常（bug-012 遗留防护）
+            await qi.verify_and_repair_market_quotes()
         except Exception as e:
             logger.warning(f"Startup backfill failed (ignored): {e}")
 
