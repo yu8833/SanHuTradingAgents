@@ -258,6 +258,7 @@ class ThreeBuysThreeSellsService:
         ma55 = calc_ma_np(closes, 55)
         ma60 = calc_ma_np(closes, 60)
         ma65 = calc_ma_np(closes, 65)
+        ma200 = calc_ma_np(closes, 200)
 
         ema30 = calc_ema_np(closes, 30)
 
@@ -268,6 +269,22 @@ class ThreeBuysThreeSellsService:
         atr14 = calc_atr_np(highs, lows, closes, 14)
 
         volume_ratio = calc_volume_ratio_np(volumes, 20)
+
+        # ===== 估算成交额（元）& 20日日均成交额 & 振幅 =====
+        # 大多数数据源K线中没有amount字段，用 close * volume * 每手乘数估算（单位股）
+        # A股每手=100，但volume单位通常是"手"。这里取保守估计用 close*volume 做相对判断即可
+        amounts_est = closes * volumes  # 估算成交额(单位任意，只做横向比较+阈值判断)
+        # 最近20日滚动日均成交额
+        avg_amount_20 = np.zeros(n, dtype=np.float64)
+        for i in range(20, n):
+            avg_amount_20[i] = float(np.mean(amounts_est[i - 19:i + 1]))
+        # 20日振幅比例 = (最高价.max - 最低价.min)/昨收
+        amplitude_20 = np.zeros(n, dtype=np.float64)
+        for i in range(20, n):
+            h_max = float(np.max(highs[i - 19:i + 1]))
+            l_min = float(np.min(lows[i - 19:i + 1]))
+            base = closes[i - 20] if closes[i - 20] > 0 else closes[i]
+            amplitude_20[i] = (h_max - l_min) / base * 100 if base > 0 else 10.0
 
         ma60_slope = calc_ma_slope_np(ma60, 5)
 
@@ -319,10 +336,14 @@ class ThreeBuysThreeSellsService:
             "highs": highs,
             "lows": lows,
             "volumes": volumes,
+            "amounts_est": amounts_est,
+            "avg_amount_20": avg_amount_20,
+            "amplitude_20": amplitude_20,
             "pct_chgs": pct_chgs,
             "ma5": ma5, "ma8": ma8, "ma13": ma13,
             "ma20": ma20,
             "ma55": ma55, "ma60": ma60, "ma65": ma65,
+            "ma200": ma200,
             "ema30": ema30,
             "bias60": bias60,
             "dif": dif, "dea": dea, "macd_hist": macd_hist,
@@ -349,9 +370,12 @@ class ThreeBuysThreeSellsService:
     def _check_b1(self, ind: dict[str, Any], idx: int, params: dict[str, Any]) -> dict[str, Any] | None:
         """B1 左侧买点: BIAS(60) ∈ [-30%, -20%]
 
-        enable_strict_b1=True时增加确认条件:
-        - 三天不新低: 近3天最低价 > 前10天最低价
-        - 下降市均线粘合向上
+        教材定义（严格模式 enable_strict_b1=True，默认开启）：
+        - 三重确认（三买三卖教材 2.1 节 B1买点定义）：
+          1) W底形态（双底确认：左底→反弹→右底不创新低+放量突破颈线）
+          2) 放量确认：右底当日或突破日量比 > 1.3（资金进场）
+          3) MACD金叉：DIF 在零轴下方向上穿越 DEA
+        - 大盘下降趋势中额外要求：短期均线粘合向上（过滤假突破）
         """
         if idx < 63:
             return None
@@ -365,17 +389,71 @@ class ThreeBuysThreeSellsService:
         market_trend = params.get("_market_trend", "neutral")
 
         if enable_strict_b1:
-            # 三天不新低确认: 近3天最低价 > 前10天最低价
-            if idx < 13:
+            # === 三重确认 1: W底形态（教材B1核心形态） ===
+            # 窗口: 向前看 30 根K线内搜索双底
+            w_window = min(30, idx - 3)
+            if w_window < 10:  # 窗口太窄无法构成W底
                 return None
-            recent_lows = ind["lows"][idx - 2:idx + 1]
-            earlier_lows = ind["lows"][idx - 12:idx - 2]
-            if len(recent_lows) < 3 or len(earlier_lows) < 10:
+
+            search_start = idx - w_window
+            lows = ind["lows"][search_start:idx + 1]
+            closes = ind["closes"][search_start:idx + 1]
+            highs_all = ind["highs"]
+            # 1. 找窗口内的最低价(左底)
+            left_bottom_rel = int(np.argmin(lows))
+            left_bottom_abs = search_start + left_bottom_rel
+            left_bottom_price = float(lows[left_bottom_rel])
+            # 2. 左底之后的次高点（颈线位候选：反弹高点）
+            if left_bottom_rel + 3 >= len(lows):  # 左底太靠后无反弹空间
                 return None
-            min_recent = float(np.min(recent_lows))
-            min_earlier = float(np.min(earlier_lows))
-            if min_recent <= min_earlier:
+            rebound_slice_start = search_start + left_bottom_rel + 1
+            rebound_slice_end = search_start + len(lows)
+            if rebound_slice_end - 1 > idx:
+                rebound_slice_end = idx + 1
+            if rebound_slice_start >= rebound_slice_end:
                 return None
+            rebound_high_rel_in_slice = int(np.argmax(highs_all[rebound_slice_start:rebound_slice_end]))
+            rebound_high_abs = rebound_slice_start + rebound_high_rel_in_slice
+            neckline_price = float(ind["highs"][rebound_high_abs])
+            # 3. 右底: [左底后, idx]范围内的第二个低点，且不低于左底5%
+            right_search_start = min(left_bottom_abs + 3, idx - 1)
+            if right_search_start >= idx:
+                return None
+            right_lows = ind["lows"][right_search_start:idx + 1]
+            right_bottom_rel2 = int(np.argmin(right_lows))
+            right_bottom_abs = right_search_start + right_bottom_rel2
+            right_bottom_price = float(right_lows[right_bottom_rel2])
+            # 右底不创新低（允许最多3%下破容忍）
+            if right_bottom_price < left_bottom_price * 0.97:
+                return None
+            # 右底必须在左底之后
+            if right_bottom_abs <= left_bottom_abs:
+                return None
+            # W底完成：当前收盘站上颈线（突破确认）
+            cur_close = float(ind["closes"][idx])
+            if cur_close < neckline_price * 0.99:  # 允许1%误差
+                return None
+
+            # === 三重确认 2: 放量确认（量比 > 1.3） ===
+            vol_ratio = float(ind["volume_ratio"][idx])
+            if vol_ratio < 1.3:
+                return None
+
+            # === 三重确认 3: MACD金叉（DIF上穿DEA） ===
+            # 当前DIF > DEA 且 前一天DIF <= DEA => 刚金叉
+            dif_cur = float(ind["dif"][idx])
+            dea_cur = float(ind["dea"][idx])
+            dif_prev = float(ind["dif"][idx - 1])
+            dea_prev = float(ind["dea"][idx - 1])
+            if not (dif_cur > dea_cur and dif_prev <= dea_prev):
+                # 放宽：允许金叉发生在 idx-3 ~ idx（3日内的金叉也算）
+                crossed = False
+                for j in range(max(1, idx - 3), idx + 1):
+                    if ind["dif"][j] > ind["dea"][j] and ind["dif"][j - 1] <= ind["dea"][j - 1]:
+                        crossed = True
+                        break
+                if not crossed:
+                    return None
 
             # 大盘下降趋势中，B1需要更强确认：短期均线粘合向上
             if market_trend == "down":
@@ -1027,23 +1105,45 @@ class ThreeBuysThreeSellsService:
         return bool(price_rising and volume_falling)
 
     def _check_s1(self, ind: dict[str, Any], idx: int, params: dict[str, Any]) -> dict[str, Any] | None:
-        """S1 减仓预警: BIAS 超过阈值 或 GMMA 慢组压缩 > 30%"""
+        """S1 减仓预警: BIAS 超阈值 或 GMMA Pro慢组压缩触发
+
+        GMMA Pro实战手册 3.2 节 S1减仓信号定义：
+          条件A（乖离超阈值）: BIAS60 >= 个股类型阈值（大盘28%/中盘32%/小盘40%）
+          条件B（慢组高位压缩）:
+              1. 压缩度 > 30%（慢组3条均线高度粘合）
+              2. 快组与慢组分度拉开（快慢分离度 < -5%？不，分离度>正值表示快组在慢组上=已经上涨一段）
+                 实际应为: fast_slow_separation > 10%（短期获利盘丰厚，机构有派发空间）
+              3. 强多状态持续 >= gmma_s1_min_duration 根（通常10根以上）
+              4. 乖离辅助: BIAS60 > 10%（排除上涨初期压缩误判）
+        任何一个条件(A 或 B)成立即触发S1减仓1/3
+        """
         if idx < 60:
             return None
         bias = ind["bias60"][idx]
         s1_threshold = ind.get("s1_threshold", 30.0)
 
         reasons = []
+        # === 条件A: 乖离超阈值（三买三卖教材定义） ===
         if bias >= s1_threshold:
-            reasons.append(f"BIAS60={bias:.1f}% 超过阈值{s1_threshold}%")
+            reasons.append(f"BIAS60={bias:.1f}% 超个股阈值{s1_threshold}%")
 
+        # === 条件B: GMMA Pro慢组压缩（严格按教材3.2节4个条件） ===
         if params.get("enable_slow_group_s1", True):
-            compression = ind["slow_compression"][idx]
-            # S1需强多持续>10根K线（GMMA Pro要求）
+            compression = float(ind["slow_compression"][idx])
+            fast_slow_sep = float(ind["fast_slow_separation"][idx])
             min_s1_duration = params.get("gmma_s1_min_duration", 10)
             duration = int(ind["strong_bull_duration"][idx])
-            if compression > 0.3 and ind["bias60"][idx] > 10 and duration >= min_s1_duration:
-                reasons.append(f"GMMA慢组压缩度={compression*100:.0f}% 超过30%")
+
+            cond_compress = compression > 0.3  # 1. 慢组压缩 > 30%
+            cond_sep = fast_slow_sep > 10.0    # 2. 快慢分离 >10%（已积累足够获利盘）
+            cond_duration = duration >= min_s1_duration  # 3. 强多持续足够久
+            cond_bias_aux = bias > 10.0        # 4. 辅助：乖离不能太低（排除底部误判）
+
+            if cond_compress and cond_sep and cond_duration and cond_bias_aux:
+                reasons.append(
+                    f"GMMA慢组压缩{compression*100:.0f}%+分离{fast_slow_sep:.1f}%"
+                    f"(强多{duration}根/BIAS{bias:.0f}%)"
+                )
 
         if reasons:
             return {
@@ -1075,20 +1175,64 @@ class ThreeBuysThreeSellsService:
         }
 
     def _check_s3(self, ind: dict[str, Any], idx: int) -> dict[str, Any] | None:
-        """S3 清仓: 跌破 MA55 & MA60 且 MA60 拐头向下"""
-        if idx < 65:
+        """S3 清仓: 中期趋势破坏 + 大级别趋势破坏
+
+        教材定义（5.3 节 S3清仓信号）:
+          基础条件: 跌破 MA55 & MA60 且 MA60 拐头向下（中期走坏）
+          强化条件（大级别趋势破坏 = 加速清仓）:
+              - 日线 MA200 拐头向下 或 收盘价跌破 MA200（对应周线MA50级别破位，牛市根基动摇）
+          任一条件成立就清仓100%
+        """
+        if idx < 200:  # 需要MA200数据
+            # 退而求其次，没有MA200时用MA60逻辑
+            if idx < 65:
+                return None
+            close = ind["closes"][idx]
+            ma55 = ind["ma55"][idx]
+            ma60 = ind["ma60"][idx]
+            ma60_slope = ind["ma60_slope"][idx]
+            if close < ma55 and close < ma60 and ma60_slope < 0:
+                return {
+                    "type": "S3",
+                    "type_label": "清仓卖出",
+                    "trigger_price": close,
+                    "ma60_slope": round(float(ma60_slope), 2),
+                    "sell_pct": 1.0
+                }
             return None
+
         close = ind["closes"][idx]
         ma55 = ind["ma55"][idx]
         ma60 = ind["ma60"][idx]
         ma60_slope = ind["ma60_slope"][idx]
+        ma200 = ind["ma200"][idx]
+        # MA200斜率（用10天差近似，>0上升 <0下降）
+        ma200_slope = ma200 - ind["ma200"][idx - 10] if idx >= 10 else 0.0
 
-        if close < ma55 and close < ma60 and ma60_slope < 0:
+        reasons_s3 = []
+        # 基础条件：中期均线破位
+        base_broken = close < ma55 and close < ma60 and ma60_slope < 0
+        if base_broken:
+            reasons_s3.append(f"中期均线破位(MA60斜率={ma60_slope:.2f})")
+
+        # 强化条件：大级别趋势破坏（跌破MA200 或 MA200拐头向下）
+        major_broken = (close < ma200) or (ma200_slope < 0)
+        if major_broken:
+            if close < ma200:
+                reasons_s3.append(f"跌破MA200(大级别趋势支撑破位)")
+            if ma200_slope < 0:
+                reasons_s3.append(f"MA200拐头向下(长期趋势反转)")
+
+        # 满足任一条件 => 清仓（教材要求：大级别趋势破坏是无条件清仓，不必等中期破位）
+        if base_broken or major_broken:
             return {
                 "type": "S3",
                 "type_label": "清仓卖出",
                 "trigger_price": close,
                 "ma60_slope": round(float(ma60_slope), 2),
+                "ma200": round(float(ma200), 2),
+                "ma200_slope": round(float(ma200_slope), 4),
+                "reasons": reasons_s3,
                 "sell_pct": 1.0
             }
         return None
@@ -1451,6 +1595,33 @@ class ThreeBuysThreeSellsService:
                 if last_idx < 60:
                     return None
 
+                # ===== P3 流动性过滤（教材要求：剔除ST/僵尸股/低成交股） =====
+                enable_liquidity_filter = params.get("enable_liquidity_filter", True)
+                liquidity_blocked = False
+                liquidity_reason = ""
+                if enable_liquidity_filter:
+                    # 1) ST/*ST/退 标记: 股票名称中包含"ST"或"退"
+                    if "ST" in name or "退" in name:
+                        liquidity_blocked = True
+                        liquidity_reason = f"名称含风险标记: {name}"
+                    # 2) 日均成交额阈值: 最近20日avg_amount_20不足5000万（单位估算: close*volume/手。若单位是"手"则除10；这里取保守值防止误删）
+                    #    这里不用精确单位，使用相对阈值，如低于全市场分位
+                    elif last_idx >= 20:
+                        avg_amt = float(ind["avg_amount_20"][last_idx])
+                        # 粗略换算：以典型低价股5元*1万手=500万手·元 = 5000万元(若volume单位=手)
+                        # 取保守阈值: avg_amt < 1_000_000 大概率是僵尸股(5元*2000手=100万元成交额)
+                        min_avg_amount = params.get("min_avg_amount", 1_000_000.0)
+                        if avg_amt < min_avg_amount:
+                            liquidity_blocked = True
+                            liquidity_reason = f"20日日均成交额不足({avg_amt:.0f} < {min_avg_amount:.0f})"
+                        # 3) 僵尸股: 20日振幅 < 5%（无波动，无参与价值）
+                        elif float(ind["amplitude_20"][last_idx]) < 5.0:
+                            liquidity_blocked = True
+                            amp = float(ind["amplitude_20"][last_idx])
+                            liquidity_reason = f"20日振幅过低({amp:.1f}% < 5%) = 僵尸股"
+                if liquidity_blocked:
+                    return None  # 直接跳过，不参与买入
+
                 # 检测所有信号
                 signals = []
                 # GMMA强多状态过滤：B2/B3/B2G需要强多状态确认，B1是左侧抄底不需要
@@ -1470,18 +1641,23 @@ class ThreeBuysThreeSellsService:
                 # 若处于戴维斯双杀象限，则直接跳过所有买入信号（B1/B2/B3/B2G 全部禁止）
                 dg_buy_blocked = in_double_kill
 
-                # 个股趋势 + 大盘仓位矩阵
+                # 个股趋势 + 大盘仓位矩阵（统一用四象限矩阵调节仓位，教材 3.2 节）
                 stock_trend = str(ind["stock_trend"][last_idx])
-
-                # B2/B3是突破信号，不打仓位折扣；B1按大盘趋势调节
+                position_mult = self._get_position_multiplier(market_trend, stock_trend, params)
                 b1_multiplier = self._get_b1_position_multiplier(market_trend, stock_trend, params)
+                b2_multiplier = position_mult
+                b3_multiplier = position_mult
+                b2g_multiplier = position_mult
+
+                # 大盘+个股双下跌: 仓位矩阵返回0.0 => 禁止任何买入
+                matrix_buy_blocked = (position_mult <= 0.0) and (b1_multiplier <= 0.0)
 
                 # 将大盘趋势写入params供B1检查
                 local_params = dict(params)
                 local_params["_market_trend"] = market_trend
 
-                # 非戴维斯双杀时才允许买入信号
-                if not dg_buy_blocked:
+                # 非戴维斯双杀 + 非矩阵空仓 才允许买入信号
+                if not dg_buy_blocked and not matrix_buy_blocked:
                     b1 = self._check_b1(ind, last_idx, local_params)
                     if b1:
                         b1["position_pct"] = round(b1["position_pct"] * b1_multiplier, 4)
@@ -1490,13 +1666,16 @@ class ThreeBuysThreeSellsService:
                     if (not enable_gmma or gmma_strong_bull) and not overheated:
                         b2 = self._check_b2(ind, last_idx, local_params)
                         if b2:
+                            b2["position_pct"] = round(b2["position_pct"] * b2_multiplier, 4)
                             signals.append(b2)
                         b3 = self._check_b3(ind, last_idx, local_params)
                         if b3:
+                            b3["position_pct"] = round(b3["position_pct"] * b3_multiplier, 4)
                             signals.append(b3)
                         # GMMA版B2（加仓信号）
                         b2g = self._check_gmma_b2(ind, last_idx, local_params)
                         if b2g:
+                            b2g["position_pct"] = round(b2g["position_pct"] * b2g_multiplier, 4)
                             signals.append(b2g)
 
                 s1 = self._check_s1(ind, last_idx, params)
@@ -1698,9 +1877,9 @@ class ThreeBuysThreeSellsService:
             "enable_slow_group_s1": True,
             "enable_gmma_filter": True,
             "enable_overheat_filter": True,
-            "enable_market_matrix": False,  # 四象限矩阵过于复杂，关闭
+            "enable_market_matrix": True,   # 开启大盘×个股四象限仓位矩阵(教材3.2节风控)
             "enable_adaptive_volume": True,
-            "enable_strict_b1": False,  # B1确认条件过于严格，关闭
+            "enable_strict_b1": True,       # 开启B1严格模式: W底+放量+MACD金叉三重确认
             "gmma_s1_min_duration": 10,
             "gmma_b2_min_duration": 5,
             "gmma_b2_max_duration": 25,
@@ -1708,6 +1887,8 @@ class ThreeBuysThreeSellsService:
             "overheat_bias_pct": 40.0,
             "slippage_pct": 0.003,
             "enable_b2b3_stop_loss": True,  # 启用B2/B3均线止损(教材5.2节定量止损规则)
+            "enable_liquidity_filter": True,  # 启用流动性过滤(剔除ST/僵尸/低成交)
+            "min_avg_amount": 1_000_000.0,  # 20日日均成交额估算阈值，低于则过滤
             "trailing_stop_min_profit": 8.0,
             "trailing_stop_atr_mult": 2.5,
             "max_holdings": 30
@@ -1852,7 +2033,19 @@ class ThreeBuysThreeSellsService:
         for code, ind in indicators_cache.items():
             date_to_idx = ind["date_to_idx"]
             info = stock_info_map.get(code, {})
+            name = info.get("name", "")
             dg_info = dg_data.get(code)
+
+            # ===== P3 流动性预过滤（回测版，一次性判断避免每日重复计算）=====
+            enable_liq = params.get("enable_liquidity_filter", True)
+            liq_blocked_static = False
+            if enable_liq:
+                # 1) ST/退市标记
+                if "ST" in name or "退" in name:
+                    liq_blocked_static = True
+            # 如果被静态过滤（ST等），直接跳过整只股票
+            if liq_blocked_static:
+                continue
 
             # ===== ΔG 预处理：提前判断该股是否长期处于戴维斯双杀（避免每日重复计算） =====
             double_kill_static = False
@@ -1864,6 +2057,17 @@ class ThreeBuysThreeSellsService:
                 idx = date_to_idx.get(td, -1)
                 if idx < 60:
                     continue
+
+                # ===== P3 流动性动态过滤（基于交易日当时的成交额/振幅，防未来函数）=====
+                if enable_liq and idx >= 20:
+                    # 注意：只访问 0..idx，不看未来数据
+                    avg_amt = float(ind["avg_amount_20"][idx])
+                    min_amt = params.get("min_avg_amount", 1_000_000.0)
+                    if avg_amt < min_amt:
+                        continue
+                    amp = float(ind["amplitude_20"][idx])
+                    if amp < 5.0:
+                        continue
 
                 # ===== 公理3（无未来函数）：信号决策点 idx 只能访问 0..idx =====
                 try:
@@ -1891,12 +2095,19 @@ class ThreeBuysThreeSellsService:
                 stock_trend = str(ind["stock_trend"][idx])
                 market_trend = market_trend_map.get(td, "neutral")
 
-                # B2/B3是突破信号，本身就是强趋势确认，下降市中数量自然减少，不打仓位折扣
-                # B1是左侧抄底，根据大盘趋势调节仓位
+                # === 教材 3.2 节 四象限仓位矩阵（统一生效，B1单独调节）===
+                # B2/B3/B2G 是趋势确认类信号，根据大盘×个股矩阵调节仓位
+                # B1是逆向抄底，使用独立的更保守矩阵 _get_b1_position_multiplier
+                position_mult = self._get_position_multiplier(market_trend, stock_trend, params)
                 b1_multiplier = self._get_b1_position_multiplier(market_trend, stock_trend, params)
-                b2_multiplier = 1.0  # 趋势突破信号不打折扣
-                b3_multiplier = 1.0
-                b2g_multiplier = 1.0
+                b2_multiplier = position_mult
+                b3_multiplier = position_mult
+                b2g_multiplier = position_mult
+
+                # 四象限矩阵"空仓观望"档位（mult=0.0）：直接不生成买入信号
+                matrix_blocked = (position_mult <= 0.0) and (b1_multiplier <= 0.0)
+                if matrix_blocked:
+                    continue  # 大盘+个股双下跌 => 不新建任何仓位
 
                 # 将大盘趋势写入params供B1检查使用
                 local_params = dict(params)
