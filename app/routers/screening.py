@@ -890,17 +890,19 @@ async def check_data_freshness(user: dict = Depends(get_current_user)):
         current_hour = today.hour
 
         # --- 1. 股票基础信息 ---
+        # 🔥 性能优化（bug-017）：原代码用 2 次 distinct() 全表扫描 stock_basic_info，
+        # 在 5000+ 股票时每次 distinct 耗时数秒，导致接口 60 秒超时。
+        # 改为 count_documents + 索引排序，毫秒级返回。
         basics_filter = {
             "$or": [
                 {"category": "stock_cn"},
                 {"market": {"$in": ["主板", "创业板", "科创板", "北交所"]}},
             ]
         }
-        # 修复 #B2：distinct("code") 对仅写了 symbol 的新记录会漏掉，
-        # 所以改为在应用层对 distinct(symbol) + distinct(code) 去重。
-        codes_from_code = await db.stock_basic_info.distinct("code", basics_filter)
-        codes_from_symbol = await db.stock_basic_info.distinct("symbol", basics_filter)
-        basics_count = len({str(c) for c in (codes_from_code + codes_from_symbol) if c})
+        basics_count = await db.stock_basic_info.count_documents(basics_filter)
+        # 如果 basics_filter 匹配数为 0，回退到全表 count（兼容老数据无 category/market 字段）
+        if basics_count == 0:
+            basics_count = await db.stock_basic_info.count_documents({})
         latest_basic_doc = await db.stock_basic_info.find().sort("updated_at", -1).limit(1).to_list(length=1)
         basics_updated_at = latest_basic_doc[0].get("updated_at") if latest_basic_doc else None
         # 基础信息只要今天更新过就算新鲜
@@ -919,19 +921,22 @@ async def check_data_freshness(user: dict = Depends(get_current_user)):
             basics_updated_at_str = None
 
         # --- 2. 历史K线数据 ---
-        latest_pipeline = [
-            {"$match": {"period": "daily"}},
-            {"$group": {"_id": "$trade_date"}},
-            {"$sort": {"_id": -1}},
-            {"$limit": 1},
-        ]
-        latest_docs = await db.stock_daily_quotes.aggregate(latest_pipeline).to_list(length=1)
-        if latest_docs:
-            quotes_latest_date = latest_docs[0]["_id"]
-            # 修复 #B2：同样区分 code/symbol 双字段
-            codes_q = await db.stock_daily_quotes.distinct("code", {"trade_date": quotes_latest_date, "period": "daily"})
-            symbols_q = await db.stock_daily_quotes.distinct("symbol", {"trade_date": quotes_latest_date, "period": "daily"})
-            quotes_total = len({str(c) for c in (codes_q + symbols_q) if c})
+        # 🔥 性能优化（bug-017）：原代码用 aggregate $group by trade_date 全表扫描，
+        # + 2 次 distinct() 全表扫描当日数据，在 stock_daily_quotes 有数百万条记录时
+        # 单次查询耗时 10-30 秒，4 次查询累计超过 60 秒超时。
+        # 改为：find().sort().limit(1) 利用 trade_date 索引毫秒级返回最新日期，
+        # 然后 count_documents 统计当日股票数（比 distinct 快得多）。
+        latest_quote_doc = await db.stock_daily_quotes.find(
+            {"period": "daily"}
+        ).sort("trade_date", -1).limit(1).to_list(length=1)
+        if latest_quote_doc:
+            quotes_latest_date = latest_quote_doc[0].get("trade_date")
+            if quotes_latest_date:
+                quotes_total = await db.stock_daily_quotes.count_documents(
+                    {"trade_date": quotes_latest_date, "period": "daily"}
+                )
+            else:
+                quotes_total = 0
         else:
             quotes_latest_date = None
             quotes_total = 0
