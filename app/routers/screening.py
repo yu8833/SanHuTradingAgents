@@ -882,12 +882,15 @@ async def check_data_freshness(user: dict = Depends(get_current_user)):
         db = get_mongo_db()
         today = datetime.now()
 
-        from app.utils.trading_time import get_latest_trade_day, is_trading_day
+        from app.utils.trading_time import calc_stale_days, count_trading_days_between, get_latest_trade_day, is_trading_day
 
         expected_date = get_latest_trade_day(today)
         expected_date_str = expected_date.strftime("%Y-%m-%d")
         is_today_trading_day = is_trading_day(today)
         current_hour = today.hour
+        # 计算"上一个交易日"（用于盘中判定，不回退到自然日昨天——周末/节假日不可能有数据更新）
+        _last_trade_day = get_latest_trade_day(datetime.combine(today.date(), datetime.min.time()))
+        last_trade_day_str = _last_trade_day.strftime("%Y-%m-%d")
 
         # --- 1. 股票基础信息 ---
         # 🔥 性能优化（bug-017）：原代码用 2 次 distinct() 全表扫描 stock_basic_info，
@@ -913,7 +916,10 @@ async def check_data_freshness(user: dict = Depends(get_current_user)):
                 basics_dt = datetime.strptime(basics_updated_at[:19], "%Y-%m-%d %H:%M:%S")
             else:
                 basics_dt = basics_updated_at
-            basics_stale_days = (today - basics_dt).days
+            # 🔥 bug-018：自然日差 → 交易日差（周末/节假日不应当作过期天数）
+            basics_stale_days = count_trading_days_between(
+                basics_dt.strftime("%Y-%m-%d"), expected_date.strftime("%Y-%m-%d")
+            )
             # 当天更新过就算新鲜
             basics_is_fresh = basics_stale_days <= 0
             basics_updated_at_str = basics_dt.strftime("%Y-%m-%d %H:%M")
@@ -945,12 +951,13 @@ async def check_data_freshness(user: dict = Depends(get_current_user)):
         quotes_stale_days = 999
         if quotes_latest_date:
             try:
-                quotes_dt = datetime.strptime(quotes_latest_date, "%Y-%m-%d")
-                quotes_stale_days = (expected_date - quotes_dt).days
+                # 🔥 bug-018：自然日差 → 交易日差（calc_stale_days 自动排除周末/节假日）
+                quotes_stale_days = calc_stale_days(quotes_latest_date)
                 if is_today_trading_day and current_hour < 16:
-                    yesterday = (today - timedelta(days=1)).strftime("%Y-%m-%d")
-                    quotes_is_fresh = quotes_dt >= datetime.strptime(yesterday, "%Y-%m-%d")
+                    # 盘中：数据到上一个交易日就算新鲜（今天日K还没发布）
+                    quotes_is_fresh = quotes_latest_date >= last_trade_day_str
                 else:
+                    # 收盘后/非交易日：到最近交易日才算新鲜
                     quotes_is_fresh = quotes_stale_days <= 0
             except Exception:
                 pass
@@ -966,8 +973,11 @@ async def check_data_freshness(user: dict = Depends(get_current_user)):
                 fin_dt = datetime.strptime(fin_updated_at[:19], "%Y-%m-%d %H:%M:%S")
             else:
                 fin_dt = fin_updated_at
-            fin_stale_days = (today - fin_dt).days
-            # 财务数据每季度更新，30天内算新鲜
+            # 🔥 bug-018：自然日差 → 交易日差（周末/节假日不应当作过期天数）
+            fin_stale_days = count_trading_days_between(
+                fin_dt.strftime("%Y-%m-%d"), expected_date.strftime("%Y-%m-%d")
+            )
+            # 财务数据每季度更新，30个交易日内算新鲜
             fin_is_fresh = fin_stale_days <= 30
             fin_updated_at_str = fin_dt.strftime("%Y-%m-%d %H:%M")
         else:
@@ -989,8 +999,11 @@ async def check_data_freshness(user: dict = Depends(get_current_user)):
                 news_dt = datetime.strptime(str(news_updated_at)[:19], "%Y-%m-%d %H:%M:%S")
             else:
                 news_dt = news_updated_at
-            news_stale_days = (today - news_dt).days
-            # 新闻数据每天更新，1天内算新鲜
+            # 🔥 bug-018：自然日差 → 交易日差（周末/节假日不应当作过期天数）
+            news_stale_days = count_trading_days_between(
+                news_dt.strftime("%Y-%m-%d"), expected_date.strftime("%Y-%m-%d")
+            )
+            # 新闻数据每天更新，1个交易日内算新鲜
             news_is_fresh = news_stale_days <= 1
             news_updated_at_str = news_dt.strftime("%Y-%m-%d %H:%M")
         else:

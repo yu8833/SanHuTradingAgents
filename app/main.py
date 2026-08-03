@@ -711,6 +711,82 @@ async def lifespan(app: FastAPI):
 
         scheduler.start()
 
+        # 🔥 bug-018：APScheduler 内存 job store 不会补跑启动前错过的 cron job。
+        # 场景：后端于工作日 20:00 才启动（容器重建、服务重启等），已错过当日历史同步 cron（18:30/19:30/20:30/21:30），
+        # 导致当日日K无法同步，Dashboard 数据新鲜度显示"历史K线过期 1 天"直到次日 cron 才会修复。
+        # 修复：启动时若当天为工作日且当前时间已过 cron 时间，则立即跑一次增量同步（延迟 30s，等初始化完成后）。
+        try:
+            from datetime import datetime, timedelta
+
+            _now = datetime.now()
+            _tz = settings.TIMEZONE
+            # 需要补跑的 (job_id, cron_expr, run_func, kwargs)
+            _catchup_candidates = []
+            if settings.TUSHARE_UNIFIED_ENABLED and settings.TUSHARE_HISTORICAL_SYNC_ENABLED:
+                _catchup_candidates.append(
+                    ("tushare_historical_sync_catchup", settings.TUSHARE_HISTORICAL_SYNC_CRON,
+                     run_tushare_historical_sync, {"incremental": True})
+                )
+            if settings.AKSHARE_UNIFIED_ENABLED and settings.AKSHARE_HISTORICAL_SYNC_ENABLED:
+                _catchup_candidates.append(
+                    ("akshare_historical_sync_catchup", settings.AKSHARE_HISTORICAL_SYNC_CRON,
+                     run_akshare_historical_sync, {"incremental": True})
+                )
+            if settings.BAOSTOCK_UNIFIED_ENABLED and settings.BAOSTOCK_DAILY_QUOTES_SYNC_ENABLED:
+                _catchup_candidates.append(
+                    ("baostock_daily_quotes_sync_catchup", settings.BAOSTOCK_DAILY_QUOTES_SYNC_CRON,
+                     run_baostock_daily_quotes_sync, {})
+                )
+            if settings.BAOSTOCK_UNIFIED_ENABLED and settings.BAOSTOCK_HISTORICAL_SYNC_ENABLED:
+                _catchup_candidates.append(
+                    ("baostock_historical_sync_catchup", settings.BAOSTOCK_HISTORICAL_SYNC_CRON,
+                     run_baostock_historical_sync, {"incremental": True})
+                )
+
+            _catchup_jobs_added = 0
+            for _jid, _cron, _func, _kwargs in _catchup_candidates:
+                try:
+                    # 用 CronTrigger 反推"上一次应触发时间"：
+                    # 1. next_fire 从 now 往后算下一次触发点
+                    # 2. prev_fire = next_fire 往前回退一个 cron 周期
+                    _trigger = CronTrigger.from_crontab(_cron, timezone=_tz)
+                    _next_fire = _trigger.get_next_fire_time(None, _now)
+                    if _next_fire is None:
+                        continue
+                    # 简化：如果 next_fire 的小时:分钟 == cron 的小时:分钟，且 next_fire 日期晚于今天，
+                    # 说明今天的 cron 已经过去。直接解析 cron 表达式取 hour/min 比较。
+                    # cron 格式：分 时 日 月 周
+                    _parts = _cron.split()
+                    if len(_parts) >= 2 and _parts[0].isdigit() and _parts[1].isdigit():
+                        _cron_hour = int(_parts[1])
+                        _cron_min = int(_parts[0])
+                        # 检查今天是否是 c ron 的 weekday 匹配日（cron 周字段 1-5 = 周一到周五）
+                        from app.utils.trading_time import is_trading_day
+                        _today_is_match = is_trading_day(_now)
+                        if _today_is_match and (_now.hour > _cron_hour or (_now.hour == _cron_hour and _now.minute >= _cron_min)):
+                            # 今天是 cron 生效日，且当前时间已过 cron 时间 → 补跑
+                            _delay_sec = 30 + _catchup_jobs_added * 60
+                            scheduler.add_job(
+                                _func,
+                                trigger="date",
+                                run_date=_now + timedelta(seconds=_delay_sec),
+                                id=_jid,
+                                name=f"启动补跑-{_cron}",
+                                kwargs=_kwargs,
+                                replace_existing=True,
+                                misfire_grace_time=600,
+                            )
+                            logger.info(
+                                f"⏰ 启动时发现错过历史同步 cron [{_cron}]，"
+                                f"将在 {_delay_sec}s 后补跑一次（job_id={_jid}，"
+                                f"cron 时间={_cron_hour:02d}:{_cron_min:02d}，当前={_now.strftime('%H:%M')}）"
+                            )
+                            _catchup_jobs_added += 1
+                except Exception as _e:
+                    logger.warning(f"⚠️ 判断历史同步是否需要补跑失败 [{_cron}]: {_e}")
+        except Exception as _e:
+            logger.warning(f"⚠️ 启动时历史同步补跑逻辑异常，跳过（不影响主流程）: {_e}")
+
         # 确保 SchedulerService 在启动时初始化（注册事件监听器和僵尸检测）
         # 否则只有在首次调用 /api/scheduler/* 时才会创建，可能导致事件监听器永不注册
         try:
