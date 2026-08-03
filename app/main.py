@@ -393,197 +393,178 @@ async def lifespan(app: FastAPI):
         # Tushare统一数据同步任务配置
         logger.info("🔄 配置Tushare统一数据同步任务...")
 
-        # 基础信息同步任务
-        scheduler.add_job(
-            run_tushare_basic_info_sync,
-            CronTrigger.from_crontab(settings.TUSHARE_BASIC_INFO_SYNC_CRON, timezone=settings.TIMEZONE),
-            id="tushare_basic_info_sync",
-            name="股票基础信息同步（Tushare）",
-            kwargs={"force_update": False}
-        )
-        if not (settings.TUSHARE_UNIFIED_ENABLED and settings.TUSHARE_BASIC_INFO_SYNC_ENABLED):
-            scheduler.pause_job("tushare_basic_info_sync")
-            logger.info(f"⏸️ Tushare基础信息同步已添加但暂停: {settings.TUSHARE_BASIC_INFO_SYNC_CRON}")
-        else:
-            logger.info(f"📅 Tushare基础信息同步已配置: {settings.TUSHARE_BASIC_INFO_SYNC_CRON}")
+        if settings.TUSHARE_UNIFIED_ENABLED:
+            # --- 方案 B-1：删除 tushare_basic_info_sync（每天 02:00）
+            # 原因：与 basics_sync_service（每天 06:30 多源版）做同一件事：
+            # 从 Tushare 拉 stock_list + daily_basic 写 stock_basic_info 表。
+            # 保留 basics_sync_service（多源 fallback 更健壮），删掉这个重复版本。
 
-        # 实时行情同步任务
-        scheduler.add_job(
-            run_tushare_quotes_sync,
-            CronTrigger.from_crontab(settings.TUSHARE_QUOTES_SYNC_CRON, timezone=settings.TIMEZONE),
-            id="tushare_quotes_sync",
-            name="实时行情同步（Tushare）"
-        )
-        if not (settings.TUSHARE_UNIFIED_ENABLED and settings.TUSHARE_QUOTES_SYNC_ENABLED):
-            scheduler.pause_job("tushare_quotes_sync")
-            logger.info(f"⏸️ Tushare行情同步已添加但暂停: {settings.TUSHARE_QUOTES_SYNC_CRON}")
-        else:
-            logger.info(f"📈 Tushare行情同步已配置: {settings.TUSHARE_QUOTES_SYNC_CRON}")
+            # --- 方案 B-2：删除 tushare_quotes_sync（盘中每分钟）
+            # 原因：与 quotes_ingestion_service（每 1 分钟 interval 版）功能重复，
+            # 且历史运行记录显示一直是 paused（tushare_quotes_sync_enabled=false），
+            # 实际行情入库走的是 quotes_ingestion_service。
 
-        # 历史数据同步任务
-        scheduler.add_job(
-            run_tushare_historical_sync,
-            CronTrigger.from_crontab(settings.TUSHARE_HISTORICAL_SYNC_CRON, timezone=settings.TIMEZONE),
-            id="tushare_historical_sync",
-            name="历史数据同步（Tushare）",
-            kwargs={"incremental": True}
-        )
-        if not (settings.TUSHARE_UNIFIED_ENABLED and settings.TUSHARE_HISTORICAL_SYNC_ENABLED):
-            scheduler.pause_job("tushare_historical_sync")
-            logger.info(f"⏸️ Tushare历史数据同步已添加但暂停: {settings.TUSHARE_HISTORICAL_SYNC_CRON}")
-        else:
-            logger.info(f"📊 Tushare历史数据同步已配置: {settings.TUSHARE_HISTORICAL_SYNC_CRON}")
+            # 历史数据同步任务（核心保留：日K同步的主来源）
+            if settings.TUSHARE_HISTORICAL_SYNC_ENABLED:
+                scheduler.add_job(
+                    run_tushare_historical_sync,
+                    CronTrigger.from_crontab(settings.TUSHARE_HISTORICAL_SYNC_CRON, timezone=settings.TIMEZONE),
+                    id="tushare_historical_sync",
+                    name="历史数据同步（Tushare）",
+                    kwargs={"incremental": True}
+                )
+                logger.info(f"📊 Tushare历史数据同步已配置: {settings.TUSHARE_HISTORICAL_SYNC_CRON}")
+            else:
+                logger.info(f"⏭️ Tushare历史数据同步跳过（未启用）: {settings.TUSHARE_HISTORICAL_SYNC_CRON}")
 
-        # 财务数据同步任务
-        scheduler.add_job(
-            run_tushare_financial_sync,
-            CronTrigger.from_crontab(settings.TUSHARE_FINANCIAL_SYNC_CRON, timezone=settings.TIMEZONE),
-            id="tushare_financial_sync",
-            name="财务数据同步（Tushare）"
-        )
-        if not (settings.TUSHARE_UNIFIED_ENABLED and settings.TUSHARE_FINANCIAL_SYNC_ENABLED):
-            scheduler.pause_job("tushare_financial_sync")
-            logger.info(f"⏸️ Tushare财务数据同步已添加但暂停: {settings.TUSHARE_FINANCIAL_SYNC_CRON}")
-        else:
-            logger.info(f"💰 Tushare财务数据同步已配置: {settings.TUSHARE_FINANCIAL_SYNC_CRON}")
+            # 财务数据同步任务
+            if settings.TUSHARE_FINANCIAL_SYNC_ENABLED:
+                scheduler.add_job(
+                    run_tushare_financial_sync,
+                    CronTrigger.from_crontab(settings.TUSHARE_FINANCIAL_SYNC_CRON, timezone=settings.TIMEZONE),
+                    id="tushare_financial_sync",
+                    name="财务数据同步（Tushare）"
+                )
+                logger.info(f"💰 Tushare财务数据同步已配置: {settings.TUSHARE_FINANCIAL_SYNC_CRON}")
+            else:
+                logger.info(f"⏭️ Tushare财务数据同步跳过（未启用）: {settings.TUSHARE_FINANCIAL_SYNC_CRON}")
 
-        # 状态检查任务
-        scheduler.add_job(
-            run_tushare_status_check,
-            CronTrigger.from_crontab(settings.TUSHARE_STATUS_CHECK_CRON, timezone=settings.TIMEZONE),
-            id="tushare_status_check",
-            name="数据源状态检查（Tushare）"
-        )
-        if not (settings.TUSHARE_UNIFIED_ENABLED and settings.TUSHARE_STATUS_CHECK_ENABLED):
-            scheduler.pause_job("tushare_status_check")
-            logger.info(f"⏸️ Tushare状态检查已添加但暂停: {settings.TUSHARE_STATUS_CHECK_CRON}")
+            # 状态检查任务（保留，频率在 config.py 已为每小时，后续可降频）
+            if settings.TUSHARE_STATUS_CHECK_ENABLED:
+                scheduler.add_job(
+                    run_tushare_status_check,
+                    CronTrigger.from_crontab(settings.TUSHARE_STATUS_CHECK_CRON, timezone=settings.TIMEZONE),
+                    id="tushare_status_check",
+                    name="数据源状态检查（Tushare）"
+                )
+                logger.info(f"🔍 Tushare状态检查已配置: {settings.TUSHARE_STATUS_CHECK_CRON}")
+            else:
+                logger.info(f"⏭️ Tushare状态检查跳过（未启用）: {settings.TUSHARE_STATUS_CHECK_CRON}")
         else:
-            logger.info(f"🔍 Tushare状态检查已配置: {settings.TUSHARE_STATUS_CHECK_CRON}")
+            logger.info("⏭️ Tushare统一数据源未启用，跳过Tushare定时任务注册（仅保留基础同步服务 basics_sync_service）")
 
         # AKShare统一数据同步任务配置
         logger.info("🔄 配置AKShare统一数据同步任务...")
 
-        # 基础信息同步任务
-        scheduler.add_job(
-            run_akshare_basic_info_sync,
-            CronTrigger.from_crontab(settings.AKSHARE_BASIC_INFO_SYNC_CRON, timezone=settings.TIMEZONE),
-            id="akshare_basic_info_sync",
-            name="股票基础信息同步（AKShare）",
-            kwargs={"force_update": False}
-        )
-        if not (settings.AKSHARE_UNIFIED_ENABLED and settings.AKSHARE_BASIC_INFO_SYNC_ENABLED):
-            scheduler.pause_job("akshare_basic_info_sync")
-            logger.info(f"⏸️ AKShare基础信息同步已添加但暂停: {settings.AKSHARE_BASIC_INFO_SYNC_CRON}")
-        else:
-            logger.info(f"📅 AKShare基础信息同步已配置: {settings.AKSHARE_BASIC_INFO_SYNC_CRON}")
+        # 🐛 精简方案-A：未启用就不注册（原 add_job + pause_job 导致 /tasks 出现 5 个永远 paused 的任务）
+        if settings.AKSHARE_UNIFIED_ENABLED:
+            # 基础信息同步任务
+            if settings.AKSHARE_BASIC_INFO_SYNC_ENABLED:
+                scheduler.add_job(
+                    run_akshare_basic_info_sync,
+                    CronTrigger.from_crontab(settings.AKSHARE_BASIC_INFO_SYNC_CRON, timezone=settings.TIMEZONE),
+                    id="akshare_basic_info_sync",
+                    name="股票基础信息同步（AKShare）",
+                    kwargs={"force_update": False}
+                )
+                logger.info(f"📅 AKShare基础信息同步已配置: {settings.AKSHARE_BASIC_INFO_SYNC_CRON}")
+            else:
+                logger.info(f"⏭️ AKShare基础信息同步跳过（未启用）: {settings.AKSHARE_BASIC_INFO_SYNC_CRON}")
 
-        # 实时行情同步任务
-        scheduler.add_job(
-            run_akshare_quotes_sync,
-            CronTrigger.from_crontab(settings.AKSHARE_QUOTES_SYNC_CRON, timezone=settings.TIMEZONE),
-            id="akshare_quotes_sync",
-            name="实时行情同步（AKShare）"
-        )
-        if not (settings.AKSHARE_UNIFIED_ENABLED and settings.AKSHARE_QUOTES_SYNC_ENABLED):
-            scheduler.pause_job("akshare_quotes_sync")
-            logger.info(f"⏸️ AKShare行情同步已添加但暂停: {settings.AKSHARE_QUOTES_SYNC_CRON}")
-        else:
-            logger.info(f"📈 AKShare行情同步已配置: {settings.AKSHARE_QUOTES_SYNC_CRON}")
+            # 实时行情同步任务
+            if settings.AKSHARE_QUOTES_SYNC_ENABLED:
+                scheduler.add_job(
+                    run_akshare_quotes_sync,
+                    CronTrigger.from_crontab(settings.AKSHARE_QUOTES_SYNC_CRON, timezone=settings.TIMEZONE),
+                    id="akshare_quotes_sync",
+                    name="实时行情同步（AKShare）"
+                )
+                logger.info(f"📈 AKShare行情同步已配置: {settings.AKSHARE_QUOTES_SYNC_CRON}")
+            else:
+                logger.info(f"⏭️ AKShare行情同步跳过（未启用）: {settings.AKSHARE_QUOTES_SYNC_CRON}")
 
-        # 历史数据同步任务
-        scheduler.add_job(
-            run_akshare_historical_sync,
-            CronTrigger.from_crontab(settings.AKSHARE_HISTORICAL_SYNC_CRON, timezone=settings.TIMEZONE),
-            id="akshare_historical_sync",
-            name="历史数据同步（AKShare）",
-            kwargs={"incremental": True}
-        )
-        if not (settings.AKSHARE_UNIFIED_ENABLED and settings.AKSHARE_HISTORICAL_SYNC_ENABLED):
-            scheduler.pause_job("akshare_historical_sync")
-            logger.info(f"⏸️ AKShare历史数据同步已添加但暂停: {settings.AKSHARE_HISTORICAL_SYNC_CRON}")
-        else:
-            logger.info(f"📊 AKShare历史数据同步已配置: {settings.AKSHARE_HISTORICAL_SYNC_CRON}")
+            # 历史数据同步任务
+            if settings.AKSHARE_HISTORICAL_SYNC_ENABLED:
+                scheduler.add_job(
+                    run_akshare_historical_sync,
+                    CronTrigger.from_crontab(settings.AKSHARE_HISTORICAL_SYNC_CRON, timezone=settings.TIMEZONE),
+                    id="akshare_historical_sync",
+                    name="历史数据同步（AKShare）",
+                    kwargs={"incremental": True}
+                )
+                logger.info(f"📊 AKShare历史数据同步已配置: {settings.AKSHARE_HISTORICAL_SYNC_CRON}")
+            else:
+                logger.info(f"⏭️ AKShare历史数据同步跳过（未启用）: {settings.AKSHARE_HISTORICAL_SYNC_CRON}")
 
-        # 财务数据同步任务
-        scheduler.add_job(
-            run_akshare_financial_sync,
-            CronTrigger.from_crontab(settings.AKSHARE_FINANCIAL_SYNC_CRON, timezone=settings.TIMEZONE),
-            id="akshare_financial_sync",
-            name="财务数据同步（AKShare）"
-        )
-        if not (settings.AKSHARE_UNIFIED_ENABLED and settings.AKSHARE_FINANCIAL_SYNC_ENABLED):
-            scheduler.pause_job("akshare_financial_sync")
-            logger.info(f"⏸️ AKShare财务数据同步已添加但暂停: {settings.AKSHARE_FINANCIAL_SYNC_CRON}")
-        else:
-            logger.info(f"💰 AKShare财务数据同步已配置: {settings.AKSHARE_FINANCIAL_SYNC_CRON}")
+            # 财务数据同步任务
+            if settings.AKSHARE_FINANCIAL_SYNC_ENABLED:
+                scheduler.add_job(
+                    run_akshare_financial_sync,
+                    CronTrigger.from_crontab(settings.AKSHARE_FINANCIAL_SYNC_CRON, timezone=settings.TIMEZONE),
+                    id="akshare_financial_sync",
+                    name="财务数据同步（AKShare）"
+                )
+                logger.info(f"💰 AKShare财务数据同步已配置: {settings.AKSHARE_FINANCIAL_SYNC_CRON}")
+            else:
+                logger.info(f"⏭️ AKShare财务数据同步跳过（未启用）: {settings.AKSHARE_FINANCIAL_SYNC_CRON}")
 
-        # 状态检查任务
-        scheduler.add_job(
-            run_akshare_status_check,
-            CronTrigger.from_crontab(settings.AKSHARE_STATUS_CHECK_CRON, timezone=settings.TIMEZONE),
-            id="akshare_status_check",
-            name="数据源状态检查（AKShare）"
-        )
-        if not (settings.AKSHARE_UNIFIED_ENABLED and settings.AKSHARE_STATUS_CHECK_ENABLED):
-            scheduler.pause_job("akshare_status_check")
-            logger.info(f"⏸️ AKShare状态检查已添加但暂停: {settings.AKSHARE_STATUS_CHECK_CRON}")
+            # 状态检查任务
+            if settings.AKSHARE_STATUS_CHECK_ENABLED:
+                scheduler.add_job(
+                    run_akshare_status_check,
+                    CronTrigger.from_crontab(settings.AKSHARE_STATUS_CHECK_CRON, timezone=settings.TIMEZONE),
+                    id="akshare_status_check",
+                    name="数据源状态检查（AKShare）"
+                )
+                logger.info(f"🔍 AKShare状态检查已配置: {settings.AKSHARE_STATUS_CHECK_CRON}")
+            else:
+                logger.info(f"⏭️ AKShare状态检查跳过（未启用）: {settings.AKSHARE_STATUS_CHECK_CRON}")
         else:
-            logger.info(f"🔍 AKShare状态检查已配置: {settings.AKSHARE_STATUS_CHECK_CRON}")
+            logger.info("⏭️ AKShare统一数据源未启用，跳过所有AKShare定时任务注册")
 
         # BaoStock统一数据同步任务配置
         logger.info("🔄 配置BaoStock统一数据同步任务...")
 
-        # 基础信息同步任务
-        scheduler.add_job(
-            run_baostock_basic_info_sync,
-            CronTrigger.from_crontab(settings.BAOSTOCK_BASIC_INFO_SYNC_CRON, timezone=settings.TIMEZONE),
-            id="baostock_basic_info_sync",
-            name="股票基础信息同步（BaoStock）"
-        )
-        if not (settings.BAOSTOCK_UNIFIED_ENABLED and settings.BAOSTOCK_BASIC_INFO_SYNC_ENABLED):
-            scheduler.pause_job("baostock_basic_info_sync")
-            logger.info(f"⏸️ BaoStock基础信息同步已添加但暂停: {settings.BAOSTOCK_BASIC_INFO_SYNC_CRON}")
-        else:
-            logger.info(f"📋 BaoStock基础信息同步已配置: {settings.BAOSTOCK_BASIC_INFO_SYNC_CRON}")
+        if settings.BAOSTOCK_UNIFIED_ENABLED:
+            # 基础信息同步任务
+            if settings.BAOSTOCK_BASIC_INFO_SYNC_ENABLED:
+                scheduler.add_job(
+                    run_baostock_basic_info_sync,
+                    CronTrigger.from_crontab(settings.BAOSTOCK_BASIC_INFO_SYNC_CRON, timezone=settings.TIMEZONE),
+                    id="baostock_basic_info_sync",
+                    name="股票基础信息同步（BaoStock）"
+                )
+                logger.info(f"📋 BaoStock基础信息同步已配置: {settings.BAOSTOCK_BASIC_INFO_SYNC_CRON}")
+            else:
+                logger.info(f"⏭️ BaoStock基础信息同步跳过（未启用）: {settings.BAOSTOCK_BASIC_INFO_SYNC_CRON}")
 
-        # 日K线同步任务（注意：BaoStock不支持实时行情）
-        scheduler.add_job(
-            run_baostock_daily_quotes_sync,
-            CronTrigger.from_crontab(settings.BAOSTOCK_DAILY_QUOTES_SYNC_CRON, timezone=settings.TIMEZONE),
-            id="baostock_daily_quotes_sync",
-            name="日K线数据同步（BaoStock）"
-        )
-        if not (settings.BAOSTOCK_UNIFIED_ENABLED and settings.BAOSTOCK_DAILY_QUOTES_SYNC_ENABLED):
-            scheduler.pause_job("baostock_daily_quotes_sync")
-            logger.info(f"⏸️ BaoStock日K线同步已添加但暂停: {settings.BAOSTOCK_DAILY_QUOTES_SYNC_CRON}")
-        else:
-            logger.info(f"📈 BaoStock日K线同步已配置: {settings.BAOSTOCK_DAILY_QUOTES_SYNC_CRON} (注意：BaoStock不支持实时行情)")
+            # 日K线同步任务（注意：BaoStock不支持实时行情）
+            if settings.BAOSTOCK_DAILY_QUOTES_SYNC_ENABLED:
+                scheduler.add_job(
+                    run_baostock_daily_quotes_sync,
+                    CronTrigger.from_crontab(settings.BAOSTOCK_DAILY_QUOTES_SYNC_CRON, timezone=settings.TIMEZONE),
+                    id="baostock_daily_quotes_sync",
+                    name="日K线数据同步（BaoStock）"
+                )
+                logger.info(f"📈 BaoStock日K线同步已配置: {settings.BAOSTOCK_DAILY_QUOTES_SYNC_CRON} (注意：BaoStock不支持实时行情)")
+            else:
+                logger.info(f"⏭️ BaoStock日K线同步跳过（未启用）: {settings.BAOSTOCK_DAILY_QUOTES_SYNC_CRON}")
 
-        # 历史数据同步任务
-        scheduler.add_job(
-            run_baostock_historical_sync,
-            CronTrigger.from_crontab(settings.BAOSTOCK_HISTORICAL_SYNC_CRON, timezone=settings.TIMEZONE),
-            id="baostock_historical_sync",
-            name="历史数据同步（BaoStock）"
-        )
-        if not (settings.BAOSTOCK_UNIFIED_ENABLED and settings.BAOSTOCK_HISTORICAL_SYNC_ENABLED):
-            scheduler.pause_job("baostock_historical_sync")
-            logger.info(f"⏸️ BaoStock历史数据同步已添加但暂停: {settings.BAOSTOCK_HISTORICAL_SYNC_CRON}")
-        else:
-            logger.info(f"📊 BaoStock历史数据同步已配置: {settings.BAOSTOCK_HISTORICAL_SYNC_CRON}")
+            # 历史数据同步任务
+            if settings.BAOSTOCK_HISTORICAL_SYNC_ENABLED:
+                scheduler.add_job(
+                    run_baostock_historical_sync,
+                    CronTrigger.from_crontab(settings.BAOSTOCK_HISTORICAL_SYNC_CRON, timezone=settings.TIMEZONE),
+                    id="baostock_historical_sync",
+                    name="历史数据同步（BaoStock）"
+                )
+                logger.info(f"📊 BaoStock历史数据同步已配置: {settings.BAOSTOCK_HISTORICAL_SYNC_CRON}")
+            else:
+                logger.info(f"⏭️ BaoStock历史数据同步跳过（未启用）: {settings.BAOSTOCK_HISTORICAL_SYNC_CRON}")
 
-        # 状态检查任务
-        scheduler.add_job(
-            run_baostock_status_check,
-            CronTrigger.from_crontab(settings.BAOSTOCK_STATUS_CHECK_CRON, timezone=settings.TIMEZONE),
-            id="baostock_status_check",
-            name="数据源状态检查（BaoStock）"
-        )
-        if not (settings.BAOSTOCK_UNIFIED_ENABLED and settings.BAOSTOCK_STATUS_CHECK_ENABLED):
-            scheduler.pause_job("baostock_status_check")
-            logger.info(f"⏸️ BaoStock状态检查已添加但暂停: {settings.BAOSTOCK_STATUS_CHECK_CRON}")
+            # 状态检查任务
+            if settings.BAOSTOCK_STATUS_CHECK_ENABLED:
+                scheduler.add_job(
+                    run_baostock_status_check,
+                    CronTrigger.from_crontab(settings.BAOSTOCK_STATUS_CHECK_CRON, timezone=settings.TIMEZONE),
+                    id="baostock_status_check",
+                    name="数据源状态检查（BaoStock）"
+                )
+                logger.info(f"🔍 BaoStock状态检查已配置: {settings.BAOSTOCK_STATUS_CHECK_CRON}")
+            else:
+                logger.info(f"⏭️ BaoStock状态检查跳过（未启用）: {settings.BAOSTOCK_STATUS_CHECK_CRON}")
         else:
-            logger.info(f"🔍 BaoStock状态检查已配置: {settings.BAOSTOCK_STATUS_CHECK_CRON}")
+            logger.info("⏭️ BaoStock统一数据源未启用，跳过所有BaoStock定时任务注册")
 
         # ==================== 数据完整性检查定时任务 ====================
         logger.info("🔄 配置数据完整性检查任务...")
