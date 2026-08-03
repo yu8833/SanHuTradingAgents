@@ -31,16 +31,18 @@ def _is_external_dependent(path: str) -> bool:
 
 
 def _all_openapi_get_paths(base_url: str):
-    """懒加载 OpenAPI schema，返回 (method, path) 列表。"""
+    """懒加载 OpenAPI schema，返回 (method, path) 列表。
+
+    注意：此函数在 parametrize 收集阶段执行（模块级），不能调用 pytest.skip。
+    服务不可用时返回空列表，parametrize 会自动跳过测试。
+    """
     import httpx
 
     try:
         r = httpx.get(base_url.rstrip("/") + "/openapi.json", timeout=20, verify=False)
     except Exception:
-        pytest.skip("无法获取 OpenAPI schema，跳过契约冒烟")
-        return []
+        return []  # 服务不可用，返回空列表（不调 pytest.skip，避免收集错误）
     if r.status_code != 200:
-        pytest.skip(f"openapi.json 返回 {r.status_code}")
         return []
     schema = r.json()
     result = []

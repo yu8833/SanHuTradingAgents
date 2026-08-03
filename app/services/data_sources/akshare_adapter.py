@@ -426,25 +426,61 @@ class AKShareAdapter(DataSourceAdapter):
             if df is None or getattr(df, "empty", True):
                 logger.warning("AKShare 单只股票查询返回空数据")
                 return None
-            
-            # 获取最后一行（最新的分时数据）
+
+            # 🔥 确定列名（兼容中英文）
+            day_col = "day" if "day" in df.columns else ("时间" if "时间" in df.columns else None)
+            close_col = "close" if "close" in df.columns else ("收盘" if "收盘" in df.columns else None)
+            open_col = "open" if "open" in df.columns else ("开盘" if "开盘" in df.columns else None)
+            high_col = "high" if "high" in df.columns else ("最高" if "最高" in df.columns else None)
+            low_col = "low" if "low" in df.columns else ("最低" if "最低" in df.columns else None)
+            volume_col = "volume" if "volume" in df.columns else ("成交量" if "成交量" in df.columns else None)
+            amount_col = "amount" if "amount" in df.columns else ("成交额" if "成交额" in df.columns else None)
+
+            if not all([close_col, open_col, high_col, low_col, volume_col, amount_col]):
+                logger.error(f"AKShare minute 数据列名异常: {df.columns.tolist()}")
+                return None
+
+            # 🔥 stock_zh_a_minute 返回多日分钟数据，需取最后一行所属交易日做当日聚合
+            # 修复 bug-016: 原代码只取 iloc[-1] 单分钟值，导致 volume/amount 量级错误
             last_row = df.iloc[-1]
-            
-            close = self._safe_float(last_row.get('close') or last_row.get('收盘'))
-            open_price = self._safe_float(last_row.get('open') or last_row.get('开盘'))
-            high = self._safe_float(last_row.get('high') or last_row.get('最高'))
-            low = self._safe_float(last_row.get('low') or last_row.get('最低'))
-            volume = self._safe_float(last_row.get('volume') or last_row.get('成交量'))
-            amount = self._safe_float(last_row.get('amount') or last_row.get('成交额'))
-            
+            trade_date_str = None
+            df_today = df  # 兜底：无法识别日期列时用全量
+            if day_col:
+                last_day_val = str(last_row[day_col])
+                date_part = last_day_val[:10]  # "2026-08-03"
+                if len(date_part) >= 8:
+                    trade_date_str = date_part.replace("-", "")  # "20260803"
+                    df_today = df[df[day_col].astype(str).str.startswith(date_part)]
+                    if df_today.empty:
+                        df_today = df  # 过滤异常时兜底
+
+            has_today = not getattr(df_today, "empty", True)
+
+            # 🔥 当日聚合：close=最后一行，open=第一行，high=max，low=min，volume/amount=求和
+            # 注意：stock_zh_a_minute 返回的列 dtype 是 object（字符串），必须先 pd.to_numeric 转换
+            # 否则 sum()/max()/min() 会做字符串拼接而非数值运算
+            if has_today:
+                close = self._safe_float(df_today.iloc[-1][close_col])
+                open_price = self._safe_float(df_today.iloc[0][open_col])
+                high = self._safe_float(pd.to_numeric(df_today[high_col], errors="coerce").max())
+                low = self._safe_float(pd.to_numeric(df_today[low_col], errors="coerce").min())
+                volume = self._safe_float(pd.to_numeric(df_today[volume_col], errors="coerce").sum())
+                amount = self._safe_float(pd.to_numeric(df_today[amount_col], errors="coerce").sum())
+            else:
+                close = self._safe_float(last_row.get(close_col))
+                open_price = None
+                high = None
+                low = None
+                volume = None
+                amount = None
+
             # 🔥 全局统一口径：amount=元，volume=股
-            # 单位转换：成交量 手 -> 股（×100）；成交额已经是元，无需转换
-            if volume is not None:
-                volume = volume * 100
-            # amount 已经是元，无需转换
-            
-            # 🔥 先返回基本数据，涨跌幅和昨收价稍后计算（由调用方处理）
-            # 这样可以保持快速查询的特性（约 1 秒）
+            # stock_zh_a_minute 的 volume 本身就是"股"（实测：当日分钟求和 ≈ 日线 volume）
+            # 与 stock_zh_a_spot_em 不同（spot 的 volume 是"手"需要 ×100）
+            # 修复 bug-016: 删除错误的 volume × 100
+
+            # 🔥 返回数据，包含 trade_date（修复缓存 trade_date 卡在上一交易日的问题）
+            # 涨跌幅和昨收价仍由调用方从缓存计算
             result = {
                 "close": close,
                 "pct_chg": None,  # 🔥 暂时设为 None，由调用方从缓存或历史数据计算
@@ -453,10 +489,14 @@ class AKShareAdapter(DataSourceAdapter):
                 "open": open_price,
                 "high": high,
                 "low": low,
-                "pre_close": None  # 🔥 暂时设为 None，由调用方从缓存获取
+                "pre_close": None,  # 🔥 暂时设为 None，由调用方从缓存获取
+                "trade_date": trade_date_str,  # 🔥 新增：当日交易日 YYYYMMDD
             }
-            
-            logger.info(f"✅ AKShare 单只股票查询成功: {code6} close={close}")
+
+            logger.info(
+                f"✅ AKShare 单只股票查询成功: {code6} close={close}, "
+                f"trade_date={trade_date_str}, volume={volume}, amount={amount}"
+            )
             return result
             
         except Exception as e:

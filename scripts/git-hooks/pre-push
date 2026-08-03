@@ -110,9 +110,12 @@ echo ""
 
 # ---- Step 4: smoke ----
 echo -e "${YELLOW}[4/4] 运行冒烟测试（容器内，对 backend:8000）...${NC}"
+# 注意：smoke 测试是对 backend:8000 的跨容器端点测试，被测代码在 backend 容器里运行，
+# test 容器内无法收集覆盖率，因此用 --no-cov 跳过覆盖率门禁
 if ! docker compose run --rm test python -m pytest \
       tests/smoke/ -m smoke \
       --ignore=tests/_archive \
+      --no-cov \
       --tb=short --strict-markers --timeout=60 -v; then
     echo ""
     echo -e "${RED}❌ 冒烟测试失败，push 已终止。"
