@@ -12,7 +12,8 @@
     </div>
 
     <!-- 智能策略模板 -->
-    <el-card class="templates-panel" shadow="never">
+    <!-- 暂时隐藏，后续可恢复：移除 v-show="false" 即可 -->
+    <el-card class="templates-panel" shadow="never" v-show="false">
       <template #header>
         <div class="card-header">
           <div style="display: flex; align-items: center; gap: 12px;">

@@ -97,7 +97,7 @@ const routes: RouteRecordRaw[] = [
     path: '/screening',
     name: 'StockScreening',
     component: () => import('@/layouts/BasicLayout.vue'),
-    redirect: '/screening/common',
+    redirect: '/screening/three-buys-three-sells',
     meta: {
       title: '选股',
       icon: 'Search',
@@ -112,7 +112,8 @@ const routes: RouteRecordRaw[] = [
         meta: {
           title: '常用策略',
           parentTitle: '选股',
-          requiresAuth: true
+          requiresAuth: true,
+          hidden: true // 暂时隐藏，后续可恢复
         }
       },
       {
@@ -122,7 +123,8 @@ const routes: RouteRecordRaw[] = [
         meta: {
           title: '涨停回调',
           parentTitle: '选股',
-          requiresAuth: true
+          requiresAuth: true,
+          hidden: true // 暂时隐藏，后续可恢复
         }
       },
       {
@@ -142,7 +144,8 @@ const routes: RouteRecordRaw[] = [
         meta: {
           title: '极端反转',
           parentTitle: '选股',
-          requiresAuth: true
+          requiresAuth: true,
+          hidden: true // 暂时隐藏，后续可恢复
         }
       },
       {
@@ -152,7 +155,8 @@ const routes: RouteRecordRaw[] = [
         meta: {
           title: '困境反转',
           parentTitle: '选股',
-          requiresAuth: true
+          requiresAuth: true,
+          hidden: true // 暂时隐藏，后续可恢复
         }
       },
       {
@@ -162,7 +166,8 @@ const routes: RouteRecordRaw[] = [
         meta: {
           title: '小盘价值',
           parentTitle: '选股',
-          requiresAuth: true
+          requiresAuth: true,
+          hidden: true // 暂时隐藏，后续可恢复
         }
       },
       {
@@ -172,7 +177,8 @@ const routes: RouteRecordRaw[] = [
         meta: {
           title: '转债博弈',
           parentTitle: '选股',
-          requiresAuth: true
+          requiresAuth: true,
+          hidden: true // 暂时隐藏，后续可恢复
         }
       },
       {
@@ -182,7 +188,8 @@ const routes: RouteRecordRaw[] = [
         meta: {
           title: '均线交叉',
           parentTitle: '选股',
-          requiresAuth: true
+          requiresAuth: true,
+          hidden: true // 暂时隐藏，后续可恢复
         }
       },
       {
@@ -192,7 +199,8 @@ const routes: RouteRecordRaw[] = [
         meta: {
           title: 'MACD背离',
           parentTitle: '选股',
-          requiresAuth: true
+          requiresAuth: true,
+          hidden: true // 暂时隐藏，后续可恢复
         }
       },
       {
@@ -202,7 +210,8 @@ const routes: RouteRecordRaw[] = [
         meta: {
           title: '量价配合',
           parentTitle: '选股',
-          requiresAuth: true
+          requiresAuth: true,
+          hidden: true // 暂时隐藏，后续可恢复
         }
       },
       {
@@ -212,7 +221,8 @@ const routes: RouteRecordRaw[] = [
         meta: {
           title: '策略对比',
           parentTitle: '选股',
-          requiresAuth: true
+          requiresAuth: true,
+          hidden: true // 暂时隐藏，后续可恢复
         }
       },
       {
@@ -222,7 +232,8 @@ const routes: RouteRecordRaw[] = [
         meta: {
           title: '散户策略中心',
           parentTitle: '选股',
-          requiresAuth: true
+          requiresAuth: true,
+          hidden: true // 暂时隐藏，后续可恢复
         }
       }
     ]

@@ -1460,6 +1460,16 @@ class ThreeBuysThreeSellsService:
                 # 过热过滤：过热状态下不新建仓
                 overheated = self._check_overheat(ind, last_idx, params)
 
+                # ===== ΔG 硬过滤（教材 4.3 节）：戴维斯双杀象限坚决回避 =====
+                # 戴维斯双杀 = G<0 且 ΔG<0（盈利下降+加速下滑），技术面再便宜也不买
+                dg_info = dg_data.get(code)
+                in_double_kill = False
+                if params.get("enable_dg_filter", True) and dg_info and dg_info.get("available"):
+                    quadrant = dg_info.get("quadrant", "")
+                    in_double_kill = (quadrant == "double_kill")
+                # 若处于戴维斯双杀象限，则直接跳过所有买入信号（B1/B2/B3/B2G 全部禁止）
+                dg_buy_blocked = in_double_kill
+
                 # 个股趋势 + 大盘仓位矩阵
                 stock_trend = str(ind["stock_trend"][last_idx])
 
@@ -1470,22 +1480,24 @@ class ThreeBuysThreeSellsService:
                 local_params = dict(params)
                 local_params["_market_trend"] = market_trend
 
-                b1 = self._check_b1(ind, last_idx, local_params)
-                if b1:
-                    b1["position_pct"] = round(b1["position_pct"] * b1_multiplier, 4)
-                    signals.append(b1)
-                # B2/B3/B2G 在启用GMMA过滤时需要强多状态，且不能过热
-                if (not enable_gmma or gmma_strong_bull) and not overheated:
-                    b2 = self._check_b2(ind, last_idx, local_params)
-                    if b2:
-                        signals.append(b2)
-                    b3 = self._check_b3(ind, last_idx, local_params)
-                    if b3:
-                        signals.append(b3)
-                    # GMMA版B2（加仓信号）
-                    b2g = self._check_gmma_b2(ind, last_idx, local_params)
-                    if b2g:
-                        signals.append(b2g)
+                # 非戴维斯双杀时才允许买入信号
+                if not dg_buy_blocked:
+                    b1 = self._check_b1(ind, last_idx, local_params)
+                    if b1:
+                        b1["position_pct"] = round(b1["position_pct"] * b1_multiplier, 4)
+                        signals.append(b1)
+                    # B2/B3/B2G 在启用GMMA过滤时需要强多状态，且不能过热
+                    if (not enable_gmma or gmma_strong_bull) and not overheated:
+                        b2 = self._check_b2(ind, last_idx, local_params)
+                        if b2:
+                            signals.append(b2)
+                        b3 = self._check_b3(ind, last_idx, local_params)
+                        if b3:
+                            signals.append(b3)
+                        # GMMA版B2（加仓信号）
+                        b2g = self._check_gmma_b2(ind, last_idx, local_params)
+                        if b2g:
+                            signals.append(b2g)
 
                 s1 = self._check_s1(ind, last_idx, params)
                 if s1:
@@ -1507,8 +1519,6 @@ class ThreeBuysThreeSellsService:
                 # 至少有一个买卖信号才返回
                 if not signals and not bottom and not macd_div and not vp_div:
                     return None
-
-                dg_info = dg_data.get(code)
 
                 # 计算主要买入信号评分
                 primary_signal = None
@@ -1697,8 +1707,7 @@ class ThreeBuysThreeSellsService:
             "overheat_separation_pct": 15.0,
             "overheat_bias_pct": 40.0,
             "slippage_pct": 0.003,
-            "enable_b2b3_stop_loss": True,
-            "b2b3_stop_loss_pct": -10.0,
+            "enable_b2b3_stop_loss": True,  # 启用B2/B3均线止损(教材5.2节定量止损规则)
             "trailing_stop_min_profit": 8.0,
             "trailing_stop_atr_mult": 2.5,
             "max_holdings": 30
@@ -1845,6 +1854,12 @@ class ThreeBuysThreeSellsService:
             info = stock_info_map.get(code, {})
             dg_info = dg_data.get(code)
 
+            # ===== ΔG 预处理：提前判断该股是否长期处于戴维斯双杀（避免每日重复计算） =====
+            double_kill_static = False
+            if params.get("enable_dg_filter", True) and dg_info and dg_info.get("available"):
+                quadrant = dg_info.get("quadrant", "")
+                double_kill_static = (quadrant == "double_kill")
+
             for td in backtest_dates:
                 idx = date_to_idx.get(td, -1)
                 if idx < 60:
@@ -1865,6 +1880,12 @@ class ThreeBuysThreeSellsService:
 
                 # 过热过滤
                 overheated = self._check_overheat(ind, idx, params)
+
+                # ===== ΔG 硬过滤（教材 4.3 节）：戴维斯双杀坚决不买 =====
+                # 如果该股处于戴维斯双杀象限（G<0且ΔG<0），跳过所有买入信号
+                dg_buy_blocked = double_kill_static
+                if dg_buy_blocked:
+                    continue  # 不产生任何买入信号，直接跳到下一个交易日
 
                 # 个股趋势 + 大盘仓位矩阵（使用预计算数组）
                 stock_trend = str(ind["stock_trend"][idx])
@@ -1988,14 +2009,48 @@ class ThreeBuysThreeSellsService:
                         codes_to_sell.append(code)
                         continue
 
-                # 优先级2.6: B2/B3初始止损（亏损超过阈值强制止损）
+                # 优先级2.6: B2/B3/B2G初始止损（严格遵循教材要求）
+                # 教材 5.2 节 定量止损规则:
+                #   - B2: 3个交易日内重新跌破中期均线组(MA55/MA60)则止损
+                #   - B3: 跌破中期均线组且连续3日不收回则止损
+                #   - B2G: 采用 B2 相同规则（因为是加仓型信号）
                 if params.get("enable_b2b3_stop_loss", True) and pos.get("signal_type") in ("B2", "B3", "B2G"):
-                    cost_basis = pos["buy_price"]
-                    if cost_basis > 0 and (close - cost_basis) / cost_basis * 100 <= params.get("b2b3_stop_loss_pct", -10.0):
+                    sig_type = pos["signal_type"]
+                    buy_idx = pos["buy_idx"]
+                    days_since_buy = idx - buy_idx  # 自买入以来的K线数(交易日)
+
+                    ma55_cur = ind["ma55"][idx]
+                    ma60_cur = ind["ma60"][idx]
+
+                    stop_reason = None
+
+                    if sig_type in ("B2", "B2G"):
+                        # ===== B2/B2G: 买入后3个交易日内重新跌破MA55或MA60 => 止损 =====
+                        # 注意: days_since_buy=1是买入当日(持仓第一日), 最多检查到第3个交易日
+                        if 1 <= days_since_buy <= 3:
+                            # 重新跌破: 当日收盘价 < MA55 或 < MA60 (任一条中期均线即算)
+                            if close < ma55_cur or close < ma60_cur:
+                                stop_reason = "B2均线止损"
+                    else:  # B3
+                        # ===== B3: 跌破MA55/MA60且连续3日不收回 => 止损 =====
+                        # 需要回溯3天是否全部在中期均线下方
+                        if idx >= 2:  # 至少有3根K线
+                            below_3d = True
+                            for j in range(idx - 2, idx + 1):
+                                c_j = ind["closes"][j]
+                                m55_j = ind["ma55"][j]
+                                m60_j = ind["ma60"][j]
+                                if c_j >= m55_j or c_j >= m60_j:  # 任何一天站回任意均线都不算连续跌破
+                                    below_3d = False
+                                    break
+                            if below_3d:
+                                stop_reason = "B3均线止损"
+
+                    if stop_reason:
                         proceeds = pos["remaining_shares"] * close * 0.999
                         capital += proceeds
                         trade_record = self._build_and_validate_sell_trade(
-                            pos, ind, td, close, "初始止损"
+                            pos, ind, td, close, stop_reason
                         )
                         if trade_record is not None:
                             all_trades.append(trade_record)
