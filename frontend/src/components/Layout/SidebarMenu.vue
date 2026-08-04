@@ -38,7 +38,7 @@
         <span>选股</span>
       </template>
       <!-- 以下菜单项暂时隐藏，后续可恢复：移除 v-show="false" 即可 -->
-      <el-menu-item index="/screening/common" v-show="false">常用策略</el-menu-item>
+      <el-menu-item index="/screening/common">常用策略</el-menu-item>
       <el-menu-item index="/screening/limit-up-pullback" v-show="false">涨停回调</el-menu-item>
       <el-menu-item index="/screening/three-buys-three-sells">三买三卖</el-menu-item>
       <el-menu-item index="/screening/extreme-reversal" v-show="false">极端反转</el-menu-item>

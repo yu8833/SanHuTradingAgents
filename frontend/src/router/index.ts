@@ -112,8 +112,7 @@ const routes: RouteRecordRaw[] = [
         meta: {
           title: '常用策略',
           parentTitle: '选股',
-          requiresAuth: true,
-          hidden: true // 暂时隐藏，后续可恢复
+          requiresAuth: true
         }
       },
       {
