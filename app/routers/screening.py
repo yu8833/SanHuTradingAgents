@@ -592,6 +592,29 @@ async def backtest_three_buys_three_sells(
         raise HTTPException(status_code=500, detail=f"三买三卖回测失败: {str(e)}")
 
 
+@router.post("/three-buys-three-sells/refresh-dg")
+async def refresh_dg_prosperity(
+    codes: list[str] | None = None,
+    user: dict = Depends(get_current_user)
+):
+    """手动触发 ΔG 景气度数据季度刷新（从 Tushare fina_indicator 拉取）
+
+    用于首次部署或数据缺失时手动补数据。正常情况下应由定时任务季度执行。
+    可传入 codes 列表刷新指定股票，不传则刷新全 A 股。
+    """
+    try:
+        from app.services.dg_prosperity_service import get_dg_prosperity_service
+
+        service = get_dg_prosperity_service()
+        logger.info(f"[refresh_dg] 开始刷新 ΔG 景气度数据, codes={'全部' if codes is None else f'{len(codes)}只'}")
+        result = await service.refresh_quarterly(codes)
+        logger.info(f"[refresh_dg] 刷新完成: {result}")
+        return {"success": True, "data": result}
+    except Exception as e:
+        logger.error(f"[refresh_dg] 刷新失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"ΔG 数据刷新失败: {str(e)}")
+
+
 # ============================================================
 # 散户策略：极端反转 / 困境反转 / 小盘价值 / 转债博弈
 # ============================================================

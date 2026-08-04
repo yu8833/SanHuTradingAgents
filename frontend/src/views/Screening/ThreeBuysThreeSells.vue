@@ -433,9 +433,19 @@ const onBuySuccess = () => {
 }
 
 function formatMoney(val: number): string {
+  // 通用金额格式化（单位：元）
+  if (val == null || isNaN(val)) return '-'
   if (val >= 100000000) return (val / 100000000).toFixed(2) + '亿'
   if (val >= 10000) return (val / 10000).toFixed(2) + '万'
   return val.toFixed(2)
+}
+
+function formatMarketCap(val: number): string {
+  // 市值格式化（后端 market_cap 单位为「亿元」，如贵州茅台约 16000 亿元）
+  if (val == null || isNaN(val)) return '-'
+  if (val >= 10000) return (val / 10000).toFixed(2) + '万亿'
+  if (val >= 1) return val.toFixed(2) + '亿'
+  return val.toFixed(4) + '亿'
 }
 
 const windowHeight = ref(window.innerHeight)
@@ -749,7 +759,7 @@ onUnmounted(() => {
             </el-table-column>
             <el-table-column prop="industry" label="行业" width="100" />
             <el-table-column label="市值" width="110" sortable :sort-method="(a: any, b: any) => a.market_cap - b.market_cap">
-              <template #default="{ row }">{{ formatMoney(row.market_cap) }}</template>
+              <template #default="{ row }">{{ formatMarketCap(row.market_cap) }}</template>
             </el-table-column>
             <el-table-column prop="close" label="现价" width="90" sortable>
               <template #default="{ row }">

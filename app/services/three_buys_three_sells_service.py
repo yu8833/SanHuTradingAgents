@@ -113,39 +113,84 @@ class ThreeBuysThreeSellsService:
         return self._dg_service
 
     async def _get_all_stock_codes(self) -> list[dict]:
-        """获取所有 A 股股票代码列表"""
+        """获取所有 A 股股票代码列表
+
+        数据库 stock_basic_info 中同一 code 可能有多条记录（多数据源），
+        部分记录 industry/total_mv 为空。本方法按 code 聚合去重，优先选择
+        industry 非空且 total_mv 非空的记录，避免行业/市值缺失。
+
+        注意：total_mv 在数据库中的单位是「亿元」，直接使用，不再做单位转换。
+        """
         db = await self._get_db()
         collection = db["stock_basic_info"]
-        cursor = collection.find(
+
+        # 使用聚合管道按 code 分组，挑选每个 code 最优的一条记录
+        pipeline = [
             {
-                "$or": [
-                    {"category": "stock_cn"},
-                    {"sse": {"$in": ["上海证券交易所", "深圳证券交易所", "上交所", "深交所"]}},
-                    {"market": {"$in": ["主板", "创业板", "科创板", "北交所"]}}
-                ]
+                "$match": {
+                    "$or": [
+                        {"category": "stock_cn"},
+                        {"sse": {"$in": ["上海证券交易所", "深圳证券交易所", "上交所", "深交所"]}},
+                        {"market": {"$in": ["主板", "创业板", "科创板", "北交所"]}}
+                    ]
+                }
             },
-            projection={"_id": 0, "code": 1, "symbol": 1, "name": 1, "industry": 1, "total_mv": 1}
-        )
-        stocks = await cursor.to_list(length=6000)
+            {
+                "$group": {
+                    "_id": "$code",
+                    "name": {"$first": "$name"},
+                    # 优先取 industry 非空的记录
+                    "industry": {"$first": {
+                        "$ifNull": [
+                            {"$arrayElemAt": [
+                                {"$filter": {
+                                    "input": {"$ifNull": [{"$objectToArray": {"industry": "$industry"}}, []]},
+                                    "as": "item",
+                                    "cond": {"$ne": ["$$item.v", ""]}
+                                }},
+                                0
+                            ]},
+                            ""
+                        ]
+                    }},
+                    # 优先取 total_mv 非空的记录
+                    "total_mv": {"$max": {"$ifNull": ["$total_mv", 0]}},
+                    # 记录所有 industry 用于后续筛选
+                    "all_industries": {"$push": "$industry"}
+                }
+            }
+        ]
+
+        cursor = collection.aggregate(pipeline)
+        docs = await cursor.to_list(length=6000)
+
         result = []
-        for s in stocks:
-            code = s.get("code") or s.get("symbol")
-            if code and len(str(code)) == 6 and str(code).isdigit():
-                code = str(code).zfill(6)
-                market_cap = s.get("total_mv") or 0
-                if isinstance(market_cap, (int, float)):
-                    market_cap_yi = market_cap / 10000
-                else:
-                    try:
-                        market_cap_yi = float(market_cap) / 10000 if market_cap else 0
-                    except (ValueError, TypeError):
-                        market_cap_yi = 0
-                result.append({
-                    "code": code,
-                    "name": s.get("name", ""),
-                    "industry": s.get("industry", ""),
-                    "market_cap": market_cap_yi
-                })
+        for doc in docs:
+            code = doc.get("_id")
+            if not code or len(str(code)) != 6 or not str(code).isdigit():
+                continue
+            code = str(code).zfill(6)
+
+            # 从 all_industries 中挑选第一个非空行业
+            industry = ""
+            for ind in doc.get("all_industries", []):
+                if ind and str(ind).strip():
+                    industry = str(ind).strip()
+                    break
+
+            # total_mv 单位为「亿元」，直接使用
+            market_cap = doc.get("total_mv") or 0
+            try:
+                market_cap = float(market_cap)
+            except (ValueError, TypeError):
+                market_cap = 0.0
+
+            result.append({
+                "code": code,
+                "name": doc.get("name", ""),
+                "industry": industry,
+                "market_cap": market_cap
+            })
         return result
 
     async def _batch_get_quotes(

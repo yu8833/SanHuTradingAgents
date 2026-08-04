@@ -154,12 +154,18 @@ class DgProsperityService:
     async def refresh_quarterly(self, codes: list[str] | None = None) -> dict:
         """季度刷新 ΔG 数据（从 Tushare fina_indicator 拉取）
 
+        Tushare 标准权限下 fina_indicator 接口必须传 ts_code，因此按股票代码
+        并发查询（限制并发数避免触发频率限制），每只股票拉取最近 8 个季度。
+
         Args:
             codes: 股票代码列表，None 表示全 A 股
 
         Returns:
-            {updated_count, failed_count, total_count}
+            {updated_count, failed_count, total_count, quarters}
         """
+        import asyncio
+        from datetime import timedelta
+
         pro = self._get_tushare_pro()
         if pro is None:
             return {"updated_count": 0, "failed_count": 0, "total_count": 0, "error": "Tushare 不可用"}
@@ -185,77 +191,96 @@ class DgProsperityService:
         if not codes:
             return {"updated_count": 0, "failed_count": 0, "total_count": 0, "error": "无股票代码"}
 
-        # 最近 8 个季度（2 年）
+        # 计算最近 8 个季度的 period 列表（如 2026Q2, 2026Q1, 2025Q4, ...）
         today = datetime.now()
         quarters = []
+        q_date = today
         for _i in range(8):
-            q_date = today
+            # 回退到最近的季末月
             while q_date.month not in (3, 6, 9, 12):
-                q_date = q_date.replace(day=1)
-                from datetime import timedelta
-                q_date = q_date - timedelta(days=1)
-            if q_date.month == 12:
-                period = f"{q_date.year}Q4"
-            elif q_date.month == 9:
-                period = f"{q_date.year}Q3"
-            elif q_date.month == 6:
-                period = f"{q_date.year}Q2"
-            else:
-                period = f"{q_date.year}Q1"
+                q_date = q_date.replace(day=1) - timedelta(days=1)
+            period = f"{q_date.year}Q{(q_date.month // 3)}"
             if period not in quarters:
                 quarters.append(period)
-            q_date = q_date.replace(day=1)
-            from datetime import timedelta
-            q_date = q_date - timedelta(days=1)
+            # 继续回退到上一个季度
+            q_date = q_date.replace(day=1) - timedelta(days=1)
+
+        # Tushare period 格式：20240930 等
+        end_dates = {"Q1": "0331", "Q2": "0630", "Q3": "0930", "Q4": "1231"}
+        tushare_periods = []
+        for period in quarters:
+            q_label = period[-2:]
+            y = period[:4]
+            tushare_periods.append(f"{y}{end_dates.get(q_label, '1231')}")
 
         updated = 0
         failed = 0
 
-        # 按季度批量拉取（Tushare fina_indicator 按 code 或 period 批量）
-        try:
-            for period in quarters:
-                period.replace("Q", "")
-                # 构造 Tushare 的 period 格式：20240930 等
-                end_dates = {
-                    "Q1": "0331",
-                    "Q2": "0630",
-                    "Q3": "0930",
-                    "Q4": "1231"
-                }
-                q_label = period[-2:]
-                y = period[:4]
-                end_date = f"{y}{end_dates.get(q_label, '1231')}"
+        # 代码 → ts_code 映射（需要交易所后缀）
+        # 沪市: 6开头 → .SH, 深市: 0/3开头 → .SZ, 北交所: 8/4开头 → .BJ
+        def code_to_ts_code(code: str) -> str:
+            c = str(code).zfill(6)
+            if c.startswith(('60', '68', '90', '11', '13')):
+                return f"{c}.SH"
+            elif c.startswith(('8', '4', '92')):
+                return f"{c}.BJ"
+            else:
+                return f"{c}.SZ"
 
+        # 并发拉取（限制并发数，避免 Tushare 频率限制）
+        semaphore = asyncio.Semaphore(10)
+
+        async def fetch_one(code: str):
+            nonlocal updated, failed
+            async with semaphore:
+                ts_code = code_to_ts_code(code)
                 try:
-                    df = pro.fina_indicator(period=end_date, fields='ts_code,end_date,q_profit_yoy')
+                    # 拉取该股票最近8个季度的财务指标
+                    df = pro.fina_indicator(
+                        ts_code=ts_code,
+                        fields='ts_code,end_date,q_profit_yoy'
+                    )
                     if df is None or len(df) == 0:
-                        continue
+                        return
 
                     for _, row in df.iterrows():
-                        ts_code = row.get("ts_code", "")
-                        code = ts_code.split(".")[0] if "." in ts_code else ts_code
-                        if len(code) != 6:
-                            continue
+                        end_date_str = str(row.get("end_date", ""))
                         g = row.get("q_profit_yoy")
-                        if g is None:
+                        if g is None or not end_date_str:
                             continue
 
-                        # 计算 ΔG 需要上一个季度的数据，先存进去
+                        # 将 end_date(20240930) 转为 period(2024Q3)
+                        y = end_date_str[:4]
+                        md = end_date_str[4:]
+                        q_map = {"0331": "Q1", "0630": "Q2", "0930": "Q3", "1231": "Q4"}
+                        period = f"{y}{q_map.get(md, 'Q4')}"
+
                         await collection.update_one(
                             {"code": code, "report_period": period},
-                            {"$set": {"code": code, "report_period": period, "g": float(g), "updated_at": datetime.now().isoformat()}},
+                            {"$set": {
+                                "code": code,
+                                "report_period": period,
+                                "g": float(g),
+                                "ts_code": ts_code,
+                                "updated_at": datetime.now().isoformat()
+                            }},
                             upsert=True
                         )
                         updated += 1
                 except Exception as e:
-                    logger.warning(f"[DgProsperity] 拉取 {period} 失败: {e}")
                     failed += 1
+                    if failed <= 5:
+                        logger.warning(f"[DgProsperity] 拉取 {ts_code} 失败: {e}")
 
-            # 第二遍：计算 ΔG（环比差值）
-            await self._compute_dg_for_all()
+        # 分批处理，避免内存问题
+        batch_size = 200
+        for i in range(0, len(codes), batch_size):
+            batch = codes[i:i + batch_size]
+            await asyncio.gather(*[fetch_one(c) for c in batch], return_exceptions=True)
+            logger.info(f"[DgProsperity] 进度: {min(i + batch_size, len(codes))}/{len(codes)}, updated={updated}, failed={failed}")
 
-        except Exception as e:
-            logger.error(f"[DgProsperity] 季度刷新失败: {e}", exc_info=True)
+        # 第二遍：计算 ΔG（环比差值）
+        await self._compute_dg_for_all()
 
         return {
             "updated_count": updated,
@@ -277,14 +302,16 @@ class DgProsperityService:
 
         for code in codes:
             try:
-                cursor = collection.find({"code": code}).sort("report_period", 1)
-                docs = await cursor.to_list(length=20)
+                # 按报告期降序取最近 12 个季度，确保覆盖新拉取的数据
+                cursor = collection.find({"code": code}).sort("report_period", -1)
+                docs = await cursor.to_list(length=12)
             except Exception:
                 continue
 
             if len(docs) < 2:
                 continue
 
+            # 按报告期升序排列后计算环比 ΔG
             docs_sorted = sorted(docs, key=lambda d: d.get("report_period", ""))
             for i in range(1, len(docs_sorted)):
                 prev_g = docs_sorted[i - 1].get("g")
