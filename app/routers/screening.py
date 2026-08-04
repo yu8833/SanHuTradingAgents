@@ -615,6 +615,27 @@ async def refresh_dg_prosperity(
         raise HTTPException(status_code=500, detail=f"ΔG 数据刷新失败: {str(e)}")
 
 
+@router.post("/three-buys-three-sells/compute-dg")
+async def compute_dg_prosperity(
+    user: dict = Depends(get_current_user)
+):
+    """手动触发 ΔG 环比计算（当季 G - 上季 G）
+
+    用于 refresh-dg 拉取数据后，或数据刷新中断后，重新计算所有股票的 ΔG。
+    """
+    try:
+        from app.services.dg_prosperity_service import get_dg_prosperity_service
+
+        service = get_dg_prosperity_service()
+        logger.info("[compute_dg] 开始计算 ΔG 环比")
+        await service._compute_dg_for_all()
+        logger.info("[compute_dg] 计算完成")
+        return {"success": True, "message": "ΔG 环比计算完成"}
+    except Exception as e:
+        logger.error(f"[compute_dg] 计算失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"ΔG 计算失败: {str(e)}")
+
+
 # ============================================================
 # 散户策略：极端反转 / 困境反转 / 小盘价值 / 转债博弈
 # ============================================================

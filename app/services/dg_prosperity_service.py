@@ -103,20 +103,28 @@ class DgProsperityService:
 
         codes_str = [str(c).zfill(6) for c in codes]
 
-        # 批量查 MongoDB 缓存
+        # 使用聚合管道按 code 分组取最新季度（避免 to_list length 限制导致数据遗漏）
         try:
-            cursor = collection.find({"code": {"$in": codes_str}})
-            docs = await cursor.to_list(length=len(codes_str) * 4)
+            pipeline = [
+                {"$match": {"code": {"$in": codes_str}}},
+                {"$sort": {"report_period": -1}},
+                {"$group": {
+                    "_id": "$code",
+                    "g": {"$first": "$g"},
+                    "dg": {"$first": "$dg"},
+                    "report_period": {"$first": "$report_period"}
+                }}
+            ]
+            cursor = collection.aggregate(pipeline)
+            docs = await cursor.to_list(length=len(codes_str))
         except Exception as e:
             logger.warning(f"[DgProsperity] 查缓存失败: {e}")
             return {c: self._empty_quadrant() for c in codes_str}
 
-        # 按 code 取最新季度
         latest: dict[str, dict] = {}
         for doc in docs:
-            code = doc.get("code", "")
-            period = doc.get("report_period", "")
-            if code not in latest or period > latest[code].get("report_period", ""):
+            code = doc.get("_id", "")
+            if code:
                 latest[code] = doc
 
         result = {}
