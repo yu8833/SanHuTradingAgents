@@ -686,6 +686,42 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"🚨 散户策略定时任务注册失败，退出信号扫描/预警检查等功能将不可用: {e}", exc_info=True)
 
+        # ==================== ΔG 景气度数据季度刷新 ====================
+        # 每月1日凌晨5:00从 Tushare fina_indicator 拉取全 A 股最近 8 个季度的财务指标，
+        # 计算 ΔG（环比差值）用于戴维斯双杀象限判断。
+        # 财报披露时间：Q1季报4月底、Q2中报8月底、Q3季报10月底、Q4年报次年4月底，
+        # 每月执行可确保财报披露后及时更新。
+        async def run_dg_prosperity_sync():
+            """运行 ΔG 景气度数据季度刷新"""
+            try:
+                from app.services.dg_prosperity_service import get_dg_prosperity_service
+                logger.info("📊 [APScheduler] 开始 ΔG 景气度数据季度刷新...")
+                service = get_dg_prosperity_service()
+                result = await service.refresh_quarterly()
+                logger.info(
+                    f"📊 [APScheduler] ΔG 景气度刷新完成: "
+                    f"更新={result.get('updated_count')}, "
+                    f"失败={result.get('failed_count')}, "
+                    f"总数={result.get('total_count')}, "
+                    f"季度={result.get('quarters')}"
+                )
+                return result
+            except Exception as e:
+                logger.error(f"❌ [APScheduler] ΔG 景气度刷新失败: {e}", exc_info=True)
+                raise
+
+        scheduler.add_job(
+            run_dg_prosperity_sync,
+            CronTrigger.from_crontab(settings.DG_PROSPERITY_SYNC_CRON, timezone=settings.TIMEZONE),
+            id="dg_prosperity_sync",
+            name="ΔG景气度数据季度刷新",
+        )
+        if not settings.DG_PROSPERITY_SYNC_ENABLED:
+            scheduler.pause_job("dg_prosperity_sync")
+            logger.info(f"⏸️ ΔG景气度刷新已添加但暂停: {settings.DG_PROSPERITY_SYNC_CRON}")
+        else:
+            logger.info(f"📊 ΔG景气度刷新已配置: {settings.DG_PROSPERITY_SYNC_CRON}")
+
         # 设置调度器实例到服务中，以便API可以管理任务
         # 注意：必须在 scheduler.start() 之前设置，避免 start 与 set 之间的窗口期 API 无可用实例
         set_scheduler_instance(scheduler)
@@ -767,6 +803,55 @@ async def lifespan(app: FastAPI):
                     logger.warning(f"⚠️ 判断历史同步是否需要补跑失败 [{_cron}]: {_e}")
         except Exception as _e:
             logger.warning(f"⚠️ 启动时历史同步补跑逻辑异常，跳过（不影响主流程）: {_e}")
+
+        # ==================== ΔG 景气度数据启动补跑 ====================
+        # ΔG 为月度任务，补跑条件：dg_prosperity 集合为空 或 最近一次更新超过 35 天
+        # 延迟 120s 启动，避开历史同步补跑窗口（30-90s）
+        if settings.DG_PROSPERITY_SYNC_ENABLED:
+            try:
+                from app.core.database import get_mongo_db
+
+                _db = get_mongo_db()
+                _dg_count = await _db["dg_prosperity"].count_documents({})
+                _need_catchup = False
+                if _dg_count == 0:
+                    _need_catchup = True
+                    logger.info("📊 ΔG 数据为空，启动时将补跑刷新")
+                else:
+                    _latest = await _db["dg_prosperity"].find_one(
+                        sort=[("updated_at", -1)]
+                    )
+                    if _latest and _latest.get("updated_at"):
+                        try:
+                            _updated_str = _latest["updated_at"]
+                            # updated_at 是 ISO 格式字符串
+                            from datetime import datetime as _dt
+                            _updated_at = _dt.fromisoformat(_updated_str)
+                            _days_since = (_now - _updated_at).days
+                            if _days_since > 35:
+                                _need_catchup = True
+                                logger.info(
+                                    f"📊 ΔG 数据已过期（最后更新: {_updated_str}，"
+                                    f"距今 {_days_since} 天），启动时将补跑刷新"
+                                )
+                        except Exception:
+                            # updated_at 格式异常，保守起见补跑
+                            _need_catchup = True
+                            logger.info("📊 ΔG 数据 updated_at 格式异常，启动时将补跑刷新")
+
+                if _need_catchup:
+                    scheduler.add_job(
+                        run_dg_prosperity_sync,
+                        trigger="date",
+                        run_date=_now + timedelta(seconds=120),
+                        id="dg_prosperity_sync_catchup",
+                        name="启动补跑-ΔG景气度刷新",
+                        replace_existing=True,
+                        misfire_grace_time=600,
+                    )
+                    logger.info("⏰ ΔG 景气度补跑任务已安排，将在 120s 后执行")
+            except Exception as _e:
+                logger.warning(f"⚠️ ΔG 启动补跑逻辑异常，跳过（不影响主流程）: {_e}")
 
         # 确保 SchedulerService 在启动时初始化（注册事件监听器和僵尸检测）
         # 否则只有在首次调用 /api/scheduler/* 时才会创建，可能导致事件监听器永不注册

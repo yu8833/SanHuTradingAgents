@@ -247,6 +247,12 @@ class Settings(BaseSettings):
     TUSHARE_STATUS_CHECK_ENABLED: bool = Field(default=True)
     TUSHARE_STATUS_CHECK_CRON: str = Field(default="0 * * * *")  # 每小时
 
+    # ΔG 景气度数据季度刷新配置
+    # 财报披露时间：Q1季报4月底、Q2中报8月底、Q3季报10月底、Q4年报次年4月底
+    # 每月1日凌晨5:00执行，确保财报披露截止后能及时拉取最新季度数据
+    DG_PROSPERITY_SYNC_ENABLED: bool = Field(default=True, description="启用ΔG景气度数据季度刷新")
+    DG_PROSPERITY_SYNC_CRON: str = Field(default="0 5 1 * *", description="ΔG景气度刷新CRON（每月1日5:00）")
+
     # 数据完整性检查配置
     DATA_INTEGRITY_CHECK_ENABLED: bool = Field(default=True, description="启用数据完整性检查")
     DATA_INTEGRITY_CHECK_CRON: str = Field(default="0 19 * * 1-5", description="数据完整性检查CRON（工作日19点）")
