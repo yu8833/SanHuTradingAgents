@@ -143,7 +143,7 @@ async def delete_alert(alert_id: str, current_user: dict = Depends(get_current_u
 async def manual_check(current_user: dict = Depends(get_current_user)):
     """手动触发一次监控评估（用于调试/立即生效）。"""
     try:
-        n = await monitor_service.run_evaluation()
+        n = await monitor_service.run_evaluation(respect_trading_time=False)
         return ok({"triggered": n}, "评估完成")
     except Exception as e:
         logger.error(f"❌ 手动监控评估失败: {e}", exc_info=True)

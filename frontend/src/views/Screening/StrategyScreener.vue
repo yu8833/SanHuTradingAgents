@@ -6,15 +6,16 @@
         策略
       </h1>
       <p class="page-description">基于本地行情数据 · 策略筛选与评分排序</p>
+      <p v-if="computedAt" class="computed-at">结果更新于 {{ computedAt }}</p>
       <div class="header-actions">
         <el-radio-group v-model="assetType" size="small" @change="onAssetTypeChange">
           <el-radio-button value="stock">股票</el-radio-button>
           <el-radio-button value="etf">ETF</el-radio-button>
         </el-radio-group>
-        <el-select v-model="asOf" placeholder="选择交易日" size="small" style="width: 150px" filterable>
+        <el-select v-model="asOf" placeholder="选择交易日" size="small" style="width: 150px" filterable @change="onAsOfChange">
           <el-option v-for="d in tradeDates" :key="d" :label="d" :value="d" />
         </el-select>
-        <el-button size="small" :loading="runningAll" @click="runAll">
+        <el-button size="small" :loading="runningAll" @click="runAll(true)">
           <el-icon><Refresh /></el-icon>
           运行全部
         </el-button>
@@ -59,7 +60,7 @@
         <div class="card-header">
           <span>
             <el-icon><DataLine /></el-icon>
-            {{ showAllResult ? '全部策略' : (activeStrategyName || '') }} 命中 {{ displayRows.length }} 只
+            {{ showAll ? '全部策略' : (activeStrategyName || '') }} 命中 {{ displayRows.length }} 只
             <span class="text-muted">· {{ asOf }}</span>
           </span>
           <div class="header-actions">
@@ -144,6 +145,7 @@ const showAllResult = ref<StrategyRunAllItem[] | null>(null)
 const showAll = ref(false)
 const asOf = ref('')
 const tradeDates = ref<string[]>([])
+const computedAt = ref('')
 const allStrategyRunning = ref(false)
 
 const displayRows = computed<StrategyRunItem[]>(() => {
@@ -166,36 +168,75 @@ const displayRows = computed<StrategyRunItem[]>(() => {
 const loadStrategies = async () => {
   loading.value = true
   try {
-    const res = await strategyApi.list()
-    const list = (res as any)?.data ?? res
-    strategies.value = Array.isArray(list) ? list : []
-    // 首次进入自动运行全部策略获取命中数
+    // 并行加载策略列表与交易日下拉
+    const [listRes, datesRes] = await Promise.allSettled([
+      strategyApi.list(),
+      strategyApi.tradeDates(30),
+    ])
+    if (listRes.status === 'fulfilled') {
+      const list = (listRes.value as any)?.data ?? listRes.value
+      strategies.value = Array.isArray(list) ? list : []
+    } else {
+      ElMessage.error('加载策略列表失败')
+    }
+    if (datesRes.status === 'fulfilled') {
+      const dres = datesRes.value as any
+      const dates = dres?.data?.dates ?? []
+      tradeDates.value = Array.isArray(dates) ? dates : []
+    }
+    // 首次进入自动加载全部策略结果（后端缓存命中时秒回，否则后台计算）
     if (strategies.value.length > 0) {
       await runAll()
     }
   } catch (e) {
-    ElMessage.error('加载策略列表失败')
+    ElMessage.error('加载策略失败')
   } finally {
     loading.value = false
   }
 }
 
-const runAll = async () => {
+const runAll = async (refresh = false) => {
   if (runningAll.value) return
   runningAll.value = true
   try {
-    const res = await strategyApi.runAll({ as_of: asOf.value || null, limit: 30 })
+    const res = await strategyApi.runAll({ as_of: asOf.value || null, limit: 30, refresh })
     const data = (res as any)?.data ?? res
     if (data?.as_of) asOf.value = data.as_of
+    if (data?.computed_at) computedAt.value = data.computed_at
     const counts: Record<string, number> = {}
     for (const s of data?.strategies ?? []) {
       counts[s.id] = s.count
     }
     hitCounts.value = counts
+    showAllResult.value = data?.strategies ?? null
     allStrategyRunning.value = true
-    // 若当前选了某个策略，刷新其明细
-    if (activeStrategy.value && !showAll.value) {
-      await runSingle(activeStrategy.value)
+    const strategiesData = data?.strategies ?? []
+    // 默认展示第一个策略的完整结果（行数与命中数一致），其余策略点击卡片切换
+    if (!activeStrategy.value || !showAll.value) {
+      const first = strategiesData[0]
+      if (first) {
+        activeStrategy.value = first.id
+        activeStrategyName.value = first.name
+        showAll.value = false
+        result.value = {
+          strategy_id: first.id,
+          strategy_name: first.name,
+          as_of: data.as_of,
+          total: first.count,
+          items: first.top ?? [],
+        }
+      }
+    } else {
+      const cur = strategiesData.find((x: any) => x.id === activeStrategy.value)
+      if (cur) {
+        result.value = {
+          strategy_id: cur.id,
+          strategy_name: cur.name,
+          as_of: data.as_of,
+          total: cur.count,
+          items: cur.top ?? [],
+        }
+      }
     }
   } catch (e) {
     ElMessage.error('运行全部策略失败')
@@ -222,17 +263,33 @@ const handleRun = (s: StrategyMeta) => {
   activeStrategy.value = s.id
   activeStrategyName.value = s.name
   showAll.value = false
+  // 立即用后端缓存/已加载的 run-all 结果展示，无需等待慢接口
+  const cachedStrategy = showAllResult.value?.find((x) => x.id === s.id)
+  if (cachedStrategy) {
+    result.value = {
+      strategy_id: s.id,
+      strategy_name: cachedStrategy.name,
+      as_of: asOf.value,
+      total: cachedStrategy.count,
+      items: cachedStrategy.top ?? [],
+    }
+  }
+  // 后台刷新完整明细（limit=100），完成后更新表格
   runSingle(s.id)
+}
+
+const onAsOfChange = () => {
+  // 切换交易日：清空当前明细并重新加载该交易日结果（后端缓存命中则秒回）
+  result.value = null
+  showAllResult.value = null
+  activeStrategy.value = null
+  runAll()
 }
 
 const toggleShowAll = () => {
   showAll.value = !showAll.value
-  if (showAll.value) {
-    activeStrategy.value = null
-    // 若未运行过全部，则触发运行
-    if (!showAllResult.value) {
-      runAll()
-    }
+  if (showAll.value && !showAllResult.value) {
+    runAll()
   }
 }
 
@@ -302,6 +359,12 @@ onMounted(() => {
       color: var(--el-text-color-regular);
       margin: 0 0 16px 0;
       font-size: 14px;
+    }
+
+    .computed-at {
+      color: var(--el-color-success);
+      margin: 0 0 12px 0;
+      font-size: 13px;
     }
 
     .header-actions {

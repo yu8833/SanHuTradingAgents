@@ -42,11 +42,30 @@ def _score(value: float, low: float, high: float) -> int:
     return max(0, min(100, round((value - low) / (high - low) * 100)))
 
 
+def _load_name_fallback() -> dict[str, str]:
+    """从 stock_basic_info 构建 code -> 中文名称 映射，用于 market_quotes 缺 name 时兜底。"""
+    try:
+        db = get_mongo_db_sync()
+        m = {}
+        for doc in db["stock_basic_info"].find(
+            {"code": {"$exists": True}, "name": {"$exists": True}},
+            {"code": 1, "name": 1, "_id": 0},
+        ):
+            code = str(doc.get("code") or "").strip()
+            name = str(doc.get("name") or "").strip()
+            if code and name:
+                m[code] = name
+        return m
+    except Exception:
+        return {}
+
+
 def _load_market_rows() -> list[dict]:
     """读取全市场实时快照，返回带有效涨跌幅的行（仅保留 pct_chg 有效者）。"""
     try:
         db = get_mongo_db_sync()
         coll = db["market_quotes"]
+        name_map = _load_name_fallback()
         rows = []
         for doc in coll.find({
             "code": {"$exists": True},
@@ -60,9 +79,10 @@ def _load_market_rows() -> list[dict]:
             pct = _num(doc.get("pct_chg"))
             if math.isnan(pct):
                 continue
+            code = str(doc.get("code") or doc.get("symbol") or "")
             rows.append({
-                "code": str(doc.get("code") or doc.get("symbol") or ""),
-                "name": doc.get("name") or str(doc.get("code") or doc.get("symbol") or ""),
+                "code": code,
+                "name": doc.get("name") or name_map.get(code) or code,
                 "close": _num(doc.get("close")),
                 "pct_chg": pct,
                 "amount": _num(doc.get("amount")),

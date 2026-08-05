@@ -19,6 +19,9 @@ from app.core.numeric_sanitizer import (
     sanitize_price as _s_price,
 )
 from app.core.numeric_sanitizer import (
+    sanitize_turnover_rate as _s_turnover,
+)
+from app.core.numeric_sanitizer import (
     sanitize_volume as _s_volume,
 )
 from app.services.data_sources.manager import DataSourceManager
@@ -401,6 +404,10 @@ class QuotesIngestionService:
                         "pre_close": _s_price(q.get("pre_close")),
                         "trade_date": trade_date,
                         "updated_at": updated_at,
+                        # 补充字段：换手率/量比/名称（供情绪雷达量能维度、榜单与名称解析使用）
+                        "turnover_rate": _s_turnover(q.get("turnover_rate")),
+                        "vol_ratio": _s_turnover(q.get("vol_ratio")),
+                        "name": str(q.get("name") or "").strip() or None,
                     }},
                     upsert=True,
                 )

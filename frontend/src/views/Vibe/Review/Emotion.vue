@@ -117,8 +117,8 @@
             <el-table-column label="名称 / 代码" min-width="170">
               <template #default="{ row }">
                 <div class="stock-cell">
-                  <span class="stock-name">{{ row.name }}</span>
-                  <span class="stock-code">{{ row.code }}</span>
+                  <router-link :to="`/stocks/${row.code}`" class="stock-name">{{ row.name }}</router-link>
+                  <router-link :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
                 </div>
               </template>
             </el-table-column>
@@ -374,14 +374,25 @@ onMounted(() => {
 
 .stock-name {
   font-size: 14px;
-  color: var(--el-text-color-primary);
+  color: var(--el-color-primary);
   font-weight: 500;
+  text-decoration: none;
+}
+
+.stock-name:hover {
+  text-decoration: underline;
 }
 
 .stock-code {
   font-size: 12px;
   color: var(--el-text-color-secondary);
   font-family: 'JetBrains Mono', monospace;
+  text-decoration: none;
+}
+
+.stock-code:hover {
+  color: var(--el-color-primary);
+  text-decoration: underline;
 }
 
 .empty {

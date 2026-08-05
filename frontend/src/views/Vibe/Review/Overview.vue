@@ -113,7 +113,10 @@
               <polygon :points="radarPolygon" :fill="'url(#emRadarFill)'" :stroke="scoreHex" stroke-width="2" />
               <circle v-for="p in radarPoints" :key="p.key" :cx="p.x" :cy="p.y" r="2.8" :fill="scoreHex" />
               <text x="120" y="127" text-anchor="middle" class="radar-score">{{ dashboard.emotion.score }}</text>
-              <text v-for="p in radarPoints" :key="p.key + '-t'" :x="p.lx" :y="p.ly + 4" text-anchor="middle" class="radar-label">{{ p.label }}</text>
+              <text v-for="p in radarPoints" :key="p.key + '-t'" :x="p.lx" :y="p.ly + 4" text-anchor="middle" class="radar-label" :style="{ cursor: 'help' }">
+                {{ p.label }}
+                <title>{{ p.label }}：{{ p.value }}分{{ p.desc ? ' — ' + p.desc : '' }}</title>
+              </text>
             </svg>
           </div>
           <div v-else class="radar-empty">暂无雷达数据</div>
@@ -196,7 +199,7 @@
           <div v-for="(r, idx) in col.rows" :key="key + '-' + r.code" class="list-item">
             <span class="list-no">{{ idx + 1 }}</span>
             <div class="list-main">
-              <div class="list-name">{{ r.name }}</div>
+              <router-link :to="`/stocks/${r.code}`" class="list-name stock-link" :title="r.name">{{ r.name }}</router-link>
               <div class="list-code">{{ r.code }}</div>
             </div>
             <div class="list-right">
@@ -234,84 +237,6 @@
           <el-empty :image-size="48" description="暂无全球指数" />
         </el-card>
       </div>
-    </section>
-
-    <!-- 关注股票 -->
-    <section class="block">
-      <div class="block-head">
-        <span class="block-title"><el-icon><Star /></el-icon> 关注股票</span>
-        <div class="watch-input-wrap">
-          <el-input
-            v-model="watchInput"
-            placeholder="输入6位代码，回车添加"
-            maxlength="6"
-            style="width: 200px"
-            size="small"
-            @keyup.enter="addWatch"
-          />
-          <el-button size="small" type="primary" @click="addWatch">添加</el-button>
-        </div>
-      </div>
-      <div v-loading="watchLoading" class="grid grid-watch">
-        <el-card
-          v-for="q in watchQuotes"
-          :key="q.code"
-          shadow="never"
-          class="watch-card"
-        >
-          <div class="watch-head">
-            <span class="watch-name">{{ q.name || q.code }}</span>
-            <el-icon class="watch-del" @click="removeWatch(q.code)"><Close /></el-icon>
-          </div>
-          <div class="watch-price">{{ q.price == null ? '—' : q.price.toFixed(2) }}</div>
-          <div class="watch-change" :class="colorClass(q.change_pct)">
-            {{ q.change_pct == null ? '—' : sign(q.change_pct) + formatPct(q.change_pct) + '%' }}
-          </div>
-        </el-card>
-        <div v-if="watchlist.length === 0" class="watch-placeholder">
-          添加关注的股票，实时跟踪行情
-        </div>
-      </div>
-    </section>
-
-    <!-- AI 当日复盘 -->
-    <section class="block">
-      <el-card shadow="never" class="review-card">
-        <template #header>
-          <div class="card-head">
-            <span class="block-title"><el-icon><MagicStick /></el-icon> AI 当日复盘</span>
-            <div class="head-actions">
-              <el-button
-                v-if="!reviewing && !reviewText"
-                type="primary"
-                :icon="MagicStick"
-                @click="runReview"
-              >
-                让 AI 复盘今天
-              </el-button>
-              <el-button v-if="reviewing" type="info" loading disabled>
-                AI 复盘中…
-              </el-button>
-              <el-button
-                v-if="reviewText && !reviewing"
-                type="success"
-                :icon="EditPen"
-                @click="saveReview"
-              >
-                存入沉淀
-              </el-button>
-            </div>
-          </div>
-        </template>
-        <div class="review-body">
-          <div v-if="!reviewText && !reviewing" class="placeholder">
-            点击「让 AI 复盘今天」，AI 会结合今日大盘、情绪与板块资金，输出一段简明当日复盘。
-          </div>
-          <div v-if="reviewText" class="review-text">
-            {{ reviewText }}<span v-if="reviewing" class="cursor">▍</span>
-          </div>
-        </div>
-      </el-card>
     </section>
 
     <!-- 市场情绪 -->
@@ -398,20 +323,14 @@ import {
   DataAnalysis,
   DataLine,
   Refresh,
-  MagicStick,
   Loading,
   Odometer,
-  EditPen,
-  Star,
-  Close,
 } from '@element-plus/icons-vue'
 import {
   vibeApi,
   type IndexQuote,
   type GlobalIndex,
   type MarketSentiment,
-  type SectorFlow,
-  type StockQuote,
   type MarketDashboard,
 } from '@/api/vibe'
 
@@ -419,17 +338,7 @@ const loading = ref(false)
 const indices = ref<IndexQuote[]>([])
 const globalIndices = ref<GlobalIndex[]>([])
 const sentiment = ref<MarketSentiment | null>(null)
-const sectors = ref<SectorFlow[]>([])
 const dashboard = ref<MarketDashboard | null>(null)
-
-const reviewing = ref(false)
-const reviewText = ref('')
-
-// 关注股票
-const watchlist = ref<string[]>([])
-const watchQuotes = ref<StockQuote[]>([])
-const watchInput = ref('')
-const watchLoading = ref(false)
 
 const today = computed(() => {
   const d = new Date()
@@ -490,6 +399,17 @@ const pctClass = (v: number | null | undefined) => {
 const RADAR_CX = 120
 const RADAR_CY = 120
 const RADAR_MAX_R = 78
+
+// 各维度说明（悬停提示）
+const RADAR_DESC: Record<string, string> = {
+  index: '主要指数当日平均涨跌幅所反映的大盘整体强度',
+  profit: '赚钱效应：上涨家数占比、涨跌幅均值/中位数与强势股占比综合',
+  money: '量能：全市场平均换手率与高换手个股占比，反映资金活跃度',
+  speculation: '投机：涨停家数、封板率、最高连板与2板以上家数综合',
+  resilience: '抗跌：下跌家数占比与大跌家数占比越低，抗跌分越高',
+  mainline: '主线：领涨行业平均涨幅与覆盖度，反映资金主攻方向',
+}
+
 const radarPoints = computed(() => {
   const dims = dashboard.value?.radar || []
   return dims.map((r, i) => {
@@ -498,6 +418,8 @@ const radarPoints = computed(() => {
     return {
       key: r.key,
       label: r.label,
+      value: r.value,
+      desc: RADAR_DESC[r.key] || '',
       x: RADAR_CX + Math.cos(angle) * radius,
       y: RADAR_CY + Math.sin(angle) * radius,
       lx: RADAR_CX + Math.cos(angle) * (RADAR_MAX_R + 27),
@@ -575,7 +497,6 @@ const loadAll = async () => {
     indices.value = idx.data || []
     globalIndices.value = g.data || []
     sentiment.value = ov.data?.sentiment || null
-    sectors.value = ov.data?.sectors || []
     dashboard.value = dash.data || null
   } catch (e: any) {
     ElMessage.error(e?.message || '数据加载失败')
@@ -584,113 +505,8 @@ const loadAll = async () => {
   }
 }
 
-const buildContext = () => {
-  const parts: string[] = []
-  if (indices.value.length) {
-    parts.push(
-      '大盘指数: ' +
-        indices.value
-          .map(
-            i =>
-              `${i.name} ${i.price.toFixed(2)}(${sign(i.change_pct)}${formatPct(i.change_pct)}%)`
-          )
-          .join(', ')
-    )
-  }
-  if (sentiment.value) {
-    const s = sentiment.value
-    parts.push(
-      `市场情绪: 上涨${s.up}家 下跌${s.down}家 平盘${s.flat}家 涨停${s.zt}家(真实${s.zt_real}) 跌停${s.dt}家(真实${s.dt_real}) 大盘宽度:${s.breadth} 题材投机:${s.speculation} 活跃度:${s.active}`
-    )
-  }
-  if (sectors.value.length) {
-    const top = sectors.value
-      .slice(0, 5)
-      .map(
-        x =>
-          `${x.name}(${sign(x.pct)}${formatPct(x.pct)}%,净${(x.net / 1e8).toFixed(1)}亿)`
-      )
-      .join(', ')
-    parts.push('板块资金Top: ' + top)
-  }
-  return parts.join('\n')
-}
-
-const runReview = async () => {
-  reviewing.value = true
-  reviewText.value = ''
-  const messages = [
-    {
-      role: 'user',
-      content:
-        '请基于今日 A 股大盘、市场情绪与板块资金数据，做一段简明当日复盘（300字以内），指出市场风格、资金主攻方向与潜在风险点。不要给出任何个股买卖建议。',
-    },
-  ]
-  try {
-    await vibeApi.chatStream(
-      messages,
-      buildContext(),
-      delta => {
-        reviewText.value += delta
-      },
-      err => {
-        ElMessage.error(err)
-      }
-    )
-  } catch (e: any) {
-    ElMessage.error(e?.message || 'AI 复盘失败')
-  } finally {
-    reviewing.value = false
-  }
-}
-
-const saveReview = async () => {
-  if (!reviewText.value) return
-  try {
-    await vibeApi.saveNote('复盘', `${today.value} AI 当日复盘`, reviewText.value)
-    ElMessage.success('已存入研究沉淀')
-  } catch (e: any) {
-    ElMessage.error(e?.message || '保存失败')
-  }
-}
-
-// 关注股票
-const loadWatchQuotes = async () => {
-  if (watchlist.value.length === 0) {
-    watchQuotes.value = []
-    return
-  }
-  watchLoading.value = true
-  try {
-    const res = await vibeApi.getQuotes(watchlist.value)
-    watchQuotes.value = res.data || []
-  } catch (e: any) {
-    console.error('加载关注股票失败:', e)
-  } finally {
-    watchLoading.value = false
-  }
-}
-
-const addWatch = () => {
-  const code = watchInput.value.trim()
-  if (!/^\d{6}$/.test(code)) {
-    ElMessage.warning('请输入6位数字代码')
-    return
-  }
-  watchlist.value = vibeApi.addWatchlist(code)
-  watchInput.value = ''
-  loadWatchQuotes()
-}
-
-const removeWatch = (code: string) => {
-  watchlist.value = vibeApi.removeWatchlist(code)
-  loadWatchQuotes()
-}
-
 onMounted(() => {
   loadAll()
-  watchlist.value = vibeApi.loadWatchlist()
-  loadWatchQuotes()
 })
 </script>
 
@@ -819,48 +635,6 @@ onMounted(() => {
   margin: 0;
 }
 
-.review-card {
-  border-radius: 8px;
-}
-
-.card-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.head-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.review-body {
-  min-height: 120px;
-}
-
-.placeholder {
-  color: var(--el-text-color-secondary);
-  font-size: 14px;
-  line-height: 1.8;
-}
-
-.review-text {
-  white-space: pre-wrap;
-  font-size: 14px;
-  line-height: 1.9;
-  color: var(--el-text-color-primary);
-}
-
-.cursor {
-  color: var(--el-color-primary);
-  animation: blink 1s steps(2) infinite;
-}
-
-@keyframes blink {
-  0%, 50% { opacity: 1; }
-  50.01%, 100% { opacity: 0; }
-}
-
 .sentiment-wrap {
   display: flex;
   flex-direction: column;
@@ -952,73 +726,6 @@ onMounted(() => {
 
 @media (max-width: 1200px) {
   .grid-5 { grid-template-columns: repeat(3, 1fr); }
-}
-
-/* 关注股票 */
-.watch-input-wrap {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.grid-watch {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-.watch-card {
-  width: 160px;
-  border-radius: 8px;
-  flex-shrink: 0;
-}
-
-.watch-card :deep(.el-card__body) {
-  padding: 12px 14px;
-}
-
-.watch-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 6px;
-}
-
-.watch-name {
-  font-size: 13px;
-  color: var(--el-text-color-regular);
-  font-weight: 500;
-}
-
-.watch-del {
-  font-size: 12px;
-  color: var(--el-text-color-placeholder);
-  cursor: pointer;
-  transition: color 0.2s;
-}
-
-.watch-del:hover {
-  color: var(--el-color-danger);
-}
-
-.watch-price {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 22px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
-  margin: 4px 0 2px;
-}
-
-.watch-change {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 13px;
-}
-
-.watch-placeholder {
-  color: var(--el-text-color-placeholder);
-  font-size: 13px;
-  padding: 16px 0;
-  width: 100%;
 }
 
 @media (max-width: 768px) {
@@ -1338,6 +1045,16 @@ onMounted(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.stock-link {
+  color: var(--el-color-primary);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.stock-link:hover {
+  text-decoration: underline;
 }
 
 .list-code {

@@ -34,6 +34,7 @@ from bson import ObjectId
 from pydantic import BaseModel, Field
 
 from app.core.database import get_mongo_db
+from app.utils.trading_time import is_trading_time
 
 logger = logging.getLogger(__name__)
 
@@ -374,8 +375,15 @@ class MonitorService:
                 parts.append(f"{label}{op_map.get(op, op)}{value}")
         return f" {logic_word} ".join(parts)
 
-    async def run_evaluation(self) -> int:
-        """评估所有启用规则，触发条件时写入告警记录。返回触发条数。"""
+    async def run_evaluation(self, respect_trading_time: bool = True) -> int:
+        """评估所有启用规则，触发条件时写入告警记录。返回触发条数。
+
+        respect_trading_time=True 时，非 A 股交易时间（含收盘后缓冲期）跳过评估，
+        避免基于盘后冻结行情在夜间反复触发重复告警。
+        """
+        if respect_trading_time and not is_trading_time():
+            logger.debug("非交易时间，跳过监控规则评估")
+            return 0
         try:
             db = await self._get_db()
             cursor = db[self.rules_coll].find({"enabled": True})

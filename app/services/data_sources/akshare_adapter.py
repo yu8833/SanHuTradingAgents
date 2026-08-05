@@ -307,6 +307,9 @@ class AKShareAdapter(DataSourceAdapter):
                     low_col = next((c for c in ["最低", "low"] if c in df.columns), None)
                     pre_close_col = next((c for c in ["昨收", "昨收(元)", "pre_close", "昨收价", "settlement"] if c in df.columns), None)
                     volume_col = next((c for c in ["成交量", "成交量(手)", "volume", "成交量(股)", "vol"] if c in df.columns), None)
+                    name_col = next((c for c in ["名称", "name", "股票名称"] if c in df.columns), None)
+                    turnover_col = next((c for c in ["换手率", "turnover_rate", "turnover"] if c in df.columns), None)
+                    vol_ratio_col = next((c for c in ["量比", "vol_ratio"] if c in df.columns), None)
 
                     if not code_col or not price_col:
                         logger.error(f"AKShare {src} 缺少必要列: code={code_col}, price={price_col}, columns={list(df.columns)}")
@@ -365,7 +368,10 @@ class AKShareAdapter(DataSourceAdapter):
                             "open": op,
                             "high": hi,
                             "low": lo,
-                            "pre_close": pre
+                            "pre_close": pre,
+                            "name": str(row.get(name_col)).strip() if name_col and row.get(name_col) is not None else None,
+                            "turnover_rate": self._safe_float(row.get(turnover_col)) if turnover_col else None,
+                            "vol_ratio": self._safe_float(row.get(vol_ratio_col)) if vol_ratio_col else None,
                         }
 
                     logger.info(f"✅ AKShare {src} 获取到 {len(result)} 只股票的实时行情")

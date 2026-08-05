@@ -52,7 +52,10 @@
           <div v-for="(c, i) in data?.gainers || []" :key="c.code" class="rank-row">
             <span class="rank-idx">{{ i + 1 }}</span>
             <span class="rank-name">{{ c.name }}</span>
-            <span class="rank-lead">{{ c.lead_name }}</span>
+            <span class="rank-lead">
+              <router-link v-if="c.lead_code" :to="`/stocks/${c.lead_code}`" class="stock-link">{{ c.lead_name }}</router-link>
+              <template v-else>{{ c.lead_name }}</template>
+            </span>
             <span class="rank-pct up">{{ sign(c.pct_chg) }}{{ formatPct(c.pct_chg) }}%</span>
           </div>
           <el-empty v-if="!data?.gainers?.length" :image-size="48" description="暂无数据" />
@@ -63,7 +66,10 @@
           <div v-for="(c, i) in data?.losers || []" :key="c.code" class="rank-row">
             <span class="rank-idx">{{ i + 1 }}</span>
             <span class="rank-name">{{ c.name }}</span>
-            <span class="rank-lead">{{ c.lead_name }}</span>
+            <span class="rank-lead">
+              <router-link v-if="c.lead_code" :to="`/stocks/${c.lead_code}`" class="stock-link">{{ c.lead_name }}</router-link>
+              <template v-else>{{ c.lead_name }}</template>
+            </span>
             <span class="rank-pct down">{{ sign(c.pct_chg) }}{{ formatPct(c.pct_chg) }}%</span>
           </div>
           <el-empty v-if="!data?.losers?.length" :image-size="48" description="暂无数据" />
@@ -74,7 +80,10 @@
           <div v-for="(c, i) in data?.money_leaders || []" :key="c.code" class="rank-row">
             <span class="rank-idx">{{ i + 1 }}</span>
             <span class="rank-name">{{ c.name }}</span>
-            <span class="rank-lead">{{ c.lead_name }}</span>
+            <span class="rank-lead">
+              <router-link v-if="c.lead_code" :to="`/stocks/${c.lead_code}`" class="stock-link">{{ c.lead_name }}</router-link>
+              <template v-else>{{ c.lead_name }}</template>
+            </span>
             <span class="rank-pct up">{{ sign(c.money_flow) }}{{ fmtNum(c.money_flow) }}亿</span>
           </div>
           <el-empty v-if="!data?.money_leaders?.length" :image-size="48" description="暂无数据" />
@@ -114,7 +123,8 @@
         </el-table-column>
         <el-table-column label="领涨股" min-width="120">
           <template #default="{ row }">
-            <span class="col-lead">{{ row.lead_name || '—' }}</span>
+            <router-link v-if="row.lead_code" :to="`/stocks/${row.lead_code}`" class="col-lead stock-link">{{ row.lead_name || '—' }}</router-link>
+            <span v-else class="col-lead">{{ row.lead_name || '—' }}</span>
           </template>
         </el-table-column>
         <el-table-column label="资金净流入" width="130" align="right" sortable :sort-method="sortMoney">
@@ -432,6 +442,16 @@ onMounted(loadAnalysis)
     .col-lead {
       color: var(--el-text-color-secondary);
       font-size: 12px;
+    }
+
+    .stock-link {
+      color: var(--el-color-primary);
+      text-decoration: none;
+      cursor: pointer;
+    }
+
+    .stock-link:hover {
+      text-decoration: underline;
     }
 
     .muted {

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -24,6 +24,9 @@ logger = logging.getLogger(__name__)
 
 # 指标 warmup 需要的历史天数（覆盖 ma60/60日动量等长周期）
 WARMUP_DAYS = 180
+
+# run-all 筛选结果缓存集合：同一交易日结果幂等，缓存后再次打开页面可直接返回（含 computed_at）
+SCREEN_CACHE_COLLECTION = "strategy_screen_cache"
 
 
 def _latest_trade_date(db) -> str:
@@ -89,6 +92,17 @@ def _resolve_as_of(db, as_of=None) -> str:
     return date.today().strftime("%Y-%m-%d")
 
 
+def _stock_name_map(db) -> dict:
+    """构建 symbol -> 股票名称 映射，用于结果中展示名称而非代码。"""
+    names: dict[str, str] = {}
+    for s in data_adapter.get_stock_list(db):
+        sym = str(s.get("symbol") or "")
+        nm = s.get("name") or ""
+        if sym and nm:
+            names[sym] = nm
+    return names
+
+
 def run_strategy(
     db,
     strategy_id: str,
@@ -127,18 +141,17 @@ def run_strategy(
     scores = _score_rank(target, strategy.get("scoring", {}), universe)
     candidates["score"] = scores[mask.fillna(False).to_numpy()]
 
-    # 排序
+    # 排序（返回全部命中，保证行数与命中数一致）
     descending = strategy.get("descending", True)
-    candidates = candidates.sort_values(
-        "score", ascending=not descending
-    ).head(limit)
+    candidates = candidates.sort_values("score", ascending=not descending)
 
+    name_map = _stock_name_map(db)
     items = []
     for _, row in candidates.iterrows():
         items.append({
             "symbol": row["symbol"],
             "code": row["symbol"],
-            "name": row.get("name", ""),
+            "name": name_map.get(str(row["symbol"]), ""),
             "close": _round(row.get("close")),
             "change_pct": _round(row.get("pct_chg")),
             "open": _round(row.get("open")),
@@ -161,15 +174,45 @@ def run_strategy(
     }
 
 
+def get_trade_dates(db, limit: int = 30) -> list[str]:
+    """获取最近 limit 个交易日（倒序），用于前端日期选择下拉。"""
+    dates = db["stock_daily_quotes"].distinct(
+        "trade_date", {"period": "daily", "trade_date": {"$ne": None}}
+    )
+    dates = sorted([d for d in dates if d], reverse=True)[: max(1, limit)]
+    return dates
+
+
+def _cache_key(as_of: str, pool: list[str] | None) -> dict:
+    return {"as_of": as_of, "pool": sorted(pool) if pool else None}
+
+
 def run_all_strategies(
     db,
     as_of=None,
     limit: int = 30,
     pool: list[str] | None = None,
+    refresh: bool = False,
 ) -> dict:
-    """批量运行全部策略，返回每个策略的命中数与 top 结果。"""
+    """批量运行全部策略，返回每个策略的命中数与 top 结果。
+
+    结果按 (as_of, pool) 缓存到 MongoDB；同一交易日数据幂等，命中缓存时直接返回，
+    并附带 computed_at（计算时间）。refresh=True 时强制重算。
+    """
     t0 = time.perf_counter()
     as_of_date = _resolve_as_of(db, as_of)
+    key = _cache_key(as_of_date, pool)
+
+    if not refresh:
+        cached = db[SCREEN_CACHE_COLLECTION].find_one(
+            key, {"_id": 0, "result": 1, "computed_at": 1}
+        )
+        if cached and cached.get("result"):
+            result = cached["result"]
+            result["computed_at"] = cached.get("computed_at")
+            result["cached"] = True
+            return result
+
     as_of_dt = pd.to_datetime(as_of_date)
     start_dt = as_of_dt - timedelta(days=WARMUP_DAYS)
 
@@ -183,6 +226,7 @@ def run_all_strategies(
         return {"as_of": as_of_date, "strategies": [], "elapsed_ms": 0}
 
     strategies = []
+    name_map = _stock_name_map(db)
     for strategy in BUILTIN_STRATEGIES:
         sid = strategy["id"]
         try:
@@ -196,15 +240,23 @@ def run_all_strategies(
             if n_hits > 0:
                 sub = target[cand_idx].copy()
                 sub["score"] = scores[cand_idx]
-                sub = sub.sort_values("score", ascending=not strategy.get("descending", True)).head(limit)
+                # 返回全部命中，保证行数与命中数一致
+                sub = sub.sort_values("score", ascending=not strategy.get("descending", True))
                 for _, row in sub.iterrows():
                     top_items.append({
                         "symbol": row["symbol"],
                         "code": row["symbol"],
-                        "name": row.get("name", ""),
+                        "name": name_map.get(str(row["symbol"]), ""),
                         "close": _round(row.get("close")),
                         "change_pct": _round(row.get("pct_chg")),
+                        "open": _round(row.get("open")),
+                        "high": _round(row.get("high")),
+                        "low": _round(row.get("low")),
+                        "volume": _round(row.get("volume")),
+                        "amount": _round(row.get("amount")),
+                        "vol_ratio": _round(row.get("vol_ratio_5d")),
                         "score": round(float(row.get("score", 0)), 2),
+                        "date": as_of_date,
                     })
             strategies.append({
                 "id": sid,
@@ -226,11 +278,26 @@ def run_all_strategies(
                 "error": str(e),
             })
 
-    return {
+    result = {
         "as_of": as_of_date,
         "strategies": strategies,
         "elapsed_ms": round((time.perf_counter() - t0) * 1000, 1),
     }
+    computed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    result["computed_at"] = computed_at
+    result["cached"] = False
+    db[SCREEN_CACHE_COLLECTION].update_one(
+        key,
+        {
+            "$set": {
+                "result": result,
+                "computed_at": computed_at,
+                "updated_at": computed_at,
+            }
+        },
+        upsert=True,
+    )
+    return result
 
 
 def _round(v):

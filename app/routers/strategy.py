@@ -36,6 +36,7 @@ class StrategyRunAllRequest(BaseModel):
     as_of: str | None = None
     limit: int = 30
     pool: list[str] | None = None
+    refresh: bool = False
 
 
 class BacktestRequest(BaseModel):
@@ -140,12 +141,24 @@ async def run_all_strategies(req: StrategyRunAllRequest):
     try:
         db = get_mongo_db_sync()
         result = await asyncio.to_thread(
-            screener.run_all_strategies, db, req.as_of, req.limit, req.pool
+            screener.run_all_strategies, db, req.as_of, req.limit, req.pool, req.refresh
         )
         return ok(result)
     except Exception as e:  # noqa: BLE001
         logger.exception("批量策略筛选失败")
         return fail(f"批量策略筛选失败: {e}")
+
+
+@router.get("/api/strategy/trade-dates")
+async def list_trade_dates(limit: int = 30):
+    """获取最近 limit 个交易日（倒序），用于前端日期选择。"""
+    try:
+        db = get_mongo_db_sync()
+        dates = await asyncio.to_thread(screener.get_trade_dates, db, limit)
+        return ok({"dates": dates})
+    except Exception as e:  # noqa: BLE001
+        logger.exception("获取交易日列表失败")
+        return fail(f"获取交易日列表失败: {e}")
 
 
 @router.post("/api/strategy/backtest")
