@@ -1,0 +1,672 @@
+<template>
+  <div class="strategy-backtest">
+    <div class="page-header">
+      <h1 class="page-title">
+        <el-icon><Histogram /></el-icon>
+        回测工作台
+      </h1>
+      <p class="page-description">{{ activeMode.hint }}</p>
+      <div class="header-actions">
+        <el-radio-group v-model="activeTab" size="small">
+          <el-radio-button v-for="m in MODES" :key="m.key" :value="m.key">
+            {{ m.title }}
+          </el-radio-button>
+        </el-radio-group>
+      </div>
+    </div>
+
+    <!-- 策略回测 -->
+    <template v-if="activeTab === 'strategy'">
+      <el-card class="form-panel" shadow="never">
+        <template #header><span class="panel-title">策略回测参数</span></template>
+        <el-form :inline="true" label-width="110px" class="bt-form">
+          <el-form-item label="策略">
+            <el-select v-model="btForm.strategy_id" placeholder="选择策略" style="width: 200px">
+              <el-option v-for="s in strategies" :key="s.id" :label="s.name" :value="s.id" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="区间">
+            <el-date-picker v-model="btRange" type="daterange" value-format="YYYY-MM-DD" range-separator="至" start-placeholder="开始" end-placeholder="结束" style="width: 260px" />
+          </el-form-item>
+          <el-form-item label="初始资金">
+            <el-input-number v-model="btForm.initial_capital" :min="10000" :step="100000" style="width: 160px" />
+          </el-form-item>
+          <el-form-item label="最大持仓">
+            <el-input-number v-model="btForm.max_positions" :min="1" :max="50" style="width: 120px" />
+          </el-form-item>
+          <el-form-item label="仓位方式">
+            <el-select v-model="btForm.position_sizing" style="width: 140px">
+              <el-option label="等权" value="equal" />
+              <el-option label="评分加权" value="score_weight" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="费率">
+            <el-input-number v-model="btForm.fees_pct" :min="0" :max="0.01" :step="0.0001" :precision="4" style="width: 120px" />
+          </el-form-item>
+          <el-form-item label="滑点(bp)">
+            <el-input-number v-model="btForm.slippage_bps" :min="0" :max="100" style="width: 120px" />
+          </el-form-item>
+          <el-form-item label="止损%">
+            <el-input-number v-model="btForm.stop_loss_pct" :min="0" :max="0.5" :step="0.01" :precision="2" style="width: 120px" />
+          </el-form-item>
+          <el-form-item label="止盈%">
+            <el-input-number v-model="btForm.take_profit_pct" :min="0" :max="1" :step="0.01" :precision="2" style="width: 120px" />
+          </el-form-item>
+          <el-form-item label="最大持有(天)">
+            <el-input-number v-model="btForm.max_hold_days" :min="0" :max="365" style="width: 120px" />
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" :loading="strategyLoading" @click="runStrategyBacktest">
+              <el-icon><Search /></el-icon>
+              开始回测
+            </el-button>
+          </el-form-item>
+        </el-form>
+      </el-card>
+
+      <template v-if="strategyResult">
+        <el-alert v-if="!strategyResult.success" :title="strategyResult.error || '回测失败'" type="error" show-icon :closable="false" />
+        <template v-else>
+          <StatCards :stats="strategyResult.stats" />
+          <el-card class="chart-panel" shadow="never">
+            <template #header><span class="panel-title">净值曲线</span></template>
+            <v-chart class="chart" :option="equityOption" autoresize />
+          </el-card>
+          <el-card class="chart-panel" shadow="never">
+            <template #header><span class="panel-title">交易明细 ({{ strategyResult.trades?.length }})</span></template>
+            <el-table :data="strategyResult.trades" size="small" stripe border max-height="420">
+              <el-table-column prop="symbol" label="代码" width="100" />
+              <el-table-column prop="name" label="名称" width="110" />
+              <el-table-column prop="entry_date" label="买入日期" width="110" />
+              <el-table-column prop="exit_date" label="卖出日期" width="110" />
+              <el-table-column prop="entry_price" label="买入价" width="90" align="right" />
+              <el-table-column prop="exit_price" label="卖出价" width="90" align="right" />
+              <el-table-column prop="pnl_pct" label="收益率" width="90" align="right">
+                <template #default="{ row }">
+                  <span :class="row.pnl_pct >= 0 ? 'text-red' : 'text-green'">{{ (row.pnl_pct * 100).toFixed(2) }}%</span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="duration" label="持有(天)" width="80" align="right" />
+              <el-table-column prop="exit_reason" label="卖出原因" width="110" />
+            </el-table>
+          </el-card>
+        </template>
+      </template>
+    </template>
+
+    <!-- 因子回测 -->
+    <template v-else-if="activeTab === 'factor'">
+      <el-card class="form-panel" shadow="never">
+        <template #header><span class="panel-title">因子回测参数</span></template>
+        <el-form :inline="true" label-width="110px" class="bt-form">
+          <el-form-item label="因子">
+            <el-select v-model="factorForm.factor_name" placeholder="选择因子" style="width: 200px">
+              <el-option v-for="f in FACTOR_OPTIONS" :key="f.value" :label="f.label" :value="f.value" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="区间">
+            <el-date-picker v-model="factorRange" type="daterange" value-format="YYYY-MM-DD" range-separator="至" start-placeholder="开始" end-placeholder="结束" style="width: 260px" />
+          </el-form-item>
+          <el-form-item label="分组数">
+            <el-input-number v-model="factorForm.n_groups" :min="2" :max="10" style="width: 120px" />
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" :loading="factorLoading" @click="runFactorBacktest">
+              <el-icon><Search /></el-icon>
+              开始回测
+            </el-button>
+          </el-form-item>
+        </el-form>
+      </el-card>
+
+      <template v-if="factorResult">
+        <el-alert v-if="!factorResult.success" :title="factorResult.error || '回测失败'" type="error" show-icon :closable="false" />
+        <template v-else>
+          <el-row :gutter="12" class="stat-row">
+            <el-col :span="4"><el-statistic title="IC均值" :value="factorResult.stats?.ic_mean" :precision="4" /></el-col>
+            <el-col :span="4"><el-statistic title="IC标准差" :value="factorResult.stats?.ic_std" :precision="4" /></el-col>
+            <el-col :span="4"><el-statistic title="IC_IR" :value="factorResult.stats?.ic_ir" :precision="4" /></el-col>
+            <el-col :span="4"><el-statistic title="IC正值占比" :value="factorResult.stats?.ic_positive_ratio" :precision="4" /></el-col>
+            <el-col :span="4"><el-statistic title="多空收益" :value="factorResult.long_short?.avg_return" :precision="4" /></el-col>
+            <el-col :span="4"><el-statistic title="样本天数" :value="factorResult.stats?.n_days" /></el-col>
+          </el-row>
+          <el-card class="chart-panel" shadow="never">
+            <template #header><span class="panel-title">IC 序列</span></template>
+            <v-chart class="chart" :option="icOption" autoresize />
+          </el-card>
+          <el-card class="chart-panel" shadow="never">
+            <template #header><span class="panel-title">分组收益</span></template>
+            <el-table :data="factorResult.group_returns" size="small" stripe border>
+              <el-table-column prop="group" label="分组" width="120" />
+              <el-table-column prop="avg_return" label="平均收益" align="right">
+                <template #default="{ row }"><span :class="row.avg_return >= 0 ? 'text-red' : 'text-green'">{{ (row.avg_return * 100).toFixed(2) }}%</span></template>
+              </el-table-column>
+              <el-table-column prop="cum_return" label="累计收益" align="right">
+                <template #default="{ row }"><span :class="row.cum_return >= 0 ? 'text-red' : 'text-green'">{{ (row.cum_return * 100).toFixed(2) }}%</span></template>
+              </el-table-column>
+              <el-table-column prop="n_days" label="样本天数" align="right" />
+            </el-table>
+          </el-card>
+        </template>
+      </template>
+    </template>
+
+    <!-- 参数优化 -->
+    <template v-else-if="activeTab === 'optimizer'">
+      <el-card class="form-panel" shadow="never">
+        <template #header><span class="panel-title">参数优化</span></template>
+        <el-form :inline="true" label-width="110px" class="bt-form">
+          <el-form-item label="策略">
+            <el-select v-model="optForm.strategy_id" placeholder="选择策略" style="width: 200px">
+              <el-option v-for="s in strategies" :key="s.id" :label="s.name" :value="s.id" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="区间">
+            <el-date-picker v-model="optRange" type="daterange" value-format="YYYY-MM-DD" range-separator="至" start-placeholder="开始" end-placeholder="结束" style="width: 260px" />
+          </el-form-item>
+          <el-form-item label="目标函数">
+            <el-select v-model="optForm.objective" style="width: 160px">
+              <el-option label="总收益" value="total_return" />
+              <el-option label="夏普比率" value="sharpe" />
+              <el-option label="最大回撤" value="max_drawdown" />
+              <el-option label="胜率" value="win_rate" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="参数网格">
+            <el-input v-model="optForm.paramGridText" type="textarea" :rows="3" placeholder='{"vol_ratio_min": [1.0, 1.2, 1.5], "use_volume_filter": [true, false]}' style="width: 420px" />
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" :loading="optLoading" @click="runOptimizer">
+              <el-icon><Search /></el-icon>
+              开始优化
+            </el-button>
+          </el-form-item>
+        </el-form>
+      </el-card>
+
+      <template v-if="optResult">
+        <el-alert v-if="!optResult.success" :title="optResult.error || '优化失败'" type="error" show-icon :closable="false" />
+        <template v-else>
+          <el-card class="chart-panel" shadow="never">
+            <template #header><span class="panel-title">参数组合结果 ({{ optResult.n_trials }})</span></template>
+            <el-table :data="optResult.results" size="small" stripe border>
+              <el-table-column type="index" label="#" width="50" />
+              <el-table-column label="参数" min-width="220">
+                <template #default="{ row }">
+                  <el-tag v-for="(v, k) in row.params" :key="k" size="small" class="param-tag">{{ k }}={{ v }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="value" label="目标值" align="right" width="120">
+                <template #default="{ row }"><span class="text-red">{{ Number(row.value).toFixed(4) }}</span></template>
+              </el-table-column>
+              <el-table-column prop="stats.total_return" label="总收益" align="right" width="100">
+                <template #default="{ row }">{{ (row.stats?.total_return * 100).toFixed(2) }}%</template>
+              </el-table-column>
+              <el-table-column prop="stats.sharpe" label="夏普" align="right" width="90" />
+              <el-table-column prop="stats.max_drawdown" label="最大回撤" align="right" width="100">
+                <template #default="{ row }">{{ (row.stats?.max_drawdown * 100).toFixed(2) }}%</template>
+              </el-table-column>
+              <el-table-column prop="stats.win_rate" label="胜率" align="right" width="90">
+                <template #default="{ row }">{{ (row.stats?.win_rate * 100).toFixed(1) }}%</template>
+              </el-table-column>
+              <el-table-column prop="stats.n_trades" label="交易数" align="right" width="90" />
+            </el-table>
+          </el-card>
+        </template>
+      </template>
+    </template>
+
+    <!-- 步进优化 -->
+    <template v-else-if="activeTab === 'walkforward'">
+      <el-card class="form-panel" shadow="never">
+        <template #header><span class="panel-title">步进优化</span></template>
+        <el-form :inline="true" label-width="110px" class="bt-form">
+          <el-form-item label="策略">
+            <el-select v-model="wfForm.strategy_id" placeholder="选择策略" style="width: 200px">
+              <el-option v-for="s in strategies" :key="s.id" :label="s.name" :value="s.id" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="区间">
+            <el-date-picker v-model="wfRange" type="daterange" value-format="YYYY-MM-DD" range-separator="至" start-placeholder="开始" end-placeholder="结束" style="width: 260px" />
+          </el-form-item>
+          <el-form-item label="训练天数">
+            <el-input-number v-model="wfForm.train_days" :min="30" :max="500" style="width: 120px" />
+          </el-form-item>
+          <el-form-item label="测试天数">
+            <el-input-number v-model="wfForm.test_days" :min="10" :max="200" style="width: 120px" />
+          </el-form-item>
+          <el-form-item label="参数网格">
+            <el-input v-model="wfForm.paramGridText" type="textarea" :rows="2" placeholder='{"vol_ratio_min": [1.0, 1.2, 1.5]}' style="width: 380px" />
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" :loading="wfLoading" @click="runWalkForward">
+              <el-icon><Search /></el-icon>
+              开始优化
+            </el-button>
+          </el-form-item>
+        </el-form>
+      </el-card>
+
+      <template v-if="wfResult">
+        <el-alert v-if="!wfResult.success" :title="wfResult.error || '步进优化失败'" type="error" show-icon :closable="false" />
+        <template v-else>
+          <el-card class="chart-panel" shadow="never">
+            <template #header>
+              <span class="panel-title">各折样本外表现 · 平均测试收益</span>
+              <el-tag size="small" type="success" style="margin-left: 8px">{{ (wfResult.avg_test_return * 100).toFixed(2) }}%</el-tag>
+            </template>
+            <el-table :data="wfResult.folds" size="small" stripe border>
+              <el-table-column type="index" label="#" width="50" />
+              <el-table-column label="训练区间" width="190">
+                <template #default="{ row }">{{ row.train.start }} ~ {{ row.train.end }}</template>
+              </el-table-column>
+              <el-table-column label="测试区间" width="190">
+                <template #default="{ row }">{{ row.test.start }} ~ {{ row.test.end }}</template>
+              </el-table-column>
+              <el-table-column label="最优参数" min-width="200">
+                <template #default="{ row }">
+                  <el-tag v-for="(v, k) in row.best_params" :key="k" size="small" class="param-tag">{{ k }}={{ v }}</el-tag>
+                  <span v-if="!row.best_params || Object.keys(row.best_params).length === 0" class="text-muted">-</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="测试收益" align="right" width="110">
+                <template #default="{ row }">
+                  <span :class="row.stats?.total_return >= 0 ? 'text-red' : 'text-green'">{{ (row.stats?.total_return * 100).toFixed(2) }}%</span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="stats.sharpe" label="夏普" align="right" width="90" />
+              <el-table-column prop="stats.max_drawdown" label="最大回撤" align="right" width="100">
+                <template #default="{ row }">{{ (row.stats?.max_drawdown * 100).toFixed(2) }}%</template>
+              </el-table-column>
+              <el-table-column prop="stats.n_trades" label="交易数" align="right" width="90" />
+            </el-table>
+          </el-card>
+        </template>
+      </template>
+    </template>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, computed, onMounted, h } from 'vue'
+import { ElMessage } from 'element-plus'
+import { Histogram, Search } from '@element-plus/icons-vue'
+import { use as echartsUse } from 'echarts/core'
+import { LineChart } from 'echarts/charts'
+import { TitleComponent, TooltipComponent, LegendComponent, GridComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+import VChart from 'vue-echarts'
+import { strategyApi, FACTOR_OPTIONS, type StrategyMeta, type BacktestResult, type BacktestStats, type FactorBacktestResult, type OptimizeResult, type WalkForwardResult } from '@/api/strategy'
+
+echartsUse([LineChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent, CanvasRenderer])
+
+defineOptions({ name: 'StrategyBacktest' })
+
+// 回测统计卡片
+const StatCards = (props: { stats: BacktestStats }) => {
+  const s = props.stats || {}
+  const pct = (v: number) => (v != null ? `${(v * 100).toFixed(2)}%` : '-')
+  const cards = computed(() => [
+    { label: '总收益', value: pct(s.total_return), color: (s.total_return ?? 0) >= 0 ? 'var(--el-color-danger)' : 'var(--el-color-success)' },
+    { label: '年化收益', value: pct(s.annual_return), color: (s.annual_return ?? 0) >= 0 ? 'var(--el-color-danger)' : 'var(--el-color-success)' },
+    { label: '最大回撤', value: pct(s.max_drawdown), color: 'var(--el-color-warning)' },
+    { label: '夏普比率', value: s.sharpe != null ? s.sharpe.toFixed(2) : '-', color: 'var(--el-color-primary)' },
+    { label: '胜率', value: pct(s.win_rate), color: 'var(--el-color-primary)' },
+    { label: '盈亏比', value: s.profit_factor != null ? s.profit_factor.toFixed(2) : '-', color: 'var(--el-color-primary)' },
+    { label: '交易次数', value: String(s.n_trades ?? 0), color: 'var(--el-color-primary)' },
+    { label: '平均盈利', value: pct(s.avg_win), color: 'var(--el-color-danger)' },
+    { label: '平均亏损', value: pct(s.avg_loss), color: 'var(--el-color-success)' },
+    { label: '最佳', value: pct(s.best), color: 'var(--el-color-danger)' },
+    { label: '最差', value: pct(s.worst), color: 'var(--el-color-success)' },
+  ])
+  return () =>
+    h('div', { class: 'stat-cards' }, cards.value.map((c) =>
+      h('div', { class: 'stat-card', key: c.label }, [
+        h('div', { class: 'stat-label' }, c.label),
+        h('div', { class: 'stat-value', style: { color: c.color } }, c.value),
+      ])
+    ))
+}
+
+const MODES = [
+  { key: 'strategy', title: '策略回测', hint: '验证完整选股和交易规则，看净值曲线、回撤、胜率和交易明细。' },
+  { key: 'factor', title: '因子回测', hint: '验证单个因子是否有预测能力，看 IC / IR 和分层收益。' },
+  { key: 'optimizer', title: '参数优化', hint: '网格搜索最优参数组合，按夏普/收益等目标排序。' },
+  { key: 'walkforward', title: '步进优化', hint: '滚动窗口样本外验证，识别过拟合。' },
+] as const
+
+const activeTab = ref<'strategy' | 'factor' | 'optimizer' | 'walkforward'>('strategy')
+const activeMode = computed(() => MODES.find(m => m.key === activeTab.value)!)
+const strategies = ref<StrategyMeta[]>([])
+
+// 策略回测表单
+const btRange = ref<[string, string] | null>(null)
+const btForm = ref({
+  strategy_id: '',
+  initial_capital: 1000000,
+  max_positions: 10,
+  position_sizing: 'equal',
+  fees_pct: 0.0002,
+  slippage_bps: 5,
+  stop_loss_pct: null as number | null,
+  take_profit_pct: null as number | null,
+  max_hold_days: null as number | null,
+})
+const strategyLoading = ref(false)
+const strategyResult = ref<BacktestResult | null>(null)
+
+// 因子回测表单
+const factorRange = ref<[string, string] | null>(null)
+const factorForm = ref({ factor_name: 'momentum_20d', n_groups: 5 })
+const factorLoading = ref(false)
+const factorResult = ref<FactorBacktestResult | null>(null)
+
+// 参数优化表单
+const optRange = ref<[string, string] | null>(null)
+const optForm = ref({ strategy_id: '', objective: 'total_return', paramGridText: '' })
+const optLoading = ref(false)
+const optResult = ref<OptimizeResult | null>(null)
+
+// 步进优化表单
+const wfRange = ref<[string, string] | null>(null)
+const wfForm = ref({ strategy_id: '', train_days: 120, test_days: 30, paramGridText: '' })
+const wfLoading = ref(false)
+const wfResult = ref<WalkForwardResult | null>(null)
+
+const parseParamGrid = (text: string): Record<string, any> => {
+  if (!text.trim()) return {}
+  try {
+    const obj = JSON.parse(text)
+    return obj && typeof obj === 'object' ? obj : {}
+  } catch {
+    ElMessage.error('参数网格 JSON 格式错误')
+    throw new Error('JSON parse error')
+  }
+}
+
+const loadStrategies = async () => {
+  try {
+    const res = await strategyApi.list()
+    const list = (res as any)?.data ?? res
+    strategies.value = Array.isArray(list) ? list : []
+    if (strategies.value.length > 0) {
+      const first = strategies.value[0].id
+      btForm.value.strategy_id = first
+      optForm.value.strategy_id = first
+      wfForm.value.strategy_id = first
+    }
+  } catch {
+    ElMessage.error('加载策略列表失败')
+  }
+}
+
+const runStrategyBacktest = async () => {
+  if (!btForm.value.strategy_id) return ElMessage.warning('请选择策略')
+  if (!btRange.value?.[0]) return ElMessage.warning('请选择回测区间')
+  strategyLoading.value = true
+  try {
+    const res = await strategyApi.backtest({
+      strategy_id: btForm.value.strategy_id,
+      start: btRange.value[0],
+      end: btRange.value[1],
+      params: {},
+      entry_fill: 'open_t+1',
+      exit_fill: 'open_t+1',
+      fees_pct: btForm.value.fees_pct,
+      slippage_bps: btForm.value.slippage_bps,
+      max_positions: btForm.value.max_positions,
+      max_exposure_pct: 1.0,
+      initial_capital: btForm.value.initial_capital,
+      position_sizing: btForm.value.position_sizing,
+      stop_loss_pct: btForm.value.stop_loss_pct,
+      take_profit_pct: btForm.value.take_profit_pct,
+      max_hold_days: btForm.value.max_hold_days,
+      holding_days: 5,
+    })
+    strategyResult.value = (res as any)?.data ?? res
+  } catch (e) {
+    ElMessage.error('策略回测失败')
+  } finally {
+    strategyLoading.value = false
+  }
+}
+
+const runFactorBacktest = async () => {
+  if (!factorRange.value?.[0]) return ElMessage.warning('请选择回测区间')
+  factorLoading.value = true
+  try {
+    const res = await strategyApi.factorBacktest({
+      factor_name: factorForm.value.factor_name,
+      start: factorRange.value[0],
+      end: factorRange.value[1],
+      n_groups: factorForm.value.n_groups,
+      rebalance: 'monthly',
+    })
+    factorResult.value = (res as any)?.data ?? res
+  } catch (e) {
+    ElMessage.error('因子回测失败')
+  } finally {
+    factorLoading.value = false
+  }
+}
+
+const runOptimizer = async () => {
+  if (!optForm.value.strategy_id) return ElMessage.warning('请选择策略')
+  if (!optRange.value?.[0]) return ElMessage.warning('请选择回测区间')
+  let paramGrid: Record<string, any>
+  try { paramGrid = parseParamGrid(optForm.value.paramGridText) } catch { return }
+  optLoading.value = true
+  try {
+    const res = await strategyApi.optimize({
+      strategy_id: optForm.value.strategy_id,
+      start: optRange.value[0],
+      end: optRange.value[1],
+      objective: optForm.value.objective,
+      param_grid: Object.keys(paramGrid).length ? paramGrid : undefined,
+      entry_fill: 'open_t+1',
+      exit_fill: 'open_t+1',
+      fees_pct: 0.0002,
+      slippage_bps: 5,
+      max_positions: 10,
+      initial_capital: 1000000,
+      position_sizing: 'equal',
+    })
+    optResult.value = (res as any)?.data ?? res
+  } catch (e) {
+    ElMessage.error('参数优化失败')
+  } finally {
+    optLoading.value = false
+  }
+}
+
+const runWalkForward = async () => {
+  if (!wfForm.value.strategy_id) return ElMessage.warning('请选择策略')
+  if (!wfRange.value?.[0]) return ElMessage.warning('请选择回测区间')
+  let paramGrid: Record<string, any>
+  try { paramGrid = parseParamGrid(wfForm.value.paramGridText) } catch { return }
+  wfLoading.value = true
+  try {
+    const res = await strategyApi.walkforward({
+      strategy_id: wfForm.value.strategy_id,
+      start: wfRange.value[0],
+      end: wfRange.value[1],
+      train_days: wfForm.value.train_days,
+      test_days: wfForm.value.test_days,
+      param_grid: Object.keys(paramGrid).length ? paramGrid : undefined,
+      entry_fill: 'open_t+1',
+      exit_fill: 'open_t+1',
+      fees_pct: 0.0002,
+      slippage_bps: 5,
+      max_positions: 10,
+      initial_capital: 1000000,
+      position_sizing: 'equal',
+    })
+    wfResult.value = (res as any)?.data ?? res
+  } catch (e) {
+    ElMessage.error('步进优化失败')
+  } finally {
+    wfLoading.value = false
+  }
+}
+
+const equityOption = computed(() => {
+  const curve = strategyResult.value?.equity_curve ?? []
+  const legend = ['策略净值']
+  const series: any[] = [{
+    name: '策略净值',
+    type: 'line',
+    showSymbol: false,
+    data: curve.map(p => [p.date, p.value]),
+    lineStyle: { width: 2 },
+    itemStyle: { color: '#409eff' },
+  }]
+  const bench = strategyResult.value?.benchmark_curve ?? []
+  if (bench.length) {
+    legend.push('上证指数')
+    series.push({
+      name: '上证指数',
+      type: 'line',
+      showSymbol: false,
+      data: bench.map(p => [p.date, p.value]),
+      lineStyle: { width: 1.5, type: 'dashed' },
+      itemStyle: { color: '#67c23a' },
+    })
+  }
+  return {
+    tooltip: { trigger: 'axis' },
+    legend: { data: legend },
+    grid: { left: 60, right: 20, top: 40, bottom: 40 },
+    xAxis: { type: 'category', data: curve.map(p => p.date) },
+    yAxis: { type: 'value', scale: true },
+    series,
+  }
+})
+
+const icOption = computed(() => {
+  const series = factorResult.value?.ic_series ?? []
+  return {
+    tooltip: { trigger: 'axis' },
+    grid: { left: 60, right: 20, top: 20, bottom: 40 },
+    xAxis: { type: 'category', data: series.map(p => p.date) },
+    yAxis: { type: 'value', scale: true },
+    series: [{
+      name: 'IC',
+      type: 'line',
+      showSymbol: false,
+      data: series.map(p => p.value),
+      lineStyle: { width: 1.5 },
+      itemStyle: { color: '#409eff' },
+    }],
+  }
+})
+
+onMounted(() => {
+  loadStrategies()
+})
+</script>
+
+<style lang="scss" scoped>
+.strategy-backtest {
+  padding: 20px;
+  max-width: 1600px;
+  margin: 0 auto;
+
+  .page-header {
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 2px solid var(--el-border-color-lighter);
+
+    .page-title {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--el-text-color-primary);
+      margin: 0 0 8px 0;
+
+      .el-icon { color: var(--el-color-primary); font-size: 28px; }
+    }
+
+    .page-description {
+      color: var(--el-text-color-regular);
+      margin: 0 0 16px 0;
+      font-size: 14px;
+    }
+  }
+
+  .form-panel {
+    margin-bottom: 20px;
+    border-radius: 12px;
+
+    :deep(.el-card__header) {
+      background: linear-gradient(135deg, var(--el-color-primary-light-9) 0%, var(--el-color-primary-light-8) 100%);
+      padding: 14px 20px;
+    }
+
+    .panel-title { font-size: 15px; font-weight: 600; color: var(--el-text-color-primary); }
+
+    .bt-form { padding: 16px; }
+  }
+
+  .chart-panel {
+    margin-bottom: 20px;
+    border-radius: 12px;
+
+    :deep(.el-card__header) {
+      background: linear-gradient(135deg, var(--el-color-info-light-9) 0%, var(--el-color-info-light-8) 100%);
+      padding: 14px 20px;
+    }
+
+    .panel-title { font-size: 15px; font-weight: 600; color: var(--el-text-color-primary); }
+
+    .chart { height: 320px; }
+  }
+
+  .stat-row {
+    margin-bottom: 20px;
+
+    :deep(.el-statistic__head) { font-size: 13px; }
+  }
+
+  .param-tag { margin-right: 6px; margin-bottom: 4px; }
+  .text-red { color: var(--el-color-danger); font-weight: 600; }
+  .text-green { color: var(--el-color-success); font-weight: 600; }
+  .text-muted { color: var(--el-text-color-secondary); }
+
+  .stat-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 16px;
+    margin-bottom: 20px;
+
+    .stat-card {
+      background: var(--el-fill-color-light);
+      padding: 16px;
+      border-radius: 8px;
+
+      .stat-label {
+        font-size: 13px;
+        color: var(--el-text-color-secondary);
+        margin-bottom: 8px;
+      }
+
+      .stat-value {
+        font-size: 20px;
+        font-weight: 700;
+      }
+    }
+  }
+}
+
+html.dark {
+  .strategy-backtest {
+    .form-panel,
+    .chart-panel {
+      :deep(.el-card__header) {
+        background: linear-gradient(135deg, var(--el-bg-color-overlay) 0%, var(--el-fill-color-darker) 100%);
+      }
+    }
+  }
+}
+</style>

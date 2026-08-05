@@ -74,6 +74,7 @@ import {
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const notifStore = useNotificationStore()
+const router = useRouter()
 const { unreadCount, items, loading } = storeToRefs(notifStore)
 const drawerVisible = ref(false)
 const filter = ref<'all' | 'unread'>('all')
@@ -155,7 +156,7 @@ onUnmounted(() => {
 })
 
 function showHelp() {
-  window.open('https://www.sse.com.cn/', '_blank')
+  router.push('/learning')
 }
 </script>
 

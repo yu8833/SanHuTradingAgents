@@ -14,6 +14,8 @@ from pydantic import BaseModel
 
 from app.core.response import ok
 from app.services import vibe_astock as astock
+from app.services.concept_analysis import get_concept_analysis, get_concept_rotation
+from app.services.market_dashboard import get_dashboard
 from app.services.market_overview import get_global_indices, get_overview, get_short_term_emotion, get_turnover_top
 from app.services.news_data_service import NewsQueryParams, get_news_data_service
 from app.services.newsradar import fetch_radar, get_radar_cached
@@ -78,6 +80,40 @@ async def market_overview(current_user: dict = Depends(get_optional_current_user
     except Exception as e:
         logger.error(f"市场总览异常: {e}")
         return ok({"sentiment": {}, "sectors": [], "updated": ""})
+
+
+@router.get("/market/dashboard")
+async def market_dashboard(current_user: dict = Depends(get_optional_current_user)):
+    """市场看板：情绪评分+6维雷达 / KPI / 涨跌分布 / 四大榜单 / 行业热度（Redis分级TTL缓存）"""
+    try:
+        data = await get_dashboard()
+        return ok(data)
+    except Exception as e:
+        logger.error(f"市场看板异常: {e}")
+        return ok({})
+
+
+@router.get("/market/concept-analysis")
+async def market_concept_analysis(current_user: dict = Depends(get_optional_current_user)):
+    """概念分析：概念实时行情 + 领涨/领跌榜 + 资金流榜（同花顺，Redis分级TTL缓存）"""
+    try:
+        data = await get_concept_analysis()
+        return ok(data)
+    except Exception as e:
+        logger.error(f"概念分析异常: {e}")
+        return ok({"total": 0, "concepts": [], "gainers": [], "losers": [], "money_leaders": []})
+
+
+@router.get("/market/concept-rotation")
+async def market_concept_rotation(top_n: int = 40, current_user: dict = Depends(get_optional_current_user)):
+    """概念轮动 RPS 矩阵：热门概念多窗口累计涨幅（5/10/20/60日，financial级TTL缓存）"""
+    try:
+        top_n = max(10, min(80, top_n))
+        data = await get_concept_rotation(top_n)
+        return ok(data)
+    except Exception as e:
+        logger.error(f"概念轮动矩阵异常: {e}")
+        return ok({"windows": [], "rows": []})
 
 
 @router.get("/market/emotion")

@@ -390,6 +390,18 @@ async def lifespan(app: FastAPI):
             )
             logger.info(f"⏱ 实时行情入库任务已启动: 每 {ingest_interval}s")
 
+        # 监控中心规则评估任务（每 N 秒，基于已入库行情）
+        if settings.MONITOR_ENABLED:
+            from app.services.monitor_service import monitor_service
+            await monitor_service.ensure_indexes()
+            scheduler.add_job(
+                monitor_service.run_evaluation,
+                IntervalTrigger(seconds=settings.MONITOR_INTERVAL_SECONDS, timezone=settings.TIMEZONE),
+                id="monitor_rule_evaluation",
+                name="监控中心规则评估"
+            )
+            logger.info(f"⏱ 监控中心规则评估已启动: 每 {settings.MONITOR_INTERVAL_SECONDS}s")
+
         # Tushare统一数据同步任务配置
         logger.info("🔄 配置Tushare统一数据同步任务...")
 
@@ -1008,6 +1020,10 @@ app.include_router(retail.router, prefix="/api/retail", tags=["retail"])
 from app.routers import stock_alerts as stock_alerts_router
 
 app.include_router(stock_alerts_router.router, prefix="/api/stock", tags=["stock-alerts"])
+# 监控中心
+from app.routers import monitor as monitor_router
+
+app.include_router(monitor_router.router, tags=["monitor"])
 # 新增：系统配置只读摘要
 from app.routers import system_config as system_config_router
 
@@ -1037,6 +1053,10 @@ app.include_router(news_data.router, tags=["news-data"])
 app.include_router(social_media.router, tags=["social-media"])
 app.include_router(internal_messages.router, tags=["internal-messages"])
 app.include_router(vibe_router.router, tags=["vibe-research"])
+# 策略系统（筛选 + 回测）
+from app.routers import strategy as strategy_router
+
+app.include_router(strategy_router.router, tags=["strategy"])
 
 
 @app.get("/")

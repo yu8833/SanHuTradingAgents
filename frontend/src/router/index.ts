@@ -33,7 +33,7 @@ const routes: RouteRecordRaw[] = [
     name: 'Dashboard',
     component: () => import('@/layouts/BasicLayout.vue'),
     meta: {
-      title: '仪表',
+      title: '监控',
       icon: 'Dashboard',
       requiresAuth: true,
       transition: 'fade'
@@ -44,7 +44,7 @@ const routes: RouteRecordRaw[] = [
         name: 'DashboardHome',
         component: () => import('@/views/Dashboard/index.vue'),
         meta: {
-          title: '仪表',
+          title: '监控',
           requiresAuth: true
         }
       }
@@ -108,9 +108,19 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'common',
         name: 'StockScreeningCommon',
-        component: () => import('@/views/Screening/index.vue'),
+        component: () => import('@/views/Screening/StrategyScreener.vue'),
         meta: {
           title: '常用策略',
+          parentTitle: '选股',
+          requiresAuth: true
+        }
+      },
+      {
+        path: 'backtest',
+        name: 'StrategyBacktest',
+        component: () => import('@/views/Screening/StrategyBacktest.vue'),
+        meta: {
+          title: '策略回测',
           parentTitle: '选股',
           requiresAuth: true
         }
@@ -282,21 +292,21 @@ const routes: RouteRecordRaw[] = [
         }
       },
       {
-        path: 'review/fundflow',
-        name: 'ReviewFundFlow',
-        component: () => import('@/views/Vibe/Review/FundFlow.vue'),
-        meta: {
-          title: '资金流向',
-          parentTitle: '市场',
-          requiresAuth: true
-        }
-      },
-      {
         path: 'review/emotion',
         name: 'ReviewEmotion',
         component: () => import('@/views/Vibe/Review/Emotion.vue'),
         meta: {
           title: '短线情绪',
+          parentTitle: '市场',
+          requiresAuth: true
+        }
+      },
+      {
+        path: 'review/concept',
+        name: 'ReviewConcept',
+        component: () => import('@/views/Vibe/Review/ConceptAnalysis.vue'),
+        meta: {
+          title: '概念分析',
           parentTitle: '市场',
           requiresAuth: true
         }

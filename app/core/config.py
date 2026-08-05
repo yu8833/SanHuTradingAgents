@@ -204,6 +204,13 @@ class Settings(BaseSettings):
     # 时区
     TIMEZONE: str = Field(default="Asia/Shanghai")
 
+    # 监控中心规则评估任务
+    MONITOR_ENABLED: bool = Field(default=True, description="启用监控中心规则评估")
+    MONITOR_INTERVAL_SECONDS: int = Field(
+        default=60,
+        description="监控中心规则评估间隔（秒）"
+    )
+
     # 实时行情入库任务
     QUOTES_INGEST_ENABLED: bool = Field(default=True)
     QUOTES_INGEST_INTERVAL_SECONDS: int = Field(

@@ -107,6 +107,69 @@ export interface MarketOverview {
   updated: string
 }
 
+// ---------------------------------------------------------------------------
+// 市场看板（借鉴 tickflow Dashboard）
+// ---------------------------------------------------------------------------
+
+export interface RadarDim {
+  key: string
+  label: string
+  value: number
+}
+
+export interface MarketRankItem {
+  name: string
+  pct: number
+  count: number
+  net: number
+}
+
+export interface MarketTopRow {
+  code: string
+  name: string
+  close: number
+  pct_chg: number
+  amount: number
+  turnover_rate: number
+}
+
+export interface DashboardLimit {
+  limit_up: number
+  limit_down: number
+  seal_rate: number | null
+  max_boards: number
+  tiers: { boards: number; count: number; plus?: boolean }[]
+}
+
+export interface MarketDashboard {
+  as_of: string
+  indices: IndexQuote[]
+  breadth: {
+    total: number
+    up: number
+    down: number
+    flat: number
+    up_pct: number
+    down_pct: number
+    avg_pct: number
+    median_pct: number
+    strong_up: number
+    strong_down: number
+  }
+  amount: { total: number; avg: number }
+  distribution: { label: string; count: number; pct: number }[]
+  limit: DashboardLimit
+  activity: { avg_turnover: number; high_turnover: number; high_turnover_pct: number }
+  radar: RadarDim[]
+  emotion: { score: number; label: string }
+  top_gainers: MarketTopRow[]
+  top_losers: MarketTopRow[]
+  turnover_leaders: MarketTopRow[]
+  active_leaders: MarketTopRow[]
+  industry_rank: { leading: MarketRankItem[]; lagging: MarketRankItem[] }
+  updated: string
+}
+
 export interface LianbanStock {
   code: string
   name: string
@@ -148,6 +211,39 @@ export interface TurnoverStock {
 export interface TurnoverTop {
   stocks: TurnoverStock[]
   updated: string
+}
+
+export interface ConceptItem {
+  code: string
+  name: string
+  pct_chg: number
+  lead_code: string
+  lead_name: string
+  money_flow: number
+  turnover: number
+}
+
+export interface ConceptAnalysis {
+  total: number
+  as_of: string
+  breadth: { up: number; down: number; avg_pct: number }
+  concepts: ConceptItem[]
+  gainers: ConceptItem[]
+  losers: ConceptItem[]
+  money_leaders: ConceptItem[]
+}
+
+export interface ConceptRotationRow {
+  code: string
+  name: string
+  pct_chg: number
+  returns: Record<string, number | null>
+}
+
+export interface ConceptRotation {
+  windows: number[]
+  as_of: string
+  rows: ConceptRotationRow[]
 }
 
 export interface StockQuote {
@@ -283,12 +379,24 @@ export const vibeApi = {
     return cachedGet<MarketOverview>('/api/vibe/market/overview', undefined, 180000, { timeout: 15000 })
   },
 
+  async getDashboard() {
+    return cachedGet<MarketDashboard>('/api/vibe/market/dashboard', undefined, 180000, { timeout: 15000 })
+  },
+
   async getEmotion() {
     return cachedGet<ShortTermEmotion>('/api/vibe/market/emotion', undefined, 180000, { timeout: 15000 })
   },
 
   async getTurnoverTop() {
     return cachedGet<TurnoverTop>('/api/vibe/market/turnover-top', undefined, 180000, { timeout: 15000 })
+  },
+
+  async getConceptAnalysis() {
+    return cachedGet<ConceptAnalysis>('/api/vibe/market/concept-analysis', undefined, 180000, { timeout: 20000 })
+  },
+
+  async getConceptRotation(topN: number = 40) {
+    return cachedGet<ConceptRotation>('/api/vibe/market/concept-rotation', { top_n: topN }, 3600000, { timeout: 120000 })
   },
 
   // 资讯模块
