@@ -3,11 +3,9 @@
 Tushare数据初始化CLI工具
 用于首次部署时的数据初始化操作
 """
-import asyncio
 import argparse
+import asyncio
 import sys
-import os
-from datetime import datetime
 from pathlib import Path
 
 # 添加项目根目录到Python路径

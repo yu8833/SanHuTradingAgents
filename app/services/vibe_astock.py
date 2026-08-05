@@ -159,9 +159,9 @@ def _parse_gtimg(data: str) -> dict[str, dict]:
             continue
         code = key[2:]
 
-        def num(i: int) -> float:
+        def num(i: int, _vals: list = vals) -> float:
             try:
-                return float(vals[i]) if vals[i] else 0.0
+                return float(_vals[i]) if _vals[i] else 0.0
             except (ValueError, IndexError):
                 return 0.0
 

@@ -919,14 +919,19 @@ async def check_data_freshness(user: dict = Depends(get_current_user)):
     - overall: 整体新鲜度（任一数据不新鲜则整体不新鲜）
     """
     try:
-        from datetime import datetime, timedelta
+        from datetime import datetime
 
         from app.core.database import get_mongo_db
 
         db = get_mongo_db()
         today = datetime.now()
 
-        from app.utils.trading_time import calc_stale_days, count_trading_days_between, get_latest_trade_day, is_trading_day
+        from app.utils.trading_time import (
+            calc_stale_days,
+            count_trading_days_between,
+            get_latest_trade_day,
+            is_trading_day,
+        )
 
         expected_date = get_latest_trade_day(today)
         expected_date_str = expected_date.strftime("%Y-%m-%d")

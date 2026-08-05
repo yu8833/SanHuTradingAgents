@@ -218,8 +218,8 @@ class RiskScanner:
             for _, row in recent.iterrows():
                 row_dict = row.to_dict()
 
-                def g(k):
-                    v = row_dict.get(k)
+                def g(k, _row=row_dict):
+                    v = _row.get(k)
                     return None if v in (False, "false", "", None) else v
 
                 results.append({

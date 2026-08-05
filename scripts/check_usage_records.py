@@ -50,34 +50,7 @@ async def main():
         print("  2. 还没有进行过分析")
         print("  3. LLM 适配器没有正确记录 token 使用")
     
-    # 3. 检查 tradingagents 的 MongoDB 存储
-    print("\n3️⃣ 检查 tradingagents 的 usage_records 集合...")
-    try:
-        from tradingagents.config.mongodb_storage import MongoDBStorage
-        from tradingagents.config.config_manager import config_manager
-        
-        # 检查是否启用了 MongoDB 存储
-        if config_manager.mongodb_storage and config_manager.mongodb_storage.is_connected():
-            records = config_manager.mongodb_storage.load_usage_records(limit=5)
-            print(f"📊 TradingAgents 记录数: {len(records)}")
-            
-            if records:
-                print("\n📋 最近的 5 条记录：")
-                for record in records[:5]:
-                    print(f"\n  • 时间: {record.timestamp}")
-                    print(f"    供应商: {record.provider}")
-                    print(f"    模型: {record.model_name}")
-                    print(f"    输入 Token: {record.input_tokens}")
-                    print(f"    输出 Token: {record.output_tokens}")
-                    print(f"    成本: ¥{record.cost:.4f}")
-            else:
-                print("⚠️  TradingAgents 也没有记录")
-        else:
-            print("⚠️  TradingAgents MongoDB 存储未连接")
-    except Exception as e:
-        print(f"❌ 检查 TradingAgents 存储失败: {e}")
-    
-    # 4. 检查配置
+    # 3. 检查配置
     print("\n4️⃣ 检查配置...")
     try:
         from app.services.config_service import config_service

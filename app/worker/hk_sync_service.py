@@ -464,11 +464,11 @@ class HKDataService:
 
 _hk_sync_service = None
 
-async def get_hk_sync_service() -> HKSyncService:
+async def get_hk_sync_service() -> HKDataService:
     """获取港股同步服务实例"""
     global _hk_sync_service
     if _hk_sync_service is None:
-        _hk_sync_service = HKSyncService()
+        _hk_sync_service = HKDataService()
         await _hk_sync_service.initialize()
     return _hk_sync_service
 

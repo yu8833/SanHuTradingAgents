@@ -1680,7 +1680,7 @@ class LimitUpPullbackService:
         for td in trade_dates:
             rise_count = 0
             total_count = 0
-            for code, date_map in quotes_by_date_by_stock.items():
+            for _code, date_map in quotes_by_date_by_stock.items():
                 q = date_map.get(td)
                 if q and q.get("pct_chg") is not None:
                     total_count += 1

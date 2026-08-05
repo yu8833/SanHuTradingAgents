@@ -6,8 +6,8 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timedelta
-from typing import Iterable
+from collections.abc import Iterable
+from datetime import date, datetime
 
 import pandas as pd
 

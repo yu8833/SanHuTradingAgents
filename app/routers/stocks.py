@@ -5,6 +5,7 @@
 - 路径前缀在 main.py 中挂载为 /api，当前路由自身前缀为 /stocks
 """
 import asyncio  # 🔥 添加 asyncio 导入
+import json
 import logging
 import os
 import re
@@ -800,7 +801,6 @@ async def get_kline(
     """
     import logging
     from datetime import datetime, timedelta
-    from datetime import time as dtime
     from zoneinfo import ZoneInfo
     logger = logging.getLogger(__name__)
 

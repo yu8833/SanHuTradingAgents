@@ -28,7 +28,7 @@ class AKShareAdapter(DataSourceAdapter):
     def is_available(self) -> bool:
         """检查AKShare是否可用（仅检查 import，快速返回，不阻塞）"""
         try:
-            import akshare as ak  # noqa: F401
+            import akshare as ak  # noqa: F401  # 仅用于可用性探测
             return True
         except ImportError:
             return False
@@ -272,9 +272,9 @@ class AKShareAdapter(DataSourceAdapter):
                 try:
                     logger.info(f"尝试 AKShare {src} 数据源获取实时行情（超时: {timeout}秒）")
 
-                    def _fetch_data():
+                    def _fetch_data(_src=src):
                         """在子线程中获取数据"""
-                        if src == "sina":
+                        if _src == "sina":
                             df = ak.stock_zh_a_spot()  # 新浪财经接口
                             logger.info("使用 AKShare 新浪财经接口获取实时行情")
                         else:  # 默认使用东方财富

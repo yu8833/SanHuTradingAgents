@@ -12,7 +12,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from app.core.database import get_mongo_db_sync
-from app.core.response import ok, fail
+from app.core.response import fail, ok
 from app.strategy_system import backtest as bt
 from app.strategy_system import screener
 
@@ -116,7 +116,7 @@ async def list_strategies():
     """获取策略列表（元信息）。"""
     try:
         return ok(screener.list_strategies())
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.exception("获取策略列表失败")
         return fail(f"获取策略列表失败: {e}")
 
@@ -130,7 +130,7 @@ async def run_strategy(req: StrategyRunRequest):
             screener.run_strategy, db, req.strategy_id, req.as_of, req.params, req.limit, req.pool
         )
         return ok(result)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.exception("策略筛选失败")
         return fail(f"策略筛选失败: {e}")
 
@@ -144,7 +144,7 @@ async def run_all_strategies(req: StrategyRunAllRequest):
             screener.run_all_strategies, db, req.as_of, req.limit, req.pool, req.refresh
         )
         return ok(result)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.exception("批量策略筛选失败")
         return fail(f"批量策略筛选失败: {e}")
 
@@ -156,7 +156,7 @@ async def list_trade_dates(limit: int = 30):
         db = get_mongo_db_sync()
         dates = await asyncio.to_thread(screener.get_trade_dates, db, limit)
         return ok({"dates": dates})
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.exception("获取交易日列表失败")
         return fail(f"获取交易日列表失败: {e}")
 
@@ -188,7 +188,7 @@ async def strategy_backtest(req: BacktestRequest):
         )
         result = await asyncio.to_thread(bt.run_strategy_backtest, db, cfg)
         return ok(result)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.exception("策略回测失败")
         return fail(f"策略回测失败: {e}")
 
@@ -202,7 +202,7 @@ async def factor_backtest(req: FactorBacktestRequest):
             bt.run_factor_backtest, db, req.model_dump()
         )
         return ok(result)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.exception("因子回测失败")
         return fail(f"因子回测失败: {e}")
 
@@ -214,7 +214,7 @@ async def optimize(req: OptimizeRequest):
         db = get_mongo_db_sync()
         result = await asyncio.to_thread(bt.run_optimizer, db, req.model_dump())
         return ok(result)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.exception("参数优化失败")
         return fail(f"参数优化失败: {e}")
 
@@ -226,6 +226,6 @@ async def walkforward(req: WalkForwardRequest):
         db = get_mongo_db_sync()
         result = await asyncio.to_thread(bt.run_walkforward, db, req.model_dump())
         return ok(result)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.exception("步进优化失败")
         return fail(f"步进优化失败: {e}")

@@ -1005,25 +1005,35 @@ class TushareSyncService:
             if key == "name":
                 result["name"] = val
             elif key in ("price", "current_price"):
-                with contextlib.suppress(ValueError): result["current_price"] = float(val)
+                with contextlib.suppress(ValueError):
+                    result["current_price"] = float(val)
             elif "pe_ttm" in key or key == "pe (ttm)":
-                with contextlib.suppress(ValueError): result["pe_ttm"] = float(val)
+                with contextlib.suppress(ValueError):
+                    result["pe_ttm"] = float(val)
             elif "pe_static" in key or key == "pe (static)":
-                with contextlib.suppress(ValueError): result["pe_static"] = float(val)
+                with contextlib.suppress(ValueError):
+                    result["pe_static"] = float(val)
             elif key == "pb":
-                with contextlib.suppress(ValueError): result["pb"] = float(val)
+                with contextlib.suppress(ValueError):
+                    result["pb"] = float(val)
             elif key == "roe":
-                with contextlib.suppress(ValueError): result["roe"] = float(val)
+                with contextlib.suppress(ValueError):
+                    result["roe"] = float(val)
             elif "total_mv" in key or "总市值" in key:
-                with contextlib.suppress(ValueError): result["total_mv"] = float(val.replace("亿", "").strip())
+                with contextlib.suppress(ValueError):
+                    result["total_mv"] = float(val.replace("亿", "").strip())
             elif "circ_mv" in key or "流通市值" in key:
-                with contextlib.suppress(ValueError): result["circ_mv"] = float(val.replace("亿", "").strip())
+                with contextlib.suppress(ValueError):
+                    result["circ_mv"] = float(val.replace("亿", "").strip())
             elif "turnover" in key or "换手" in key:
-                with contextlib.suppress(ValueError): result["turnover_rate"] = float(val.replace("%", "").strip())
+                with contextlib.suppress(ValueError):
+                    result["turnover_rate"] = float(val.replace("%", "").strip())
             elif "volume" in key or "成交量" in key:
-                with contextlib.suppress(ValueError): result["volume"] = float(val)
+                with contextlib.suppress(ValueError):
+                    result["volume"] = float(val)
             elif "amount" in key or "成交额" in key:
-                with contextlib.suppress(ValueError): result["amount"] = float(val)
+                with contextlib.suppress(ValueError):
+                    result["amount"] = float(val)
 
         # 生成默认 report_period（当前季度末）
         from datetime import datetime

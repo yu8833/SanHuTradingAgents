@@ -1,7 +1,6 @@
 import os
 import re
 from datetime import datetime
-from typing import Dict, List
 
 import questionary
 from rich.console import Console
@@ -21,7 +20,7 @@ ANALYST_ORDER = [
     ("基本面分析师 | Fundamentals Analyst", AnalystType.FUNDAMENTALS),
 ]
 
-PROVIDER_OPTIONS: List[Dict[str, str]] = [
+PROVIDER_OPTIONS: list[dict[str, str]] = [
     {
         "label": "阿里百炼 (DashScope)",
         "key": "qwen",
@@ -131,7 +130,7 @@ def get_analysis_date() -> str:
     return date.strip()
 
 
-def select_analysts(ticker: str = None) -> List[AnalystType]:
+def select_analysts(ticker: str = None) -> list[AnalystType]:
     """Select analysts using an interactive checkbox."""
     available_analysts = ANALYST_ORDER.copy()
 

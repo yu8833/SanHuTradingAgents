@@ -9,7 +9,7 @@ from pathlib import Path
 _IS_WINDOWS = platform.system() == "Windows"
 if _IS_WINDOWS:
     try:
-        from concurrent_log_handler import ConcurrentRotatingFileHandler
+        from concurrent_log_handler import ConcurrentRotatingFileHandler  # noqa: F401  # 用于可用性探测
         _USE_CONCURRENT_HANDLER = True
     except ImportError:
         _USE_CONCURRENT_HANDLER = False

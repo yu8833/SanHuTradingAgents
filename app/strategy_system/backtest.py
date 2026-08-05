@@ -15,9 +15,8 @@ import logging
 import time
 import uuid
 from bisect import bisect_right
-from dataclasses import dataclass, field
-from datetime import date, timedelta
-from typing import Literal
+from dataclasses import dataclass
+from datetime import date
 
 import numpy as np
 import pandas as pd
@@ -135,7 +134,7 @@ def run_strategy_backtest(db, config: StrategyBtConfig, panel: pd.DataFrame | No
         if panel is None:
             panel = _load_panel(db, config.as_dict or config.__dict__)
         # 传入的 panel 只读不复用拷贝，避免大内存下因深拷贝 OOM
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return _err(f"数据加载失败: {e}")
 
     if panel.empty:
@@ -151,7 +150,7 @@ def run_strategy_backtest(db, config: StrategyBtConfig, panel: pd.DataFrame | No
 
     try:
         entry, exit_mask = _entry_exit_mask(panel, config.strategy_id, config.params or {})
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return _err(str(e))
 
     if not entry[formal.index].any():
@@ -246,7 +245,6 @@ def _simulate_portfolio(panel, entry, exit_mask, scores, config, start_s, end_s,
     positions: dict[str, dict] = {}  # symbol -> holding info
     trades: list[dict] = []
     equity_curve: list[dict] = []
-    drawdown_curve: list[dict] = []
 
     fees_pct = config.fees_pct
     slippage = _pct_from_bps(config.slippage_bps)
@@ -533,7 +531,7 @@ def _build_benchmark(db, start_s, end_s):
                 "symbol": "000001.SH",
             })
         return out
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.warning("加载基准失败: %s", e)
         return []
 
@@ -557,7 +555,7 @@ def run_factor_backtest(db, config: dict) -> dict:
 
     try:
         panel = _load_panel(db, config)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return _err(f"数据加载失败: {e}")
     if panel.empty:
         return _err("无数据")
@@ -716,7 +714,7 @@ def run_optimizer(db, config: dict, panel: pd.DataFrame | None = None) -> dict:
     if panel is None:
         try:
             panel = _load_panel(db, config)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             return _err(f"数据加载失败: {e}")
         if panel.empty:
             return _err("无数据")
@@ -727,7 +725,7 @@ def run_optimizer(db, config: dict, panel: pd.DataFrame | None = None) -> dict:
     if keys:
         values = [param_grid[k] if isinstance(param_grid[k], list) else [param_grid[k]] for k in keys]
         for combo in itertools.product(*values):
-            combos.append(dict(zip(keys, combo)))
+            combos.append(dict(zip(keys, combo, strict=True)))
     else:
         combos.append({})
 
@@ -807,7 +805,7 @@ def run_walkforward(db, config: dict) -> dict:
     # 构建交易日序列
     try:
         panel = _load_panel(db, config)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return _err(f"数据加载失败: {e}")
     if panel.empty:
         return _err("无数据")

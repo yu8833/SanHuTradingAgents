@@ -12,6 +12,10 @@ export interface AppState {
   // 网络状态
   isOnline: boolean
   apiConnected: boolean
+  // 是否已完成过 API 连接检测（避免初始化时误报后端异常）
+  apiChecked: boolean
+  // 连续失败次数（用于前端防抖，避免瞬时抖动误报后端异常）
+  apiFailureStreak: number
   lastApiCheck: number
 
   // 布局状态
@@ -53,6 +57,8 @@ export const useAppStore = defineStore('app', {
 
     isOnline: navigator.onLine,
     apiConnected: false,
+    apiChecked: false,
+    apiFailureStreak: 0,
     lastApiCheck: 0,
 
     sidebarCollapsed: useStorage('sidebar-collapsed', false).value || false,
@@ -196,7 +202,10 @@ export const useAppStore = defineStore('app', {
     // 设置API连接状态
     setApiConnected(connected: boolean) {
       this.apiConnected = connected
+      this.apiChecked = true
       this.lastApiCheck = Date.now()
+      // 连续失败计数：成功归零，失败累加；用于前端防抖，避免瞬时抖动误报
+      this.apiFailureStreak = connected ? 0 : this.apiFailureStreak + 1
     },
 
     // 检查API连接状态

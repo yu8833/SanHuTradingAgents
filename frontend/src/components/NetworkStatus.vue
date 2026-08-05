@@ -13,7 +13,7 @@
     </el-alert>
     
     <el-alert
-      v-else-if="!appStore.apiConnected"
+      v-else-if="shouldShowApiError"
       title="后端服务连接失败"
       type="error"
       :closable="false"
@@ -44,7 +44,12 @@ const retrying = ref(false)
 
 // 只在有网络问题时显示状态
 const showStatus = computed(() => {
-  return !appStore.isOnline || !appStore.apiConnected
+  return !appStore.isOnline || shouldShowApiError.value
+})
+
+// 后端连接失败提示：需连续失败≥2次才展示，避免瞬时抖动/网络抖动误报
+const shouldShowApiError = computed(() => {
+  return appStore.apiChecked && !appStore.apiConnected && appStore.apiFailureStreak >= 2
 })
 
 // 重试连接

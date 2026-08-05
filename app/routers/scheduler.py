@@ -4,6 +4,7 @@
 提供定时任务的查询、暂停、恢复、手动触发等功能
 """
 
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -12,6 +13,8 @@ from pydantic import BaseModel, Field
 from app.core.response import ok
 from app.routers.auth_db import get_current_user
 from app.services.scheduler_service import SchedulerService, get_scheduler_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/scheduler", tags=["scheduler"])
 

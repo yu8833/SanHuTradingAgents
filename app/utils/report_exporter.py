@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 # 检查依赖是否可用
 try:
-    import markdown
+    import markdown  # noqa: F401  # 用于可用性探测
     import pypandoc
 
     # 检查 pandoc 是否可用

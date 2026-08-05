@@ -93,10 +93,8 @@ from app.worker.baostock_sync_service import (
     run_baostock_status_check,
 )
 from app.worker.tushare_sync_service import (
-    run_tushare_basic_info_sync,
     run_tushare_financial_sync,
     run_tushare_historical_sync,
-    run_tushare_quotes_sync,
     run_tushare_status_check,
 )
 

@@ -48,13 +48,13 @@ def _num(v) -> float:
 def _ths_v_cookie() -> str:
     """生成同花顺 v 验证 cookie（复用 akshare 的 ths.js）。"""
     try:
-        from akshare.stock_feature.stock_board_concept_ths import _get_file_content_ths
         import py_mini_racer
+        from akshare.stock_feature.stock_board_concept_ths import _get_file_content_ths
 
         js = py_mini_racer.MiniRacer()
         js.eval(_get_file_content_ths("ths.js"))
         return js.call("v")
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.warning(f"生成同花顺 v cookie 失败: {e}")
         return ""
 
@@ -79,7 +79,7 @@ def _fetch_concept_board() -> list[dict]:
     try:
         resp = requests.get(_THS_GN_URL, headers=headers, timeout=15)
         resp.raise_for_status()
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.warning(f"抓取同花顺概念板块失败: {e}")
         return []
 
@@ -90,7 +90,7 @@ def _fetch_concept_board() -> list[dict]:
 
     try:
         raw = json.loads(htmllib.unescape(m.group(1)))
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.warning(f"解析 gnSection 失败: {e}")
         return []
 
@@ -127,7 +127,7 @@ def _load_code_name_map() -> dict[str, str]:
             if code and name:
                 m[code] = name
         return m
-    except Exception:  # noqa: BLE001
+    except Exception:
         return {}
 
 
@@ -154,7 +154,7 @@ def _resolve_lead_names(concepts: list[dict]) -> list[dict]:
             quotes = get_unified_quotes(need[:_MAX_LEAD])
             for code, q in quotes.items():
                 code_map[code] = q.get("name") or code_map.get(code, "")
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.warning(f"领涨股名称解析失败: {e}")
 
     for c in concepts:
@@ -240,7 +240,7 @@ def _concept_index_returns(name: str) -> dict[str, float] | None:
             else:
                 out[w] = None
         return out
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.warning(f"获取概念 {name} 指数历史失败: {e}")
         return None
 

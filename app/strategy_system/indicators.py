@@ -51,7 +51,6 @@ def _compute_symbol_indicators(g: pd.DataFrame) -> pd.DataFrame:
     close = g["close"]
     high = g["high"]
     low = g["low"]
-    open_ = g["open"]
     volume = g["volume"]
 
     prev_close = close.shift(1)

@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from bson import ObjectId
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from app.core.database import get_mongo_db
 from app.utils.trading_time import is_trading_time
@@ -253,8 +253,9 @@ class MonitorService:
     # ── 行情获取 ──────────────────────────────────────
     async def _fetch_symbol_quotes(self, symbols: list[str]) -> dict[str, dict]:
         """获取指定标的实时行情（字段全）。"""
-        from app.services.unified_quotes import get_unified_quotes
         import asyncio
+
+        from app.services.unified_quotes import get_unified_quotes
         raw = await asyncio.to_thread(get_unified_quotes, symbols)
         out: dict[str, dict] = {}
         for code, q in raw.items():

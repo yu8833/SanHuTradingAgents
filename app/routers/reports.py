@@ -311,7 +311,7 @@ def _extract_holder_empty_advice(text: str, field_name: str) -> str | None:
                 collected.append(stripped)
     else:
         # 方法2：对于结构化列表格式，收集所有包含关键词且不包含排除关键词的行
-        for i, line in enumerate(lines):
+        for _i, line in enumerate(lines):
             stripped = line.strip()
             
             # 检查是否包含关键词
@@ -1050,7 +1050,7 @@ def _calculate_confidence(reports: dict[str, Any]) -> dict[str, Any]:
         neutral_level = _extract_risk_level(neutral_text) if has_neutral else None
         safe_level = _extract_risk_level(safe_text) if has_safe else None
 
-        levels = [l for l in [risky_level, neutral_level, safe_level] if l is not None]
+        levels = [lv for lv in [risky_level, neutral_level, safe_level] if lv is not None]
 
         if len(levels) <= 1:
             score = 5 if risk_count == 1 else 15
@@ -1058,9 +1058,9 @@ def _calculate_confidence(reports: dict[str, Any]) -> dict[str, Any]:
         else:
             risk_score_map = {"low": 0, "medium": 1, "high": 2}
             level_names = {"low": "低风险", "medium": "中风险", "high": "高风险"}
-            numeric_levels = [risk_score_map.get(l, 1) for l in levels]
+            numeric_levels = [risk_score_map.get(lv, 1) for lv in levels]
             max_diff = max(numeric_levels) - min(numeric_levels)
-            level_strs = [level_names.get(l, l) for l in levels]
+            level_strs = [level_names.get(lv, lv) for lv in levels]
 
             if risk_count == 3:
                 if max_diff <= 1:

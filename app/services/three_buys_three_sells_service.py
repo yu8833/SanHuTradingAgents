@@ -442,7 +442,6 @@ class ThreeBuysThreeSellsService:
 
             search_start = idx - w_window
             lows = ind["lows"][search_start:idx + 1]
-            closes = ind["closes"][search_start:idx + 1]
             highs_all = ind["highs"]
             # 1. 找窗口内的最低价(左底)
             left_bottom_rel = int(np.argmin(lows))
@@ -1264,9 +1263,9 @@ class ThreeBuysThreeSellsService:
         major_broken = (close < ma200) or (ma200_slope < 0)
         if major_broken:
             if close < ma200:
-                reasons_s3.append(f"跌破MA200(大级别趋势支撑破位)")
+                reasons_s3.append("跌破MA200(大级别趋势支撑破位)")
             if ma200_slope < 0:
-                reasons_s3.append(f"MA200拐头向下(长期趋势反转)")
+                reasons_s3.append("MA200拐头向下(长期趋势反转)")
 
         # 满足任一条件 => 清仓（教材要求：大级别趋势破坏是无条件清仓，不必等中期破位）
         if base_broken or major_broken:
@@ -1643,12 +1642,10 @@ class ThreeBuysThreeSellsService:
                 # ===== P3 流动性过滤（教材要求：剔除ST/僵尸股/低成交股） =====
                 enable_liquidity_filter = params.get("enable_liquidity_filter", True)
                 liquidity_blocked = False
-                liquidity_reason = ""
                 if enable_liquidity_filter:
                     # 1) ST/*ST/退 标记: 股票名称中包含"ST"或"退"
                     if "ST" in name or "退" in name:
                         liquidity_blocked = True
-                        liquidity_reason = f"名称含风险标记: {name}"
                     # 2) 日均成交额阈值: 最近20日avg_amount_20不足5000万（单位估算: close*volume/手。若单位是"手"则除10；这里取保守值防止误删）
                     #    这里不用精确单位，使用相对阈值，如低于全市场分位
                     elif last_idx >= 20:
@@ -1656,14 +1653,8 @@ class ThreeBuysThreeSellsService:
                         # 粗略换算：以典型低价股5元*1万手=500万手·元 = 5000万元(若volume单位=手)
                         # 取保守阈值: avg_amt < 1_000_000 大概率是僵尸股(5元*2000手=100万元成交额)
                         min_avg_amount = params.get("min_avg_amount", 1_000_000.0)
-                        if avg_amt < min_avg_amount:
+                        if avg_amt < min_avg_amount or float(ind["amplitude_20"][last_idx]) < 5.0:
                             liquidity_blocked = True
-                            liquidity_reason = f"20日日均成交额不足({avg_amt:.0f} < {min_avg_amount:.0f})"
-                        # 3) 僵尸股: 20日振幅 < 5%（无波动，无参与价值）
-                        elif float(ind["amplitude_20"][last_idx]) < 5.0:
-                            liquidity_blocked = True
-                            amp = float(ind["amplitude_20"][last_idx])
-                            liquidity_reason = f"20日振幅过低({amp:.1f}% < 5%) = 僵尸股"
                 if liquidity_blocked:
                     return None  # 直接跳过，不参与买入
 

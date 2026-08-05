@@ -5,8 +5,6 @@ filter 接收目标日期的 enriched 行 DataFrame（含全部指标与信号�
 """
 from __future__ import annotations
 
-from typing import Callable
-
 import pandas as pd
 
 

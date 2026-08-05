@@ -26,7 +26,7 @@ class BaoStockAdapter(DataSourceAdapter):
 
     def is_available(self) -> bool:
         try:
-            import baostock as bs  # noqa: F401
+            import baostock as bs  # noqa: F401  # 仅用于可用性探测
             return True
         except ImportError:
             return False

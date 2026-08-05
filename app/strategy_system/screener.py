@@ -15,8 +15,8 @@ from app.strategy_system import data_adapter
 from app.strategy_system.indicators import compute_all
 from app.strategy_system.strategies import (
     BUILTIN_STRATEGIES,
-    get_strategy,
     get_strategies,
+    get_strategy,
     run_strategy_filter,
 )
 
@@ -61,7 +61,7 @@ def _score_rank(df: pd.DataFrame, scoring: dict, universe: pd.Series) -> np.ndar
     if total_weight <= 0:
         return score
 
-    for col, weight, val in executable:
+    for _, weight, val in executable:
         w = weight / total_weight
         valid = val.notna()
         if valid.any():
@@ -266,7 +266,7 @@ def run_all_strategies(
                 "count": n_hits,
                 "top": top_items,
             })
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.warning("策略 %s 运行失败: %s", sid, e)
             strategies.append({
                 "id": sid,
