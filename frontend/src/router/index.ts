@@ -81,17 +81,7 @@ const routes: RouteRecordRaw[] = [
           requiresAuth: true
         }
       },
-      {
-        path: 'notifications',
-        name: 'NotificationsCenter',
-        component: () => import('@/views/Notifications/index.vue'),
-        meta: {
-          title: '通知中心',
-          parentTitle: '分析',
-          requiresAuth: true
-        }
-      },
-    ]
+      ]
   },
   {
     path: '/screening',
@@ -317,16 +307,6 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Vibe/Intel/Radar.vue'),
         meta: {
           title: '资讯',
-          requiresAuth: true
-        }
-      },
-      {
-        path: 'notes',
-        name: 'Notes',
-        component: () => import('@/views/Vibe/Notes/index.vue'),
-        meta: {
-          title: '研究记录',
-          parentTitle: '记录',
           requiresAuth: true
         }
       }
@@ -667,7 +647,7 @@ const routes: RouteRecordRaw[] = [
         name: 'StockAlertsView',
         component: () => import('@/views/StockAlerts/StockAlertsView.vue'),
         meta: {
-          title: '个股预警',
+          title: '监控中心',
           requiresAuth: true
         }
       }

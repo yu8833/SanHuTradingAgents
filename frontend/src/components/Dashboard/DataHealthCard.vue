@@ -48,13 +48,27 @@
         <span class="health-message">{{ freshness.message || '' }}</span>
       </div>
 
-      <!-- 过期项明细（仅展示未最新项，全部最新时折叠） -->
-      <div v-if="staleItems.length > 0" class="stale-list">
-        <div v-for="item in staleItems" :key="item.key" class="stale-item">
-          <span class="stale-label">{{ item.label }}</span>
-          <el-tag type="warning" size="small" effect="plain">
-            过期{{ item.stale_days > 0 ? item.stale_days + '天' : '' }}
-          </el-tag>
+      <!-- 数据明细：每项的名称、条数、截止时间、状态 -->
+      <div v-if="freshnessItems.length > 0" class="freshness-list">
+        <div
+          v-for="item in freshnessItems"
+          :key="item.key"
+          class="freshness-item"
+          :class="{ stale: !item.is_fresh }"
+        >
+          <div class="fi-left">
+            <span class="fi-label">{{ item.label }}</span>
+            <span class="fi-count">{{ fmtCount(item.count) }}条</span>
+          </div>
+          <div class="fi-right">
+            <span class="fi-latest" :title="item.threshold">
+              {{ item.key === 'quotes' ? '截至 ' + (item.latest || '—') : (item.latest || '—') }}
+            </span>
+            <el-tag v-if="!item.is_fresh" type="warning" size="small" effect="plain">
+              过期{{ item.stale_days > 0 ? item.stale_days + '天' : '' }}
+            </el-tag>
+            <el-tag v-else type="success" size="small" effect="plain">最新</el-tag>
+          </div>
         </div>
       </div>
       <div v-else class="all-fresh-hint">
@@ -97,13 +111,20 @@ const syncStatus = ref<SyncStatus | null>(null)
 const freshness = ref<{
   overall_is_fresh: boolean
   message?: string
-  items?: { key: string; label: string; is_fresh: boolean; stale_days: number }[]
+  items?: {
+    key: string
+    label: string
+    is_fresh: boolean
+    stale_days: number
+    latest?: string
+    count?: number
+    threshold?: string
+  }[]
 }>({ overall_is_fresh: false, message: '', items: [] })
 
 const overallIsFresh = computed(() => freshness.value.overall_is_fresh ?? false)
 const freshnessItems = computed(() => freshness.value.items || [])
 const freshCount = computed(() => freshnessItems.value.filter((i) => i.is_fresh).length)
-const staleItems = computed(() => freshnessItems.value.filter((i) => !i.is_fresh))
 
 const syncType = computed(() => {
   const map: Record<string, 'info' | 'warning' | 'success' | 'danger'> = {
@@ -166,6 +187,14 @@ const formatLastSync = (timeStr: string) => {
   if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`
   if (diff < 86400000) return `${Math.floor(diff / 3600000)}小时前`
   return new Date(timeStr).toLocaleDateString('zh-CN')
+}
+
+// 格式化数据条数（万/亿）
+const fmtCount = (n: number | undefined) => {
+  if (n == null) return '—'
+  if (n >= 1e8) return (n / 1e8).toFixed(2).replace(/\.?0+$/, '') + '亿'
+  if (n >= 1e4) return (n / 1e4).toFixed(1).replace(/\.0$/, '') + '万'
+  return String(n)
 }
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
@@ -259,23 +288,57 @@ onBeforeUnmount(() => {
     }
   }
 
-  .stale-list {
+  .freshness-list {
     display: flex;
     flex-direction: column;
     gap: 6px;
 
-    .stale-item {
+    .freshness-item {
       display: flex;
       justify-content: space-between;
       align-items: center;
+      gap: 8px;
       padding: 6px 10px;
-      background: var(--el-color-warning-light-9);
+      background: var(--el-fill-color-light);
       border-radius: 6px;
 
-      .stale-label {
-        font-size: 12px;
-        font-weight: 500;
-        color: var(--el-color-warning);
+      &.stale {
+        background: var(--el-color-warning-light-9);
+      }
+
+      .fi-left {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+
+        .fi-label {
+          font-size: 12px;
+          font-weight: 500;
+          color: var(--el-text-color-primary);
+          white-space: nowrap;
+        }
+
+        .fi-count {
+          font-size: 11px;
+          color: var(--el-text-color-secondary);
+          white-space: nowrap;
+        }
+      }
+
+      .fi-right {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+
+        .fi-latest {
+          font-size: 11px;
+          color: var(--el-text-color-secondary);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
       }
     }
   }

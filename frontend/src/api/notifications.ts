@@ -20,9 +20,9 @@ export interface NotificationListResponse {
 
 export const notificationsApi = {
   async getUnreadCount(): Promise<{ success: boolean; data: { count: number } }> {
-    // 后端尚未提供时兜底为0
+    // 后端尚未提供时兜底为0；只统计"分析"类通知
     try {
-      return await request.get('/api/notifications/unread_count')
+      return await request.get('/api/notifications/unread_count?type=analysis')
     } catch {
       return { success: true, data: { count: 0 } }
     }

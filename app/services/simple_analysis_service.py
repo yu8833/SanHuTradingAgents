@@ -48,6 +48,54 @@ except Exception:
 logger = logging.getLogger("app.services.simple_analysis_service")
 
 
+def _extract_concise_summary(content: str, max_len: int = 120) -> str:
+    """
+    从分析报告内容中提取简明摘要，避免原始 Markdown 表格造成排版混乱。
+
+    优先解析"质量评估摘要"表格中的关键指标（整体质量/置信度/建议参考），
+    并追加表格后的风险提示段落；无法解析时回退为纯文本截断。
+
+    Args:
+        content: 原始分析内容（通常为 final_trade_decision 的 Markdown）
+        max_len: 摘要最大长度
+
+    Returns:
+        简明摘要文本
+    """
+    if not isinstance(content, str) or not content.strip():
+        return ""
+    # 1. 解析 Markdown 表格中的关键指标
+    kv: dict[str, str] = {}
+    for line in content.splitlines():
+        line = line.strip()
+        if line.startswith("|") and line.endswith("|"):
+            cells = [c.strip() for c in line.strip("|").split("|")]
+            if len(cells) >= 2 and cells[0] not in ("指标", "值", "", "---"):
+                key = cells[0].strip("#* ")
+                val = cells[1].strip("#* ")
+                if key:
+                    kv[key] = val
+    parts = [f"{k}:{kv[k]}" for k in ("整体质量", "置信度", "建议参考") if k in kv]
+    if parts:
+        text = "; ".join(parts)
+        # 2. 追加表格后的风险提示/说明段落
+        for line in content.splitlines():
+            line = line.strip()
+            if not line or line.startswith("|") or line.startswith("#") or line.startswith("-"):
+                continue
+            if line.startswith(("📊", "⚠️", "⚠", "📈", "📉", "🎯", "✅")):
+                continue
+            if len(line) > 5:
+                text += f"。{line}"
+                break
+        if len(text) > max_len:
+            text = text[:max_len].rstrip() + "..."
+        return text
+    # 3. 无法解析表格时回退为纯文本截断
+    text = content.replace("#", "").replace("*", "").strip()
+    return text[:max_len].rstrip() + ("..." if len(text) > max_len else "")
+
+
 def _sanitize_state_for_mongo(state: Any) -> Any:
     """
     清理 state 对象，移除不可序列化的 LangChain 消息对象，确保可以存入 MongoDB。
@@ -1809,19 +1857,15 @@ class SimpleAnalysisService:
             if isinstance(reports, dict) and 'final_trade_decision' in reports:
                 final_decision_content = reports['final_trade_decision']
                 if isinstance(final_decision_content, str) and len(final_decision_content) > 50:
-                    # 提取前200个字符作为摘要（与web目录完全一致）
-                    summary = final_decision_content[:200].replace('#', '').replace('*', '').strip()
-                    if len(final_decision_content) > 200:
-                        summary += "..."
+                    # 提取简明摘要（解析质量评估表格，避免原始Markdown排版混乱）
+                    summary = _extract_concise_summary(final_decision_content)
                     logger.info(f"📝 [SUMMARY] 从final_trade_decision提取摘要: {len(summary)}字符")
 
             # 2. 如果没有final_trade_decision，从state中提取
             if not summary and isinstance(state, dict):
                 final_decision = state.get('final_trade_decision', '')
                 if isinstance(final_decision, str) and len(final_decision) > 50:
-                    summary = final_decision[:200].replace('#', '').replace('*', '').strip()
-                    if len(final_decision) > 200:
-                        summary += "..."
+                    summary = _extract_concise_summary(final_decision)
                     logger.info(f"📝 [SUMMARY] 从state.final_trade_decision提取摘要: {len(summary)}字符")
 
             # 3. 生成recommendation（从decision的reasoning）
@@ -1843,9 +1887,7 @@ class SimpleAnalysisService:
                 # 尝试从其他报告中提取摘要
                 for report_name, content in reports.items():
                     if isinstance(content, str) and len(content) > 100:
-                        summary = content[:200].replace('#', '').replace('*', '').strip()
-                        if len(content) > 200:
-                            summary += "..."
+                        summary = _extract_concise_summary(content)
                         logger.info(f"📝 [SUMMARY] 从{report_name}提取摘要: {len(summary)}字符")
                         break
 

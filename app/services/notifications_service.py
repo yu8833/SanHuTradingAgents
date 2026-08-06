@@ -87,7 +87,7 @@ class NotificationsService:
 
         return doc_id
 
-    async def unread_count(self, user_id: str) -> int:
+    async def unread_count(self, user_id: str, ntype: str | None = None) -> int:
         db = get_mongo_db()
         # user_id 兼容查询：支持字符串和 ObjectId，支持 admin 特殊处理
         uid_candidates = self._build_uid_candidates(user_id)
@@ -95,7 +95,10 @@ class NotificationsService:
             {"user_id": {"$in": uid_candidates}},
             {"user": {"$in": uid_candidates}}
         ]
-        query = {"$and": [{"$or": or_conditions}, {"status": "unread"}]}
+        conditions = [{"$or": or_conditions}, {"status": "unread"}]
+        if ntype in ("analysis", "alert", "system"):
+            conditions.append({"type": ntype})
+        query = {"$and": conditions}
         return await db[self.collection].count_documents(query)
 
     def _build_uid_candidates(self, user_id: str) -> list:

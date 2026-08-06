@@ -30,9 +30,13 @@ async def list_notifications(
 
 
 @router.get("/notifications/unread_count")
-async def get_unread_count(user: dict = Depends(get_current_user)):
+async def get_unread_count(
+    type: str | None = Query(None, description="类型: analysis|alert|system"),
+    user: dict = Depends(get_current_user)
+):
     svc = get_notifications_service()
-    cnt = await svc.unread_count(user_id=user["id"])
+    t = type if type in ("analysis", "alert", "system") else None
+    cnt = await svc.unread_count(user_id=user["id"], ntype=t)
     return ok(data={"count": cnt})
 
 

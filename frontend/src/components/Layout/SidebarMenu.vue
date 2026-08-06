@@ -24,7 +24,6 @@
       <el-menu-item index="/analysis/single">单股分析</el-menu-item>
       <el-menu-item index="/analysis/batch">批量分析</el-menu-item>
       <el-menu-item index="/reports">分析报告</el-menu-item>
-      <el-menu-item index="/analysis/notifications">通知中心</el-menu-item>
     </el-sub-menu>
 
     <el-menu-item index="/tasks">
@@ -67,7 +66,6 @@
       <el-menu-item index="/vibe/review/emotion">短线情绪</el-menu-item>
       <el-menu-item index="/vibe/review/concept">概念分析</el-menu-item>
       <el-menu-item index="/vibe/intel/radar">资讯雷达</el-menu-item>
-      <el-menu-item index="/vibe/notes">研究记录</el-menu-item>
     </el-sub-menu>
 
     <el-sub-menu index="/paper-root">
@@ -77,7 +75,7 @@
       </template>
       <el-menu-item index="/paper">模拟交易</el-menu-item>
       <el-menu-item index="/portfolio">持仓追踪</el-menu-item>
-      <el-menu-item index="/stock-alerts">个股预警</el-menu-item>
+      <el-menu-item index="/stock-alerts">监控中心</el-menu-item>
     </el-sub-menu>
 
     <el-sub-menu index="/settings-root">

@@ -288,7 +288,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, h } from 'vue'
+import { ref, computed, onMounted, watch, h } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Histogram, Search } from '@element-plus/icons-vue'
 import { use as echartsUse } from 'echarts/core'
@@ -373,6 +373,52 @@ const wfForm = ref({ strategy_id: '', train_days: 120, test_days: 30, paramGridT
 const wfLoading = ref(false)
 const wfResult = ref<WalkForwardResult | null>(null)
 
+// ---------------------------------------------------------------------------
+// 回测结果持久化：离开页面/刷新后再次进入仍能查看上次结果
+// ---------------------------------------------------------------------------
+const BT_STORAGE_PREFIX = 'strategy_backtest_result_'
+const BT_STORAGE_TTL = 24 * 60 * 60 * 1000 // 结果保留 24 小时
+
+interface StoredResult {
+  savedAt: number
+  data: unknown
+}
+
+function saveResult(key: string, value: unknown | null) {
+  try {
+    if (value == null) {
+      localStorage.removeItem(BT_STORAGE_PREFIX + key)
+      return
+    }
+    const payload: StoredResult = { savedAt: Date.now(), data: value }
+    localStorage.setItem(BT_STORAGE_PREFIX + key, JSON.stringify(payload))
+  } catch (e) {
+    console.warn('[回测结果] 本地保存失败:', e)
+  }
+}
+
+function loadResult<T>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(BT_STORAGE_PREFIX + key)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as StoredResult
+    if (!parsed?.data || Date.now() - parsed.savedAt > BT_STORAGE_TTL) {
+      localStorage.removeItem(BT_STORAGE_PREFIX + key)
+      return null
+    }
+    return parsed.data as T
+  } catch (e) {
+    console.warn('[回测结果] 本地读取失败:', e)
+    return null
+  }
+}
+
+// 监听四个结果，变更时自动持久化
+watch(strategyResult, v => saveResult('strategy', v))
+watch(factorResult, v => saveResult('factor', v))
+watch(optResult, v => saveResult('optimizer', v))
+watch(wfResult, v => saveResult('walkforward', v))
+
 const parseParamGrid = (text: string): Record<string, any> => {
   if (!text.trim()) return {}
   try {
@@ -424,6 +470,8 @@ const runStrategyBacktest = async () => {
       holding_days: 5,
     })
     strategyResult.value = (res as any)?.data ?? res
+    // 显式保存：即使用户在回测完成前已离开页面（组件卸载、watch 已停止），结果仍能落盘
+    saveResult('strategy', strategyResult.value)
   } catch (e) {
     ElMessage.error('策略回测失败')
   } finally {
@@ -443,6 +491,7 @@ const runFactorBacktest = async () => {
       rebalance: 'monthly',
     })
     factorResult.value = (res as any)?.data ?? res
+    saveResult('factor', factorResult.value)
   } catch (e) {
     ElMessage.error('因子回测失败')
   } finally {
@@ -472,6 +521,7 @@ const runOptimizer = async () => {
       position_sizing: 'equal',
     })
     optResult.value = (res as any)?.data ?? res
+    saveResult('optimizer', optResult.value)
   } catch (e) {
     ElMessage.error('参数优化失败')
   } finally {
@@ -502,6 +552,7 @@ const runWalkForward = async () => {
       position_sizing: 'equal',
     })
     wfResult.value = (res as any)?.data ?? res
+    saveResult('walkforward', wfResult.value)
   } catch (e) {
     ElMessage.error('步进优化失败')
   } finally {
@@ -562,6 +613,11 @@ const icOption = computed(() => {
 
 onMounted(() => {
   loadStrategies()
+  // 恢复上次保存的回测结果（离开页面/刷新后仍可查看）
+  strategyResult.value = loadResult<BacktestResult>('strategy')
+  factorResult.value = loadResult<FactorBacktestResult>('factor')
+  optResult.value = loadResult<OptimizeResult>('optimizer')
+  wfResult.value = loadResult<WalkForwardResult>('walkforward')
 })
 </script>
 

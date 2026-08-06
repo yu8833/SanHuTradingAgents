@@ -98,8 +98,8 @@
       </el-col>
     </el-row>
 
-    <!-- 监控中心（主体） -->
-    <MonitorCenter style="margin-top: 24px;" />
+    <!-- 监控中心（简要触发记录，查看详情跳转监控中心） -->
+    <MonitorSummary style="margin-top: 24px;" />
 
     <!-- 全量同步对话框 -->
     <el-dialog
@@ -176,7 +176,7 @@ import {
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import DataHealthCard from '@/components/Dashboard/DataHealthCard.vue'
-import MonitorCenter from '@/components/Dashboard/MonitorCenter.vue'
+import MonitorSummary from '@/components/Dashboard/MonitorSummary.vue'
 import { favoritesApi } from '@/api/favorites'
 import { paperApi, type PaperAccountSummary } from '@/api/paper'
 import * as syncApi from '@/api/sync'

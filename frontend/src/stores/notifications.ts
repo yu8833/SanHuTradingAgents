@@ -32,8 +32,9 @@ export const useNotificationStore = defineStore('notifications', () => {
   async function loadList(status: 'unread' | 'all' = 'all') {
     loading.value = true
     try {
-      const res = await notificationsApi.getList({ status, page: 1, page_size: 50 })
-      items.value = res?.data?.items ?? []
+      // 通知中心只保留"分析"类通知，预警/系统已移除
+      const res = await notificationsApi.getList({ status, type: 'analysis', page: 1, page_size: 50 })
+      items.value = (res?.data?.items ?? []).filter(i => i.type === 'analysis')
     } catch (e) {
       console.error('[Notifications] 加载通知列表失败:', e)
       items.value = []
@@ -192,7 +193,8 @@ export const useNotificationStore = defineStore('notifications', () => {
         break
 
       case 'notification':
-        if (message.data && message.data.title && message.data.type) {
+        // 通知中心只保留"分析"类通知，预警/系统已移除
+        if (message.data && message.data.title && message.data.type === 'analysis') {
           addNotification({
             id: message.data.id,
             title: message.data.title,

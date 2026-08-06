@@ -485,19 +485,49 @@ const specClass = computed(() => {
   return 'flat'
 })
 
+// 带超时的请求包装
+const withTimeout = <T>(promise: Promise<T>, timeoutMs: number = 15000): Promise<T> => {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      setTimeout(() => {
+        reject(new Error(`请求超时 (${timeoutMs}ms)`))
+      }, timeoutMs)
+    })
+  ])
+}
+
 const loadAll = async () => {
   loading.value = true
   try {
-    const [idx, g, ov, dash] = await Promise.all([
-      vibeApi.getIndices(),
-      vibeApi.getGlobalIndices(),
-      vibeApi.getMarketOverview(),
-      vibeApi.getDashboard(),
+    const results = await Promise.allSettled([
+      withTimeout(vibeApi.getIndices(), 15000),
+      withTimeout(vibeApi.getGlobalIndices(), 15000),
+      withTimeout(vibeApi.getMarketOverview(), 15000),
+      withTimeout(vibeApi.getDashboard(), 20000),
     ])
-    indices.value = idx.data || []
-    globalIndices.value = g.data || []
-    sentiment.value = ov.data?.sentiment || null
-    dashboard.value = dash.data || null
+
+    // 逐个处理结果，失败不影响其他数据显示
+    const [idxRes, gRes, ovRes, dashRes] = results
+    if (idxRes.status === 'fulfilled') {
+      indices.value = idxRes.value.data || []
+    }
+    if (gRes.status === 'fulfilled') {
+      globalIndices.value = gRes.value.data || []
+    }
+    if (ovRes.status === 'fulfilled') {
+      sentiment.value = ovRes.value.data?.sentiment || null
+    }
+    if (dashRes.status === 'fulfilled') {
+      dashboard.value = dashRes.value.data || null
+    }
+
+    // 统计失败数量，给出提示
+    const failed = results.filter(r => r.status === 'rejected')
+    if (failed.length > 0) {
+      const msg = failed.map(r => (r as PromiseRejectedResult).reason.message).join(', ')
+      ElMessage.warning(`${failed.length} 个接口加载超时，显示已有数据：${msg}`)
+    }
   } catch (e: any) {
     ElMessage.error(e?.message || '数据加载失败')
   } finally {

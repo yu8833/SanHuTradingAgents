@@ -101,11 +101,12 @@ function onMarkAllRead() {
 }
 
 function typeLabel(t: string) {
-  return t === 'analysis' ? '分析' : t === 'alert' ? '预警' : '系统'
+  // 通知中心只保留"分析"类通知
+  return '分析'
 }
 
 function tagType(t: string) {
-  return t === 'analysis' ? 'success' : t === 'alert' ? 'warning' : 'info'
+  return 'success'
 }
 
 function toLocal(iso: string) {

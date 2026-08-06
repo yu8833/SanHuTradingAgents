@@ -11,6 +11,34 @@
       <span class="monitor-tip">行情每 60 秒自动评估一次，命中规则后写入触发记录</span>
     </div>
 
+    <!-- 汇总指标 -->
+    <div class="monitor-stats">
+      <div class="stat-item" :class="{ active: todayCount > 0 }">
+        <div class="stat-num">{{ todayCount }}</div>
+        <div class="stat-label">今日触发</div>
+      </div>
+      <div class="stat-item" :class="{ danger: criticalCount > 0 }">
+        <div class="stat-num">{{ criticalCount }}</div>
+        <div class="stat-label">重要告警</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-num">{{ enabledRules }}<span class="stat-sub">/{{ rules.length }}</span></div>
+        <div class="stat-label">启用规则</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-num">{{ sourceCounts.signal }}</div>
+        <div class="stat-label">信号触发</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-num">{{ sourceCounts.price }}</div>
+        <div class="stat-label">价格/涨跌</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-num">{{ sourceCounts.market }}</div>
+        <div class="stat-label">市场异动</div>
+      </div>
+    </div>
+
     <el-row :gutter="16">
       <!-- 左栏：触发记录 -->
       <el-col :xs="24" :lg="14">
@@ -227,7 +255,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Lightning, Refresh, Bell, List, Plus, Delete, EditPen,
@@ -260,6 +288,30 @@ const draft = reactive<{
 })
 
 let pollTimer: number | null = null
+
+// ── 汇总指标 ──────────────────────────────────────────
+// 今日触发（ts 为毫秒时间戳）
+const todayStart = () => {
+  const now = new Date()
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+}
+const todayCount = computed(() =>
+  alerts.value.filter(a => a.ts >= todayStart()).length
+)
+const criticalCount = computed(() =>
+  alerts.value.filter(a => a.severity === 'critical').length
+)
+const enabledRules = computed(() =>
+  rules.value.filter(r => r.enabled).length
+)
+const sourceCounts = computed(() => {
+  const counts = { signal: 0, price: 0, market: 0 }
+  for (const a of alerts.value) {
+    const s = (a.source || a.rule_type) as keyof typeof counts
+    if (s in counts) counts[s]++
+  }
+  return counts
+})
 
 // ── 加载数据 ───────────────────────────────────────────
 const loadOptions = async () => {
@@ -521,6 +573,44 @@ onBeforeUnmount(() => {
       margin-left: auto;
       font-size: 12px;
       color: var(--el-text-color-secondary);
+    }
+  }
+
+  .monitor-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 16px;
+
+    .stat-item {
+      flex: 1;
+      min-width: 120px;
+      padding: 12px;
+      border-radius: 8px;
+      background: var(--el-fill-color-light);
+      text-align: center;
+
+      .stat-num {
+        font-size: 24px;
+        font-weight: 700;
+        color: var(--el-color-primary);
+        font-family: monospace;
+
+        &.active { color: var(--el-color-warning); }
+        &.danger { color: var(--el-color-danger); }
+
+        .stat-sub {
+          font-size: 13px;
+          font-weight: 400;
+          color: var(--el-text-color-secondary);
+        }
+      }
+
+      .stat-label {
+        margin-top: 4px;
+        font-size: 12px;
+        color: var(--el-text-color-secondary);
+      }
     }
   }
 

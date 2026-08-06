@@ -140,7 +140,9 @@ services:
     networks:
       - tradingagents-network
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "https://localhost/health"]
+      # 使用 127.0.0.1 而非 localhost（避免解析到 IPv6 ::1 导致连接拒绝），
+      # 并跳过自签名证书校验
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--no-check-certificate", "--spider", "https://127.0.0.1/health"]
       interval: 30s
       timeout: 10s
       retries: 3
