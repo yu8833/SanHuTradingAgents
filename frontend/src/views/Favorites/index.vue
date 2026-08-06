@@ -115,7 +115,11 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="stock_name" label="股票名称" width="150" />
+        <el-table-column prop="stock_name" label="股票名称" width="150">
+          <template #default="{ row }">
+            <router-link :to="`/stocks/${row.stock_code}`" target="_blank" class="stock-name">{{ row.stock_name }}</router-link>
+          </template>
+        </el-table-column>
         <el-table-column prop="market" label="市场" width="80">
           <template #default="{ row }">
             {{ row.market || 'A股' }}

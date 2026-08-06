@@ -75,8 +75,16 @@
           <el-card class="chart-panel" shadow="never">
             <template #header><span class="panel-title">交易明细 ({{ strategyResult.trades?.length }})</span></template>
             <el-table :data="strategyResult.trades" size="small" stripe border max-height="420">
-              <el-table-column prop="symbol" label="代码" width="100" />
-              <el-table-column prop="name" label="名称" width="110" />
+              <el-table-column prop="symbol" label="代码" width="100">
+                <template #default="{ row }">
+                  <router-link :to="`/stocks/${row.symbol}`" class="stock-code">{{ row.symbol }}</router-link>
+                </template>
+              </el-table-column>
+              <el-table-column prop="name" label="名称" width="110">
+                <template #default="{ row }">
+                  <router-link :to="`/stocks/${row.symbol}`" class="stock-name">{{ row.name }}</router-link>
+                </template>
+              </el-table-column>
               <el-table-column prop="entry_date" label="买入日期" width="110" />
               <el-table-column prop="exit_date" label="卖出日期" width="110" />
               <el-table-column prop="entry_price" label="买入价" width="90" align="right" />

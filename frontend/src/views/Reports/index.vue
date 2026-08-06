@@ -78,7 +78,7 @@
             <div class="report-title">
               <router-link :to="`/reports/view/${row.id}`" class="report-title-link">{{ row.title }}</router-link>
               <div class="report-subtitle">
-                <router-link :to="`/stocks/${row.stock_code}`" target="_blank">{{ row.stock_code }}</router-link> - {{ row.stock_name }}
+                <router-link :to="`/stocks/${row.stock_code}`" target="_blank">{{ row.stock_code }}</router-link> - <router-link :to="`/stocks/${row.stock_code}`" target="_blank" class="stock-name">{{ row.stock_name }}</router-link>
               </div>
             </div>
           </template>

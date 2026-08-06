@@ -94,50 +94,44 @@ class FavoritesService:
         # 先格式化基础字段
         items = [self._format_favorite(fav) for fav in favorites]
 
-        # 批量获取股票基础信息（板块等）
+        # 批量获取股票基础信息（板块、交易所等）
         codes = [it.get("stock_code") for it in items if it.get("stock_code")]
         if codes:
             try:
-                # 🔥 获取数据源优先级配置
-                from app.core.unified_config import UnifiedConfigManager
-                config = UnifiedConfigManager()
-                data_source_configs = await config.get_data_source_configs_async()
-
-                # 提取启用的数据源，按优先级排序
-                enabled_sources = [
-                    ds.type.lower() for ds in data_source_configs
-                    if ds.enabled and ds.type.lower() in ['tushare', 'akshare', 'baostock']
-                ]
-
-                if not enabled_sources:
-                    enabled_sources = ['tushare', 'akshare', 'baostock']
-
-                preferred_source = enabled_sources[0] if enabled_sources else 'tushare'
-
-                # 从 stock_basic_info 获取板块信息（只查询优先级最高的数据源）
+                # 从 stock_basic_info 获取板块信息。
+                # 注意：不同数据源的板块字段质量不一（tushare 的 market 常为空字符串），
+                # 因此这里跨源查询，取第一个 market 非空的有效结果，并做规范化。
                 basic_info_coll = db["stock_basic_info"]
                 cursor = basic_info_coll.find(
-                    {"code": {"$in": codes}, "source": preferred_source},  # 🔥 添加数据源筛选
-                    {"code": 1, "sse": 1, "market": 1, "_id": 0}
+                    {"code": {"$in": codes}},
+                    {"code": 1, "sse": 1, "market": 1, "source": 1, "_id": 0}
                 )
                 basic_docs = await cursor.to_list(length=None)
-                basic_map = {str(d.get("code")).zfill(6): d for d in (basic_docs or [])}
+
+                # 按代码聚合所有数据源的记录
+                basic_map: dict[str, list[dict]] = {}
+                for d in (basic_docs or []):
+                    key = str(d.get("code")).zfill(6)
+                    basic_map.setdefault(key, []).append(d)
 
                 for it in items:
-                    code = it.get("stock_code")
-                    basic = basic_map.get(code)
-                    if basic:
-                        # market 字段表示板块（主板、创业板、科创板等）
-                        it["board"] = basic.get("market", "-")
-                        # sse 字段表示交易所（上海证券交易所、深圳证券交易所等）
-                        it["exchange"] = basic.get("sse", "-")
-                    else:
-                        it["board"] = "-"
-                        it["exchange"] = "-"
+                    code = str(it.get("stock_code") or "").strip().upper()
+                    docs = basic_map.get(code, [])
+                    # 优先选择 market 非空的数据源记录
+                    board = next(
+                        (d.get("market") for d in docs if d.get("market")),
+                        ""
+                    )
+                    exchange = next(
+                        (d.get("sse") for d in docs if d.get("sse")),
+                        ""
+                    )
+                    it["board"] = self._normalize_board(board, code)
+                    it["exchange"] = exchange or "-"
             except Exception:
                 # 查询失败时设置默认值
                 for it in items:
-                    it["board"] = "-"
+                    it["board"] = self._normalize_board("", it.get("stock_code"))
                     it["exchange"] = "-"
 
         # 批量获取行情（优先使用入库的 market_quotes，30秒更新）
@@ -406,6 +400,33 @@ class FavoritesService:
             result = await db.user_favorites.aggregate(pipeline).to_list(None)
 
         return [item["_id"] for item in result if item.get("_id")]
+
+    @staticmethod
+    def _normalize_board(board: str, stock_code: str) -> str:
+        """规范化板块值。
+
+        - 处理历史遗留值（中小板已并入主板）与异常值（如"未知"）
+        - 空值或无有效值时按股票代码前缀兜底推导
+        """
+        import re
+        b = str(board or "").strip()
+        if b in ("中小板", "未知"):
+            b = ""
+        if b in ("主板", "创业板", "科创板", "北交所"):
+            return b
+        # 兜底：按 A 股代码前缀推导板块
+        m = re.match(r"^(\d{6})", stock_code.strip())
+        if not m:
+            return b or "-"
+        code = m.group(1)
+        # 北交所代码以 4/8 开头
+        if code.startswith(("4", "8")):
+            return "北交所"
+        if code.startswith(("300", "301", "302")):
+            return "创业板"
+        if code.startswith(("688", "689")):
+            return "科创板"
+        return "主板"
 
     def _get_mock_price(self, stock_code: str) -> float:
         """获取模拟股价"""

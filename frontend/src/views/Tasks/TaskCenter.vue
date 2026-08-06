@@ -94,7 +94,11 @@
             <router-link :to="`/stocks/${row.stock_code}`" target="_blank">{{ row.stock_code }}</router-link>
           </template>
         </el-table-column>
-        <el-table-column prop="stock_name" label="股票名称" width="150" />
+        <el-table-column prop="stock_name" label="股票名称" width="150">
+          <template #default="{ row }">
+            <router-link :to="`/stocks/${row.stock_code}`" target="_blank" class="stock-name">{{ row.stock_name }}</router-link>
+          </template>
+        </el-table-column>
         <el-table-column label="状态" width="110">
           <template #default="{ row }">
             <el-tag :type="getStatusType(row.status)">{{ getStatusText(row.status) }}</el-tag>

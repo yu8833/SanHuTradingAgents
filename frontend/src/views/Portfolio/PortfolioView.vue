@@ -66,8 +66,16 @@
           </template>
 
           <el-table :data="positions" v-loading="loading" stripe border style="width:100%">
-            <el-table-column label="代码" width="100" prop="symbol" />
-            <el-table-column label="名称" width="100" prop="stock_name" />
+            <el-table-column label="代码" width="100" prop="symbol">
+              <template #default="{ row }">
+                <router-link :to="`/stocks/${row.symbol}`" class="stock-code">{{ row.symbol }}</router-link>
+              </template>
+            </el-table-column>
+            <el-table-column label="名称" width="100" prop="stock_name">
+              <template #default="{ row }">
+                <router-link :to="`/stocks/${row.symbol}`" class="stock-name">{{ row.stock_name }}</router-link>
+              </template>
+            </el-table-column>
             <el-table-column label="策略" width="120">
               <template #default="{ row }">
                 <el-tag size="small" :type="getStrategyTagType(row.strategy)">{{ strategyLabel(row.strategy) }}</el-tag>
@@ -165,8 +173,16 @@
           </template>
 
           <el-table :data="closedTrades" v-loading="closedLoading" stripe border style="width:100%">
-            <el-table-column label="代码" width="100" prop="code" />
-            <el-table-column label="名称" width="100" prop="stock_name" />
+            <el-table-column label="代码" width="100" prop="code">
+              <template #default="{ row }">
+                <router-link :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
+              </template>
+            </el-table-column>
+            <el-table-column label="名称" width="100" prop="stock_name">
+              <template #default="{ row }">
+                <router-link :to="`/stocks/${row.code}`" class="stock-name">{{ row.stock_name }}</router-link>
+              </template>
+            </el-table-column>
             <el-table-column label="策略" width="120">
               <template #default="{ row }">
                 <el-tag size="small" :type="getStrategyTagType(row.strategy)">{{ strategyLabel(row.strategy) }}</el-tag>
@@ -326,7 +342,9 @@
     <el-dialog v-model="reviewDialogVisible" title="交易复盘" width="640px" :close-on-click-modal="false">
       <div v-if="reviewTarget" class="review-trade-summary">
         <el-descriptions :column="3" border size="small">
-          <el-descriptions-item label="股票">{{ reviewTarget.stock_name }} ({{ reviewTarget.code }})</el-descriptions-item>
+          <el-descriptions-item label="股票">
+            <router-link :to="`/stocks/${reviewTarget.code}`" class="stock-name">{{ reviewTarget.stock_name }} ({{ reviewTarget.code }})</router-link>
+          </el-descriptions-item>
           <el-descriptions-item label="策略">{{ strategyLabel(reviewTarget.strategy || 'default') }}</el-descriptions-item>
           <el-descriptions-item label="盈亏">
             <span :class="{ up: (reviewTarget.realized_pnl || 0) >= 0, down: (reviewTarget.realized_pnl || 0) < 0 }">

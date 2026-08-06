@@ -404,7 +404,11 @@
             </div>
           </template>
           <el-table :data="exitResult.signals" size="small" border>
-            <el-table-column label="代码" prop="symbol" width="120" />
+            <el-table-column label="代码" prop="symbol" width="120">
+              <template #default="{ row }">
+                <router-link :to="`/stocks/${row.symbol}`" class="stock-code">{{ row.symbol }}</router-link>
+              </template>
+            </el-table-column>
             <el-table-column label="是否退出" width="100">
               <template #default="{ row }">
                 <el-tag :type="row.should_exit ? 'danger' : 'success'" size="small">{{ row.should_exit ? '需退出' : '继续持有' }}</el-tag>

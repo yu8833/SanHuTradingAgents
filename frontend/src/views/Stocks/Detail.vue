@@ -369,8 +369,16 @@
             </el-descriptions>
             <!-- 同板块股票 -->
             <el-table :data="sectorData.sector_stocks" size="small" border style="width: 100%" max-height="240">
-              <el-table-column label="代码" prop="code" width="80" />
-              <el-table-column label="名称" prop="name" width="100" />
+              <el-table-column label="代码" prop="code" width="80">
+                <template #default="{ row }">
+                  <router-link :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
+                </template>
+              </el-table-column>
+              <el-table-column label="名称" prop="name" width="100">
+                <template #default="{ row }">
+                  <router-link :to="`/stocks/${row.code}`" class="stock-name">{{ row.name }}</router-link>
+                </template>
+              </el-table-column>
               <el-table-column label="最新价" prop="price" width="80">
                 <template #default="{ row }">{{ row.price?.toFixed(2) || '-' }}</template>
               </el-table-column>
