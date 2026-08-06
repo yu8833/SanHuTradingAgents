@@ -33,7 +33,7 @@ const routes: RouteRecordRaw[] = [
     name: 'Dashboard',
     component: () => import('@/layouts/BasicLayout.vue'),
     meta: {
-      title: '监控',
+      title: '速览',
       icon: 'Dashboard',
       requiresAuth: true,
       transition: 'fade'
@@ -44,7 +44,7 @@ const routes: RouteRecordRaw[] = [
         name: 'DashboardHome',
         component: () => import('@/views/Dashboard/index.vue'),
         meta: {
-          title: '监控',
+          title: '速览',
           requiresAuth: true
         }
       }
