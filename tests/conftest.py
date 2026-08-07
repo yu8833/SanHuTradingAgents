@@ -84,7 +84,7 @@ async def auth_token(base_url: str, admin_username: str, admin_password: str) ->
 # ==========================================================
 # 异步 HTTP 客户端（带 token）
 # ==========================================================
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 async def http_client(
     base_url: str, auth_token: str | None
 ) -> AsyncGenerator[httpx.AsyncClient, None]:
@@ -102,7 +102,7 @@ async def http_client(
     try:
         yield client
     finally:
-        # 容忍 event loop 已关闭的情况（session 级 fixture teardown 时常见）
+        # 容忍 event loop 已关闭的情况（teardown 时常见）
         with contextlib.suppress(RuntimeError):
             await client.aclose()
 

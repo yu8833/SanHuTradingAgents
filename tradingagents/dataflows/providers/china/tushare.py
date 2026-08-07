@@ -270,6 +270,39 @@ class TushareProvider:
             logger.error(f"[TushareProvider] 获取 {symbol} 财务数据失败: {e}")
             return None
 
+    async def get_dividend_data(self, symbol: str) -> List[Dict[str, Any]]:
+        """获取个股分红送配数据（Tushare pro.dividend）。
+
+        Args:
+            symbol: 6位股票代码，如 "600519"
+
+        Returns:
+            list[dict]，每项含 ts_code/ann_date/end_date/ex_date/cash_div/cash_div_tax 等字段
+        """
+        try:
+            adapter = self._get_adapter()
+            if adapter is None:
+                return []
+
+            # 归一化 ts_code
+            if "." not in symbol:
+                if symbol.startswith(("6", "9")):
+                    ts_code = f"{symbol}.SH"
+                elif symbol.startswith(("8", "4")):
+                    ts_code = f"{symbol}.BJ"
+                else:
+                    ts_code = f"{symbol}.SZ"
+            else:
+                ts_code = symbol
+
+            df = await asyncio.to_thread(adapter.get_dividend_data, ts_code)
+            if df is None or df.empty:
+                return []
+            return df.to_dict("records")
+        except Exception as e:
+            logger.error(f"[TushareProvider] 获取 {symbol} 分红数据失败: {e}")
+            return []
+
     async def get_stock_news(
         self,
         symbol: str,

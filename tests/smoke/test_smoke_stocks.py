@@ -10,18 +10,6 @@ pytestmark = pytest.mark.smoke
 
 
 class TestCoreEndpointsSmoke:
-    @pytest.mark.parametrize("code", ["000001", "600519", "002969"])
-    async def test_stocks_detail_no_500(self, http_client, code):
-        """股票详情端点任何情况都不能 500，只能是 200 或 404"""
-        try:
-            resp = await http_client.get(f"/api/stocks/{code}")
-        except Exception as exc:
-            pytest.skip(f"本地服务未启动，跳过：{exc}")
-            return
-        assert resp.status_code in (200, 404), (
-            f"/api/stocks/{code} 返回 {resp.status_code}（500=服务端错误）"
-        )
-
     async def test_screening_status_no_500(self, http_client):
         """筛选/新鲜度检查端点不能 500（防 bug-002 字段名错误触发 500）"""
         try:

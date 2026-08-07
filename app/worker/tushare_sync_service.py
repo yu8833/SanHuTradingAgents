@@ -23,6 +23,26 @@ logger = logging.getLogger(__name__)
 UTC_8 = timezone(timedelta(hours=8))
 
 
+def _to_float(v):
+    """安全转 float，失败返回 None。"""
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _norm_date(d) -> str:
+    """将 yyyymmdd / yyyy-mm-dd 归一到 yyyy-mm-dd，非法返回空串。"""
+    if not d:
+        return ""
+    s = str(d).strip()
+    if len(s) == 8 and s.isdigit():
+        return f"{s[:4]}-{s[4:6]}-{s[6:]}"
+    return s[:10] if len(s) >= 10 else s
+
+
 def get_utc8_now():
     """
     获取 UTC+8 当前时间（naive datetime）
@@ -978,6 +998,139 @@ class TushareSyncService:
             logger.error(f"❌ 保存 {symbol} 财务数据失败: {e}")
             return False
 
+    # ==================== 分红数据同步 ====================
+
+    async def sync_dividend_data(self, symbols: list[str] = None, job_id: str = None) -> dict[str, Any]:
+        """同步分红送配数据到 stock_dividend 集合。
+
+        每条公告记录一个文档（按 code+ann_date upsert），供筛选策略计算股息率与分红稳定性。
+        """
+        logger.info("🔄 开始同步分红送配数据...")
+
+        stats = {
+            "total_processed": 0,
+            "success_count": 0,
+            "error_count": 0,
+            "record_count": 0,
+            "start_time": datetime.utcnow(),
+            "errors": []
+        }
+
+        try:
+            # 获取股票列表
+            if symbols is None:
+                cursor = self.db.stock_basic_info.find(
+                    {
+                        "$or": [
+                            {"market_info.market": "CN"},
+                            {"category": "stock_cn"},
+                            {"market": {"$in": ["主板", "创业板", "科创板", "北交所"]}}
+                        ]
+                    },
+                    {"code": 1}
+                )
+                symbols = [doc["code"] async for doc in cursor]
+
+            stats["total_processed"] = len(symbols)
+            logger.info(f"📋 需要同步 {len(symbols)} 只股票的分红数据")
+
+            for i, symbol in enumerate(symbols):
+                try:
+                    await self.rate_limiter.acquire()
+                    records = await self.provider.get_dividend_data(symbol)
+                    if records:
+                        saved = await self._save_dividend_data(symbol, records)
+                        if saved > 0:
+                            stats["success_count"] += 1
+                            stats["record_count"] += saved
+                        else:
+                            stats["error_count"] += 1
+                            stats["errors"].append({
+                                "code": symbol,
+                                "error": "分红数据保存失败",
+                                "context": "sync_dividend_data"
+                            })
+                    else:
+                        # 无分红记录（如新股），计入成功但跳过
+                        stats["success_count"] += 1
+
+                    if (i + 1) % 50 == 0 or (i + 1) == len(symbols):
+                        progress = int((i + 1) / len(symbols) * 100)
+                        logger.info(f"📈 分红数据同步进度: {i + 1}/{len(symbols)} ({progress}%) "
+                                   f"(成功: {stats['success_count']}, 记录: {stats['record_count']}, "
+                                   f"错误: {stats['error_count']})")
+                        if job_id:
+                            await self._update_progress(
+                                job_id,
+                                progress,
+                                f"正在同步 {symbol} 分红数据 ({i + 1}/{len(symbols)})"
+                            )
+
+                except Exception as e:
+                    stats["error_count"] += 1
+                    stats["errors"].append({
+                        "code": symbol,
+                        "error": str(e),
+                        "context": "sync_dividend_data"
+                    })
+                    logger.error(f"❌ {symbol} 分红数据同步失败: {e}")
+
+            stats["end_time"] = datetime.utcnow()
+            stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
+
+            logger.info(f"✅ 分红数据同步完成: "
+                       f"成功 {stats['success_count']}/{stats['total_processed']}, "
+                       f"记录 {stats['record_count']} 条, "
+                       f"错误 {stats['error_count']} 个, "
+                       f"耗时 {stats['duration']:.2f} 秒")
+
+            return stats
+
+        except Exception as e:
+            logger.error(f"❌ 分红数据同步失败(外层): {e}")
+            stats["errors"].append({"error": str(e), "context": "sync_dividend_data"})
+            return stats
+
+    async def _save_dividend_data(self, symbol: str, records: list[dict]) -> int:
+        """保存单只股票的分红记录到 stock_dividend 集合（按 code+ann_date upsert）。"""
+        if not records:
+            return 0
+
+        from pymongo import UpdateOne
+
+        ops = []
+        saved = 0
+        for r in records:
+            ann_date = _norm_date(r.get("ann_date"))
+            if not ann_date:
+                continue
+            doc = {
+                "symbol": symbol,
+                "code": symbol,
+                "ts_code": r.get("ts_code") or "",
+                "ann_date": ann_date,
+                "end_date": _norm_date(r.get("end_date")),
+                "div_proc": r.get("div_proc") or "",
+                "stk_div": _to_float(r.get("stk_div")),
+                "cash_div": _to_float(r.get("cash_div")),
+                "cash_div_tax": _to_float(r.get("cash_div_tax")),
+                "record_date": _norm_date(r.get("record_date")),
+                "ex_date": _norm_date(r.get("ex_date")),
+                "pay_date": _norm_date(r.get("pay_date")),
+                "data_source": "tushare",
+                "updated_at": get_utc8_now(),
+            }
+            ops.append(UpdateOne(
+                {"code": symbol, "ann_date": ann_date},
+                {"$set": doc},
+                upsert=True,
+            ))
+
+        if ops:
+            await self.db.stock_dividend.bulk_write(ops, ordered=False)
+            saved = len(ops)
+        return saved
+
     @staticmethod
     def _parse_financial_text(symbol: str, text: str) -> dict[str, Any]:
         """将 get_fundamentals 返回的格式化文本解析为结构化 dict。
@@ -1418,6 +1571,18 @@ async def run_tushare_financial_sync():
         return result
     except Exception as e:
         logger.error(f"❌ Tushare财务数据同步失败: {e}")
+        raise
+
+
+async def run_tushare_dividend_sync():
+    """APScheduler任务：同步分红送配数据"""
+    try:
+        service = await get_tushare_sync_service()
+        result = await service.sync_dividend_data(job_id="tushare_dividend_sync")
+        logger.info(f"✅ Tushare分红数据同步完成: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"❌ Tushare分红数据同步失败: {e}")
         raise
 
 

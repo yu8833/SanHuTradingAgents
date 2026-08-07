@@ -103,6 +103,117 @@ def _stock_name_map(db) -> dict:
     return names
 
 
+def _to_float(v):
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _load_fundamentals(db, symbols) -> pd.DataFrame:
+    """从 stock_basic_info 加载行业/市值/估值字段，返回 symbol 去重后的 DataFrame。
+
+    单位约定：total_mv 为亿元。
+    """
+    if not symbols:
+        return pd.DataFrame()
+    sym_list = [str(s) for s in symbols]
+    cursor = db["stock_basic_info"].find(
+        {"$or": [{"code": {"$in": sym_list}}, {"symbol": {"$in": sym_list}}]},
+        {
+            "_id": 0, "code": 1, "symbol": 1, "industry": 1,
+            "total_mv": 1, "pe": 1, "pb": 1, "pe_ttm": 1, "pb_mrq": 1,
+        },
+    )
+    rows = []
+    seen = set()
+    for doc in cursor:
+        code = str(doc.get("code") or doc.get("symbol") or "")
+        if not code or code in seen:
+            continue
+        seen.add(code)
+        rows.append({
+            "symbol": code,
+            "industry": doc.get("industry") or "",
+            "total_mv": _to_float(doc.get("total_mv")),
+            "pe_ttm": _to_float(doc.get("pe_ttm")) or _to_float(doc.get("pe")),
+            "pb": _to_float(doc.get("pb")) or _to_float(doc.get("pb_mrq")),
+        })
+    return pd.DataFrame(rows)
+
+
+def _load_dividend_metrics(db, symbols, as_of_date: str) -> dict:
+    """从 stock_dividend 计算每只股票的股息指标。
+
+    返回 {symbol: {"div_12m_ps": 近12个月每股现金分红(税后),
+                   "div_paying_years": 近5个自然年度内有分红(现金>0)的年数}}
+    """
+    if not symbols:
+        return {}
+    sym_list = [str(s) for s in symbols]
+    cursor = db["stock_dividend"].find(
+        {"code": {"$in": sym_list}},
+        {"_id": 0, "code": 1, "ex_date": 1, "ann_date": 1, "end_date": 1,
+         "cash_div": 1, "cash_div_tax": 1},
+    )
+    as_of = pd.to_datetime(as_of_date)
+    as_of_year = as_of.year
+
+    ps_sum: dict[str, float] = {}
+    years: dict[str, set] = {}
+    for doc in cursor:
+        code = str(doc.get("code") or "")
+        if not code:
+            continue
+        cash = _to_float(doc.get("cash_div_tax")) or _to_float(doc.get("cash_div"))
+        if not cash or cash <= 0:
+            continue
+        date_str = str(doc.get("ex_date") or doc.get("ann_date") or "").strip()
+        if len(date_str) < 8:
+            continue
+        try:
+            dt = pd.to_datetime(date_str[:10])
+        except Exception:
+            continue
+        if (as_of - dt).days <= 365:
+            ps_sum[code] = ps_sum.get(code, 0.0) + cash
+        years.setdefault(code, set()).add(dt.year)
+
+    out: dict[str, dict] = {}
+    for code in set(ps_sum.keys()) | set(years.keys()):
+        yset = {y for y in years.get(code, set()) if as_of_year - 5 < y <= as_of_year}
+        out[code] = {
+            "div_12m_ps": round(ps_sum.get(code, 0.0), 4),
+            "div_paying_years": len(yset),
+        }
+    return out
+
+
+def _enrich_target(db, target: pd.DataFrame, as_of_date: str) -> pd.DataFrame:
+    """把基本面(行业/市值/估值)与分红数据 join 进目标日筛选 DataFrame。
+
+    新增列：industry, total_mv, pe_ttm, pb, div_12m_ps, div_paying_years, div_yield。
+    """
+    if target.empty:
+        return target
+    symbols = [str(s) for s in target["symbol"].unique().tolist()]
+
+    out = target.copy()
+    fund = _load_fundamentals(db, symbols)
+    if not fund.empty:
+        out = out.merge(fund, on="symbol", how="left", suffixes=("", "_fund"))
+
+    div_map = _load_dividend_metrics(db, symbols, as_of_date)
+    out["div_12m_ps"] = out["symbol"].map(lambda s: div_map.get(str(s), {}).get("div_12m_ps", 0.0))
+    out["div_paying_years"] = out["symbol"].map(lambda s: div_map.get(str(s), {}).get("div_paying_years", 0))
+
+    close = pd.to_numeric(out["close"], errors="coerce")
+    out["div_yield"] = (out["div_12m_ps"] / close.where(close > 0)).round(4)
+    return out
+
+
 def run_strategy(
     db,
     strategy_id: str,
@@ -131,6 +242,9 @@ def run_strategy(
     target = df[df["date"] == as_of_date].copy()
     if target.empty:
         return _empty_result(as_of_date, strategy_id, "目标交易日无数据")
+
+    # 注入基本面(行业/市值/估值)与分红数据，供价值/股息类策略使用
+    target = _enrich_target(db, target, as_of_date)
 
     # 过滤（对目标日行向量执行策略 filter）
     mask = run_strategy_filter(strategy_id, target, params or {})
@@ -224,6 +338,9 @@ def run_all_strategies(
     target = df[df["date"] == as_of_date].copy()
     if target.empty:
         return {"as_of": as_of_date, "strategies": [], "elapsed_ms": 0}
+
+    # 注入基本面(行业/市值/估值)与分红数据，供价值/股息类策略使用
+    target = _enrich_target(db, target, as_of_date)
 
     strategies = []
     name_map = _stock_name_map(db)

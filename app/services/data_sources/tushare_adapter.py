@@ -153,6 +153,37 @@ class TushareAdapter(DataSourceAdapter):
         return None
 
 
+    def get_dividend_data(self, ts_code: str) -> pd.DataFrame | None:
+        """获取个股分红送配数据（Tushare pro.dividend）。
+
+        返回字段（单位说明）：
+        - cash_div / cash_div_tax：每股现金分红，单位 元/股；
+        - stk_div：每股送转股；
+        - ann_date / ex_date / record_date / pay_date：公告日/除权除息日/股权登记日/派息日。
+        """
+        if not self.is_available():
+            logger.warning("Tushare: Provider is not available")
+            return None
+        try:
+            import tushare as ts
+            token = getattr(self._provider, 'token', None)
+            if not token:
+                import os
+                token = os.getenv('TUSHARE_TOKEN', '').strip().strip('"').strip("'")
+            if not token:
+                return None
+            ts.set_token(token)
+            pro = ts.pro_api()
+            fields = ("ts_code,ann_date,end_date,div_proc,stk_div,stk_bo_rate,stk_co_rate,"
+                      "cash_div,cash_div_tax,record_date,ex_date,pay_date,base_date,base_share,float_share")
+            df = pro.dividend(ts_code=ts_code, fields=fields)
+            if df is not None and not df.empty:
+                logger.info(f"Tushare: Successfully fetched dividend data for {ts_code}, {len(df)} records")
+                return df
+        except Exception as e:
+            logger.error(f"Tushare: Failed to fetch dividend data for {ts_code}: {e}")
+        return None
+
     def get_realtime_quotes(self):
         """Get full-market near real-time quotes via Tushare rt_k fallback
         Returns dict keyed by 6-digit code: {'000001': {'close': ..., 'pct_chg': ..., 'amount': ...}}

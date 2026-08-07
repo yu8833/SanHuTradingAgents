@@ -251,6 +251,8 @@ class Settings(BaseSettings):
     TUSHARE_HISTORICAL_SYNC_CRON: str = Field(default="30 18 * * 1-5")  # 工作日18:30（Tushare当日日K发布通常16:00-18:00完成）
     TUSHARE_FINANCIAL_SYNC_ENABLED: bool = Field(default=True)
     TUSHARE_FINANCIAL_SYNC_CRON: str = Field(default="0 3 * * 0")  # 周日凌晨3点
+    TUSHARE_DIVIDEND_SYNC_ENABLED: bool = Field(default=True)
+    TUSHARE_DIVIDEND_SYNC_CRON: str = Field(default="0 4 * * 0")  # 周日凌晨4点（分红公告频率低，周更即可）
     TUSHARE_STATUS_CHECK_ENABLED: bool = Field(default=True)
     TUSHARE_STATUS_CHECK_CRON: str = Field(default="0 * * * *")  # 每小时
 

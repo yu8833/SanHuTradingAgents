@@ -108,6 +108,49 @@ def _low_volatility_leader(df: pd.DataFrame, params: dict) -> pd.Series:
     return m
 
 
+def _low_pe_high_dividend_leader(df: pd.DataFrame, params: dict) -> pd.Series:
+    """低估值、高股息、能长期稳定分红的行业龙头。
+
+    依赖 screener._enrich_target 注入的列：pe_ttm, pb, total_mv, industry,
+    div_yield, div_paying_years。
+
+    分两阶段：
+    1. 基础过滤：PE>0且≤max_pe、PB>0且≤max_pb（低估值）、股息率≥min_div_yield（高股息）、
+       近5年分红年数≥min_div_years（长期稳定分红）、市值有效。
+    2. 行业龙头：在通过基础过滤的股票中，按行业内市值降序取 top N。
+    """
+    max_pe = float(params.get("max_pe", 15))
+    max_pb = float(params.get("max_pb", 3.0))
+    min_div_yield = float(params.get("min_div_yield", 0.03))
+    min_div_years = int(params.get("min_div_years", 4))
+    top_n = int(params.get("top_n", 3))
+
+    pe = pd.to_numeric(df.get("pe_ttm"), errors="coerce")
+    pb = pd.to_numeric(df.get("pb"), errors="coerce")
+    dy = pd.to_numeric(df.get("div_yield"), errors="coerce")
+    div_years = pd.to_numeric(df.get("div_paying_years"), errors="coerce")
+    mv = pd.to_numeric(df.get("total_mv"), errors="coerce")
+    industry = df.get("industry", pd.Series("", index=df.index)).fillna("")
+
+    m = (pe > 0) & (pe <= max_pe)
+    m &= (pb > 0) & (pb <= max_pb)
+    m &= (dy.fillna(0) >= min_div_yield)
+    m &= (div_years.fillna(0) >= min_div_years)
+    m &= mv.notna()
+
+    didx = df.index[m.fillna(False)]
+    leader = pd.Series(False, index=df.index)
+    if len(didx) > 0:
+        sub = pd.DataFrame({
+            "industry": industry.loc[didx].values,
+            "mv": mv.loc[didx].values,
+        }, index=didx)
+        sub = sub.sort_values("mv", ascending=False)
+        for _ind, grp in sub.groupby("industry", sort=False):
+            leader.loc[grp.head(top_n).index] = True
+    return leader
+
+
 def _def(id_, name, description, tags, params, scoring, filter_fn,
          entry_signals, exit_signals, order_by="score", descending=True, limit=100):
     return {
@@ -240,6 +283,20 @@ BUILTIN_STRATEGIES: list[dict] = [
         ],
         {"momentum_20d": 0.5, "momentum_60d": 0.3, "annual_vol_20d": 0.2},
         _low_volatility_leader,
+        [], [],
+    ),
+    _def(
+        "low_pe_high_div_leader", "低估值高股息龙头", "低估值(PE/PB)、高股息、近5年稳定分红且行业内市值Top3的行业龙头",
+        ["价值", "高股息", "行业龙头"],
+        [
+            {"id": "max_pe", "label": "市盈率上限", "type": "float", "default": 15, "min": 5, "max": 50, "step": 1},
+            {"id": "max_pb", "label": "市净率上限", "type": "float", "default": 3.0, "min": 0.5, "max": 10, "step": 0.1},
+            {"id": "min_div_yield", "label": "最低股息率", "type": "float", "default": 0.03, "min": 0.01, "max": 0.10, "step": 0.005},
+            {"id": "min_div_years", "label": "近5年分红年数", "type": "int", "default": 4, "min": 1, "max": 5, "step": 1},
+            {"id": "top_n", "label": "行业龙头数", "type": "int", "default": 3, "min": 1, "max": 10, "step": 1},
+        ],
+        {"div_yield": 0.4, "total_mv": 0.3, "div_paying_years": 0.3},
+        _low_pe_high_dividend_leader,
         [], [],
     ),
 ]

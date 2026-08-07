@@ -32,15 +32,6 @@ class TestSyncSmoke:
             return
         assert resp.status_code != 500, "/api/sync/stock_basics/status 返回 500"
 
-    async def test_multi_source_sync_status_no_500(self, http_client):
-        """多数据源同步状态不能 500"""
-        try:
-            resp = await http_client.get("/api/sync/multi-source/status")
-        except Exception as exc:
-            pytest.skip(f"服务未启动：{exc}")
-            return
-        assert resp.status_code != 500, "/api/sync/multi-source/status 返回 500"
-
 
 class TestFavoritesSmoke:
     """自选股端点冒烟测试"""
@@ -55,15 +46,6 @@ class TestFavoritesSmoke:
         # 200/401/403 都可接受，只要不是 500
         assert resp.status_code != 500, f"/api/favorites/ 返回 {resp.status_code}"
 
-    async def test_favorites_tags_no_500(self, http_client):
-        """自选股标签端点不能 500"""
-        try:
-            resp = await http_client.get("/api/favorites/tags")
-        except Exception as exc:
-            pytest.skip(f"服务未启动：{exc}")
-            return
-        assert resp.status_code != 500, "/api/favorites/tags 返回 500"
-
 
 class TestConfigSmoke:
     """配置管理端点冒烟测试"""
@@ -76,15 +58,6 @@ class TestConfigSmoke:
             pytest.skip(f"服务未启动：{exc}")
             return
         assert resp.status_code != 500, "/api/config/system 返回 500"
-
-    async def test_config_llm_no_500(self, http_client):
-        """LLM 配置读取不能 500"""
-        try:
-            resp = await http_client.get("/api/config/llm")
-        except Exception as exc:
-            pytest.skip(f"服务未启动：{exc}")
-            return
-        assert resp.status_code != 500, "/api/config/llm 返回 500"
 
     async def test_config_llm_providers_no_500(self, http_client):
         """LLM 提供商列表不能 500"""
@@ -99,15 +72,6 @@ class TestConfigSmoke:
 class TestSystemSmoke:
     """系统管理端点冒烟测试"""
 
-    async def test_scheduler_status_no_500(self, http_client):
-        """调度器状态端点不能 500"""
-        try:
-            resp = await http_client.get("/api/scheduler/status")
-        except Exception as exc:
-            pytest.skip(f"服务未启动：{exc}")
-            return
-        assert resp.status_code != 500, "/api/scheduler/status 返回 500"
-
     async def test_usage_statistics_no_500(self, http_client):
         """使用统计端点不能 500"""
         try:
@@ -116,15 +80,6 @@ class TestSystemSmoke:
             pytest.skip(f"服务未启动：{exc}")
             return
         assert resp.status_code != 500, "/api/usage/statistics 返回 500"
-
-    async def test_system_logs_no_500(self, http_client):
-        """系统日志端点不能 500"""
-        try:
-            resp = await http_client.get("/api/system/logs/")
-        except Exception as exc:
-            pytest.skip(f"服务未启动：{exc}")
-            return
-        assert resp.status_code != 500, "/api/system/logs/ 返回 500"
 
     async def test_cache_status_no_500(self, http_client):
         """缓存状态端点不能 500"""
@@ -139,15 +94,6 @@ class TestSystemSmoke:
 class TestDataSmoke:
     """数据相关端点冒烟测试"""
 
-    async def test_news_data_no_500(self, http_client):
-        """新闻数据端点不能 500"""
-        try:
-            resp = await http_client.get("/api/news-data/")
-        except Exception as exc:
-            pytest.skip(f"服务未启动：{exc}")
-            return
-        assert resp.status_code != 500, "/api/news-data/ 返回 500"
-
     async def test_financial_data_no_500(self, http_client):
         """财务数据端点不能 500"""
         try:
@@ -156,15 +102,6 @@ class TestDataSmoke:
             pytest.skip(f"服务未启动：{exc}")
             return
         assert resp.status_code != 500, "/api/financial-data/ 返回 500"
-
-    async def test_stock_data_list_no_500(self, http_client):
-        """股票数据列表端点不能 500"""
-        try:
-            resp = await http_client.get("/api/stock-data/")
-        except Exception as exc:
-            pytest.skip(f"服务未启动：{exc}")
-            return
-        assert resp.status_code != 500, "/api/stock-data/ 返回 500"
 
     async def test_multi_market_stocks_no_500(self, http_client):
         """多市场股票列表不能 500"""
@@ -178,20 +115,6 @@ class TestDataSmoke:
 
 class TestPortfolioAndRetailSmoke:
     """持仓、散户数据端点冒烟测试"""
-
-    async def test_portfolio_no_500(self, http_client):
-        """持仓端点不能 500"""
-        try:
-            resp = await http_client.get("/api/portfolio/")
-        except RuntimeError as exc:
-            if "Event loop is closed" in str(exc):
-                pytest.skip("event loop 已关闭（session fixture 复用问题）")
-                return
-            raise
-        except Exception as exc:
-            pytest.skip(f"服务未启动：{exc}")
-            return
-        assert resp.status_code != 500, "/api/portfolio/ 返回 500"
 
     async def test_retail_no_500(self, http_client):
         """散户数据端点不能 500"""

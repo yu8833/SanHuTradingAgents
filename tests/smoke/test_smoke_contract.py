@@ -11,8 +11,8 @@ import pytest
 pytestmark = [pytest.mark.smoke, pytest.mark.contract]
 
 
-# 已知需要真实外部依赖的端点，500 可接受（降级为 skip）
-# 这些端点 500 通常是因为外部服务/数据未配置，不是代码 bug
+# 已知需要真实外部依赖的端点，直接过滤（不再生成用例）
+# 这些端点通常因为外部服务/数据未配置而无法通过，不是代码 bug
 EXTERNAL_DEPENDENT_PATHS = [
     r"/api/baostock-init/",       # 需要 BaoStock 连接
     r"/api/tushare-init/",        # 需要 Tushare token
@@ -24,17 +24,30 @@ EXTERNAL_DEPENDENT_PATHS = [
     r"/api/analysis/",            # 需要 LLM 配置
 ]
 
+# 请求会因访问外部数据源而长期阻塞（超过请求超时）的端点，直接过滤（不再生成用例）
+TIMEOUT_PRONE_PATHS = [
+    r"/api/historical-data/health",
+    r"/api/historical-data/statistics",
+    r"/api/multi-period-sync/health",
+    r"/api/multi-period-sync/statistics",
+]
+
 
 def _is_external_dependent(path: str) -> bool:
     """判断路径是否为已知需要外部依赖的端点。"""
     return any(re.search(pattern, path) for pattern in EXTERNAL_DEPENDENT_PATHS)
 
 
-def _all_openapi_get_paths(base_url: str):
-    """懒加载 OpenAPI schema，返回 (method, path) 列表。
+def _is_timeout_prone(path: str) -> bool:
+    """判断路径是否为已知会长期阻塞导致请求超时的端点。"""
+    return any(re.search(pattern, path) for pattern in TIMEOUT_PRONE_PATHS)
 
-    注意：此函数在 parametrize 收集阶段执行（模块级），不能调用 pytest.skip。
-    服务不可用时返回空列表，parametrize 会自动跳过测试。
+
+def _all_openapi_get_paths(base_url: str):
+    """懒加载 OpenAPI schema，返回应测试的 (method, path) 列表。
+
+    在 parametrize 收集阶段过滤掉外部依赖端点与超时端点，使其不再生成测试用例
+    （而非生成后跳过）。服务不可用时返回空列表，parametrize 会自动跳过测试。
     """
     import httpx
 
@@ -48,8 +61,13 @@ def _all_openapi_get_paths(base_url: str):
     result = []
     for path, methods in schema.get("paths", {}).items():
         for method in methods:
-            if method.upper() == "GET":
-                result.append((method, path))
+            if method.upper() != "GET":
+                continue
+            if _is_external_dependent(path):
+                continue
+            if _is_timeout_prone(path):
+                continue
+            result.append((method, path))
     return result
 
 
@@ -73,18 +91,13 @@ def test_openapi_schema_reachable(base_url):
 def test_get_endpoints_no_500(base_url, auth_token, method_path):
     """所有 GET 端点在合法路径下都不能 500。
 
-    对于已知需要真实外部依赖的端点（初始化、历史数据查询等），降级为 skip，
-    但记录到日志便于后续排查。
+    外部依赖与超时端点已在收集阶段过滤，此处不再生成用例。
     """
     if not method_path:
         pytest.skip("无路径可测")
         return
     import httpx
     method, path = method_path
-
-    # 已知需要外部依赖的端点降级处理
-    if _is_external_dependent(path):
-        pytest.skip(f"外部依赖端点 {path}，需要真实配置才能通过")
 
     # 将路径参数替换为合理占位值
     test_path = path
