@@ -23,7 +23,12 @@ from app.strategy_system.strategies import (
 logger = logging.getLogger(__name__)
 
 # 指标 warmup 需要的历史天数（覆盖 ma60/60日动量等长周期）
-WARMUP_DAYS = 180
+WARMUP_DAYS = 130
+
+# 筛选只需目标交易日当天的指标，最长指标窗口为 60 个交易日（ma60/momentum60/high60d）。
+# 因此在 compute_all 前把面板裁剪到最近 SCREEN_MAX_WINDOW_DAYS 个交易日，
+# 避免对全量历史行计算指标，显著降低耗时。
+SCREEN_MAX_WINDOW_DAYS = 70
 
 # run-all 筛选结果缓存集合：同一交易日结果幂等，缓存后再次打开页面可直接返回（含 computed_at）
 SCREEN_CACHE_COLLECTION = "strategy_screen_cache"
@@ -112,6 +117,17 @@ def _to_float(v):
         return None
 
 
+def _trim_to_last_days(df: pd.DataFrame, days: int) -> pd.DataFrame:
+    """裁剪面板，每只股票只保留最近 days 个交易日（输入需按 symbol/date 升序）。
+
+    筛选只需目标交易日当天的指标，且最长指标窗口为 60 个交易日，
+    因此保留最近 days(=70) 个交易日已足以为 ma60/60日动量等提供 warmup。
+    """
+    if df is None or df.empty or days <= 0:
+        return df
+    return df.groupby("symbol", sort=False).tail(days).reset_index(drop=True)
+
+
 def _load_fundamentals(db, symbols) -> pd.DataFrame:
     """从 stock_basic_info 加载行业/市值/估值字段，返回 symbol 去重后的 DataFrame。
 
@@ -152,14 +168,15 @@ def _load_dividend_metrics(db, symbols, as_of_date: str) -> dict:
     """
     if not symbols:
         return {}
+    from datetime import date as _date
     sym_list = [str(s) for s in symbols]
     cursor = db["stock_dividend"].find(
         {"code": {"$in": sym_list}},
         {"_id": 0, "code": 1, "ex_date": 1, "ann_date": 1, "end_date": 1,
          "cash_div": 1, "cash_div_tax": 1},
     )
-    as_of = pd.to_datetime(as_of_date)
-    as_of_year = as_of.year
+    as_of_d = pd.to_datetime(as_of_date).date()
+    as_of_year = as_of_d.year
 
     ps_sum: dict[str, float] = {}
     years: dict[str, set] = {}
@@ -174,10 +191,10 @@ def _load_dividend_metrics(db, symbols, as_of_date: str) -> dict:
         if len(date_str) < 8:
             continue
         try:
-            dt = pd.to_datetime(date_str[:10])
-        except Exception:
+            dt = _date.fromisoformat(date_str[:10])
+        except ValueError:
             continue
-        if (as_of - dt).days <= 365:
+        if (as_of_d - dt).days <= 365:
             ps_sum[code] = ps_sum.get(code, 0.0) + cash
         years.setdefault(code, set()).add(dt.year)
 
@@ -236,6 +253,9 @@ def run_strategy(
     if df.empty:
         return _empty_result(as_of_date, strategy_id, "无行情数据")
 
+    # 仅保留最近 SCREEN_MAX_WINDOW_DAYS 个交易日（足以为最长60日窗口提供warmup），
+    # 避免对全量历史行计算指标，显著降低耗时
+    df = _trim_to_last_days(df, SCREEN_MAX_WINDOW_DAYS)
     df = compute_all(df)
 
     # 仅保留目标交易日并需要足够 warmup
@@ -334,6 +354,9 @@ def run_all_strategies(
     if df.empty:
         return {"as_of": as_of_date, "strategies": [], "elapsed_ms": 0}
 
+    # 仅保留最近 SCREEN_MAX_WINDOW_DAYS 个交易日（足以为最长60日窗口提供warmup），
+    # 避免对全量历史行计算指标，显著降低耗时
+    df = _trim_to_last_days(df, SCREEN_MAX_WINDOW_DAYS)
     df = compute_all(df)
     target = df[df["date"] == as_of_date].copy()
     if target.empty:
