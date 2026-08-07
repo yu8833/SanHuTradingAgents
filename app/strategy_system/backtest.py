@@ -15,6 +15,7 @@ import logging
 import time
 import uuid
 from bisect import bisect_right
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 
@@ -118,9 +119,14 @@ def _pct_from_bps(bps: float) -> float:
     return bps / 10000.0
 
 
-def run_strategy_backtest(db, config: StrategyBtConfig, panel: pd.DataFrame | None = None) -> dict:
+def run_strategy_backtest(db, config: StrategyBtConfig, panel: pd.DataFrame | None = None,
+                          progress_cb: Callable[[float, str], None] | None = None) -> dict:
     t0 = time.perf_counter()
     run_id = uuid.uuid4().hex[:10]
+
+    def _report(p: float, msg: str) -> None:
+        if progress_cb:
+            progress_cb(p, msg)
 
     def _err(msg: str) -> dict:
         return {
@@ -140,6 +146,8 @@ def run_strategy_backtest(db, config: StrategyBtConfig, panel: pd.DataFrame | No
     if panel.empty:
         return _err("无数据，请检查日期范围或先同步行情")
 
+    _report(0.05, "正在计算指标与信号…")
+
     # 仅保留正式区间
     cfg = config.as_dict or config.__dict__
     start_s = _parse_date(cfg.get("start"))
@@ -156,6 +164,8 @@ def run_strategy_backtest(db, config: StrategyBtConfig, panel: pd.DataFrame | No
     if not entry[formal.index].any():
         return _err("在指定区间内未产生买入信号")
 
+    _report(0.10, "正在计算评分…")
+
     # 评分
     strategy = _get_strategy_map().get(config.strategy_id)
     scoring = strategy.get("scoring", {}) if strategy else {}
@@ -164,9 +174,12 @@ def run_strategy_backtest(db, config: StrategyBtConfig, panel: pd.DataFrame | No
     sim = _simulate_portfolio(
         panel, entry, exit_mask, scores, config,
         start_s, end_s, db,
+        progress_cb=progress_cb,
     )
     if sim is None:
         return _err("回测模拟失败")
+
+    _report(0.98, "正在生成报告…")
 
     elapsed = round((time.perf_counter() - t0) * 1000, 1)
     return {
@@ -227,7 +240,8 @@ def _score_series(df: pd.DataFrame, scoring: dict) -> pd.Series:
     return scores * 100
 
 
-def _simulate_portfolio(panel, entry, exit_mask, scores, config, start_s, end_s, db):
+def _simulate_portfolio(panel, entry, exit_mask, scores, config, start_s, end_s, db,
+                        progress_cb: Callable[[float, str], None] | None = None):
     """逐日组合模拟。返回 dict 含 stats/equity_curve/drawdown/trades/per_symbol。"""
     df = panel
     dates = sorted(df["date"].unique())
@@ -235,6 +249,7 @@ def _simulate_portfolio(panel, entry, exit_mask, scores, config, start_s, end_s,
     sim_dates = [d for d in dates if start_s <= d <= end_s]
     if not sim_dates:
         return None
+    total_days = len(sim_dates)
 
     df = df.set_index(["symbol", "date"])
     entry = entry.set_axis(df.index)
@@ -284,7 +299,9 @@ def _simulate_portfolio(panel, entry, exit_mask, scores, config, start_s, end_s,
             return float(px) * (1 + slippage)
         return float(px) * (1 - slippage)
 
-    for d in sim_dates:
+    for idx, d in enumerate(sim_dates):
+        if progress_cb and (idx % 10 == 0 or idx == total_days - 1):
+            progress_cb(0.10 + 0.85 * (idx + 1) / total_days, f"正在撮合回测（{idx + 1}/{total_days} 个交易日）…")
         day_syms = df.index.get_level_values(0)[df.index.get_level_values(1) == d]
         day_syms = list(dict.fromkeys(day_syms))
         day = df.xs(d, level="date") if d in df.index.get_level_values(1) else pd.DataFrame()
@@ -540,7 +557,7 @@ def _build_benchmark(db, start_s, end_s):
 # 因子回测
 # ──────────────────────────────────────────────────────────────
 
-def run_factor_backtest(db, config: dict) -> dict:
+def run_factor_backtest(db, config: dict, progress_cb: Callable[[float, str], None] | None = None) -> dict:
     t0 = time.perf_counter()
     run_id = uuid.uuid4().hex[:10]
     factor_name = config.get("factor_name")
@@ -548,6 +565,10 @@ def run_factor_backtest(db, config: dict) -> dict:
     end_s = _parse_date(config.get("end"))
     n_groups = int(config.get("n_groups", 5))
     rebalance = config.get("rebalance", "monthly")
+
+    def _report(p: float, msg: str) -> None:
+        if progress_cb:
+            progress_cb(p, msg)
 
     def _err(msg):
         return {"run_id": run_id, "success": False, "error": msg,
@@ -567,9 +588,13 @@ def run_factor_backtest(db, config: dict) -> dict:
         return _err(f"因子 {factor_name} 未在数据中（需先计算指标）")
 
     # 逐日因子分层
+    _report(0.4, "正在计算分组收益…")
     group_returns = _compute_group_returns(formal, factor_name, n_groups, rebalance)
+    _report(0.7, "正在计算 IC/IR…")
     ic, ir = _compute_ic_ir(formal, factor_name)
     long_short = _compute_long_short(formal, factor_name, n_groups, rebalance)
+
+    _report(1.0, "完成")
 
     return {
         "run_id": run_id,
@@ -695,12 +720,17 @@ def _compute_long_short(df, factor_name, n_groups, rebalance):
 # 参数优化
 # ──────────────────────────────────────────────────────────────
 
-def run_optimizer(db, config: dict, panel: pd.DataFrame | None = None) -> dict:
+def run_optimizer(db, config: dict, panel: pd.DataFrame | None = None,
+                  progress_cb: Callable[[float, str], None] | None = None) -> dict:
     t0 = time.perf_counter()
     run_id = uuid.uuid4().hex[:10]
     strategy_id = config.get("strategy_id")
     objective = config.get("objective", "total_return")
     param_grid = config.get("param_grid") or {}
+
+    def _report(p: float, msg: str) -> None:
+        if progress_cb:
+            progress_cb(p, msg)
 
     def _err(msg):
         return {"run_id": run_id, "success": False, "error": msg,
@@ -719,6 +749,8 @@ def run_optimizer(db, config: dict, panel: pd.DataFrame | None = None) -> dict:
         if panel.empty:
             return _err("无数据")
 
+    _report(0.05, "正在构建参数组合…")
+
     # 构建参数组合
     keys = list(param_grid.keys())
     combos = []
@@ -732,8 +764,11 @@ def run_optimizer(db, config: dict, panel: pd.DataFrame | None = None) -> dict:
     if not combos:
         return _err("参数网格为空")
 
+    n_combos = len(combos)
     results = []
-    for params in combos:
+    for i, params in enumerate(combos):
+        def _inner(p: float, msg: str, _i: int = i) -> None:
+            _report(0.05 + 0.90 * (_i + p) / n_combos, msg)
         bt = run_strategy_backtest(db, StrategyBtConfig(
             strategy_id=strategy_id,
             start=config.get("start"),
@@ -752,7 +787,8 @@ def run_optimizer(db, config: dict, panel: pd.DataFrame | None = None) -> dict:
             max_hold_days=config.get("max_hold_days"),
             holding_days=int(config.get("holding_days", 5)),
             as_dict=config,
-        ), panel=panel)
+        ), panel=panel, progress_cb=_inner)
+        _report(0.05 + 0.90 * (i + 1) / n_combos, f"已完成参数组合 {i + 1}/{n_combos}")
         if bt.get("success"):
             stats = bt["stats"]
             objective_value = stats.get(objective, 0.0)
@@ -784,7 +820,8 @@ def run_optimizer(db, config: dict, panel: pd.DataFrame | None = None) -> dict:
 # 步进优化
 # ──────────────────────────────────────────────────────────────
 
-def run_walkforward(db, config: dict) -> dict:
+def run_walkforward(db, config: dict,
+                    progress_cb: Callable[[float, str], None] | None = None) -> dict:
     t0 = time.perf_counter()
     run_id = uuid.uuid4().hex[:10]
     strategy_id = config.get("strategy_id")
@@ -793,6 +830,10 @@ def run_walkforward(db, config: dict) -> dict:
     train_days = int(config.get("train_days", 120))
     test_days = int(config.get("test_days", 30))
     param_grid = config.get("param_grid") or {}
+
+    def _report(p: float, msg: str) -> None:
+        if progress_cb:
+            progress_cb(p, msg)
 
     def _err(msg):
         return {"run_id": run_id, "success": False, "error": msg,
@@ -826,13 +867,16 @@ def run_walkforward(db, config: dict) -> dict:
             "test_end": test_end,
         })
 
+    n_folds = len(folds)
     fold_results = []
-    for fold in folds:
+    for i, fold in enumerate(folds):
+        def _inner(p: float, msg: str, _i: int = i) -> None:
+            _report((_i + p) / n_folds, msg)
         # 训练期：选最优参数
         train_cfg = dict(config)
         train_cfg["start"] = fold["train_start"]
         train_cfg["end"] = fold["train_end"]
-        opt = run_optimizer(db, train_cfg, panel=panel)
+        opt = run_optimizer(db, train_cfg, panel=panel, progress_cb=_inner)
         best_params = None
         if opt.get("success") and opt.get("results"):
             best_params = opt["results"][0]["params"]
@@ -857,6 +901,7 @@ def run_walkforward(db, config: dict) -> dict:
             holding_days=int(config.get("holding_days", 5)),
             as_dict=test_cfg,
         ), panel=panel)
+        _report((i + 1) / n_folds, f"已完成折叠 {i + 1}/{n_folds}")
         fold_results.append({
             "train": {"start": fold["train_start"], "end": fold["train_end"]},
             "test": {"start": fold["test_start"], "end": fold["test_end"]},
@@ -865,6 +910,8 @@ def run_walkforward(db, config: dict) -> dict:
             "success": bt.get("success", False),
             "error": bt.get("error"),
         })
+
+    _report(1.0, "完成")
 
     # 汇总测试期表现
     test_total_returns = [f["stats"].get("total_return", 0) for f in fold_results if f.get("success")]

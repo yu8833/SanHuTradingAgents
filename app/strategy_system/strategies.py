@@ -108,11 +108,22 @@ def _low_volatility_leader(df: pd.DataFrame, params: dict) -> pd.Series:
     return m
 
 
+def _num_col(df: pd.DataFrame, col: str) -> pd.Series:
+    """安全读取数值列：缺失列返回与 df 对齐索引的 NaN Series，而非标量。
+
+    避免 pd.to_numeric(None) 返回 numpy.float64 标量导致后续 .fillna/.notna 崩溃。
+    """
+    if col not in df.columns:
+        return pd.Series(float("nan"), index=df.index)
+    return pd.to_numeric(df[col], errors="coerce")
+
+
 def _low_pe_high_dividend_leader(df: pd.DataFrame, params: dict) -> pd.Series:
     """低估值、高股息、能长期稳定分红的行业龙头。
 
     依赖 screener._enrich_target 注入的列：pe_ttm, pb, total_mv, industry,
-    div_yield, div_paying_years。
+    div_yield, div_paying_years。回测面板若无这些列（技术指标面板），
+    则返回全 False（无信号），不崩溃。
 
     分两阶段：
     1. 基础过滤：PE>0且≤max_pe、PB>0且≤max_pb（低估值）、股息率≥min_div_yield（高股息）、
@@ -125,11 +136,11 @@ def _low_pe_high_dividend_leader(df: pd.DataFrame, params: dict) -> pd.Series:
     min_div_years = int(params.get("min_div_years", 4))
     top_n = int(params.get("top_n", 3))
 
-    pe = pd.to_numeric(df.get("pe_ttm"), errors="coerce")
-    pb = pd.to_numeric(df.get("pb"), errors="coerce")
-    dy = pd.to_numeric(df.get("div_yield"), errors="coerce")
-    div_years = pd.to_numeric(df.get("div_paying_years"), errors="coerce")
-    mv = pd.to_numeric(df.get("total_mv"), errors="coerce")
+    pe = _num_col(df, "pe_ttm")
+    pb = _num_col(df, "pb")
+    dy = _num_col(df, "div_yield")
+    div_years = _num_col(df, "div_paying_years")
+    mv = _num_col(df, "total_mv")
     industry = df.get("industry", pd.Series("", index=df.index)).fillna("")
 
     m = (pe > 0) & (pe <= max_pe)

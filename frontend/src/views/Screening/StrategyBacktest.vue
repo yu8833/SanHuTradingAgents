@@ -15,6 +15,24 @@
       </div>
     </div>
 
+    <!-- 回测进行中：进度 + 预计剩余时间（无论停留在哪个标签页都展示） -->
+    <el-card v-if="runningKind" class="progress-panel" shadow="never">
+      <template #header>
+        <span class="panel-title">
+          <el-icon class="is-loading" style="margin-right: 6px"><Loading /></el-icon>
+          回测进行中
+        </span>
+      </template>
+      <el-progress :percentage="progressInfo.percent" :stroke-width="14"
+                   :status="progressInfo.percent >= 100 ? 'success' : undefined" />
+      <div class="progress-meta">
+        <span class="progress-msg">{{ progressInfo.message }}</span>
+        <span v-if="progressInfo.etaSec > 0" class="progress-eta">预计还需 {{ formatEta(progressInfo.etaSec) }}</span>
+        <span v-else class="progress-eta">正在计算，请稍候…</span>
+        <span class="progress-elapsed">已运行 {{ formatEta(progressInfo.elapsedSec) }}</span>
+      </div>
+    </el-card>
+
     <!-- 策略回测 -->
     <template v-if="activeTab === 'strategy'">
       <el-card class="form-panel" shadow="never">
@@ -296,9 +314,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, h } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, h } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Histogram, Search } from '@element-plus/icons-vue'
+import { Histogram, Search, Loading } from '@element-plus/icons-vue'
 import { use as echartsUse } from 'echarts/core'
 import { LineChart } from 'echarts/charts'
 import { TitleComponent, TooltipComponent, LegendComponent, GridComponent } from 'echarts/components'
@@ -427,6 +445,119 @@ watch(factorResult, v => saveResult('factor', v))
 watch(optResult, v => saveResult('optimizer', v))
 watch(wfResult, v => saveResult('walkforward', v))
 
+// ---------------------------------------------------------------------------
+// 异步回测任务：离开页面/刷新后仍可恢复进度，完成后自动展示结果
+// ---------------------------------------------------------------------------
+type TaskKind = 'strategy' | 'factor' | 'optimizer' | 'walkforward'
+
+const BT_ACTIVE_KEY = 'strategy_backtest_active_task' // 记录当前进行中的任务
+
+const runningKind = ref<TaskKind | null>(null)
+const progressInfo = ref({ percent: 0, message: '', etaSec: 0, elapsedSec: 0 })
+let pollTimer: ReturnType<typeof setInterval> | null = null
+
+function saveActiveTask(kind: TaskKind, taskId: string | null) {
+  try {
+    if (taskId == null) {
+      localStorage.removeItem(BT_ACTIVE_KEY)
+      return
+    }
+    localStorage.setItem(BT_ACTIVE_KEY, JSON.stringify({ kind, task_id: taskId }))
+  } catch (e) {
+    console.warn('[回测任务] 本地保存失败:', e)
+  }
+}
+
+function loadActiveTask(): { kind: TaskKind; task_id: string } | null {
+  try {
+    const raw = localStorage.getItem(BT_ACTIVE_KEY)
+    if (!raw) return null
+    const p = JSON.parse(raw)
+    return p?.task_id ? { kind: p.kind, task_id: p.task_id } : null
+  } catch {
+    return null
+  }
+}
+
+function clearActiveTask() {
+  try {
+    localStorage.removeItem(BT_ACTIVE_KEY)
+  } catch { /* ignore */ }
+}
+
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
+function formatEta(sec: number): string {
+  if (!sec || sec < 0 || !isFinite(sec)) return ''
+  if (sec < 60) return `${Math.max(1, Math.round(sec))} 秒`
+  const m = Math.floor(sec / 60)
+  const s = Math.round(sec % 60)
+  return s > 0 ? `${m} 分 ${s} 秒` : `${m} 分钟`
+}
+
+const resultSetters: Record<TaskKind, (r: any) => void> = {
+  strategy: (r) => { strategyResult.value = r; saveResult('strategy', r) },
+  factor: (r) => { factorResult.value = r; saveResult('factor', r) },
+  optimizer: (r) => { optResult.value = r; saveResult('optimizer', r) },
+  walkforward: (r) => { wfResult.value = r; saveResult('walkforward', r) },
+}
+
+const loadingSetters: Record<TaskKind, (v: boolean) => void> = {
+  strategy: (v) => { strategyLoading.value = v },
+  factor: (v) => { factorLoading.value = v },
+  optimizer: (v) => { optLoading.value = v },
+  walkforward: (v) => { wfLoading.value = v },
+}
+
+function pollTask(taskId: string, kind: TaskKind) {
+  stopPolling()
+  pollTimer = setInterval(async () => {
+    try {
+      const res = await strategyApi.getTask(taskId)
+      const data = (res as any)?.data ?? res
+      const status = data.status
+      if (status === 'running') {
+        const p = data.progress ?? 0
+        const elapsed = (data.elapsed_ms ?? 0) / 1000
+        progressInfo.value = {
+          percent: Math.round(p * 100),
+          message: data.message || '回测进行中…',
+          elapsedSec: elapsed,
+          etaSec: p > 0 && p < 1 ? (elapsed / p) * (1 - p) : 0,
+        }
+      } else if (status === 'success') {
+        stopPolling()
+        loadingSetters[kind](false)
+        runningKind.value = null
+        clearActiveTask()
+        resultSetters[kind](data.result)
+        ElMessage.success('回测已完成')
+      } else if (status === 'failure') {
+        stopPolling()
+        loadingSetters[kind](false)
+        runningKind.value = null
+        clearActiveTask()
+        ElMessage.error(data.error || '回测失败')
+      }
+    } catch (e) {
+      // 瞬时网络错误忽略，下个周期重试
+    }
+  }, 2000)
+}
+
+function startTask(kind: TaskKind, taskId: string) {
+  saveActiveTask(kind, taskId)
+  runningKind.value = kind
+  loadingSetters[kind](true)
+  progressInfo.value = { percent: 0, message: '任务已提交，等待执行…', etaSec: 0, elapsedSec: 0 }
+  pollTask(taskId, kind)
+}
+
 const parseParamGrid = (text: string): Record<string, any> => {
   if (!text.trim()) return {}
   try {
@@ -457,9 +588,8 @@ const loadStrategies = async () => {
 const runStrategyBacktest = async () => {
   if (!btForm.value.strategy_id) return ElMessage.warning('请选择策略')
   if (!btRange.value?.[0]) return ElMessage.warning('请选择回测区间')
-  strategyLoading.value = true
   try {
-    const res = await strategyApi.backtest({
+    const res = await strategyApi.startBacktest({
       strategy_id: btForm.value.strategy_id,
       start: btRange.value[0],
       end: btRange.value[1],
@@ -477,33 +607,29 @@ const runStrategyBacktest = async () => {
       max_hold_days: btForm.value.max_hold_days,
       holding_days: 5,
     })
-    strategyResult.value = (res as any)?.data ?? res
-    // 显式保存：即使用户在回测完成前已离开页面（组件卸载、watch 已停止），结果仍能落盘
-    saveResult('strategy', strategyResult.value)
+    const data = (res as any)?.data ?? res
+    if (!data?.task_id) return ElMessage.error('提交回测任务失败')
+    startTask('strategy', data.task_id)
   } catch (e) {
-    ElMessage.error('策略回测失败')
-  } finally {
-    strategyLoading.value = false
+    ElMessage.error('提交策略回测失败')
   }
 }
 
 const runFactorBacktest = async () => {
   if (!factorRange.value?.[0]) return ElMessage.warning('请选择回测区间')
-  factorLoading.value = true
   try {
-    const res = await strategyApi.factorBacktest({
+    const res = await strategyApi.startFactorBacktest({
       factor_name: factorForm.value.factor_name,
       start: factorRange.value[0],
       end: factorRange.value[1],
       n_groups: factorForm.value.n_groups,
       rebalance: 'monthly',
     })
-    factorResult.value = (res as any)?.data ?? res
-    saveResult('factor', factorResult.value)
+    const data = (res as any)?.data ?? res
+    if (!data?.task_id) return ElMessage.error('提交因子回测任务失败')
+    startTask('factor', data.task_id)
   } catch (e) {
-    ElMessage.error('因子回测失败')
-  } finally {
-    factorLoading.value = false
+    ElMessage.error('提交因子回测失败')
   }
 }
 
@@ -512,9 +638,8 @@ const runOptimizer = async () => {
   if (!optRange.value?.[0]) return ElMessage.warning('请选择回测区间')
   let paramGrid: Record<string, any>
   try { paramGrid = parseParamGrid(optForm.value.paramGridText) } catch { return }
-  optLoading.value = true
   try {
-    const res = await strategyApi.optimize({
+    const res = await strategyApi.startOptimize({
       strategy_id: optForm.value.strategy_id,
       start: optRange.value[0],
       end: optRange.value[1],
@@ -528,12 +653,11 @@ const runOptimizer = async () => {
       initial_capital: 1000000,
       position_sizing: 'equal',
     })
-    optResult.value = (res as any)?.data ?? res
-    saveResult('optimizer', optResult.value)
+    const data = (res as any)?.data ?? res
+    if (!data?.task_id) return ElMessage.error('提交参数优化任务失败')
+    startTask('optimizer', data.task_id)
   } catch (e) {
-    ElMessage.error('参数优化失败')
-  } finally {
-    optLoading.value = false
+    ElMessage.error('提交参数优化失败')
   }
 }
 
@@ -542,9 +666,8 @@ const runWalkForward = async () => {
   if (!wfRange.value?.[0]) return ElMessage.warning('请选择回测区间')
   let paramGrid: Record<string, any>
   try { paramGrid = parseParamGrid(wfForm.value.paramGridText) } catch { return }
-  wfLoading.value = true
   try {
-    const res = await strategyApi.walkforward({
+    const res = await strategyApi.startWalkforward({
       strategy_id: wfForm.value.strategy_id,
       start: wfRange.value[0],
       end: wfRange.value[1],
@@ -559,12 +682,11 @@ const runWalkForward = async () => {
       initial_capital: 1000000,
       position_sizing: 'equal',
     })
-    wfResult.value = (res as any)?.data ?? res
-    saveResult('walkforward', wfResult.value)
+    const data = (res as any)?.data ?? res
+    if (!data?.task_id) return ElMessage.error('提交步进优化任务失败')
+    startTask('walkforward', data.task_id)
   } catch (e) {
-    ElMessage.error('步进优化失败')
-  } finally {
-    wfLoading.value = false
+    ElMessage.error('提交步进优化失败')
   }
 }
 
@@ -619,13 +741,37 @@ const icOption = computed(() => {
   }
 })
 
-onMounted(() => {
+onMounted(async () => {
   loadStrategies()
   // 恢复上次保存的回测结果（离开页面/刷新后仍可查看）
   strategyResult.value = loadResult<BacktestResult>('strategy')
   factorResult.value = loadResult<FactorBacktestResult>('factor')
   optResult.value = loadResult<OptimizeResult>('optimizer')
   wfResult.value = loadResult<WalkForwardResult>('walkforward')
+
+  // 恢复进行中的异步回测任务
+  const active = loadActiveTask()
+  if (active) {
+    try {
+      const res = await strategyApi.getTask(active.task_id)
+      const data = (res as any)?.data ?? res
+      if (data.status === 'running' && (data.kind === 'strategy' || data.kind === 'factor'
+          || data.kind === 'optimizer' || data.kind === 'walkforward')) {
+        startTask(active.kind, active.task_id)
+      } else if (data.status === 'success') {
+        resultSetters[active.kind]?.(data.result)
+        clearActiveTask()
+      } else {
+        clearActiveTask()
+      }
+    } catch (e) {
+      clearActiveTask()
+    }
+  }
+})
+
+onBeforeUnmount(() => {
+  stopPolling()
 })
 </script>
 
@@ -691,6 +837,23 @@ onMounted(() => {
     margin-bottom: 20px;
 
     :deep(.el-statistic__head) { font-size: 13px; }
+  }
+
+  .progress-panel {
+    margin-bottom: 20px;
+    border-radius: 12px;
+
+    .progress-meta {
+      display: flex;
+      align-items: baseline;
+      gap: 16px;
+      margin-top: 12px;
+      font-size: 13px;
+
+      .progress-msg { color: var(--el-text-color-primary); }
+      .progress-eta { color: var(--el-color-primary); font-weight: 600; }
+      .progress-elapsed { color: var(--el-text-color-secondary); }
+    }
   }
 
   .param-tag { margin-right: 6px; margin-bottom: 4px; }

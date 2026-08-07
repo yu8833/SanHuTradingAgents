@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
+import time
 from typing import Any
 
 from fastapi import APIRouter
@@ -15,6 +17,7 @@ from app.core.database import get_mongo_db_sync
 from app.core.response import fail, ok
 from app.strategy_system import backtest as bt
 from app.strategy_system import screener
+from app.strategy_system.task_manager import make_progress_cb, task_manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["strategy"])
@@ -229,3 +232,144 @@ async def walkforward(req: WalkForwardRequest):
     except Exception as e:
         logger.exception("步进优化失败")
         return fail(f"步进优化失败: {e}")
+
+
+# ──────────────────────────────────────────────────────────────
+# 异步回测任务（长时计算不阻塞请求，支持前端轮询进度/恢复结果）
+# ──────────────────────────────────────────────────────────────
+
+def _build_strategy_bt_config(req: BacktestRequest) -> bt.StrategyBtConfig:
+    return bt.StrategyBtConfig(
+        strategy_id=req.strategy_id,
+        start=req.start,
+        end=req.end,
+        symbols=req.symbols,
+        params=req.params,
+        entry_fill=req.entry_fill,
+        exit_fill=req.exit_fill,
+        fees_pct=req.fees_pct,
+        slippage_bps=req.slippage_bps,
+        max_positions=req.max_positions,
+        max_exposure_pct=req.max_exposure_pct,
+        initial_capital=req.initial_capital,
+        position_sizing=req.position_sizing,
+        stop_loss_pct=req.stop_loss_pct,
+        take_profit_pct=req.take_profit_pct,
+        max_hold_days=req.max_hold_days,
+        holding_days=req.holding_days,
+        as_dict=req.model_dump(),
+    )
+
+
+@router.post("/api/strategy/backtest/start")
+async def strategy_backtest_start(req: BacktestRequest):
+    """发起异步策略回测，立即返回 task_id。"""
+    try:
+        task = task_manager.create("strategy")
+        task_id = task.task_id
+
+        def _run() -> None:
+            try:
+                db = get_mongo_db_sync()
+                cfg = _build_strategy_bt_config(req)
+                result = bt.run_strategy_backtest(db, cfg, progress_cb=make_progress_cb(task_id))
+                task_manager.update(task_id, status="success", result=result, progress=1.0)
+            except Exception as e:
+                logger.exception("策略回测任务异常")
+                task_manager.update(task_id, status="failure", error=str(e))
+
+        threading.Thread(target=_run, daemon=True).start()
+        return ok({"task_id": task_id, "status": "running", "kind": "strategy"})
+    except Exception as e:
+        logger.exception("创建策略回测任务失败")
+        return fail(f"创建回测任务失败: {e}")
+
+
+@router.post("/api/strategy/factor/backtest/start")
+async def factor_backtest_start(req: FactorBacktestRequest):
+    """发起异步因子回测，立即返回 task_id。"""
+    try:
+        task = task_manager.create("factor")
+        task_id = task.task_id
+
+        def _run() -> None:
+            try:
+                db = get_mongo_db_sync()
+                result = bt.run_factor_backtest(db, req.model_dump(), progress_cb=make_progress_cb(task_id))
+                task_manager.update(task_id, status="success", result=result, progress=1.0)
+            except Exception as e:
+                logger.exception("因子回测任务异常")
+                task_manager.update(task_id, status="failure", error=str(e))
+
+        threading.Thread(target=_run, daemon=True).start()
+        return ok({"task_id": task_id, "status": "running", "kind": "factor"})
+    except Exception as e:
+        logger.exception("创建因子回测任务失败")
+        return fail(f"创建回测任务失败: {e}")
+
+
+@router.post("/api/strategy/optimize/start")
+async def optimize_start(req: OptimizeRequest):
+    """发起异步参数优化，立即返回 task_id。"""
+    try:
+        task = task_manager.create("optimizer")
+        task_id = task.task_id
+
+        def _run() -> None:
+            try:
+                db = get_mongo_db_sync()
+                result = bt.run_optimizer(db, req.model_dump(), progress_cb=make_progress_cb(task_id))
+                task_manager.update(task_id, status="success", result=result, progress=1.0)
+            except Exception as e:
+                logger.exception("参数优化任务异常")
+                task_manager.update(task_id, status="failure", error=str(e))
+
+        threading.Thread(target=_run, daemon=True).start()
+        return ok({"task_id": task_id, "status": "running", "kind": "optimizer"})
+    except Exception as e:
+        logger.exception("创建参数优化任务失败")
+        return fail(f"创建回测任务失败: {e}")
+
+
+@router.post("/api/strategy/walkforward/start")
+async def walkforward_start(req: WalkForwardRequest):
+    """发起异步步进优化，立即返回 task_id。"""
+    try:
+        task = task_manager.create("walkforward")
+        task_id = task.task_id
+
+        def _run() -> None:
+            try:
+                db = get_mongo_db_sync()
+                result = bt.run_walkforward(db, req.model_dump(), progress_cb=make_progress_cb(task_id))
+                task_manager.update(task_id, status="success", result=result, progress=1.0)
+            except Exception as e:
+                logger.exception("步进优化任务异常")
+                task_manager.update(task_id, status="failure", error=str(e))
+
+        threading.Thread(target=_run, daemon=True).start()
+        return ok({"task_id": task_id, "status": "running", "kind": "walkforward"})
+    except Exception as e:
+        logger.exception("创建步进优化任务失败")
+        return fail(f"创建回测任务失败: {e}")
+
+
+@router.get("/api/strategy/task/{task_id}")
+async def strategy_task_status(task_id: str):
+    """查询回测任务状态/进度/结果。"""
+    task = task_manager.get(task_id)
+    if task is None:
+        return fail("任务不存在或已过期", code=404)
+    data: dict[str, Any] = {
+        "task_id": task.task_id,
+        "kind": task.kind,
+        "status": task.status,
+        "progress": round(task.progress, 4),
+        "message": task.message,
+        "elapsed_ms": int((time.time() - task.started_at) * 1000),
+    }
+    if task.status == "success":
+        data["result"] = task.result
+    if task.status == "failure":
+        data["error"] = task.error
+    return ok(data)

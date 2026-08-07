@@ -231,4 +231,25 @@ export const strategyApi = {
     ApiClient.post<OptimizeResult>('/api/strategy/optimize', payload, { timeout: options?.timeout ?? 600000 }),
   walkforward: (payload: any, options?: { timeout?: number }) =>
     ApiClient.post<WalkForwardResult>('/api/strategy/walkforward', payload, { timeout: options?.timeout ?? 600000 }),
+
+  // ===== 异步回测任务（长时计算，支持进度轮询与结果恢复） =====
+  startBacktest: (payload: BacktestConfig) =>
+    ApiClient.post<{ task_id: string; status: string; kind: string }>('/api/strategy/backtest/start', payload),
+  startFactorBacktest: (payload: any) =>
+    ApiClient.post<{ task_id: string; status: string; kind: string }>('/api/strategy/factor/backtest/start', payload),
+  startOptimize: (payload: any) =>
+    ApiClient.post<{ task_id: string; status: string; kind: string }>('/api/strategy/optimize/start', payload),
+  startWalkforward: (payload: any) =>
+    ApiClient.post<{ task_id: string; status: string; kind: string }>('/api/strategy/walkforward/start', payload),
+  getTask: (taskId: string) =>
+    ApiClient.get<{
+      task_id: string
+      kind: string
+      status: 'running' | 'success' | 'failure'
+      progress: number
+      message: string
+      elapsed_ms: number
+      result?: any
+      error?: string
+    }>(`/api/strategy/task/${taskId}`),
 }
