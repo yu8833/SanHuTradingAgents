@@ -9,13 +9,14 @@ import json
 import logging
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.database import get_mongo_db
 from app.core.response import ok
 from app.routers.auth_db import get_current_user
+from app.services.sync_cache_layer import get_cache_sync, set_cache_sync
 
 logger = logging.getLogger(__name__)
 
@@ -176,6 +177,68 @@ async def _fetch_news_from_multiple_sources(code: str, days: int = 30, limit: in
     except Exception as e:
         logger.error(f"❌ 多数据源获取新闻失败: {e}")
         return items
+
+
+# ============================
+# 新闻/资金流向 缓存辅助
+# ============================
+NEWS_CACHE_CATEGORY = "news"
+MONEY_FLOW_COLLECTION = "stock_money_flow"
+_money_flow_ttl_ensured = False
+
+
+async def _get_money_flow_ttl() -> int:
+    """资金流向缓存的TTL：交易时段5分钟，非交易时段30分钟。"""
+    from app.utils.trading_time import is_strict_trading_time
+
+    return 300 if is_strict_trading_time() else 1800
+
+
+async def _ensure_money_flow_ttl_index(db) -> None:
+    """确保资金流向缓存的TTL索引与唯一索引存在（惰性创建，幂等）。"""
+    global _money_flow_ttl_ensured
+    if _money_flow_ttl_ensured:
+        return
+    try:
+        coll = db[MONEY_FLOW_COLLECTION]
+        await coll.create_index([("expire_at", 1)], expireAfterSeconds=0, background=True)
+        await coll.create_index([("code", 1), ("days", 1)], unique=True, background=True)
+        _money_flow_ttl_ensured = True
+    except Exception as e:
+        logger.warning(f"⚠️ 创建资金流向TTL索引失败: {e}")
+
+
+async def _get_money_flow_cache(db, code6: str, days: int) -> dict | None:
+    """从MongoDB读取未过期的资金流向缓存。"""
+    try:
+        doc = await db[MONEY_FLOW_COLLECTION].find_one(
+            {"code": code6, "days": days},
+            {"_id": 0, "data": 1, "expire_at": 1}
+        )
+        if doc and doc.get("expire_at") and doc["expire_at"] > datetime.now():
+            return doc.get("data")
+    except Exception as e:
+        logger.warning(f"⚠️ 读取资金流向缓存失败: {e}")
+    return None
+
+
+async def _set_money_flow_cache(db, code6: str, days: int, data: dict, ttl: int) -> None:
+    """将资金流向数据写入MongoDB缓存（带过期时间，TTL索引自动清理）。"""
+    try:
+        expire_at = datetime.now() + timedelta(seconds=ttl)
+        await db[MONEY_FLOW_COLLECTION].update_one(
+            {"code": code6, "days": days},
+            {"$set": {
+                "code": code6,
+                "days": days,
+                "data": data,
+                "fetched_at": datetime.now(),
+                "expire_at": expire_at,
+            }},
+            upsert=True
+        )
+    except Exception as e:
+        logger.warning(f"⚠️ 写入资金流向缓存失败: {e}")
 
 
 @router.get("/{code}/quote", response_model=dict)
@@ -802,6 +865,7 @@ async def get_kline(
     import logging
     from datetime import datetime, timedelta
     from zoneinfo import ZoneInfo
+    import asyncio
     logger = logging.getLogger(__name__)
 
     valid_periods = {"day","week","month","5m","15m","30m","60m"}
@@ -838,6 +902,19 @@ async def get_kline(
     adj_norm = None if adj in (None, "none", "", "null") else adj
     items = None
     source = None
+
+    # 🔥 K线响应缓存（决策核心：反向共用 + 分级TTL，realtime分级TTL：交易30s/非交易5min）。
+    #    MongoDB 已承担历史K线的落盘缓存，此层进一步缓存组装后的完整响应（含当天实时K线），
+    #    命中即先用旧值立即返回，避免每次请求重复执行多路 MongoDB 读取与 JSON 组装。
+    kline_cache_key = f"stock:kline:{code_padded}:{period}:{limit}:{adj_norm or 'none'}"
+    if not force_refresh:
+        try:
+            cached_kline = await asyncio.to_thread(get_cache_sync, kline_cache_key)
+            if cached_kline is not None:
+                logger.info(f"📦 K线缓存命中: {code_padded} {period} limit={limit}")
+                return ok(data=cached_kline)
+        except Exception as e:
+            logger.warning(f"⚠️ 读取K线缓存失败: {e}")
 
     # 周期映射：前端 -> MongoDB
     period_map = {
@@ -1011,11 +1088,19 @@ async def get_kline(
         "source": source,
         "items": items or []
     }
+
+    # 决策核心：写入缓存（realtime分级TTL：交易30s/非交易5min），仅缓存有有效K线数据的场景
+    if items:
+        try:
+            await asyncio.to_thread(set_cache_sync, kline_cache_key, data, category="realtime")
+        except Exception as e:
+            logger.warning(f"⚠️ 写入K线缓存失败: {e}")
+
     return ok(data)
 
 
 @router.get("/{code}/news", response_model=dict)
-async def get_news(code: str, days: int = 30, limit: int = 50, include_announcements: bool = True, current_user: dict = Depends(get_current_user)):
+async def get_news(code: str, days: int = 30, limit: int = 50, include_announcements: bool = True, force_refresh: bool = Query(False, description="是否强制刷新（跳过缓存）"), current_user: dict = Depends(get_current_user)):
     """获取新闻与公告（支持A股、港股、美股）"""
     from app.services.foreign_stock_service import ForeignStockService
     from app.services.news_data_service import NewsQueryParams, get_news_data_service
@@ -1040,6 +1125,18 @@ async def get_news(code: str, days: int = 30, limit: int = 50, include_announcem
         return ok(data)
     else:
         # A股：直接调用同步服务的查询方法（包含智能回退逻辑）
+        # 🔥 新闻响应缓存：复用同步缓存层（Redis+内存，news 分级TTL：交易5min/非交易1h）。
+        #    新闻组装会反复调用外部公告接口，缓存最终组装结果可大幅降低外部调用与响应耗时。
+        news_cache_key = f"stock:news:{normalized_code}:{days}:{limit}:{int(include_announcements)}"
+        if not force_refresh:
+            try:
+                cached_news = await asyncio.to_thread(get_cache_sync, news_cache_key)
+                if cached_news is not None:
+                    logger.info(f"📦 新闻缓存命中: {normalized_code}")
+                    return ok(data=cached_news)
+            except Exception as e:
+                logger.warning(f"⚠️ 读取新闻缓存失败: {e}")
+
         try:
             logger.info("=" * 80)
             logger.info(f"📰 开始获取新闻: code={code}, normalized_code={normalized_code}, days={days}, limit={limit}")
@@ -1073,8 +1170,11 @@ async def get_news(code: str, days: int = 30, limit: int = 50, include_announcem
             logger.info(f"📊 数据库查询结果: 返回 {len(news_list)} 条新闻")
 
             # 🔥 检查数据库中是否有真正的新闻（非公告）类型数据
+            # 注意：必须校验 type 字段真实存在（news.get("type") 而非带默认值），
+            # 否则历史数据缺 type 字段时会被误判为"已有新闻"，从而跳过实时拉取，
+            # 导致新闻永远不更新（例如 000001 缺 type 的旧记录遮蔽了最新新闻）。
             has_real_news = any(
-                news.get("type", "news") == "news" and "公告" not in str(news.get("title", ""))
+                news.get("type") == "news" and "公告" not in str(news.get("title", ""))
                 for news in news_list
             )
 
@@ -1217,6 +1317,14 @@ async def get_news(code: str, days: int = 30, limit: int = 50, include_announcem
 
             logger.info(f"📤 最终返回: source={data_source}, items_count={len(items)}")
             logger.info("=" * 80)
+
+            # 🔥 写入新闻缓存（仅在有关键内容时缓存，避免缓存空结果）
+            if items:
+                try:
+                    await asyncio.to_thread(set_cache_sync, news_cache_key, data, category=NEWS_CACHE_CATEGORY)
+                except Exception as e:
+                    logger.warning(f"⚠️ 写入新闻缓存失败: {e}")
+
             return ok(data)
 
         except Exception as e:
@@ -1235,6 +1343,7 @@ async def get_news(code: str, days: int = 30, limit: int = 50, include_announcem
 @router.get("/{code}/sector-info", response_model=dict)
 async def get_sector_info(
     code: str,
+    force_refresh: bool = Query(False, description="是否强制刷新（跳过缓存）"),
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -1253,6 +1362,20 @@ async def get_sector_info(
 
     code6 = str(normalized_code).zfill(6)
     db = get_mongo_db()
+
+    # 🔥 板块联动响应缓存（展示低敏感：长缓存 + 过期保护，market分级TTL：交易3min/非交易30min）。
+    #    板块名与成分统计相对稳定，无需每次请求都重跑多路 MongoDB 查询/外部接口回退，
+    #    冷启动命中缓存可避免重复打外部接口（AKShare/东方财富）。
+    import asyncio
+    sector_cache_key = f"stock:sector:{code6}"
+    if not force_refresh:
+        try:
+            cached = await asyncio.to_thread(get_cache_sync, sector_cache_key)
+            if cached is not None:
+                logger.info(f"📦 板块联动缓存命中: {code6}")
+                return ok(data=cached)
+        except Exception as e:
+            logger.warning(f"⚠️ 读取板块联动缓存失败: {e}")
     sector_name = None
     sector_stocks = []
     stock_codes = []  # 同行业全部股票代码（用于统计板块总规模）
@@ -1531,6 +1654,14 @@ async def get_sector_info(
         "displayed_count": len(sector_stocks),
         "data_source": "mongodb" if sector_stocks else "none"
     }
+
+    # 板块联动：写入缓存（仅缓存有有效板块数据的场景，避免缓存空/失败态导致外部接口长期不再重试）
+    if sector_name:
+        try:
+            await asyncio.to_thread(set_cache_sync, sector_cache_key, data, category="market")
+        except Exception as e:
+            logger.warning(f"⚠️ 写入板块联动缓存失败: {e}")
+
     return ok(data=data)
 
 
@@ -1538,6 +1669,7 @@ async def get_sector_info(
 async def get_money_flow(
     code: str,
     days: int = Query(5, description="查询天数"),
+    force_refresh: bool = Query(False, description="是否强制刷新（跳过缓存）"),
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -1568,6 +1700,15 @@ async def get_money_flow(
     trend = "unknown"
     data_source = "none"
     error_message = None
+
+    # 🔥 MongoDB落盘缓存：读取未过期的资金流向结果，避免每次访问都调用外部接口
+    db = get_mongo_db()
+    await _ensure_money_flow_ttl_index(db)
+    if not force_refresh:
+        cached_flow = await _get_money_flow_cache(db, code6, days)
+        if cached_flow is not None:
+            logger.info(f"📦 资金流向缓存命中: {code6}")
+            return ok(data=cached_flow)
 
     # 数据源优先级：Tushare moneyflow（付费用户稳定） → AKShare（容器内常被东方财富风控）
     # Tushare 返回金额单位为万元，统一 ×10000 转为元，与 AKShare 口径一致
@@ -1753,6 +1894,11 @@ async def get_money_flow(
     if data_source == "unavailable":
         data["error_message"] = error_message or "资金流向数据暂时不可用，请稍后重试"
         logger.info(f"⚠️ 资金流向数据不可用: {code6}, 原因: {error_message}")
+
+    # 🔥 写入MongoDB落盘缓存（仅在数据真实可用时缓存，避免缓存空/不可用结果）
+    if data_source != "unavailable" and history:
+        ttl = await _get_money_flow_ttl()
+        await _set_money_flow_cache(db, code6, days, data, ttl)
 
     return ok(data=data)
 

@@ -346,6 +346,20 @@ class QuotesIngestionService:
 
         return is_trading_time(now)
 
+    def _is_strict_trading_time(self, now: datetime | None = None) -> bool:
+        """
+        判断是否在严格A股交易时间内（不含收盘后缓冲期 15:00-15:30）
+
+        委托给统一的 app.utils.trading_time.is_strict_trading_time。
+
+        行情实时采集仅在严格交易时段进行；
+        收盘缓冲期与休市期统一走 backfill 兜底，避免每60秒轮换外部接口
+        空转重试（实时接口在缓冲期/休市期频繁超时失败，会拉高系统负载）。
+        """
+        from app.utils.trading_time import is_strict_trading_time
+
+        return is_strict_trading_time(now)
+
     async def _collection_empty(self) -> bool:
         db = get_mongo_db()
         coll = db[self.collection_name]
@@ -806,8 +820,10 @@ class QuotesIngestionService:
         2. 按轮换顺序尝试获取行情：Tushare → AKShare东方财富 → AKShare新浪财经
         3. 任意一个接口成功即入库，失败则跳过本次采集
         """
-        # 非交易时段处理
-        if not self._is_trading_time():
+        # 仅在严格交易时段进行实时行情采集；
+        # 收盘缓冲期(15:00-15:30)与休市期统一走 backfill 兜底，
+        # 避免每60秒轮换外部接口空转重试导致系统负载过高。
+        if not self._is_strict_trading_time():
             if settings.QUOTES_BACKFILL_ON_OFFHOURS:
                 await self.backfill_last_close_snapshot_if_needed()
             else:

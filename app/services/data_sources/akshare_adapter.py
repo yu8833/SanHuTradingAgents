@@ -12,6 +12,22 @@ from .base import DataSourceAdapter
 logger = logging.getLogger(__name__)
 
 
+def _news_time_key(time_str: str) -> str:
+    """将新闻时间字符串规范化为可排序的 key（YYYY-MM-DD HH:MM:SS）。
+
+    兼容多种格式：'2026-08-05 16:55:00'、'2026-08-05'、'2026/08/05' 等；
+    无法解析的置为最早时间，保证排到最后。
+    """
+    s = (time_str or "").strip().replace("/", "-")
+    s = s.replace("T", " ").replace("Z", "")
+    # 补全到标准长度，缺秒补 :00
+    if len(s) == 10:  # YYYY-MM-DD
+        s = s + " 00:00:00"
+    elif len(s) == 16:  # YYYY-MM-DD HH:MM
+        s = s + ":00"
+    return s or "0000-00-00 00:00:00"
+
+
 class AKShareAdapter(DataSourceAdapter):
     """AKShare数据源适配器"""
 
@@ -599,7 +615,11 @@ class AKShareAdapter(DataSourceAdapter):
                             })
             except Exception:
                 pass
-            return items if items else None
+            # 🔥 按时间倒序排序后再截断：AKShare 返回顺序不代表时间顺序
+            # （000001 等代码在东财同时是上证指数，大盘新闻会排在行业新闻前面），
+            # 若不排序，行业新闻等有效内容易被顶出 limit 截断窗口。
+            items.sort(key=lambda x: _news_time_key(x.get("time", "")), reverse=True)
+            return items[:limit] if items else None
         except Exception as e:
             logger.error(f"AKShare get_news failed: {e}")
             return None
