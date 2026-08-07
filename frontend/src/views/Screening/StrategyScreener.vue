@@ -8,10 +8,6 @@
       <p class="page-description">基于本地行情数据 · 策略筛选与评分排序</p>
       <p v-if="computedAt" class="computed-at">结果更新于 {{ computedAt }}</p>
       <div class="header-actions">
-        <el-radio-group v-model="assetType" size="small" @change="onAssetTypeChange">
-          <el-radio-button value="stock">股票</el-radio-button>
-          <el-radio-button value="etf">ETF</el-radio-button>
-        </el-radio-group>
         <el-select v-model="asOf" placeholder="选择交易日" size="small" style="width: 150px" filterable @change="onAsOfChange">
           <el-option v-for="d in tradeDates" :key="d" :label="d" :value="d" />
         </el-select>
@@ -133,7 +129,6 @@ import { favoritesApi } from '@/api/favorites'
 
 defineOptions({ name: 'StrategyScreener' })
 
-const assetType = ref<'stock' | 'etf'>('stock')
 const strategies = ref<StrategyMeta[]>([])
 const loading = ref(false)
 const runningAll = ref(false)
@@ -291,14 +286,6 @@ const toggleShowAll = () => {
   if (showAll.value && !showAllResult.value) {
     runAll()
   }
-}
-
-const onAssetTypeChange = () => {
-  activeStrategy.value = null
-  result.value = null
-  showAllResult.value = null
-  showAll.value = false
-  hitCounts.value = {}
 }
 
 const addToFavorite = async (row: StrategyRunItem) => {
