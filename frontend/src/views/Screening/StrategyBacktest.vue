@@ -314,7 +314,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, watch, h } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, h, defineComponent, type PropType } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Histogram, Search, Loading } from '@element-plus/icons-vue'
 import { use as echartsUse } from 'echarts/core'
@@ -328,31 +328,37 @@ echartsUse([LineChart, TitleComponent, TooltipComponent, LegendComponent, GridCo
 
 defineOptions({ name: 'StrategyBacktest' })
 
-// 回测统计卡片
-const StatCards = (props: { stats: BacktestStats }) => {
-  const s = props.stats || {}
-  const pct = (v: number) => (v != null ? `${(v * 100).toFixed(2)}%` : '-')
-  const cards = computed(() => [
-    { label: '总收益', value: pct(s.total_return), color: (s.total_return ?? 0) >= 0 ? 'var(--el-color-danger)' : 'var(--el-color-success)' },
-    { label: '年化收益', value: pct(s.annual_return), color: (s.annual_return ?? 0) >= 0 ? 'var(--el-color-danger)' : 'var(--el-color-success)' },
-    { label: '最大回撤', value: pct(s.max_drawdown), color: 'var(--el-color-warning)' },
-    { label: '夏普比率', value: s.sharpe != null ? s.sharpe.toFixed(2) : '-', color: 'var(--el-color-primary)' },
-    { label: '胜率', value: pct(s.win_rate), color: 'var(--el-color-primary)' },
-    { label: '盈亏比', value: s.profit_factor != null ? s.profit_factor.toFixed(2) : '-', color: 'var(--el-color-primary)' },
-    { label: '交易次数', value: String(s.n_trades ?? 0), color: 'var(--el-color-primary)' },
-    { label: '平均盈利', value: pct(s.avg_win), color: 'var(--el-color-danger)' },
-    { label: '平均亏损', value: pct(s.avg_loss), color: 'var(--el-color-success)' },
-    { label: '最佳', value: pct(s.best), color: 'var(--el-color-danger)' },
-    { label: '最差', value: pct(s.worst), color: 'var(--el-color-success)' },
-  ])
-  return () =>
-    h('div', { class: 'stat-cards' }, cards.value.map((c) =>
-      h('div', { class: 'stat-card', key: c.label }, [
-        h('div', { class: 'stat-label' }, c.label),
-        h('div', { class: 'stat-value', style: { color: c.color } }, c.value),
-      ])
-    ))
-}
+// 回测统计卡片（标准组合式组件：setup() 返回渲染函数，避免裸函数被当作文本渲染）
+const StatCards = defineComponent({
+  name: 'StatCards',
+  props: {
+    stats: { type: Object as PropType<BacktestStats>, default: () => ({}) },
+  },
+  setup(props) {
+    const s = props.stats || {}
+    const pct = (v: number) => (v != null ? `${(v * 100).toFixed(2)}%` : '-')
+    const cards = computed(() => [
+      { label: '总收益', value: pct(s.total_return), color: (s.total_return ?? 0) >= 0 ? 'var(--el-color-danger)' : 'var(--el-color-success)' },
+      { label: '年化收益', value: pct(s.annual_return), color: (s.annual_return ?? 0) >= 0 ? 'var(--el-color-danger)' : 'var(--el-color-success)' },
+      { label: '最大回撤', value: pct(s.max_drawdown), color: 'var(--el-color-warning)' },
+      { label: '夏普比率', value: s.sharpe != null ? s.sharpe.toFixed(2) : '-', color: 'var(--el-color-primary)' },
+      { label: '胜率', value: pct(s.win_rate), color: 'var(--el-color-primary)' },
+      { label: '盈亏比', value: s.profit_factor != null ? s.profit_factor.toFixed(2) : '-', color: 'var(--el-color-primary)' },
+      { label: '交易次数', value: String(s.n_trades ?? 0), color: 'var(--el-color-primary)' },
+      { label: '平均盈利', value: pct(s.avg_win), color: 'var(--el-color-danger)' },
+      { label: '平均亏损', value: pct(s.avg_loss), color: 'var(--el-color-success)' },
+      { label: '最佳', value: pct(s.best), color: 'var(--el-color-danger)' },
+      { label: '最差', value: pct(s.worst), color: 'var(--el-color-success)' },
+    ])
+    return () =>
+      h('div', { class: 'stat-cards' }, cards.value.map((c) =>
+        h('div', { class: 'stat-card', key: c.label }, [
+          h('div', { class: 'stat-label' }, c.label),
+          h('div', { class: 'stat-value', style: { color: c.color } }, c.value),
+        ])
+      ))
+  },
+})
 
 const MODES = [
   { key: 'strategy', title: '策略回测', hint: '验证完整选股和交易规则，看净值曲线、回撤、胜率和交易明细。' },
@@ -423,12 +429,26 @@ function saveResult(key: string, value: unknown | null) {
   }
 }
 
+function isErrorResult(d: unknown): boolean {
+  if (d && typeof d === 'object') {
+    const o = d as Record<string, unknown>
+    if (o.success === false) return true
+    if (typeof o.error === 'string' && o.error) return true
+  }
+  return false
+}
+
 function loadResult<T>(key: string): T | null {
   try {
     const raw = localStorage.getItem(BT_STORAGE_PREFIX + key)
     if (!raw) return null
     const parsed = JSON.parse(raw) as StoredResult
     if (!parsed?.data || Date.now() - parsed.savedAt > BT_STORAGE_TTL) {
+      localStorage.removeItem(BT_STORAGE_PREFIX + key)
+      return null
+    }
+    // 丢弃历史失败的错误结果，避免刷新后仍展示旧错误
+    if (isErrorResult(parsed.data)) {
       localStorage.removeItem(BT_STORAGE_PREFIX + key)
       return null
     }
@@ -524,11 +544,16 @@ function pollTask(taskId: string, kind: TaskKind) {
       if (status === 'running') {
         const p = data.progress ?? 0
         const elapsed = (data.elapsed_ms ?? 0) / 1000
+        // 进度低于 5% 时不显示预计时间：
+        // 早期阶段（数据加载/技术指标计算）进度上报值小但耗时占比高，
+        // 用 (elapsed/p)*(1-p) 外推会得到离谱的 ETA（如 99 分钟），误导用户。
+        // 进度 >= 5% 后再显示，此时估算才有意义。
+        const etaSec = p >= 0.05 && p < 1 ? (elapsed / p) * (1 - p) : 0
         progressInfo.value = {
-          percent: Math.round(p * 100),
+          percent: Math.max(1, Math.round(p * 100)),
           message: data.message || '回测进行中…',
           elapsedSec: elapsed,
-          etaSec: p > 0 && p < 1 ? (elapsed / p) * (1 - p) : 0,
+          etaSec,
         }
       } else if (status === 'success') {
         stopPolling()

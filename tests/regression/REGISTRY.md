@@ -18,6 +18,9 @@
 | 010 | 股票详情页周末显示"数据已过期2天"误导用户 | 前端 `getDataExpiredDays` 用自然日差值判断过期，后端未返回 `stale_days`。项目中有 6+ 处碎片化的"周末判断"但全部只查 `weekday()` 不查节假日。 | frontend/src/views/Stocks/Detail.vue, app/utils/trading_time.py | test_bug_010_holiday_check.py | (本轮) | ✅ |
 | 011 | 回测交易价格与K线数据不一致（603186卖出价超出当天 [low, high]） | 分批减仓后最终清仓时 sell_price=跨日期加权均价avg_sell，该均价无法落在清仓日当天K线区间；同时入库层缺少OHLC校验。 | app/services/three_buys_three_sells_service.py | test_bug_011_data_contract.py | (本轮) | ✅ |
 | 012 | **688669 成交额显示 2.41 万，实际应为 241.29 万**：全局 amount/volume 单位混乱** | 缺少「数据契约」缺失：每条链路各自做单位转换（Tushare千元→万元直接入库、AKShare元÷10000→万元、Tushare rt_k×0.1→万元、Tushare pro_bar×0.1→万元），前端 fmtAmount 再按"元"除10000，多次乘除叠加 → 数值错乱。统一口径：后端入库/API返回 amount=永远是元，volume永远是股；临时中间变量 amount_wan(万元)仅用在 quotes_service 内立即 ×10000 转元输出；前端 Screening 阈值×10000 改为元量级。 | historical_data_service.py, tushare_adapter.py(rt_k+pro_bar), akshare_adapter.py, unified_quotes.py, quotes_service.py, database_screening_service.py, Screening/index.vue | test_bug_012_amount_unit_conversion.py | (本轮) | ✅ |
+| 017 | 回测任务提示"任务不存在或已过期" | 异步回测任务注册表是纯进程内存 dict，多 worker / 进程重启后任务丢失，get(task_id) 返回 None | app/strategy_system/task_manager.py | test_bug_017_backtest_task_redis.py | (本轮) | ✅ |
+| 018 | 低估值高股息策略回测提示"在指定区间内未产生买入信号" | `_low_pe_high_dividend_leader` 行业龙头用 `grp.head(top_n)` 按"行"而非"只股票"取数：筛选侧每股票仅1行正常，回测多日面板每股票多行，排序后误取同一只股票的多行，正式区间 0 信号 | app/strategy_system/strategies.py | test_bug_018_backtest_leader_topn.py | (本轮) | ✅ |
+| 019 | 回测期末强制平仓价=买入价，期末盈亏恒为0 | `_simulate_portfolio` 期末强制平仓 `px = pos["entry_price"]` 直接用建仓价结算，未用最后交易日收盘价 → 买入价==卖出价，total_return 失真 | app/strategy_system/backtest.py | test_bug_019_backtest_end_liquidation.py | (本轮) | ✅ |
 
 ---
 

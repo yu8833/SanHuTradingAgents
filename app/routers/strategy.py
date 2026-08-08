@@ -17,6 +17,7 @@ from app.core.database import get_mongo_db_sync
 from app.core.response import fail, ok
 from app.strategy_system import backtest as bt
 from app.strategy_system import screener
+from app.strategy_system.backtest_queue import enqueue as bt_enqueue
 from app.strategy_system.task_manager import make_progress_cb, task_manager
 
 logger = logging.getLogger(__name__)
@@ -267,18 +268,23 @@ async def strategy_backtest_start(req: BacktestRequest):
     try:
         task = task_manager.create("strategy")
         task_id = task.task_id
+        # 序列化为 JSON 安全的字典，投递给独立回测 Worker 进程
+        request_dict = req.model_dump(mode="json")
 
         def _run() -> None:
             try:
                 db = get_mongo_db_sync()
-                cfg = _build_strategy_bt_config(req)
+                cfg = _build_strategy_bt_config(BacktestRequest(**request_dict))
                 result = bt.run_strategy_backtest(db, cfg, progress_cb=make_progress_cb(task_id))
                 task_manager.update(task_id, status="success", result=result, progress=1.0)
             except Exception as e:
                 logger.exception("策略回测任务异常")
                 task_manager.update(task_id, status="failure", error=str(e))
 
-        threading.Thread(target=_run, daemon=True).start()
+        # 优先投递到独立回测 Worker（后端重启不会杀掉任务）；
+        # Redis 不可用时回退到本地守护线程，保证功能不失效。
+        if not bt_enqueue("strategy", task_id, request_dict):
+            threading.Thread(target=_run, daemon=True).start()
         return ok({"task_id": task_id, "status": "running", "kind": "strategy"})
     except Exception as e:
         logger.exception("创建策略回测任务失败")
@@ -291,17 +297,19 @@ async def factor_backtest_start(req: FactorBacktestRequest):
     try:
         task = task_manager.create("factor")
         task_id = task.task_id
+        request_dict = req.model_dump(mode="json")
 
         def _run() -> None:
             try:
                 db = get_mongo_db_sync()
-                result = bt.run_factor_backtest(db, req.model_dump(), progress_cb=make_progress_cb(task_id))
+                result = bt.run_factor_backtest(db, request_dict, progress_cb=make_progress_cb(task_id))
                 task_manager.update(task_id, status="success", result=result, progress=1.0)
             except Exception as e:
                 logger.exception("因子回测任务异常")
                 task_manager.update(task_id, status="failure", error=str(e))
 
-        threading.Thread(target=_run, daemon=True).start()
+        if not bt_enqueue("factor", task_id, request_dict):
+            threading.Thread(target=_run, daemon=True).start()
         return ok({"task_id": task_id, "status": "running", "kind": "factor"})
     except Exception as e:
         logger.exception("创建因子回测任务失败")
@@ -314,17 +322,19 @@ async def optimize_start(req: OptimizeRequest):
     try:
         task = task_manager.create("optimizer")
         task_id = task.task_id
+        request_dict = req.model_dump(mode="json")
 
         def _run() -> None:
             try:
                 db = get_mongo_db_sync()
-                result = bt.run_optimizer(db, req.model_dump(), progress_cb=make_progress_cb(task_id))
+                result = bt.run_optimizer(db, request_dict, progress_cb=make_progress_cb(task_id))
                 task_manager.update(task_id, status="success", result=result, progress=1.0)
             except Exception as e:
                 logger.exception("参数优化任务异常")
                 task_manager.update(task_id, status="failure", error=str(e))
 
-        threading.Thread(target=_run, daemon=True).start()
+        if not bt_enqueue("optimizer", task_id, request_dict):
+            threading.Thread(target=_run, daemon=True).start()
         return ok({"task_id": task_id, "status": "running", "kind": "optimizer"})
     except Exception as e:
         logger.exception("创建参数优化任务失败")
@@ -337,17 +347,19 @@ async def walkforward_start(req: WalkForwardRequest):
     try:
         task = task_manager.create("walkforward")
         task_id = task.task_id
+        request_dict = req.model_dump(mode="json")
 
         def _run() -> None:
             try:
                 db = get_mongo_db_sync()
-                result = bt.run_walkforward(db, req.model_dump(), progress_cb=make_progress_cb(task_id))
+                result = bt.run_walkforward(db, request_dict, progress_cb=make_progress_cb(task_id))
                 task_manager.update(task_id, status="success", result=result, progress=1.0)
             except Exception as e:
                 logger.exception("步进优化任务异常")
                 task_manager.update(task_id, status="failure", error=str(e))
 
-        threading.Thread(target=_run, daemon=True).start()
+        if not bt_enqueue("walkforward", task_id, request_dict):
+            threading.Thread(target=_run, daemon=True).start()
         return ok({"task_id": task_id, "status": "running", "kind": "walkforward"})
     except Exception as e:
         logger.exception("创建步进优化任务失败")

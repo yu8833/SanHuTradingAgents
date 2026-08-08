@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 
 from app.strategy_system import data_adapter
+from app.strategy_system import screener
 from app.strategy_system.indicators import compute_all
 from app.strategy_system.strategies import run_strategy_filter
 
@@ -46,24 +47,151 @@ def _parse_date(d) -> str:
     return str(d)[:10]
 
 
-def _load_panel(db, config, end_extra_days: int = 0) -> pd.DataFrame:
-    """加载回测区间 + warmup 历史，并计算指标/信号。"""
+def _load_panel(db, config, end_extra_days: int = 0,
+                progress_cb: Callable[[float, str], None] | None = None) -> pd.DataFrame:
+    """加载回测区间 + warmup 历史，并计算指标/信号。
+
+    通过 progress_cb 分阶段上报进度，避免长时数据加载期间前端进度条长时间停留在 0%。
+    """
+    def _report(p: float, msg: str) -> None:
+        if progress_cb:
+            progress_cb(p, msg)
+
     start = _parse_date(config.get("start"))
     end = _parse_date(config.get("end"))
     end_dt = pd.to_datetime(end)
     start_dt = pd.to_datetime(start) - pd.Timedelta(days=WARMUP_DAYS)
     load_end = end_dt + pd.Timedelta(days=end_extra_days)
 
+    _report(0.01, "正在加载行情数据…")
     symbols = config.get("symbols")
     df = data_adapter.load_daily_panel(
         db, symbols, start_dt, load_end.strftime("%Y-%m-%d")
     )
     if df.empty:
         return df
+    _report(0.02, "正在计算技术指标…")
     df = compute_all(df)
     # compute_all 会把 date 转为 datetime64，统一转回字符串便于下游字符串比较
     df["date"] = df["date"].dt.strftime("%Y-%m-%d")
+    # 注入基本面(行业/市值/估值)与分红列，供价值/股息类策略在回测中也能产生信号，
+    # 与筛选侧 screener._enrich_target 保持一致的口径
+    _report(0.025, "正在注入基本面与股息数据（全市场可能较慢）…")
+    # 将子阶段的 0-1 进度映射到整体 [0.025, 0.05]，避免子进度直接写回导致进度条跳变
+    base_from, base_to = 0.025, 0.05
+
+    def _child(p: float, msg: str, _a: float = base_from, _b: float = base_to) -> None:
+        _report(_a + (_b - _a) * min(1.0, max(0.0, float(p))), msg)
+
+    df = _enrich_panel_fundamentals(db, df, progress_cb=_child)
     return df
+
+
+def _enrich_panel_fundamentals(db, df: pd.DataFrame,
+                               progress_cb: Callable[[float, str], None] | None = None) -> pd.DataFrame:
+    """为回测面板逐行注入基本面与分红列：industry, total_mv, pe_ttm, pb,
+    div_12m_ps, div_paying_years, div_yield。
+
+    复用 screener._load_fundamentals（行业/市值/估值，每股最新快照，按 symbol 广播），
+    股息指标则按面板内每个交易日内存批量计算（div_yield = div_12m_ps / 当日 close）。
+    与筛选侧 _enrich_target 口径一致，使依赖基本面列的策略回测能产生信号。
+    """
+    if df.empty:
+        return df
+    symbols = [str(s) for s in df["symbol"].unique().tolist() if s]
+    if not symbols:
+        return df
+
+    # 1) 基本面（行业/市值/估值）——每股最新快照，广播到该股所有日期行
+    fund = screener._load_fundamentals(db, symbols)
+    if not fund.empty:
+        df = df.merge(fund, on="symbol", how="left", suffixes=("", "_fund"))
+
+    # 2) 股息指标——逐交易日内存计算（一次性加载记录，避免逐日查库）
+    div_df = _load_dividend_panel(db, symbols, df, progress_cb=progress_cb)
+    if not div_df.empty:
+        df = df.merge(div_df, on=["symbol", "date"], how="left")
+        df["div_12m_ps"] = df["div_12m_ps"].fillna(0.0)
+        df["div_paying_years"] = df["div_paying_years"].fillna(0)
+    else:
+        df["div_12m_ps"] = 0.0
+        df["div_paying_years"] = 0
+
+    close = pd.to_numeric(df["close"], errors="coerce")
+    df["div_yield"] = (df["div_12m_ps"] / close.where(close > 0)).round(4)
+    return df
+
+
+def _load_dividend_panel(db, symbols, df: pd.DataFrame,
+                         progress_cb: Callable[[float, str], None] | None = None) -> pd.DataFrame:
+    """批量加载 symbols 的全部分红记录，按面板内每个交易日计算股息指标。
+
+    返回列: date, symbol, div_12m_ps(近12个月每股现金分红), div_paying_years(近5年分红年数)。
+    计算口径与 screener._load_dividend_metrics 一致，仅改为批量/逐日。
+
+    性能：将原先 O(交易日 x 分红记录) 的 Python 双重循环改为向量化（按日做布尔掩码+分组聚合），
+    全市场回测由分钟级降为秒级。
+    """
+    from datetime import date as _date
+
+    sym_list = [str(s) for s in symbols]
+    cursor = db["stock_dividend"].find(
+        {"code": {"$in": sym_list}},
+        {"_id": 0, "code": 1, "ex_date": 1, "ann_date": 1,
+         "cash_div": 1, "cash_div_tax": 1},
+    )
+    records: list[tuple[str, _date, float]] = []
+    for doc in cursor:
+        code = str(doc.get("code") or "")
+        if not code:
+            continue
+        cash = screener._to_float(doc.get("cash_div_tax")) or screener._to_float(doc.get("cash_div"))
+        if not cash or cash <= 0:
+            continue
+        date_str = str(doc.get("ex_date") or doc.get("ann_date") or "").strip()
+        if len(date_str) < 8:
+            continue
+        try:
+            dt = _date.fromisoformat(date_str[:10])
+        except ValueError:
+            continue
+        records.append((code, dt, cash))
+
+    if not records:
+        return pd.DataFrame(columns=["date", "symbol", "div_12m_ps", "div_paying_years"])
+
+    rec_df = pd.DataFrame(records, columns=["code", "dt", "cash"])
+    rec_df["dt"] = pd.to_datetime(rec_df["dt"])
+    rec_df["year"] = rec_df["dt"].dt.year
+
+    dates = sorted(df["date"].unique().tolist())
+    total = len(dates)
+    frames: list[pd.DataFrame] = []
+    for i, d in enumerate(dates):
+        if progress_cb and (i % 5 == 0 or i == total - 1):
+            progress_cb((i + 1) / total, f"正在计算股息指标（{i + 1}/{total}）…")
+        dd = pd.to_datetime(d)
+        # 近12个月：每股累计现金分红 div_12m_ps
+        win12 = rec_df[(rec_df["dt"] > dd - pd.Timedelta(days=365)) & (rec_df["dt"] <= dd)]
+        # 近5个自然年度：分红年数 div_paying_years
+        win5 = rec_df[(rec_df["year"] > dd.year - 5) & (rec_df["year"] <= dd.year)]
+        if win12.empty and win5.empty:
+            continue
+        ps = win12.groupby("code")["cash"].sum()
+        dy = win5.groupby("code")["year"].nunique()
+        idx = ps.index.union(dy.index)
+        if len(idx) == 0:
+            continue
+        frames.append(pd.DataFrame({
+            "date": d,
+            "symbol": idx,
+            "div_12m_ps": ps.reindex(idx).fillna(0.0).round(4).to_numpy(),
+            "div_paying_years": dy.reindex(idx).fillna(0).astype(int).to_numpy(),
+        }))
+
+    if not frames:
+        return pd.DataFrame(columns=["date", "symbol", "div_12m_ps", "div_paying_years"])
+    return pd.concat(frames, ignore_index=True)
 
 
 def _entry_exit_mask(df: pd.DataFrame, strategy_id: str, params: dict):
@@ -138,7 +266,7 @@ def run_strategy_backtest(db, config: StrategyBtConfig, panel: pd.DataFrame | No
 
     try:
         if panel is None:
-            panel = _load_panel(db, config.as_dict or config.__dict__)
+            panel = _load_panel(db, config.as_dict or config.__dict__, progress_cb=progress_cb)
         # 传入的 panel 只读不复用拷贝，避免大内存下因深拷贝 OOM
     except Exception as e:
         return _err(f"数据加载失败: {e}")
@@ -403,18 +531,22 @@ def _simulate_portfolio(panel, entry, exit_mask, scores, config, start_s, end_s,
                 equity += pos["shares"] * close
         equity_curve.append({"date": d, "value": round(equity, 2), "positions": len(positions)})
 
-    # 期末强制平仓
+    # 期末强制平仓：以最后交易日的收盘价为平仓成交价（含卖出滑点），
+    # 与盘中卖出 _price_for(..., "sell", ...) 口径一致；若取不到最后收盘价则跳过该笔。
+    last_d = sim_dates[-1]
     for sym in list(positions.keys()):
         pos = positions[sym]
-        day = df.xs(pos["entry_date"], level="date") if pos["entry_date"] in df.index.get_level_values(1) else None
-        px = pos["entry_price"]
+        last_close = _fast_last_close(sym, last_d)
+        if last_close is None:
+            continue
+        px = last_close * (1 - slippage)
         proceeds = pos["shares"] * px * (1 - fees_pct)
         cash += proceeds
         trades.append({
             "symbol": sym,
             "name": _fast_name(sym),
             "entry_date": pos["entry_date"],
-            "exit_date": sim_dates[-1],
+            "exit_date": last_d,
             "entry_price": round(pos["entry_price"], 4),
             "exit_price": round(px, 4),
             "shares": pos["shares"],
@@ -422,7 +554,7 @@ def _simulate_portfolio(panel, entry, exit_mask, scores, config, start_s, end_s,
             "exit_value": round(proceeds, 2),
             "pnl_amount": round(proceeds - pos["entry_value"], 2),
             "pnl_pct": round((proceeds - pos["entry_value"]) / pos["entry_value"] if pos["entry_value"] else 0, 4),
-            "duration": _trading_days_between(pos["entry_date"], sim_dates[-1], dates),
+            "duration": _trading_days_between(pos["entry_date"], last_d, dates),
             "exit_reason": "end",
             "entry_score": pos.get("entry_score"),
             "position_pct": pos.get("position_pct"),

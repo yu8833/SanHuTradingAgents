@@ -573,6 +573,7 @@ class TushareSyncService:
             "total_processed": 0,
             "success_count": 0,
             "error_count": 0,
+            "skipped_count": 0,
             "total_records": 0,
             "start_time": datetime.utcnow(),
             "errors": []
@@ -629,6 +630,9 @@ class TushareSyncService:
             consecutive_failures = 0
             MAX_CONSECUTIVE_FAILURES = 20  # 连续失败20次后终止
 
+            # 真增量：最近一个"理应已有K线数据"的交易日（仅增量模式用于跳过已最新股票）
+            latest_settled = self._latest_settled_trade_day() if (incremental and not all_history) else ""
+
             # 4. 批量处理
             for i, symbol in enumerate(symbols):
                 # 记录单个股票开始时间
@@ -641,10 +645,7 @@ class TushareSyncService:
                         stats["stopped"] = True
                         break
 
-                    # 速率限制
-                    await self.rate_limiter.acquire()
-
-                    # 确定该股票的起始日期
+                    # 确定该股票的起始日期（先于速率限制与API，便于"真增量"跳过）
                     symbol_start_date = start_date
                     if not symbol_start_date:
                         if all_history:
@@ -655,6 +656,22 @@ class TushareSyncService:
                             logger.debug(f"📅 {symbol}: 从 {symbol_start_date} 开始同步")
                         else:
                             symbol_start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+
+                    # 真增量跳过：最后同步日已覆盖最近应有数据交易日 → 无需调API
+                    if incremental and latest_settled and symbol_start_date and symbol_start_date > latest_settled:
+                        stats["skipped_count"] += 1
+                        consecutive_failures = 0
+                        logger.debug(f"⏭️ {symbol}: 已是最新（最后同步 {symbol_start_date}），跳过API")
+                        if job_id and ((i + 1) % 50 == 0 or (i + 1) == len(symbols)):
+                            progress_percent = int(((i + 1) / len(symbols)) * 100)
+                            await self._update_progress(
+                                job_id, progress_percent,
+                                f"正在检查最新状态 {symbol} ({i + 1}/{len(symbols)}，已跳过 {stats['skipped_count']} 只最新)…"
+                            )
+                        continue
+
+                    # 速率限制
+                    await self.rate_limiter.acquire()
 
                     # 记录请求参数
                     logger.debug(
@@ -749,6 +766,7 @@ class TushareSyncService:
 
             logger.info(f"✅ {period_name}数据同步完成: "
                        f"股票 {stats['success_count']}/{stats['total_processed']}, "
+                       f"跳过最新 {stats['skipped_count']}, "
                        f"记录 {stats['total_records']} 条, "
                        f"错误 {stats['error_count']} 个, "
                        f"耗时 {stats['duration']:.2f} 秒")
@@ -848,6 +866,31 @@ class TushareSyncService:
             logger.error(f"❌ 获取最后同步日期失败 {symbol}: {e}")
             # 出错时返回30天前，确保不漏数据
             return (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+
+    def _latest_settled_trade_day(self) -> str:
+        """返回最近一个"理应已有K线数据"的交易日（YYYY-MM-DD）。
+
+        用于真增量跳过：晚间 cron（TUSHARE_HISTORICAL_SYNC_CRON=18:30）才会拉取当日K线；
+        在 18:30 之前的启动补跑/白天同步里，当日K线尚未落地，理应只有上一交易日的完整数据，
+        因此回退到上一交易日，避免为尚未发布的当日K线空跑全市场。
+
+        格式统一为 YYYY-MM-DD，可直接与 _get_last_sync_date 返回的字符串做字典序比较。
+        """
+        try:
+            from app.utils.trading_time import get_latest_trade_day, is_trading_day
+
+            now = datetime.now()
+            target = get_latest_trade_day(now)
+            # 交易日当日 18:30 前，当日K线未落地，回退到上一交易日
+            if is_trading_day(now) and (now.hour, now.minute) < (18, 30):
+                cursor = target - timedelta(days=1)
+                while not is_trading_day(cursor):
+                    cursor -= timedelta(days=1)
+                target = cursor
+            return target.strftime('%Y-%m-%d')
+        except Exception as e:
+            logger.warning(f"⚠️ 计算最近应有数据交易日失败，退化为不跳过: {e}")
+            return ""
 
     # ==================== 财务数据同步 ====================
 
@@ -1532,6 +1575,21 @@ async def run_tushare_quotes_sync(force: bool = False):
 async def run_tushare_historical_sync(incremental: bool = True):
     """APScheduler任务：同步历史数据"""
     logger.info(f"🚀 [APScheduler] 开始执行 Tushare 历史数据同步任务 (incremental={incremental})")
+    # 🔧 交易日门控：非交易日（周末/法定节假日）直接跳过，避免节假日全量拉取 0 条新数据浪费资源。
+    # 注意：cron 表达式 `1-5` 只排除周末，无法识别 A 股法定节假日，必须在函数内再校验一次。
+    try:
+        from app.utils.trading_time import is_trading_day
+        if not is_trading_day(datetime.now()):
+            logger.info("⏭️ [APScheduler] 非交易日，跳过 Tushare 历史数据同步")
+            return {
+                "skipped": "non_trading_day",
+                "total_processed": 0,
+                "success_count": 0,
+                "error_count": 0,
+                "total_records": 0,
+            }
+    except Exception as _e:
+        logger.warning(f"⚠️ [APScheduler] 交易日判断异常，继续执行同步: {_e}")
     try:
         service = await get_tushare_sync_service()
         logger.info("✅ [APScheduler] Tushare 同步服务已初始化")

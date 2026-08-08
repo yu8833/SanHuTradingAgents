@@ -152,13 +152,20 @@ def _low_pe_high_dividend_leader(df: pd.DataFrame, params: dict) -> pd.Series:
     didx = df.index[m.fillna(False)]
     leader = pd.Series(False, index=df.index)
     if len(didx) > 0:
+        symbol = df.loc[didx, "symbol"].astype(str)
         sub = pd.DataFrame({
+            "symbol": symbol.values,
             "industry": industry.loc[didx].values,
             "mv": mv.loc[didx].values,
         }, index=didx)
-        sub = sub.sort_values("mv", ascending=False)
+        # 先按 symbol 去重（回测面板含多日行，市值/行业为每股快照逐日广播），
+        # 再按行业取市值 TopN 只股票，避免 head(top_n) 误取同一只股票的多行
+        sub = sub.sort_values(["mv", "symbol"], ascending=[False, True])
+        sub = sub.groupby("symbol", sort=False).head(1)
+        selected: set[str] = set()
         for _ind, grp in sub.groupby("industry", sort=False):
-            leader.loc[grp.head(top_n).index] = True
+            selected.update(grp["symbol"].head(top_n).tolist())
+        leader = df["symbol"].isin(selected)
     return leader
 
 

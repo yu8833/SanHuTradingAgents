@@ -258,6 +258,17 @@ async def lifespan(app: FastAPI):
 
     await init_db()
 
+    # 清理僵尸回测任务：后端进程被重启/崩溃时，守护线程被杀，
+    # Redis 中会残留"running"但永无进度的任务，前端据此外推出离谱 ETA。
+    # 启动时自动将这些长时间无更新的任务标记为 failure，避免误导用户。
+    try:
+        from app.strategy_system.task_manager import cleanup_stale_tasks
+        _cleaned = cleanup_stale_tasks()
+        if _cleaned:
+            logger.info(f"🧹 启动时清理 {_cleaned} 个僵尸回测任务（标记为失败）")
+    except Exception as _e:
+        logger.warning(f"⚠️ 僵尸回测任务清理失败（不影响主流程）: {_e}")
+
     #  配置桥接：将统一配置写入环境变量，供 TradingAgents 核心库使用
     try:
         from app.core.config_bridge import bridge_config_to_env
@@ -784,6 +795,29 @@ async def lifespan(app: FastAPI):
                 )
 
             _catchup_jobs_added = 0
+
+            # 🔧 bug-018 加固：启动补跑去放大。
+            # 问题：后端每重启一次、只要当天已过 cron 时间就再补跑一次"全量"历史同步，
+            # 反复重启就会反复全量同步（实测 43 次 catchup），造成"一遍一遍无意义地同步"。
+            # 修复：补跑前先查该同步今天是否已经成功过（常规 cron 或本次补跑均可），成功则跳过。
+            async def _already_synced_today(_job_ids: list[str]) -> bool:
+                try:
+                    from app.core.database import get_mongo_db
+                    _db = get_mongo_db()
+                    _today_s = _now.strftime('%Y-%m-%d')
+                    for _jid2 in _job_ids:
+                        _hit = await _db["scheduler_executions"].find_one(
+                            {"job_id": _jid2, "status": "success"},
+                            sort=[("timestamp", -1)],
+                        )
+                        if _hit:
+                            _ts = _hit.get("timestamp")
+                            if _ts and str(_ts).startswith(_today_s):
+                                return True
+                except Exception as _e2:
+                    logger.warning(f"⚠️ 查询当天同步是否已成功失败 [{_job_ids}]: {_e2}")
+                return False
+
             for _jid, _cron, _func, _kwargs in _catchup_candidates:
                 try:
                     # 用 CronTrigger 反推"上一次应触发时间"：
@@ -800,11 +834,17 @@ async def lifespan(app: FastAPI):
                     if len(_parts) >= 2 and _parts[0].isdigit() and _parts[1].isdigit():
                         _cron_hour = int(_parts[1])
                         _cron_min = int(_parts[0])
-                        # 检查今天是否是 c ron 的 weekday 匹配日（cron 周字段 1-5 = 周一到周五）
+                        # 检查今天是否是 cron 的 weekday 匹配日（cron 周字段 1-5 = 周一到周五）
                         from app.utils.trading_time import is_trading_day
                         _today_is_match = is_trading_day(_now)
                         if _today_is_match and (_now.hour > _cron_hour or (_now.hour == _cron_hour and _now.minute >= _cron_min)):
-                            # 今天是 cron 生效日，且当前时间已过 cron 时间 → 补跑
+                            # 今天是 cron 生效日，且当前时间已过 cron 时间 → 判断是否已同步，未同步才补跑
+                            _regular_id = _jid[:-len("_catchup")] if _jid.endswith("_catchup") else _jid
+                            if await _already_synced_today([_regular_id, _jid]):
+                                logger.info(
+                                    f"⏭️ 启动时发现错过历史同步 cron [{_cron}]，但当天已同步成功，跳过补跑（job_id={_jid}）"
+                                )
+                                continue
                             _delay_sec = 30 + _catchup_jobs_added * 60
                             scheduler.add_job(
                                 _func,

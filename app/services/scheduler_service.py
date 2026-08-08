@@ -831,6 +831,17 @@ class SchedulerService:
             if zombie_tasks:
                 logger.info(f"✅ 已标记 {len(zombie_tasks)} 个僵尸任务为失败状态")
 
+            # 顺带清理僵尸回测任务：回测在 web 进程守护线程执行，若后端被重启/崩溃，
+            # 线程被杀后 Redis 中会残留长时间无更新的 running 任务，前端据此外推出离谱 ETA。
+            # 复用本周期任务（每 5 分钟）弥补启动清理的空窗。
+            try:
+                from app.strategy_system.task_manager import cleanup_stale_tasks
+                _cleaned = cleanup_stale_tasks()
+                if _cleaned:
+                    logger.warning(f"🧹 已清理 {_cleaned} 个僵尸回测任务（标记为失败）")
+            except Exception as _e:
+                logger.warning(f"⚠️ 僵尸回测任务清理失败: {_e}")
+
         except Exception as e:
             logger.error(f"❌ 检测僵尸任务失败: {e}")
 

@@ -120,6 +120,61 @@ services:
         max-size: "100m"
         max-file: "3"
 
+  # 回测Worker服务（独立进程，消费回测任务队列）
+  # 与后端解耦：后端重启/升级不会杀掉正在运行的回测任务
+  backtest_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    image: tradingagents-backend:latest
+    container_name: tradingagents-backtest-worker
+    volumes:
+      # 日志目录映射
+      - ./logs:/app/logs
+      # 配置目录映射
+      - ./config:/app/config
+      # 数据目录映射
+      - ./data:/app/data
+      # 源代码映射（开发模式 - 本地修改自动生效）
+      - ./app:/app/app
+      - ./tradingagents:/app/tradingagents
+    env_file:
+      - .env
+    environment:
+      PYTHONUNBUFFERED: 1
+      PYTHONDONTWRITEBYTECODE: 1
+      TZ: "Asia/Shanghai"
+      # 日志配置
+      TRADINGAGENTS_LOG_LEVEL: "INFO"
+      TRADINGAGENTS_LOG_DIR: "/app/logs"
+      TRADINGAGENTS_LOG_FILE: "/app/logs/backtest_worker.log"
+      # Docker专用数据库配置
+      TRADINGAGENTS_MONGODB_URL: mongodb://admin:tradingagents123@mongodb:27017/tradingagentscn?authSource=admin
+      TRADINGAGENTS_REDIS_URL: redis://:tradingagents123@redis:6379
+      TRADINGAGENTS_CACHE_TYPE: redis
+      # 启用MongoDB缓存（优先使用MongoDB中的同步数据）
+      TA_USE_APP_CACHE: "true"
+      # Docker环境标识
+      DOCKER_CONTAINER: "true"
+      # Worker角色标识
+      WORKER_ROLE: "backtest"
+    depends_on:
+      backend:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - tradingagents-network
+    restart: unless-stopped
+    command: ["python", "-m", "app.worker.backtest_worker"]
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
   # Vue 3 前端服务
   frontend:
     build:
@@ -166,6 +221,10 @@ services:
       MONGO_INITDB_ROOT_PASSWORD: tradingagents123
       MONGO_INITDB_DATABASE: tradingagentscn
       TZ: "Asia/Shanghai"
+    # 显式限制 WiredTiger 缓存大小，避免 MongoDB 独占 VM 内存，
+    # 给回测任务（需加载大量行情数据）留出更多内存余量。
+    # entrypoint 会自动追加 --auth 与 --bind_ip_all。
+    command: ["mongod", "--wiredTigerCacheSizeGB", "1"]
     volumes:
       - mongodb_data:/data/db
       - ./scripts/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
