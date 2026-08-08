@@ -129,10 +129,12 @@ def _load_dividend_panel(db, symbols, df: pd.DataFrame,
     返回列: date, symbol, div_12m_ps(近12个月每股现金分红), div_paying_years(近5年分红年数)。
     计算口径与 screener._load_dividend_metrics 一致，仅改为批量/逐日。
 
-    性能：将原先 O(交易日 x 分红记录) 的 Python 双重循环改为向量化（按日做布尔掩码+分组聚合），
-    全市场回测由分钟级降为秒级。
+    性能：按股票分组，用"排序 + 前缀和 + 二分查找"一次性算出所有交易日的结果，
+    内存与耗时均为 O(分红记录 + 股票数 × 交易日)，大幅低于 O(交易日 × 记录) 的逐日
+    布尔掩码方案，避免全市场回测因内存峰值过高而触发容器 OOM。
     """
     from datetime import date as _date
+    from collections import defaultdict
 
     sym_list = [str(s) for s in symbols]
     cursor = db["stock_dividend"].find(
@@ -140,13 +142,16 @@ def _load_dividend_panel(db, symbols, df: pd.DataFrame,
         {"_id": 0, "code": 1, "ex_date": 1, "ann_date": 1,
          "cash_div": 1, "cash_div_tax": 1},
     )
-    records: list[tuple[str, _date, float]] = []
+    # 按股票收集 (距今天数, 现金分红, 自然年)
+    by_code: dict[str, list[tuple[int, float, int]]] = defaultdict(list)
     for doc in cursor:
         code = str(doc.get("code") or "")
         if not code:
             continue
-        cash = screener._to_float(doc.get("cash_div_tax")) or screener._to_float(doc.get("cash_div"))
-        if not cash or cash <= 0:
+        cash = screener._to_float(doc.get("cash_div_tax"))
+        if cash is None or cash != cash:  # NaN 视为无效
+            cash = screener._to_float(doc.get("cash_div"))
+        if not cash or cash != cash or cash <= 0:
             continue
         date_str = str(doc.get("ex_date") or doc.get("ann_date") or "").strip()
         if len(date_str) < 8:
@@ -155,38 +160,54 @@ def _load_dividend_panel(db, symbols, df: pd.DataFrame,
             dt = _date.fromisoformat(date_str[:10])
         except ValueError:
             continue
-        records.append((code, dt, cash))
+        # 用基数日(ordinal)代替 datetime，避免逐日比较的对象开销
+        by_code[code].append((dt.toordinal(), cash, dt.year))
 
-    if not records:
+    if not by_code:
         return pd.DataFrame(columns=["date", "symbol", "div_12m_ps", "div_paying_years"])
 
-    rec_df = pd.DataFrame(records, columns=["code", "dt", "cash"])
-    rec_df["dt"] = pd.to_datetime(rec_df["dt"])
-    rec_df["year"] = rec_df["dt"].dt.year
+    # 面板内交易日（升序），转成基数日与自然年数组
+    dates = pd.DatetimeIndex(pd.to_datetime(pd.unique(df["date"]))).sort_values()
+    panel_ord = np.array([d.toordinal() for d in dates], dtype=np.int64)  # 与分红记录 toordinal 同尺度
+    panel_year = np.array([d.year for d in dates], dtype=np.int64)
+    date_to_str = {int(o): d.strftime("%Y-%m-%d")
+                   for o, d in zip(panel_ord, dates)}
 
-    dates = sorted(df["date"].unique().tolist())
-    total = len(dates)
+    codes = sorted(by_code.keys())
+    total = len(codes)
     frames: list[pd.DataFrame] = []
-    for i, d in enumerate(dates):
+    for i, code in enumerate(codes):
         if progress_cb and (i % 5 == 0 or i == total - 1):
             progress_cb((i + 1) / total, f"正在计算股息指标（{i + 1}/{total}）…")
-        dd = pd.to_datetime(d)
-        # 近12个月：每股累计现金分红 div_12m_ps
-        win12 = rec_df[(rec_df["dt"] > dd - pd.Timedelta(days=365)) & (rec_df["dt"] <= dd)]
-        # 近5个自然年度：分红年数 div_paying_years
-        win5 = rec_df[(rec_df["year"] > dd.year - 5) & (rec_df["year"] <= dd.year)]
-        if win12.empty and win5.empty:
-            continue
-        ps = win12.groupby("code")["cash"].sum()
-        dy = win5.groupby("code")["year"].nunique()
-        idx = ps.index.union(dy.index)
-        if len(idx) == 0:
+        rec = by_code[code]
+        rec.sort(key=lambda r: r[0])
+        ords = np.array([r[0] for r in rec], dtype=np.int64)
+        cashs = np.array([r[1] for r in rec], dtype=np.float64)
+        years = np.array([r[2] for r in rec], dtype=np.int64)
+
+        # 前缀和：cum[k] = 前 k 条分红之和
+        cum = np.concatenate([[0.0], np.cumsum(cashs)])
+
+        # div_12m_ps：近365天(含当天)内现金分红之和
+        right = np.searchsorted(ords, panel_ord, side="right")
+        left = np.searchsorted(ords, panel_ord - 365, side="left")
+        div12 = cum[right] - cum[left]
+
+        # div_paying_years：近5个自然年度内有分红(现金>0)的年数
+        uniq_years = np.unique(years)
+        yr_right = np.searchsorted(uniq_years, panel_year, side="right")
+        yr_left = np.searchsorted(uniq_years, panel_year - 5, side="right")
+        dy = yr_right - yr_left
+
+        mask = (div12 != 0) | (dy != 0)
+        idx = np.nonzero(mask)[0]
+        if idx.size == 0:
             continue
         frames.append(pd.DataFrame({
-            "date": d,
-            "symbol": idx,
-            "div_12m_ps": ps.reindex(idx).fillna(0.0).round(4).to_numpy(),
-            "div_paying_years": dy.reindex(idx).fillna(0).astype(int).to_numpy(),
+            "date": [date_to_str[panel_ord[j]] for j in idx],
+            "symbol": code,
+            "div_12m_ps": np.round(div12[idx], 4),
+            "div_paying_years": dy[idx].astype(int),
         }))
 
     if not frames:
