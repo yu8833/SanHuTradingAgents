@@ -538,9 +538,32 @@ def _build_name_map(panel: pd.DataFrame, db) -> dict[str, str]:
     return name_map
 
 
+def _shift_signal_to_execute(sig: pd.Series, panel: pd.DataFrame) -> pd.Series:
+    """将"收盘信号"按每只股票的时间序列后移一个交易日，得到"执行日"信号。
+
+    回测撮合在"当日开盘"成交。若直接用当日收盘产生的信号（如 RSI、MA 金叉、
+    MA 死叉，均依赖当日 close）在当日开盘买入/卖出，属于未来函数——开盘时
+    无法预知当日收盘，会系统性高估收益（超跌反弹等反转策略体现得最明显）。
+
+    open_t+1 的正确语义：T 日收盘产生的信号，应在 T+1 日开盘执行。本函数把
+    (symbol, T) 的信号平移到 (symbol, T 的下一个交易日)，使撮合循环在当日开盘
+    用到的信号全部来自"前一个交易日"。
+    """
+    tmp = pd.DataFrame({
+        "symbol": panel["symbol"].to_numpy(),
+        "date": panel["date"].to_numpy(),
+        "v": sig.to_numpy().astype(np.int8),
+    })
+    tmp.sort_values(["symbol", "date"], inplace=True)
+    exec_v = tmp.groupby("symbol")["v"].shift(1).fillna(0).astype(bool)
+    tmp["exec"] = exec_v.to_numpy()
+    tmp.sort_index(inplace=True)  # 恢复与原面板一致的行序
+    return pd.Series(tmp["exec"].to_numpy(), index=sig.index)
+
+
 def _simulate_portfolio(panel, entry, exit_mask, scores, config, start_s, end_s, db,
                         progress_cb: Callable[[float, str], None] | None = None):
-    """逐日组合模拟。返回 dict 含 stats/equity_curve/drawdown/trades/per_symbol。"""
+    """逐日组合模拟。返回 dict 含 stats/equity_curve/drawdown/trades/per_symbol."""
     df = panel
     dates = sorted(df["date"].unique())
     # 加入 warmup 数据但只从 start_s 开始撮合
@@ -548,6 +571,13 @@ def _simulate_portfolio(panel, entry, exit_mask, scores, config, start_s, end_s,
     if not sim_dates:
         return None
     total_days = len(sim_dates)
+
+    # open_t+1：T 日收盘信号 → T+1 日开盘执行。把信号后移一个交易日，
+    # 消除"用当日收盘信号在当日开盘成交"的未来函数（见 _shift_signal_to_execute）。
+    if config.entry_fill == "open_t+1":
+        entry = _shift_signal_to_execute(entry, panel)
+    if config.exit_fill == "open_t+1":
+        exit_mask = _shift_signal_to_execute(exit_mask, panel)
 
     df = df.set_index(["symbol", "date"])
     entry = entry.set_axis(df.index)
@@ -625,8 +655,17 @@ def _simulate_portfolio(panel, entry, exit_mask, scores, config, start_s, end_s,
             if exit_reason is None:
                 continue
 
-            px = _price_for(row, "sell", config.exit_fill)
-            if px is None:
+            # 成交价：止损/止盈是盘中触发（用当日 low/high 判定），应在触发价位成交，
+            # 而非当日开盘价——否则等于"已知当日最低/最高价后，用更早的开盘价成交"，
+            # 同样是未来函数且对止损/止盈都系统性有利。
+            # exit_signal / max_hold 则按配置口径：open_t+1 → 当日开盘（信号来自前一日）。
+            if exit_reason == "stop_loss":
+                px = stop_price * (1 - slippage)
+            elif exit_reason == "take_profit":
+                px = tp_price * (1 - slippage)
+            else:
+                px = _price_for(row, "sell", config.exit_fill)
+            if px is None or px <= 0:
                 continue
             proceeds = pos["shares"] * px * (1 - fees_pct)
             cash += proceeds
@@ -817,37 +856,81 @@ def _per_symbol_stats(trades):
 
 
 def _build_benchmark(db, start_s, end_s):
-    """以上证指数（000001.SH）作为基准。若数据不可用返回空。"""
+    """以上证指数（000001.SH）作为基准。
+
+    优先从 stock_daily_quotes 读取指数日线（须用带交易所后缀的指数代码）；
+    若库中无指数历史数据，则回退到 AKShare 实时拉取上证指数日线后再按区间截取。
+
+    注意：绝不能用裸代码 "000001" 查询——库中该代码对应的是平安银行（000001.SZ），
+    会把个股价格误当成上证指数（历史上曾因此把基准画成 ~11 元而非 ~3900 点）。
+    """
+    # 库中指数代码候选（仅带交易所后缀，避免命中股票 000001.SZ）
+    index_codes = ["000001.SH", "sh000001", "000001.XSHG"]
     try:
-        # 从 stock_daily_quotes 读取上证指数（兼容 code/symbol 两种存储）
         collection = db["stock_daily_quotes"]
         query = {
             "period": "daily",
             "trade_date": {"$gte": start_s, "$lte": end_s},
             "$or": [
-                {"code": {"$in": ["000001.SH", "000001", "sh000001", "000001.XSHG"]}},
-                {"symbol": {"$in": ["000001.SH", "000001", "sh000001", "000001.XSHG"]}},
+                {"code": {"$in": index_codes}},
+                {"symbol": {"$in": index_codes}},
             ],
         }
-        rows = collection.find(
-            query,
-            {"_id": 0, "trade_date": 1, "close": 1},
-        ).sort("trade_date", 1)
+        rows = list(collection.find(query, {"_id": 0, "trade_date": 1, "close": 1}).sort("trade_date", 1))
         out = []
+        seen = set()
         for r in rows:
             close = r.get("close")
             if close is None:
                 continue
+            d = r.get("trade_date", "")
+            # 同一交易日可能因指数以多种代码存储（000001.SH / sh000001 / 000001.XSHG）
+            # 而命中多条记录，按日期去重，避免净值曲线出现重叠/双线
+            if d in seen:
+                continue
+            seen.add(d)
             out.append({
-                "date": r.get("trade_date", ""),
+                "date": d,
                 "value": round(float(close), 4),
                 "close": round(float(close), 4),
                 "name": "上证指数",
                 "symbol": "000001.SH",
             })
-        return out
+        if out:
+            return out
     except Exception as e:
         logger.warning("加载基准失败: %s", e)
+
+    # 库中无指数数据 → 回退 AKShare 拉取上证指数历史日线
+    return _benchmark_from_akshare(start_s, end_s)
+
+
+def _benchmark_from_akshare(start_s, end_s):
+    """通过 AKShare 拉取上证指数历史日线并按回测区间截取。"""
+    try:
+        import akshare as ak
+        df = ak.stock_zh_index_daily(symbol="sh000001")
+        if df is None or df.empty or "date" not in df.columns or "close" not in df.columns:
+            logger.warning("AKShare 上证指数数据为空")
+            return []
+        df = df[(df["date"].astype(str) >= start_s) & (df["date"].astype(str) <= end_s)]
+        df = df.sort_values("date")
+        out = []
+        for _, row in df.iterrows():
+            try:
+                close = float(row["close"])
+            except (TypeError, ValueError):
+                continue
+            out.append({
+                "date": str(row["date"])[:10],
+                "value": round(close, 4),
+                "close": round(close, 4),
+                "name": "上证指数",
+                "symbol": "000001.SH",
+            })
+        return out
+    except Exception as e:
+        logger.warning("AKShare 拉取基准失败: %s", e)
         return []
 
 

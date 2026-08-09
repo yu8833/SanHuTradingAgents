@@ -24,6 +24,7 @@
 | 020 | 回测估值用最新快照按日广播，估值变化无法触发卖出；**前端仅传空 params 时估值退出被静默跳过，策略全程持有** | `_enrich_panel_fundamentals` 用最新快照 pe_ttm/pb/total_mv 按 symbol 广播到所有日期行；且 `_entry_exit_mask` 仅在 params 明确含 max_pe/max_pb 键时才生成估值退出掩码，调用方传空 params（`{}`）时退出逻辑失效 → 依赖估值条件的策略买在起点卖在终点、全部持仓持有到期末 | app/strategy_system/backtest.py, app/worker/tushare_sync_service.py | test_bug_020_backtest_daily_valuation.py | (本轮) | ✅ |
 | 021 | 回测交易明细名称列全为空（只有代码） | 回测面板 `load_daily_panel` 输出列不含 `name`，`_simulate_portfolio` 仅从面板 name 列构建映射 → 名称列全空。修复：`_build_name_map` 缺失时回退从 stock_basic_info 按代码补齐 | app/strategy_system/backtest.py | test_bug_021_backtest_trade_name.py | (本轮) | ✅ |
 | 022 | 全市场回测技术指标阶段进度条停留在 2% 十余分钟，像卡死 | `compute_all` 内部（compute_indicators/compute_signals）不报增量进度。修复：增加可选 `progress_cb` 按分批上报，`_load_panel` 映射到整体进度 | app/strategy_system/indicators.py, app/strategy_system/backtest.py | test_bug_022_backtest_indicator_progress.py | (本轮) | ✅ |
+| 023 | 回测 open_t+1 存在未来函数：当日收盘信号当日开盘成交，收益系统性虚高（超跌反弹年化 700%+） | `_price_for("open_t+1")` 取"当前行" open，但信号依赖当日 close → 买入用当日收盘信号在当日开盘成交、卖出同理；止损/止盈用当日 low/high 判定却用当日开盘价成交。修复：`_shift_signal_to_execute` 把信号按每股后移一个交易日（T 收盘信号→T+1 开盘执行）；止损/止盈改在触发价成交扣滑点 | app/strategy_system/backtest.py | test_bug_023_backtest_lookahead_fill.py | (本轮) | ✅ |
 
 ---
 
