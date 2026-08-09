@@ -98,7 +98,10 @@ def load_daily_panel(
     }
 
     # 按 (symbol, date) 去重，保留优先级最高的数据源
-    best: dict[tuple, dict] = {}
+    # 为降低大回测(数十万行)时的内存峰值：rows 只存一份最终行，best 只存 key->(rows下标, src_rank)，
+    # 高优先级数据后到时覆盖 rows 中该行，避免行数据被重复持有两份。
+    best: dict[tuple, tuple[int, int]] = {}
+    rows: list[dict] = []
     cursor = collection.find(query, projection)
     for doc in cursor:
         code = doc.get("code") or doc.get("symbol")
@@ -112,46 +115,40 @@ def load_daily_panel(
             src_rank = DATA_SOURCE_PRIORITY.index(src) if src else len(DATA_SOURCE_PRIORITY)
         except ValueError:
             src_rank = len(DATA_SOURCE_PRIORITY)
+        row = {
+            "symbol": code,
+            "date": trade_date,
+            "open": doc.get("open"),
+            "high": doc.get("high"),
+            "low": doc.get("low"),
+            "close": doc.get("close"),
+            "volume": doc.get("volume"),
+            "amount": doc.get("amount"),
+            "pct_chg": doc.get("pct_chg"),
+        }
         prev = best.get(key)
         if prev is None:
-            best[key] = {
-                "symbol": code,
-                "date": trade_date,
-                "open": doc.get("open"),
-                "high": doc.get("high"),
-                "low": doc.get("low"),
-                "close": doc.get("close"),
-                "volume": doc.get("volume"),
-                "amount": doc.get("amount"),
-                "pct_chg": doc.get("pct_chg"),
-                "_src_rank": src_rank,
-            }
-        else:
-            if src_rank < prev["_src_rank"]:
-                best[key] = {
-                    "symbol": code,
-                    "date": trade_date,
-                    "open": doc.get("open"),
-                    "high": doc.get("high"),
-                    "low": doc.get("low"),
-                    "close": doc.get("close"),
-                    "volume": doc.get("volume"),
-                    "amount": doc.get("amount"),
-                    "pct_chg": doc.get("pct_chg"),
-                    "_src_rank": src_rank,
-                }
+            best[key] = (len(rows), src_rank)
+            rows.append(row)
+        elif src_rank < prev[1]:
+            # 更高优先级数据后到，覆盖该行
+            rows[prev[0]] = row
+            best[key] = (prev[0], src_rank)
 
-    if not best:
+    if not rows:
         return pd.DataFrame(columns=PANEL_COLUMNS)
 
-    rows = []
-    for v in best.values():
-        rows.append({k: v[k] for k in PANEL_COLUMNS})
     df = pd.DataFrame(rows, columns=PANEL_COLUMNS)
 
     # 数值化
-    for col in ("open", "high", "low", "close", "volume", "amount", "pct_chg"):
+    for col in ("amount",):
         df[col] = pd.to_numeric(df[col], errors="coerce")
+    # 价格/涨跌幅/成交量用 float32：407万行 × 60列 的全市场面板可省一半内存，
+    # 在 8GB 受限容器中避免指标计算/merge 阶段触发全局 OOM
+    for col in ("open", "high", "low", "close", "pct_chg", "volume"):
+        df[col] = pd.to_numeric(df[col], errors="coerce").astype(
+            "float32", copy=False
+        )
 
     df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")
     df = df.sort_values(["symbol", "date"]).reset_index(drop=True)

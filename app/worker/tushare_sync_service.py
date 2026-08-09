@@ -12,6 +12,7 @@ from app.core.config import settings
 from app.core.database import get_mongo_db
 from app.core.rate_limiter import get_tushare_rate_limiter
 from app.services.historical_data_service import get_historical_data_service
+from app.services.data_sources.tushare_adapter import TushareAdapter
 from app.services.news_data_service import get_news_data_service
 from app.services.stock_data_service import get_stock_data_service
 from app.utils.timezone import now_tz
@@ -41,6 +42,17 @@ def _norm_date(d) -> str:
     if len(s) == 8 and s.isdigit():
         return f"{s[:4]}-{s[4:6]}-{s[6:]}"
     return s[:10] if len(s) >= 10 else s
+
+
+def _compact_date(d: str) -> str:
+    """将 yyyy-mm-dd 转成 Tushare 接口需要的 yyyymmdd。"""
+    s = str(d).strip()
+    if len(s) == 8 and s.isdigit():
+        return s
+    parts = s.replace("/", "-").split("-")
+    if len(parts) == 3:
+        return f"{parts[0]}{parts[1]}{parts[2]}"
+    return s[:8]
 
 
 def get_utc8_now():
@@ -1174,6 +1186,178 @@ class TushareSyncService:
             saved = len(ops)
         return saved
 
+    # ==================== 每日估值/市值数据同步 ====================
+
+    def _get_trade_days_blocking(self, start: str, end: str) -> list[str]:
+        """用 Tushare trade_cal 获取 [start, end] 内的交易日（YYYY-MM-DD 升序）。
+
+        阻塞式：供 asyncio.to_thread 调用。
+        """
+        import tushare as ts
+        token = getattr(self.provider, "token", None)
+        if not token:
+            import os
+            token = os.getenv("TUSHARE_TOKEN", "").strip().strip('"').strip("'")
+        if not token:
+            logger.warning("Tushare token 缺失，无法获取交易日历")
+            return []
+        ts.set_token(token)
+        pro = ts.pro_api()
+        df = pro.trade_cal(
+            exchange="SSE",
+            start_date=_compact_date(start),
+            end_date=_compact_date(end),
+            is_open="1",
+        )
+        if df is None or getattr(df, "empty", True):
+            return []
+        days = []
+        for val in df["cal_date"]:
+            s = str(val)
+            if len(s) == 8 and s.isdigit():
+                days.append(f"{s[:4]}-{s[4:6]}-{s[6:]}")
+        return sorted(days)
+
+    async def sync_daily_basic_data(
+        self,
+        start_date: str = None,
+        end_date: str = None,
+        days_back: int = 730,
+        job_id: str = None,
+    ) -> dict[str, Any]:
+        """同步每日估值/市值数据（Tushare daily_basic）到 stock_daily_basic 集合。
+
+        按交易日逐日拉取全市场 daily_basic，按 (code, trade_date) upsert 入库，
+        供回测按日对齐历史 PE/PB/市值，替代"最新快照逐日广播"。
+
+        - 默认同步最近 days_back 天（实际只请求交易日）；
+        - 已同步的交易日自动跳过（增量）；
+        - 单位约定：total_mv/circ_mv 由万元转为亿元（与 stock_basic_info 一致）。
+
+        Args:
+            start_date: 起始日期 YYYY-MM-DD（默认 now - days_back 天）
+            end_date: 结束日期 YYYY-MM-DD（默认今天）
+            days_back: 未指定 start_date 时回溯天数
+            job_id: 任务ID（用于进度跟踪）
+        """
+        stats = {
+            "total_processed": 0,
+            "success_count": 0,
+            "error_count": 0,
+            "skipped_count": 0,
+            "total_records": 0,
+            "start_time": datetime.utcnow(),
+            "errors": [],
+        }
+
+        end = _norm_date(end_date) or datetime.now().strftime("%Y-%m-%d")
+        start = _norm_date(start_date) or (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
+        if not start or not end or start > end:
+            logger.error(f"❌ 每日估值同步日期区间非法: {start} ~ {end}")
+            return {"error": f"invalid date range: {start} ~ {end}"}
+
+        logger.info(f"🔄 开始同步每日估值数据: {start} ~ {end}")
+
+        # 1) 获取交易日历
+        try:
+            trade_days = await asyncio.to_thread(self._get_trade_days_blocking, start, end)
+        except Exception as e:
+            logger.error(f"❌ 获取交易日历失败: {e}")
+            return {"error": str(e)}
+        if not trade_days:
+            logger.warning(f"⚠️ {start}~{end} 区间无交易日")
+            return stats
+        stats["total_processed"] = len(trade_days)
+
+        # 2) 已同步交易日（增量跳过）
+        synced: set[str] = set()
+        cursor = self.db.stock_daily_basic.find(
+            {"trade_date": {"$gte": start, "$lte": end}}, {"trade_date": 1}
+        )
+        async for doc in cursor:
+            d = str(doc.get("trade_date") or "")
+            if d:
+                synced.add(d)
+
+        # 3) 逐日拉取并入库
+        adapter = TushareAdapter()
+        from pymongo import UpdateOne
+
+        for i, td in enumerate(trade_days):
+            if job_id and await self._should_stop(job_id):
+                logger.warning(f"⚠️ 任务 {job_id} 收到停止信号，正在退出...")
+                stats["stopped"] = True
+                break
+
+            if td in synced:
+                stats["skipped_count"] += 1
+                continue
+
+            await self.rate_limiter.acquire()
+            try:
+                df = await asyncio.to_thread(adapter.get_daily_basic, _compact_date(td))
+                if df is None or getattr(df, "empty", True):
+                    stats["error_count"] += 1
+                    continue
+            except Exception as e:
+                stats["error_count"] += 1
+                stats["errors"].append({"date": td, "error": str(e)})
+                logger.error(f"❌ {td} 拉取 daily_basic 失败: {e}")
+                continue
+
+            ops = []
+            for _, row in df.iterrows():
+                ts_code = str(row.get("ts_code") or "")
+                if "." not in ts_code:
+                    continue
+                code = ts_code.split(".")[0]
+                total_mv = _to_float(row.get("total_mv"))
+                circ_mv = _to_float(row.get("circ_mv"))
+                doc = {
+                    "symbol": code,
+                    "code": code,
+                    "ts_code": ts_code,
+                    "trade_date": td,
+                    # 市值单位：万元 -> 亿元（与 stock_basic_info 保持一致）
+                    "total_mv": round(total_mv / 10000.0, 6) if total_mv is not None else None,
+                    "circ_mv": round(circ_mv / 10000.0, 6) if circ_mv is not None else None,
+                    "pe": _to_float(row.get("pe")),
+                    "pb": _to_float(row.get("pb")),
+                    "ps": _to_float(row.get("ps")),
+                    "pe_ttm": _to_float(row.get("pe_ttm")),
+                    "pb_mrq": _to_float(row.get("pb_mrq")),
+                    "ps_ttm": _to_float(row.get("ps_ttm")),
+                    "turnover_rate": _to_float(row.get("turnover_rate")),
+                    "volume_ratio": _to_float(row.get("volume_ratio")),
+                    "total_share": _to_float(row.get("total_share")),
+                    "float_share": _to_float(row.get("float_share")),
+                    "data_source": "tushare",
+                    "updated_at": get_utc8_now(),
+                }
+                ops.append(UpdateOne(
+                    {"code": code, "trade_date": td},
+                    {"$set": doc},
+                    upsert=True,
+                ))
+
+            if ops:
+                await self.db.stock_daily_basic.bulk_write(ops, ordered=False)
+                stats["success_count"] += 1
+                stats["total_records"] += len(ops)
+
+            if job_id and ((i + 1) % 5 == 0 or (i + 1) == len(trade_days)):
+                await self._update_progress(
+                    job_id,
+                    int(((i + 1) / len(trade_days)) * 100),
+                    f"正在同步每日估值 {td} ({i + 1}/{len(trade_days)})…",
+                )
+
+        stats["finished_at"] = datetime.utcnow().isoformat()
+        logger.info(f"✅ 每日估值数据同步完成: 交易日={stats['total_processed']}, "
+                    f"入库={stats['success_count']}, 跳过={stats['skipped_count']}, "
+                    f"记录={stats['total_records']}, 失败={stats['error_count']}")
+        return stats
+
     @staticmethod
     def _parse_financial_text(symbol: str, text: str) -> dict[str, Any]:
         """将 get_fundamentals 返回的格式化文本解析为结构化 dict。
@@ -1641,6 +1825,24 @@ async def run_tushare_dividend_sync():
         return result
     except Exception as e:
         logger.error(f"❌ Tushare分红数据同步失败: {e}")
+        raise
+
+
+async def run_tushare_daily_basic_sync(days_back: int = 730):
+    """APScheduler任务：同步每日估值/市值数据（Tushare daily_basic）。
+
+    默认同步最近 days_back 天（增量，已同步交易日自动跳过），
+    供回测按日对齐历史 PE/PB/市值。
+    """
+    try:
+        service = await get_tushare_sync_service()
+        result = await service.sync_daily_basic_data(
+            days_back=days_back, job_id="tushare_daily_basic_sync"
+        )
+        logger.info(f"✅ Tushare每日估值数据同步完成: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"❌ Tushare每日估值数据同步失败: {e}")
         raise
 
 

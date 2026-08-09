@@ -20,7 +20,13 @@ sys.path.insert(0, str(project_root))
 from app.core.database import get_mongo_db_sync
 from app.core.logging_config import setup_logging
 from app.strategy_system import backtest as bt
-from app.strategy_system.backtest_queue import dequeue
+from app.strategy_system.backtest_queue import (
+    clear_inflight,
+    dequeue,
+    drain_inflight,
+    enqueue,
+    mark_inflight,
+)
 from app.strategy_system.task_manager import make_progress_cb, task_manager
 
 logger = logging.getLogger("backtest_worker")
@@ -68,6 +74,9 @@ def _dispatch(kind: str, request: dict, db, task_id: str):
 def run() -> None:
     logger.info("🚀 启动回测 Worker")
 
+    # 启动时恢复上次被中断的在途任务：重新入队，确保不因 Worker 重启而丢失
+    _recover_interrupted()
+
     stopped = False
 
     def _stop(signum, frame):  # noqa: ARG001
@@ -84,16 +93,43 @@ def run() -> None:
             continue
         task_id = job["task_id"]
         kind = job["kind"]
+        # 取出即标记在途：若本进程在处理中被重启，启动时可据此恢复重入队
+        mark_inflight(task_id, job)
         try:
             db = get_mongo_db_sync()
             result = _dispatch(kind, job["request"], db, task_id)
+            clear_inflight()
             task_manager.update(task_id, status="success", result=result, progress=1.0)
             logger.info(f"✅ 回测任务完成: task_id={task_id} kind={kind}")
         except Exception as e:  # noqa: BLE001
+            clear_inflight()
             logger.exception(f"回测任务执行异常: task_id={task_id} kind={kind}")
             task_manager.update(task_id, status="failure", error=str(e))
 
     logger.info("回测 Worker 已停止")
+
+
+def _recover_interrupted() -> None:
+    """启动时把上次被中断的任务重新入队，避免任务永久丢失。
+
+    Worker 用 BLPOP 阻塞取任务，取出时条目即从队列移除。若进程在任务执行中
+    被重启（信号/PID 被杀/崩溃），该任务会残留 running 状态且无任何进程接管。
+    通过读取在途标记，把被中断的任务重新投递到队列，由本进程继续执行。
+    """
+    try:
+        payload = drain_inflight()
+        if not payload:
+            return
+        task_id = payload["task_id"]
+        kind = payload["kind"]
+        request = payload.get("request") or {}
+        ok = enqueue(kind, task_id, request)
+        if ok:
+            logger.info(f"♻️ 恢复被中断的回测任务并重新入队: task_id={task_id} kind={kind}")
+        else:
+            logger.warning(f"恢复被中断任务入队失败: task_id={task_id}")
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"恢复被中断任务异常: {e}")
 
 
 if __name__ == "__main__":

@@ -505,6 +505,16 @@ async def create_database_indexes(db):
         ):
             index_count += 1
 
+        # stock_daily_basic 的索引（每日估值/市值，回测按日对齐查询）
+        daily_basic = db["stock_daily_basic"]
+        # 回测按 (symbol/code, trade_date) 区间查询，trade_date 范围过滤 + code/symbol 命中
+        if await _safe_create_index(daily_basic, [("trade_date", 1), ("code", 1)], background=True):
+            index_count += 1
+        if await _safe_create_index(daily_basic, [("code", 1), ("trade_date", 1)], unique=True, background=True):
+            index_count += 1
+        if await _safe_create_index(daily_basic, [("symbol", 1), ("trade_date", 1)], background=True):
+            index_count += 1
+
         # stock_screening_view 的索引（筛选视图 - 全表扫描频繁）
         screening_view = db["stock_screening_view"]
         if await _safe_create_index(screening_view, [("code", 1)], unique=True, background=True):

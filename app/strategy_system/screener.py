@@ -132,6 +132,11 @@ def _load_fundamentals(db, symbols) -> pd.DataFrame:
     """从 stock_basic_info 加载行业/市值/估值字段，返回 symbol 去重后的 DataFrame。
 
     单位约定：total_mv 为亿元。
+
+    stock_basic_info 中同一 code 可能有多条记录（多数据源重复写入），部分记录
+    industry / pe / pb / total_mv 为空。这里按 code 聚合，优先挑选字段最完整的记录
+    （industry 非空优先，其次 pe/pb/total_mv 有效），避免因取到空记录导致
+    行业龙头等依赖行业字段的策略失效。
     """
     if not symbols:
         return pd.DataFrame()
@@ -143,20 +148,40 @@ def _load_fundamentals(db, symbols) -> pd.DataFrame:
             "total_mv": 1, "pe": 1, "pb": 1, "pe_ttm": 1, "pb_mrq": 1,
         },
     )
-    rows = []
-    seen = set()
+
+    def _pick_score(industry, pe, pb, mv) -> int:
+        """记录完整度评分：industry 非空 > 有效估值 > 有效市值，值越大代表字段越完整。"""
+        score = 0
+        if industry:  # 行业龙头等策略强依赖行业字段
+            score += 4
+        if pe or pb:  # 任一有效估值字段
+            score += 2
+        if mv:  # 有效市值
+            score += 1
+        return score
+
+    best: dict[str, dict] = {}
     for doc in cursor:
-        code = str(doc.get("code") or doc.get("symbol") or "")
-        if not code or code in seen:
+        code = str(doc.get("code") or doc.get("symbol") or "").strip()
+        if not code:
             continue
-        seen.add(code)
-        rows.append({
-            "symbol": code,
-            "industry": doc.get("industry") or "",
-            "total_mv": _to_float(doc.get("total_mv")),
-            "pe_ttm": _to_float(doc.get("pe_ttm")) or _to_float(doc.get("pe")),
-            "pb": _to_float(doc.get("pb")) or _to_float(doc.get("pb_mrq")),
-        })
+        industry = (doc.get("industry") or "").strip()
+        pe = _to_float(doc.get("pe_ttm")) or _to_float(doc.get("pe"))
+        pb = _to_float(doc.get("pb")) or _to_float(doc.get("pb_mrq"))
+        mv = _to_float(doc.get("total_mv"))
+        score = _pick_score(industry, pe, pb, mv)
+        prev = best.get(code)
+        if prev is None or score > prev["_score"]:
+            best[code] = {
+                "_score": score,
+                "symbol": code,
+                "industry": industry,
+                "total_mv": mv,
+                "pe_ttm": pe,
+                "pb": pb,
+            }
+
+    rows = [v for v in best.values()]
     return pd.DataFrame(rows)
 
 

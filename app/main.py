@@ -93,6 +93,7 @@ from app.worker.baostock_sync_service import (
     run_baostock_status_check,
 )
 from app.worker.tushare_sync_service import (
+    run_tushare_daily_basic_sync,
     run_tushare_dividend_sync,
     run_tushare_financial_sync,
     run_tushare_historical_sync,
@@ -462,6 +463,19 @@ async def lifespan(app: FastAPI):
                 logger.info(f"💰 Tushare分红数据同步已配置: {settings.TUSHARE_DIVIDEND_SYNC_CRON}")
             else:
                 logger.info(f"⏭️ Tushare分红数据同步跳过（未启用）: {settings.TUSHARE_DIVIDEND_SYNC_CRON}")
+
+            # 每日估值/市值数据同步任务（为回测提供按日 PE/PB/市值）
+            if settings.TUSHARE_DAILY_BASIC_SYNC_ENABLED:
+                scheduler.add_job(
+                    run_tushare_daily_basic_sync,
+                    CronTrigger.from_crontab(settings.TUSHARE_DAILY_BASIC_SYNC_CRON, timezone=settings.TIMEZONE),
+                    id="tushare_daily_basic_sync",
+                    name="每日估值数据同步（Tushare）",
+                    kwargs={"days_back": settings.TUSHARE_DAILY_BASIC_SYNC_DAYS_BACK}
+                )
+                logger.info(f"📈 Tushare每日估值数据同步已配置: {settings.TUSHARE_DAILY_BASIC_SYNC_CRON}")
+            else:
+                logger.info(f"⏭️ Tushare每日估值数据同步跳过（未启用）: {settings.TUSHARE_DAILY_BASIC_SYNC_CRON}")
 
             # 状态检查任务（保留，频率在 config.py 已为每小时，后续可降频）
             if settings.TUSHARE_STATUS_CHECK_ENABLED:

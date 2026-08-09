@@ -166,6 +166,10 @@ def _low_pe_high_dividend_leader(df: pd.DataFrame, params: dict) -> pd.Series:
         for _ind, grp in sub.groupby("industry", sort=False):
             selected.update(grp["symbol"].head(top_n).tolist())
         leader = df["symbol"].isin(selected)
+        # 关键：选中的行业龙头必须叠加"每日"基础过滤（PE/PB/股息/分红年数）。
+        # 否则龙头在回测期被 broadcast 到所有日期，即使当日 PE/PB 已突破阈值
+        # 仍会产生买入信号，导致"次日卖出→再次买入"的每日循环（bug-020）。
+        return leader & m.fillna(False)
     return leader
 
 

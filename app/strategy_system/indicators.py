@@ -154,7 +154,13 @@ def _group_ewm(col, symbols, alpha):
 
 
 def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
-    """从 OHLCV 计算全套技术指标。输入含 symbol 列，按 symbol 分组计算。"""
+    """从 OHLCV 计算全套技术指标。输入含 symbol 列，按 symbol 分组计算。
+
+    内存优化：全市场面板（数千只股票 × 数百交易日）若一次性对整个面板做
+    groupby 滚动/EWM，会产生大量与全面板等长的中间数组，峰值内存可达数 GB，
+    在内存受限的容器中易触发 OOM。因此按股票分批计算，每批处理完即拼接并
+    释放中间数组，把峰值内存限制在「单批规模」，与市场股票总数解耦。
+    """
     if df is None or df.empty:
         return df
 
@@ -165,7 +171,29 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
     df = df.copy()
     df["date"] = pd.to_datetime(df["date"])
-    df = df.sort_values(["symbol", "date"]).reset_index(drop=True)
+    df = df.sort_values(["symbol", "date"], kind="mergesort").reset_index(drop=True)
+
+    symbols = df["symbol"]
+    if len(symbols) <= _INDICATOR_CHUNK_SYMBOLS:
+        return _concat_indicators(df)
+
+    # 分批：按 symbol 切块，每块独立计算后拼接，避免全量中间数组撑爆内存
+    chunks = []
+    for _, grp in df.groupby(
+        (symbols != symbols.shift()).fillna(True).cumsum(), sort=False
+    ):
+        chunks.append(grp)
+    return pd.concat(
+        [_concat_indicators(c) for c in chunks], axis=0, ignore_index=True
+    )
+
+
+# 单批最多处理的股票数：控制中间数组的峰值内存（每批约 300 只 × 交易日）
+_INDICATOR_CHUNK_SYMBOLS = 300
+
+
+def _concat_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    """对单批 DataFrame 计算全部技术指标并返回（分批计算的核心逻辑）。"""
     symbols = df["symbol"]
 
     close = df["close"]
@@ -209,7 +237,12 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     out["kdj_d"] = d
     out["kdj_j"] = 3 * k - 2 * d
 
-    tr = pd.concat([high - low, (high - prev_close).abs(), (low - prev_close).abs()], axis=1).max(axis=1)
+    tr = pd.Series(
+        np.maximum.reduce(
+            [high - low, (high - prev_close).abs(), (low - prev_close).abs()]
+        ),
+        index=df.index,
+    )
     out["atr_14"] = _group_ewm(tr, symbols, 1.0 / 14)
 
     out["vol_ma5"] = _group_rolling(volume, symbols, 5, "mean")
@@ -237,15 +270,39 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
         rs = avg_gain / avg_loss.replace(0, np.nan)
         out[f"rsi_{n}"] = 100 - 100 / (1 + rs)
 
+    # 全市场 407 万行 × 60 列面板在 8GB 容器中会触发 OOM，将 float64 指标列
+    # 统一降为 float32（精度对信号判定足够，内存减半）
+    out = out.astype({c: "float32" for c in out.columns if out[c].dtype == "float64"})
     return pd.concat([df, out], axis=1)
 
 
 def compute_signals(df: pd.DataFrame) -> pd.DataFrame:
-    """从指标列计算原子信号布尔列。保持原索引与既有列不变，仅追加信号列。"""
+    """从指标列计算原子信号布尔列。保持原索引与既有列不变，仅追加信号列。
+
+    内存优化：与 compute_indicators 一致，按股票分批计算以控制峰值内存。
+    """
     if df is None or df.empty:
         return df
 
     df = df.copy()
+    df = df.sort_values(["symbol", "date"], kind="mergesort").reset_index(drop=True)
+
+    symbols = df["symbol"]
+    if len(symbols) <= _INDICATOR_CHUNK_SYMBOLS:
+        return _concat_signals(df)
+
+    chunks = []
+    for _, grp in df.groupby(
+        (symbols != symbols.shift()).fillna(True).cumsum(), sort=False
+    ):
+        chunks.append(grp)
+    return pd.concat(
+        [_concat_signals(c) for c in chunks], axis=0, ignore_index=True
+    )
+
+
+def _concat_signals(df: pd.DataFrame) -> pd.DataFrame:
+    """对单批 DataFrame 计算全部原子信号布尔列（分批计算的核心逻辑）。"""
     df = df.sort_values(["symbol", "date"]).reset_index(drop=True)
     symbols = df["symbol"]
 

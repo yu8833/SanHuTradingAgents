@@ -84,6 +84,11 @@ def _load_panel(db, config, end_extra_days: int = 0,
         _report(_a + (_b - _a) * min(1.0, max(0.0, float(p))), msg)
 
     df = _enrich_panel_fundamentals(db, df, progress_cb=_child)
+    # 兜底：全市场面板（407万行×60+列）在 8GB 容器中必须压缩 dtype。
+    # 指标/merge 引入的 float64 列统一降 float32，内存减半，避免全局 OOM。
+    float64_cols = [c for c in df.columns if df[c].dtype == "float64"]
+    if float64_cols:
+        df[float64_cols] = df[float64_cols].astype("float32")
     return df
 
 
@@ -92,8 +97,11 @@ def _enrich_panel_fundamentals(db, df: pd.DataFrame,
     """为回测面板逐行注入基本面与分红列：industry, total_mv, pe_ttm, pb,
     div_12m_ps, div_paying_years, div_yield。
 
-    复用 screener._load_fundamentals（行业/市值/估值，每股最新快照，按 symbol 广播），
-    股息指标则按面板内每个交易日内存批量计算（div_yield = div_12m_ps / 当日 close）。
+    估值/市值（pe_ttm/pb/total_mv）优先使用每日历史数据（stock_daily_basic，
+    按 (symbol, date) 对齐并前向填充），使依赖估值条件的策略能在估值变化时
+    触发卖出；无每日数据时回退到每股最新快照广播（保持历史行为）。
+    行业（industry）为静态字段，始终来自快照。
+    股息指标按面板内每个交易日内存批量计算（div_yield = div_12m_ps / 当日 close）。
     与筛选侧 _enrich_target 口径一致，使依赖基本面列的策略回测能产生信号。
     """
     if df.empty:
@@ -102,12 +110,36 @@ def _enrich_panel_fundamentals(db, df: pd.DataFrame,
     if not symbols:
         return df
 
-    # 1) 基本面（行业/市值/估值）——每股最新快照，广播到该股所有日期行
+    # 1) 行业/市值/估值快照（每股最新，用于行业字段与估值兜底）
     fund = screener._load_fundamentals(db, symbols)
-    if not fund.empty:
-        df = df.merge(fund, on="symbol", how="left", suffixes=("", "_fund"))
 
-    # 2) 股息指标——逐交易日内存计算（一次性加载记录，避免逐日查库）
+    # 2) 每日历史估值（pe_ttm/pb/total_mv），按 (symbol, date) 对齐 + 前向填充
+    if progress_cb:
+        progress_cb(0.05, "正在注入每日估值数据…")
+    val = _load_valuation_panel(db, symbols, df)
+    if val.empty:
+        # 无每日估值数据 → 快照广播（历史行为）
+        if not fund.empty:
+            df = df.merge(fund, on="symbol", how="left", suffixes=("", "_fund"))
+    else:
+        # 行业仍来自快照（静态字段，无每日历史）
+        if not fund.empty:
+            df = df.merge(fund[["symbol", "industry"]], on="symbol",
+                          how="left", suffixes=("", "_fund"))
+        df = df.merge(val, on=["symbol", "date"], how="left")
+        # 缺值逐 symbol 前向填充（非交易日/未同步日沿用上一估值）
+        df = df.sort_values(["symbol", "date"])
+        for col in ("pe_ttm", "pb", "total_mv"):
+            df[col] = df.groupby("symbol")[col].ffill()
+        # 仍缺失的估值列用最新快照兜底（保证列非空）
+        if not fund.empty:
+            snap = fund[["symbol", "total_mv", "pe_ttm", "pb"]]
+            df = df.merge(snap, on="symbol", how="left", suffixes=("", "_snap"))
+            for col in ("total_mv", "pe_ttm", "pb"):
+                df[col] = df[col].fillna(df[f"{col}_snap"])
+            df = df.drop(columns=[f"{col}_snap" for col in ("total_mv", "pe_ttm", "pb")])
+
+    # 3) 股息指标——逐交易日内存计算（一次性加载记录，避免逐日查库）
     div_df = _load_dividend_panel(db, symbols, df, progress_cb=progress_cb)
     if not div_df.empty:
         df = df.merge(div_df, on=["symbol", "date"], how="left")
@@ -120,6 +152,45 @@ def _enrich_panel_fundamentals(db, df: pd.DataFrame,
     close = pd.to_numeric(df["close"], errors="coerce")
     df["div_yield"] = (df["div_12m_ps"] / close.where(close > 0)).round(4)
     return df
+
+
+def _load_valuation_panel(db, symbols, df: pd.DataFrame,
+                          progress_cb: Callable[[float, str], None] | None = None) -> pd.DataFrame:
+    """从 stock_daily_basic 批量加载每日估值（pe_ttm/pb/total_mv），按 (symbol, date) 对齐。
+
+    返回列: symbol, date, pe_ttm, pb, total_mv。仅返回面板日期区间内存在数据的行。
+    单位约定：total_mv 为亿元（与 stock_basic_info / 策略一致）。
+    性能：单次批量查询（按 code/trade_date 过滤日期区间），避免逐日逐股查库。
+    """
+    sym_list = [str(s) for s in symbols if s]
+    if not sym_list or df.empty:
+        return pd.DataFrame(columns=["symbol", "date", "pe_ttm", "pb", "total_mv"])
+    dmin = str(df["date"].min())[:10]
+    dmax = str(df["date"].max())[:10]
+    cursor = db["stock_daily_basic"].find(
+        {
+            "trade_date": {"$gte": dmin, "$lte": dmax},
+            "$or": [{"code": {"$in": sym_list}}, {"symbol": {"$in": sym_list}}],
+        },
+        {"_id": 0, "code": 1, "symbol": 1, "trade_date": 1,
+         "pe_ttm": 1, "pb": 1, "total_mv": 1},
+    )
+    rows: list[dict] = []
+    for doc in cursor:
+        code = str(doc.get("code") or doc.get("symbol") or "").strip()
+        trade_date = str(doc.get("trade_date") or "").strip()
+        if not code or not trade_date:
+            continue
+        rows.append({
+            "symbol": code,
+            "date": trade_date[:10],
+            "pe_ttm": screener._to_float(doc.get("pe_ttm")),
+            "pb": screener._to_float(doc.get("pb")),
+            "total_mv": screener._to_float(doc.get("total_mv")),
+        })
+    if not rows:
+        return pd.DataFrame(columns=["symbol", "date", "pe_ttm", "pb", "total_mv"])
+    return pd.DataFrame(rows)
 
 
 def _load_dividend_panel(db, symbols, df: pd.DataFrame,
@@ -223,12 +294,36 @@ def _entry_exit_mask(df: pd.DataFrame, strategy_id: str, params: dict):
 
     entry = run_strategy_filter(strategy_id, df, params).fillna(False).astype(bool)
 
-    exit_signals = strategy.get("exit_signals") or []
     exit_mask = pd.Series(False, index=df.index)
+
+    # 策略声明的显式退出信号列
+    exit_signals = strategy.get("exit_signals") or []
     if exit_signals:
         for sig in exit_signals:
             if sig in df.columns:
                 exit_mask |= df[sig].fillna(False).astype(bool)
+
+    # 估值条件退出：当策略配置了估值上限（max_pe/max_pb）且面板含每日估值列时，
+    # 持仓股票 PE/PB 突破阈值即触发卖出，使"估值不再满足买入条件就卖出"得以生效。
+    # 依赖 _enrich_panel_fundamentals 注入的每日历史估值（bug-020）。
+    if "max_pe" in params or "max_pb" in params:
+        max_pe = max_pb = None
+        try:
+            if "max_pe" in params and "pe_ttm" in df.columns:
+                max_pe = float(params["max_pe"])
+            if "max_pb" in params and "pb" in df.columns:
+                max_pb = float(params["max_pb"])
+        except (TypeError, ValueError):
+            max_pe = max_pb = None
+        if max_pe is not None or max_pb is not None:
+            over = pd.Series(False, index=df.index)
+            pe = pd.to_numeric(df.get("pe_ttm"), errors="coerce")
+            pb = pd.to_numeric(df.get("pb"), errors="coerce")
+            if max_pe is not None:
+                over |= (pe > max_pe).fillna(False)
+            if max_pb is not None:
+                over |= (pb > max_pb).fillna(False)
+            exit_mask |= over
 
     return entry, exit_mask
 
