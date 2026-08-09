@@ -21,7 +21,7 @@
 | 017 | 回测任务提示"任务不存在或已过期" | 异步回测任务注册表是纯进程内存 dict，多 worker / 进程重启后任务丢失，get(task_id) 返回 None | app/strategy_system/task_manager.py | test_bug_017_backtest_task_redis.py | (本轮) | ✅ |
 | 018 | 低估值高股息策略回测提示"在指定区间内未产生买入信号" | `_low_pe_high_dividend_leader` 行业龙头用 `grp.head(top_n)` 按"行"而非"只股票"取数：筛选侧每股票仅1行正常，回测多日面板每股票多行，排序后误取同一只股票的多行，正式区间 0 信号 | app/strategy_system/strategies.py | test_bug_018_backtest_leader_topn.py | (本轮) | ✅ |
 | 019 | 回测期末强制平仓价=买入价，期末盈亏恒为0 | `_simulate_portfolio` 期末强制平仓 `px = pos["entry_price"]` 直接用建仓价结算，未用最后交易日收盘价 → 买入价==卖出价，total_return 失真 | app/strategy_system/backtest.py | test_bug_019_backtest_end_liquidation.py | (本轮) | ✅ |
-| 020 | 回测估值用最新快照按日广播，估值变化无法触发卖出 | `_enrich_panel_fundamentals` 用每股最新快照 pe_ttm/pb/total_mv 按 symbol 广播到所有日期行 → 依赖估值条件的策略整个区间用同一估值判断，股票从头持有到尾、买起点卖终点 | app/strategy_system/backtest.py, app/worker/tushare_sync_service.py | test_bug_020_backtest_daily_valuation.py | (本轮) | ✅ |
+| 020 | 回测估值用最新快照按日广播，估值变化无法触发卖出；**前端仅传空 params 时估值退出被静默跳过，策略全程持有** | `_enrich_panel_fundamentals` 用最新快照 pe_ttm/pb/total_mv 按 symbol 广播到所有日期行；且 `_entry_exit_mask` 仅在 params 明确含 max_pe/max_pb 键时才生成估值退出掩码，调用方传空 params（`{}`）时退出逻辑失效 → 依赖估值条件的策略买在起点卖在终点、全部持仓持有到期末 | app/strategy_system/backtest.py, app/worker/tushare_sync_service.py | test_bug_020_backtest_daily_valuation.py | (本轮) | ✅ |
 
 ---
 

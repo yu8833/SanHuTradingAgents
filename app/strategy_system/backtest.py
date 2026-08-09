@@ -292,13 +292,34 @@ def _load_dividend_panel(db, symbols, df: pd.DataFrame,
     return pd.concat(frames, ignore_index=True)
 
 
+def _effective_params(strategy: dict, params: dict | None) -> dict:
+    """合并调用方传入参数与策略声明的默认参数，返回有效参数 dict。
+
+    策略在定义时声明了各参数的默认值（如 max_pe=15, max_pb=3.0）。调用方
+    （前端）可能只传空 dict 或部分参数，若不合并默认值，依赖估值上限的退出
+    逻辑（_entry_exit_mask）会因 params 中缺少 max_pe/max_pb 而静默失效，
+    导致依赖估值条件的策略从不触发卖出（买入起点→卖出终点）。
+    """
+    effective: dict = {}
+    for p in (strategy.get("params") or []):
+        pid = p.get("id")
+        if pid and "default" in p:
+            effective[pid] = p["default"]
+    if params:
+        effective.update(params)
+    return effective
+
+
 def _entry_exit_mask(df: pd.DataFrame, strategy_id: str, params: dict):
     """返回 (entry_mask, exit_mask)：基于策略 filter 与退出信号。"""
     strategy = _get_strategy_map().get(strategy_id)
     if strategy is None:
         raise ValueError(f"未知策略: {strategy_id}")
 
-    entry = run_strategy_filter(strategy_id, df, params).fillna(False).astype(bool)
+    # 用策略默认值合并调用方参数，确保估值上限等参数在未显式传入时仍生效
+    effective = _effective_params(strategy, params)
+
+    entry = run_strategy_filter(strategy_id, df, effective).fillna(False).astype(bool)
 
     exit_mask = pd.Series(False, index=df.index)
 
@@ -312,13 +333,14 @@ def _entry_exit_mask(df: pd.DataFrame, strategy_id: str, params: dict):
     # 估值条件退出：当策略配置了估值上限（max_pe/max_pb）且面板含每日估值列时，
     # 持仓股票 PE/PB 突破阈值即触发卖出，使"估值不再满足买入条件就卖出"得以生效。
     # 依赖 _enrich_panel_fundamentals 注入的每日历史估值（bug-020）。
-    if "max_pe" in params or "max_pb" in params:
+    # 阈值取"合并默认值后的有效参数"，避免前端只传空 params 时估值退出被静默跳过。
+    if "max_pe" in effective or "max_pb" in effective:
         max_pe = max_pb = None
         try:
-            if "max_pe" in params and "pe_ttm" in df.columns:
-                max_pe = float(params["max_pe"])
-            if "max_pb" in params and "pb" in df.columns:
-                max_pb = float(params["max_pb"])
+            if "max_pe" in effective and "pe_ttm" in df.columns:
+                max_pe = float(effective["max_pe"])
+            if "max_pb" in effective and "pb" in df.columns:
+                max_pb = float(effective["max_pb"])
         except (TypeError, ValueError):
             max_pe = max_pb = None
         if max_pe is not None or max_pb is not None:

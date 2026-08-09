@@ -182,3 +182,35 @@ def test_exit_mask_when_valuation_exceeds_threshold():
         "PE 突破 15 应触发卖出（bug-020 复发）"
     assert bool(by_date.get("2026-01-07", False)) is True, \
         "PB 突破 3 应触发卖出"
+
+
+def test_exit_mask_fires_with_empty_params_using_defaults():
+    """前端传空 params 时，估值退出仍应生效（用策略默认阈值，不静默跳过）。
+
+    根因：调用方（前端）只传 `params={}`，此前 `_entry_exit_mask` 仅在
+    `params` 明确含 max_pe/max_pb 键时才生成估值退出掩码，导致依赖估值条件的
+    策略从不触发卖出（买入起点→卖出终点，全部持仓持有到期末）。修复后应合并
+    策略声明默认值（max_pe=15, max_pb=3.0）再判断退出。
+    """
+    dates = ["2026-01-05", "2026-01-06", "2026-01-07"]
+    # 第2日 PE=16 突破默认 max_pe=15，应触发卖出
+    daily = [
+        {"code": "000001", "symbol": "000001", "trade_date": d,
+         "pe_ttm": pe, "pb": pb, "total_mv": 50.0}
+        for d, pe, pb in [
+            ("2026-01-05", 10.0, 1.0),
+            ("2026-01-06", 16.0, 1.2),
+            ("2026-01-07", 10.0, 1.0),
+        ]
+    ]
+    db = _FakeDb([_basic_doc()], daily, [])
+    panel = _enrich_panel_fundamentals(db, _build_panel(dates))
+    panel = panel.sort_values("date").reset_index(drop=True)
+    _, exit_mask = _entry_exit_mask(panel, "low_pe_high_div_leader", {})
+    by_date = exit_mask.groupby(panel["date"]).first()
+    assert bool(by_date.get("2026-01-05", False)) is False, \
+        "估值未突破即不应卖出"
+    assert bool(by_date.get("2026-01-06", False)) is True, \
+        "空 params 下 PE 突破默认 15 仍应触发卖出（本次修复）"
+    assert bool(by_date.get("2026-01-07", False)) is False, \
+        "估值回落回阈值内不应持续卖出"
