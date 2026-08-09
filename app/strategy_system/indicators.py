@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Callable
 
 import numpy as np
 import pandas as pd
@@ -153,13 +154,19 @@ def _group_ewm(col, symbols, alpha):
     )
 
 
-def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
+def compute_indicators(
+    df: pd.DataFrame,
+    progress_cb: Callable[[float, str], None] | None = None,
+) -> pd.DataFrame:
     """从 OHLCV 计算全套技术指标。输入含 symbol 列，按 symbol 分组计算。
 
     内存优化：全市场面板（数千只股票 × 数百交易日）若一次性对整个面板做
     groupby 滚动/EWM，会产生大量与全面板等长的中间数组，峰值内存可达数 GB，
     在内存受限的容器中易触发 OOM。因此按股票分批计算，每批处理完即拼接并
     释放中间数组，把峰值内存限制在「单批规模」，与市场股票总数解耦。
+
+    progress_cb(p, msg) 可选：p 在 [0,1] 内按分批进度回调，供长时全市场回测
+    上报进度，避免进度条长时间停留在 0% 造成"卡死"假象。
     """
     if df is None or df.empty:
         return df
@@ -183,9 +190,13 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
         (symbols != symbols.shift()).fillna(True).cumsum(), sort=False
     ):
         chunks.append(grp)
-    return pd.concat(
-        [_concat_indicators(c) for c in chunks], axis=0, ignore_index=True
-    )
+    n = len(chunks)
+    out = []
+    for i, comp in enumerate(chunks):
+        if progress_cb:
+            progress_cb((i + 1) / n, f"正在计算技术指标（{i + 1}/{n} 批）…")
+        out.append(_concat_indicators(comp))
+    return pd.concat(out, axis=0, ignore_index=True)
 
 
 # 单批最多处理的股票数：控制中间数组的峰值内存（每批约 300 只 × 交易日）
@@ -276,10 +287,14 @@ def _concat_indicators(df: pd.DataFrame) -> pd.DataFrame:
     return pd.concat([df, out], axis=1)
 
 
-def compute_signals(df: pd.DataFrame) -> pd.DataFrame:
+def compute_signals(
+    df: pd.DataFrame,
+    progress_cb: Callable[[float, str], None] | None = None,
+) -> pd.DataFrame:
     """从指标列计算原子信号布尔列。保持原索引与既有列不变，仅追加信号列。
 
     内存优化：与 compute_indicators 一致，按股票分批计算以控制峰值内存。
+    progress_cb 同 compute_indicators，按分批上报进度。
     """
     if df is None or df.empty:
         return df
@@ -296,9 +311,13 @@ def compute_signals(df: pd.DataFrame) -> pd.DataFrame:
         (symbols != symbols.shift()).fillna(True).cumsum(), sort=False
     ):
         chunks.append(grp)
-    return pd.concat(
-        [_concat_signals(c) for c in chunks], axis=0, ignore_index=True
-    )
+    n = len(chunks)
+    out = []
+    for i, comp in enumerate(chunks):
+        if progress_cb:
+            progress_cb((i + 1) / n, f"正在计算信号（{i + 1}/{n} 批）…")
+        out.append(_concat_signals(comp))
+    return pd.concat(out, axis=0, ignore_index=True)
 
 
 def _concat_signals(df: pd.DataFrame) -> pd.DataFrame:
@@ -330,8 +349,25 @@ def _concat_signals(df: pd.DataFrame) -> pd.DataFrame:
     return pd.concat([df, s], axis=1)
 
 
-def compute_all(df: pd.DataFrame) -> pd.DataFrame:
-    """一站式计算：指标 + 信号。"""
-    df = compute_indicators(df)
-    df = compute_signals(df)
+def compute_all(
+    df: pd.DataFrame,
+    progress_cb: Callable[[float, str], None] | None = None,
+) -> pd.DataFrame:
+    """一站式计算：指标 + 信号。
+
+    progress_cb(p, msg) 可选：p 在 [0,1] 内，指标阶段占 [0, 0.7]，信号阶段占
+    [0.7, 1.0]，供回测/筛选在长时全市场计算时上报进度。
+    """
+    sub = progress_cb if progress_cb else None
+
+    def _indic(p: float, msg: str) -> None:
+        if sub:
+            sub(0.0 + 0.7 * min(1.0, max(0.0, float(p))), msg)
+
+    def _signal(p: float, msg: str) -> None:
+        if sub:
+            sub(0.7 + 0.3 * min(1.0, max(0.0, float(p))), msg)
+
+    df = compute_indicators(df, progress_cb=_indic if sub else None)
+    df = compute_signals(df, progress_cb=_signal if sub else None)
     return df

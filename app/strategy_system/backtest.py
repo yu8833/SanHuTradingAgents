@@ -71,14 +71,19 @@ def _load_panel(db, config, end_extra_days: int = 0,
     if df.empty:
         return df
     _report(0.02, "正在计算技术指标…")
-    df = compute_all(df)
+    # 指标计算阶段耗时最长（全市场可占大头），映射到 [0.02, 0.045] 并报分批进度，
+    # 避免长时计算期间进度条长时间停留在 2% 造成"卡死"假象。
+    def _ind_cb(p: float, msg: str) -> None:
+        _report(0.02 + 0.025 * min(1.0, max(0.0, float(p))), msg)
+
+    df = compute_all(df, progress_cb=_ind_cb)
     # compute_all 会把 date 转为 datetime64，统一转回字符串便于下游字符串比较
     df["date"] = df["date"].dt.strftime("%Y-%m-%d")
     # 注入基本面(行业/市值/估值)与分红列，供价值/股息类策略在回测中也能产生信号，
     # 与筛选侧 screener._enrich_target 保持一致的口径
-    _report(0.025, "正在注入基本面与股息数据（全市场可能较慢）…")
-    # 将子阶段的 0-1 进度映射到整体 [0.025, 0.05]，避免子进度直接写回导致进度条跳变
-    base_from, base_to = 0.025, 0.05
+    _report(0.045, "正在注入基本面与股息数据（全市场可能较慢）…")
+    # 将子阶段的 0-1 进度映射到整体 [0.045, 0.05]，避免子进度直接写回导致进度条跳变
+    base_from, base_to = 0.045, 0.05
 
     def _child(p: float, msg: str, _a: float = base_from, _b: float = base_to) -> None:
         _report(_a + (_b - _a) * min(1.0, max(0.0, float(p))), msg)

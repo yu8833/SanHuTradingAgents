@@ -23,6 +23,7 @@
 | 019 | 回测期末强制平仓价=买入价，期末盈亏恒为0 | `_simulate_portfolio` 期末强制平仓 `px = pos["entry_price"]` 直接用建仓价结算，未用最后交易日收盘价 → 买入价==卖出价，total_return 失真 | app/strategy_system/backtest.py | test_bug_019_backtest_end_liquidation.py | (本轮) | ✅ |
 | 020 | 回测估值用最新快照按日广播，估值变化无法触发卖出；**前端仅传空 params 时估值退出被静默跳过，策略全程持有** | `_enrich_panel_fundamentals` 用最新快照 pe_ttm/pb/total_mv 按 symbol 广播到所有日期行；且 `_entry_exit_mask` 仅在 params 明确含 max_pe/max_pb 键时才生成估值退出掩码，调用方传空 params（`{}`）时退出逻辑失效 → 依赖估值条件的策略买在起点卖在终点、全部持仓持有到期末 | app/strategy_system/backtest.py, app/worker/tushare_sync_service.py | test_bug_020_backtest_daily_valuation.py | (本轮) | ✅ |
 | 021 | 回测交易明细名称列全为空（只有代码） | 回测面板 `load_daily_panel` 输出列不含 `name`，`_simulate_portfolio` 仅从面板 name 列构建映射 → 名称列全空。修复：`_build_name_map` 缺失时回退从 stock_basic_info 按代码补齐 | app/strategy_system/backtest.py | test_bug_021_backtest_trade_name.py | (本轮) | ✅ |
+| 022 | 全市场回测技术指标阶段进度条停留在 2% 十余分钟，像卡死 | `compute_all` 内部（compute_indicators/compute_signals）不报增量进度。修复：增加可选 `progress_cb` 按分批上报，`_load_panel` 映射到整体进度 | app/strategy_system/indicators.py, app/strategy_system/backtest.py | test_bug_022_backtest_indicator_progress.py | (本轮) | ✅ |
 
 ---
 
