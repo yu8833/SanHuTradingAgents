@@ -85,35 +85,84 @@
       <template v-if="strategyResult">
         <el-alert v-if="!strategyResult.success" :title="strategyResult.error || '回测失败'" type="error" show-icon :closable="false" />
         <template v-else>
-          <StatCards :stats="strategyResult.stats" />
+          <!-- 结果概览：策略名 / 区间 / 参数 -->
+          <el-card class="result-header" shadow="never">
+            <div class="result-header-inner">
+              <div class="result-title">
+                <span class="result-strategy-name">{{ strategyResult.strategy_info?.name || '策略回测' }}</span>
+                <el-tag size="small" type="success" effect="light" class="result-tag">回测完成</el-tag>
+              </div>
+              <div class="result-meta">
+                <div class="meta-item">
+                  <span class="meta-label">回测区间</span>
+                  <span class="meta-value">{{ strategyResult.config?.start }} ~ {{ strategyResult.config?.end }}</span>
+                </div>
+                <div class="meta-item">
+                  <span class="meta-label">初始资金</span>
+                  <span class="meta-value">¥{{ formatMoney(strategyResult.config?.initial_capital) }}</span>
+                </div>
+                <div class="meta-item">
+                  <span class="meta-label">最大持仓</span>
+                  <span class="meta-value">{{ strategyResult.config?.max_positions }} 只</span>
+                </div>
+                <div class="meta-item">
+                  <span class="meta-label">仓位方式</span>
+                  <span class="meta-value">{{ positionSizingLabel(strategyResult.config?.position_sizing) }}</span>
+                </div>
+                <div class="meta-item">
+                  <span class="meta-label">费率 / 滑点</span>
+                  <span class="meta-value">{{ (strategyResult.config?.fees_pct * 100).toFixed(2) }}% / {{ strategyResult.config?.slippage_bps }}bp</span>
+                </div>
+                <div class="meta-item">
+                  <span class="meta-label">回测耗时</span>
+                  <span class="meta-value">{{ formatEta((strategyResult.elapsed_ms ?? 0) / 1000) }}</span>
+                </div>
+              </div>
+            </div>
+          </el-card>
+
+          <el-card class="stats-panel" shadow="never">
+            <template #header>
+              <span class="panel-title">
+                <el-icon style="margin-right: 6px"><DataAnalysis /></el-icon>
+                绩效指标
+              </span>
+            </template>
+            <StatCards :stats="strategyResult.stats" />
+          </el-card>
           <el-card class="chart-panel" shadow="never">
-            <template #header><span class="panel-title">净值曲线</span></template>
+            <template #header><span class="panel-title">净值曲线（起始=1，相对收益）</span></template>
             <v-chart class="chart" :option="equityOption" autoresize />
           </el-card>
           <el-card class="chart-panel" shadow="never">
             <template #header><span class="panel-title">交易明细 ({{ strategyResult.trades?.length }})</span></template>
-            <el-table :data="strategyResult.trades" size="small" stripe border max-height="420">
-              <el-table-column prop="symbol" label="代码" width="100">
+            <el-table :data="strategyResult.trades" size="small" stripe border max-height="480"
+                      :default-sort="{ prop: 'entry_date', order: 'ascending' }" class="trade-table">
+              <el-table-column prop="symbol" label="代码" width="90">
                 <template #default="{ row }">
                   <router-link :to="`/stocks/${row.symbol}`" class="stock-code">{{ row.symbol }}</router-link>
                 </template>
               </el-table-column>
-              <el-table-column prop="name" label="名称" width="110">
+              <el-table-column prop="name" label="名称" min-width="110">
                 <template #default="{ row }">
                   <router-link :to="`/stocks/${row.symbol}`" class="stock-name">{{ row.name }}</router-link>
                 </template>
               </el-table-column>
-              <el-table-column prop="entry_date" label="买入日期" width="110" />
-              <el-table-column prop="exit_date" label="卖出日期" width="110" />
-              <el-table-column prop="entry_price" label="买入价" width="90" align="right" />
-              <el-table-column prop="exit_price" label="卖出价" width="90" align="right" />
-              <el-table-column prop="pnl_pct" label="收益率" width="90" align="right">
+              <el-table-column prop="entry_date" label="买入日期" min-width="110" sortable />
+              <el-table-column prop="exit_date" label="卖出日期" min-width="110" sortable />
+              <el-table-column prop="entry_price" label="买入价" width="95" align="right" sortable :sort-method="sortNum" />
+              <el-table-column prop="exit_price" label="卖出价" width="95" align="right" sortable :sort-method="sortNum" />
+              <el-table-column prop="pnl_pct" label="收益率" width="95" align="right" sortable :sort-method="sortNum">
                 <template #default="{ row }">
                   <span :class="row.pnl_pct >= 0 ? 'text-red' : 'text-green'">{{ (row.pnl_pct * 100).toFixed(2) }}%</span>
                 </template>
               </el-table-column>
-              <el-table-column prop="duration" label="持有(天)" width="80" align="right" />
-              <el-table-column prop="exit_reason" label="卖出原因" width="110" />
+              <el-table-column prop="duration" label="持有(天)" width="90" align="right" sortable :sort-method="sortNum" />
+              <el-table-column prop="exit_reason" label="卖出原因" min-width="110">
+                <template #default="{ row }">
+                  <el-tag size="small" effect="plain" :type="exitReasonType(row.exit_reason)">{{ exitReasonLabel(row.exit_reason) }}</el-tag>
+                </template>
+              </el-table-column>
             </el-table>
           </el-card>
         </template>
@@ -316,7 +365,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch, h, defineComponent, type PropType } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Histogram, Search, Loading } from '@element-plus/icons-vue'
+import { Histogram, Search, Loading, DataAnalysis } from '@element-plus/icons-vue'
 import { use as echartsUse } from 'echarts/core'
 import { LineChart } from 'echarts/charts'
 import { TitleComponent, TooltipComponent, LegendComponent, GridComponent } from 'echarts/components'
@@ -717,25 +766,67 @@ const runWalkForward = async () => {
   }
 }
 
+// 结果概览辅助函数
+const formatMoney = (v: number | null | undefined) =>
+  v != null ? Number(v).toLocaleString('zh-CN', { maximumFractionDigits: 0 }) : '-'
+
+const positionSizingLabel = (v: string | null | undefined) =>
+  v === 'score_weight' ? '评分加权' : v === 'equal' ? '等权' : v || '-'
+
+// 交易明细金额列（保留 2 位小数）
+const toMoney = (v: number | null | undefined) =>
+  v != null ? Number(v).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-'
+
+// 卖出原因展示：英文标识 → 中文 + 标签颜色
+const exitReasonType = (r: string | undefined) => {
+  switch (r) {
+    case 'signal': return 'danger'
+    case 'stop_loss': return 'warning'
+    case 'take_profit': return 'success'
+    case 'max_hold': return 'info'
+    case 'end': return 'info'
+    default: return 'primary'
+  }
+}
+const exitReasonLabel = (r: string | undefined) => {
+  switch (r) {
+    case 'signal': return '信号卖出'
+    case 'stop_loss': return '止损'
+    case 'take_profit': return '止盈'
+    case 'max_hold': return '超期'
+    case 'end': return '期末'
+    default: return r || '-'
+  }
+}
+
+// 数值排序：null/undefined 排最后，避免字符串比较导致排序错乱
+const sortNum = (a: any, b: any) => {
+  const s = (v: any) => (v == null || isNaN(Number(v)) ? -Infinity : Number(v))
+  return s(a) - s(b)
+}
+
 const equityOption = computed(() => {
   const curve = strategyResult.value?.equity_curve ?? []
+  const initial = strategyResult.value?.config?.initial_capital ?? 1
   const legend = ['策略净值']
+  // 策略净值 / 基准均以起始=1 归一化，便于在同一坐标轴比较相对收益
   const series: any[] = [{
     name: '策略净值',
     type: 'line',
     showSymbol: false,
-    data: curve.map(p => [p.date, p.value]),
+    data: curve.map(p => [p.date, initial > 0 ? p.value / initial : p.value]),
     lineStyle: { width: 2 },
     itemStyle: { color: '#409eff' },
   }]
   const bench = strategyResult.value?.benchmark_curve ?? []
   if (bench.length) {
+    const base = bench[0]?.value ?? 1
     legend.push('上证指数')
     series.push({
       name: '上证指数',
       type: 'line',
       showSymbol: false,
-      data: bench.map(p => [p.date, p.value]),
+      data: bench.map(p => [p.date, base > 0 ? p.value / base : p.value]),
       lineStyle: { width: 1.5, type: 'dashed' },
       itemStyle: { color: '#67c23a' },
     })
@@ -745,7 +836,7 @@ const equityOption = computed(() => {
     legend: { data: legend },
     grid: { left: 60, right: 20, top: 40, bottom: 40 },
     xAxis: { type: 'category', data: curve.map(p => p.date) },
-    yAxis: { type: 'value', scale: true },
+    yAxis: { type: 'value', scale: true, name: '净值(起始=1)' },
     series,
   }
 })
@@ -846,7 +937,54 @@ onBeforeUnmount(() => {
     .bt-form { padding: 16px; }
   }
 
-  .chart-panel {
+  .result-header {
+    margin-bottom: 20px;
+    border-radius: 12px;
+    border: 1px solid var(--el-border-color-lighter);
+    background:
+      linear-gradient(135deg, var(--el-color-primary-light-9) 0%, var(--el-bg-color) 55%);
+
+    .result-header-inner { padding: 18px 20px; }
+
+    .result-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+
+      .result-strategy-name {
+        font-size: 20px;
+        font-weight: 700;
+        color: var(--el-text-color-primary);
+      }
+    }
+
+    .result-meta {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 12px 24px;
+
+      .meta-item {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+
+        .meta-label {
+          font-size: 12px;
+          color: var(--el-text-color-secondary);
+        }
+
+        .meta-value {
+          font-size: 14px;
+          font-weight: 600;
+          color: var(--el-text-color-primary);
+        }
+      }
+    }
+  }
+
+  .chart-panel,
+  .stats-panel {
     margin-bottom: 20px;
     border-radius: 12px;
 
@@ -856,8 +994,29 @@ onBeforeUnmount(() => {
     }
 
     .panel-title { font-size: 15px; font-weight: 600; color: var(--el-text-color-primary); }
+  }
 
+  .chart-panel {
     .chart { height: 320px; }
+  }
+
+  .stats-panel {
+    :deep(.stat-cards) { margin-bottom: 0; }
+  }
+
+  .trade-table {
+    border-radius: 8px;
+    overflow: hidden;
+
+    :deep(.el-table__header th) {
+      background: var(--el-fill-color-light);
+      color: var(--el-text-color-primary);
+      font-weight: 600;
+    }
+
+    :deep(.el-table__row:hover) {
+      background: var(--el-color-primary-light-9) !important;
+    }
   }
 
   .stat-row {
@@ -890,24 +1049,32 @@ onBeforeUnmount(() => {
 
   .stat-cards {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-    gap: 16px;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 14px;
     margin-bottom: 20px;
 
     .stat-card {
-      background: var(--el-fill-color-light);
+      background: var(--el-bg-color);
+      border: 1px solid var(--el-border-color-lighter);
       padding: 16px;
-      border-radius: 8px;
+      border-radius: 10px;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+
+      &:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+      }
 
       .stat-label {
         font-size: 13px;
         color: var(--el-text-color-secondary);
-        margin-bottom: 8px;
+        margin-bottom: 10px;
       }
 
       .stat-value {
         font-size: 20px;
         font-weight: 700;
+        font-variant-numeric: tabular-nums;
       }
     }
   }
@@ -916,7 +1083,8 @@ onBeforeUnmount(() => {
 html.dark {
   .strategy-backtest {
     .form-panel,
-    .chart-panel {
+    .chart-panel,
+    .stats-panel {
       :deep(.el-card__header) {
         background: linear-gradient(135deg, var(--el-bg-color-overlay) 0%, var(--el-fill-color-darker) 100%);
       }
