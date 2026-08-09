@@ -150,14 +150,14 @@
               </el-table-column>
               <el-table-column prop="entry_date" label="买入日期" min-width="110" sortable />
               <el-table-column prop="exit_date" label="卖出日期" min-width="110" sortable />
-              <el-table-column prop="entry_price" label="买入价" width="95" align="right" sortable :sort-method="sortNum" />
-              <el-table-column prop="exit_price" label="卖出价" width="95" align="right" sortable :sort-method="sortNum" />
-              <el-table-column prop="pnl_pct" label="收益率" width="95" align="right" sortable :sort-method="sortNum">
+              <el-table-column prop="entry_price" label="买入价" width="95" align="right" sortable />
+              <el-table-column prop="exit_price" label="卖出价" width="95" align="right" sortable />
+              <el-table-column prop="pnl_pct" label="收益率" width="95" align="right" sortable>
                 <template #default="{ row }">
                   <span :class="row.pnl_pct >= 0 ? 'text-red' : 'text-green'">{{ (row.pnl_pct * 100).toFixed(2) }}%</span>
                 </template>
               </el-table-column>
-              <el-table-column prop="duration" label="持有(天)" width="90" align="right" sortable :sort-method="sortNum" />
+              <el-table-column prop="duration" label="持有(天)" width="90" align="right" sortable />
               <el-table-column prop="exit_reason" label="卖出原因" min-width="110">
                 <template #default="{ row }">
                   <el-tag size="small" effect="plain" :type="exitReasonType(row.exit_reason)">{{ exitReasonLabel(row.exit_reason) }}</el-tag>
@@ -459,8 +459,9 @@ const wfResult = ref<WalkForwardResult | null>(null)
 // ---------------------------------------------------------------------------
 // 回测结果持久化：离开页面/刷新后再次进入仍能查看上次结果
 // ---------------------------------------------------------------------------
-const BT_STORAGE_PREFIX = 'strategy_backtest_result_'
 const BT_STORAGE_TTL = 24 * 60 * 60 * 1000 // 结果保留 24 小时
+// 缓存键带构建版本号：前端重新部署后版本号变化，旧回测结果缓存自动失效，不再展示旧数据
+const BT_STORAGE_PREFIX = `strategy_backtest_result_${__APP_BUILD_VERSION__}_`
 
 interface StoredResult {
   savedAt: number
@@ -797,12 +798,6 @@ const exitReasonLabel = (r: string | undefined) => {
     case 'end': return '期末'
     default: return r || '-'
   }
-}
-
-// 数值排序：null/undefined 排最后，避免字符串比较导致排序错乱
-const sortNum = (a: any, b: any) => {
-  const s = (v: any) => (v == null || isNaN(Number(v)) ? -Infinity : Number(v))
-  return s(a) - s(b)
 }
 
 const equityOption = computed(() => {

@@ -15,3 +15,6 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv
 }
+
+// 由 vite.config.ts 的 define 注入：每次构建唯一，用于前端本地缓存键命名空间
+declare const __APP_BUILD_VERSION__: string

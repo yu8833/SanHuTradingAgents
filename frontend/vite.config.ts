@@ -1,12 +1,19 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { resolve } from 'path'
+import { readFileSync } from 'fs'
 import AutoImport from 'unplugin-auto-import/vite'
 import Components from 'unplugin-vue-components/vite'
 import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 
 // https://vitejs.dev/config/
-export default defineConfig(({ mode }) => ({
+export default defineConfig(({ mode }) => {
+  // 每次构建生成唯一的版本号，用于前端本地缓存键的命名空间。
+  // 重新部署前端后，旧的回测结果缓存会因版本号不同而自然失效，避免展示旧数据。
+  const pkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf-8'))
+  const buildVersion = `${pkg.version}-${Date.now()}`
+
+  return {
   plugins: [
     vue(),
     AutoImport({
@@ -82,5 +89,9 @@ export default defineConfig(({ mode }) => ({
         additionalData: `@use "@/styles/variables.scss" as *;`
       }
     }
+  },
+  define: {
+    __APP_BUILD_VERSION__: JSON.stringify(buildVersion),
+  },
   }
-}))
+})
