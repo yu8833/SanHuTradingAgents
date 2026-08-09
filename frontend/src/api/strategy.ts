@@ -203,6 +203,16 @@ export interface WalkForwardResult {
   error?: string
 }
 
+// 回测结果对比项（后端从 MongoDB 持久化返回的精简字段）
+export interface CompareResultItem {
+  strategy_id: string
+  strategy_name: string
+  config?: { start: string; end: string }
+  stats: BacktestStats
+  equity_curve: Array<{ date: string; value: number }>
+  saved_at: number
+}
+
 // 因子候选列表（与后端 indicators 计算出的列对应）
 export const FACTOR_OPTIONS = [
   { value: 'momentum_20d', label: '20日动量' },
@@ -252,4 +262,9 @@ export const strategyApi = {
       result?: any
       error?: string
     }>(`/api/strategy/task/${taskId}`),
+
+  // ===== 回测结果对比（持久化到 MongoDB） =====
+  backtestResults: () => ApiClient.get<CompareResultItem[]>('/api/strategy/backtest/results'),
+  deleteBacktestResult: (strategyId: string) =>
+    ApiClient.delete<{ deleted: number }>(`/api/strategy/backtest/results/${encodeURIComponent(strategyId)}`),
 }

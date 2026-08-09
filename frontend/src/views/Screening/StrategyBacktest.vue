@@ -11,6 +11,9 @@
           <el-radio-button v-for="m in MODES" :key="m.key" :value="m.key">
             {{ m.title }}
           </el-radio-button>
+          <el-radio-button key="compare" :value="'compare'">
+            结果对比
+          </el-radio-button>
         </el-radio-group>
       </div>
     </div>
@@ -359,6 +362,75 @@
         </template>
       </template>
     </template>
+
+    <!-- 结果对比 -->
+    <template v-else-if="activeTab === 'compare'">
+      <template v-if="compareResults.length === 0">
+        <el-empty description="暂无回测结果。先在「策略回测」中运行至少一个策略，结果会自动收录到这里对比。" />
+      </template>
+      <template v-else>
+        <el-card class="compare-panel" shadow="never">
+          <template #header>
+            <span class="panel-title">
+              <el-icon style="margin-right: 6px"><Histogram /></el-icon>
+              策略回测结果对比（{{ compareResults.length }} 个策略）
+            </span>
+          </template>
+          <el-table :data="compareResults" size="small" stripe border class="compare-table">
+            <el-table-column prop="strategy_name" label="策略名称" min-width="150">
+              <template #default="{ row }">
+                <span class="compare-strategy">{{ row.strategy_name }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="回测区间" min-width="180">
+              <template #default="{ row }">{{ row.range }}</template>
+            </el-table-column>
+            <el-table-column prop="stats.total_return" label="总收益" align="right" sortable width="105">
+              <template #default="{ row }">
+                <span :class="row.stats.total_return >= 0 ? 'text-red' : 'text-green'">{{ (row.stats.total_return * 100).toFixed(2) }}%</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="stats.annual_return" label="年化收益" align="right" sortable width="105">
+              <template #default="{ row }">
+                <span :class="row.stats.annual_return >= 0 ? 'text-red' : 'text-green'">{{ (row.stats.annual_return * 100).toFixed(2) }}%</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="stats.max_drawdown" label="最大回撤" align="right" sortable width="105">
+              <template #default="{ row }">
+                <span class="text-green">{{ (row.stats.max_drawdown * 100).toFixed(2) }}%</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="stats.sharpe" label="夏普" align="right" sortable width="90">
+              <template #default="{ row }">{{ (row.stats.sharpe ?? 0).toFixed(2) }}</template>
+            </el-table-column>
+            <el-table-column prop="stats.win_rate" label="胜率" align="right" sortable width="90">
+              <template #default="{ row }">{{ (row.stats.win_rate * 100).toFixed(1) }}%</template>
+            </el-table-column>
+            <el-table-column prop="stats.profit_factor" label="盈亏比" align="right" sortable width="90">
+              <template #default="{ row }">{{ row.stats.profit_factor != null ? row.stats.profit_factor.toFixed(2) : '-' }}</template>
+            </el-table-column>
+            <el-table-column prop="stats.n_trades" label="交易次数" align="right" sortable width="90" />
+            <el-table-column prop="savedAtText" label="更新于" min-width="150" sortable />
+            <el-table-column label="操作" width="90" fixed="right">
+              <template #default="{ row }">
+                <el-button type="text" size="small" @click="removeFromCompare(row.strategy_id)">移除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+
+          <div class="compare-charts">
+            <div class="chart-card">
+              <div class="chart-title">总收益率对比</div>
+              <v-chart class="chart" :option="returnBarOption" autoresize />
+            </div>
+            <div class="chart-card">
+              <div class="chart-title">净值曲线对比（起始=1）</div>
+              <v-chart class="chart" :option="equityOverlayOption" autoresize />
+            </div>
+          </div>
+        </el-card>
+      </template>
+    </template>
   </div>
 </template>
 
@@ -367,13 +439,13 @@ import { ref, computed, onMounted, onBeforeUnmount, watch, h, defineComponent, t
 import { ElMessage } from 'element-plus'
 import { Histogram, Search, Loading, DataAnalysis } from '@element-plus/icons-vue'
 import { use as echartsUse } from 'echarts/core'
-import { LineChart } from 'echarts/charts'
+import { LineChart, BarChart } from 'echarts/charts'
 import { TitleComponent, TooltipComponent, LegendComponent, GridComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
-import { strategyApi, FACTOR_OPTIONS, type StrategyMeta, type BacktestResult, type BacktestStats, type FactorBacktestResult, type OptimizeResult, type WalkForwardResult } from '@/api/strategy'
+import { strategyApi, FACTOR_OPTIONS, type StrategyMeta, type BacktestResult, type BacktestStats, type CompareResultItem, type FactorBacktestResult, type OptimizeResult, type WalkForwardResult } from '@/api/strategy'
 
-echartsUse([LineChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent, CanvasRenderer])
+echartsUse([LineChart, BarChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent, CanvasRenderer])
 
 defineOptions({ name: 'StrategyBacktest' })
 
@@ -418,8 +490,14 @@ const MODES = [
   { key: 'walkforward', title: '步进优化', hint: '滚动窗口样本外验证，识别过拟合。' },
 ] as const
 
-const activeTab = ref<'strategy' | 'factor' | 'optimizer' | 'walkforward'>('strategy')
-const activeMode = computed(() => MODES.find(m => m.key === activeTab.value)!)
+const COMPARE_HINT = '对比不同策略的回测结果，聚焦收益率等核心指标，快速判断哪个策略效果更好。每次策略回测完成后自动收录，再次回测会更新对应数据。'
+
+type TabKey = 'strategy' | 'factor' | 'optimizer' | 'walkforward' | 'compare'
+const activeTab = ref<TabKey>('strategy')
+const activeMode = computed(() => {
+  if (activeTab.value === 'compare') return { key: 'compare' as const, title: '结果对比' as const, hint: COMPARE_HINT }
+  return MODES.find(m => m.key === activeTab.value)!
+})
 const strategies = ref<StrategyMeta[]>([])
 
 // 策略回测表单
@@ -512,10 +590,110 @@ function loadResult<T>(key: string): T | null {
 }
 
 // 监听四个结果，变更时自动持久化
-watch(strategyResult, v => saveResult('strategy', v))
+watch(strategyResult, v => {
+  saveResult('strategy', v)
+  // 回测结果已由后端落库到 MongoDB；此处刷新「结果对比」列表，使新结果/更新及时反映
+  loadStrategyResults()
+})
 watch(factorResult, v => saveResult('factor', v))
 watch(optResult, v => saveResult('optimizer', v))
 watch(wfResult, v => saveResult('walkforward', v))
+
+// ---------------------------------------------------------------------------
+// 结果对比：从 MongoDB 读取跨策略回测结果，横向对比核心指标
+// ---------------------------------------------------------------------------
+interface CompareItem {
+  strategy_id: string
+  strategy_name: string
+  range: string
+  savedAt: number
+  savedAtText: string
+  stats: BacktestStats
+  equity_curve: Array<{ date: string; value: number }>
+}
+
+const compareResults = ref<CompareItem[]>([])
+
+async function loadStrategyResults() {
+  try {
+    const res: any = await strategyApi.backtestResults()
+    const raw = (res as any)?.data ?? res
+    const list: CompareResultItem[] = Array.isArray(raw) ? raw : []
+    const items: CompareItem[] = []
+    for (const r of list) {
+      if (!r.strategy_id || !r.stats) continue
+      items.push({
+        strategy_id: r.strategy_id,
+        strategy_name: r.strategy_name || r.strategy_id,
+        range: `${r.config?.start ?? '-'} ~ ${r.config?.end ?? '-'}`,
+        savedAt: r.saved_at,
+        savedAtText: new Date(r.saved_at * 1000).toLocaleString('zh-CN', { hour12: false }),
+        stats: r.stats,
+        equity_curve: r.equity_curve ?? [],
+      })
+    }
+    // 后端已按 saved_at 倒序返回，这里再兜底排序
+    items.sort((a, b) => b.savedAt - a.savedAt)
+    compareResults.value = items
+  } catch (e) {
+    console.warn('[结果对比] 加载失败:', e)
+    compareResults.value = []
+  }
+}
+
+async function removeFromCompare(strategyId: string) {
+  try {
+    await strategyApi.deleteBacktestResult(strategyId)
+  } catch (e) {
+    console.warn('[结果对比] 删除失败:', e)
+  }
+  compareResults.value = compareResults.value.filter(item => item.strategy_id !== strategyId)
+}
+
+const RETURN_COLORS = ['#409eff', '#fa541c', '#52c41a', '#faad14', '#722ed1', '#eb2f96', '#13c2c2', '#f5222d']
+
+const returnBarOption = computed(() => ({
+  tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+  legend: { show: false },
+  grid: { left: 60, right: 20, top: 30, bottom: 40 },
+  xAxis: { type: 'category', data: compareResults.value.map(item => item.strategy_name), axisLabel: { interval: 0, rotate: 20 } },
+  yAxis: { type: 'value', name: '总收益率(%)' },
+  series: [{
+    name: '总收益率',
+    type: 'bar',
+    barMaxWidth: 48,
+    data: compareResults.value.map((item, i) => ({
+      value: Number((item.stats.total_return * 100).toFixed(2)),
+      itemStyle: { color: item.stats.total_return >= 0 ? RETURN_COLORS[i % RETURN_COLORS.length] : '#999' },
+    })),
+    label: { show: true, position: 'top', formatter: (p: any) => `${p.value}%` },
+  }],
+}))
+
+const equityOverlayOption = computed(() => {
+  const items = compareResults.value
+  const dates = items[0]?.equity_curve.map(p => p.date) ?? []
+  const series = items.map((item, index) => {
+    const curve = item.equity_curve
+    const initial = curve[0]?.value ?? 1
+    return {
+      name: item.strategy_name,
+      type: 'line',
+      showSymbol: false,
+      data: curve.map(p => [p.date, initial > 0 ? p.value / initial : p.value]),
+      lineStyle: { width: 2 },
+      itemStyle: { color: RETURN_COLORS[index % RETURN_COLORS.length] },
+    }
+  })
+  return {
+    tooltip: { trigger: 'axis' },
+    legend: { data: items.map(item => item.strategy_name), top: 0 },
+    grid: { left: 60, right: 20, top: 40, bottom: 40 },
+    xAxis: { type: 'category', data: dates },
+    yAxis: { type: 'value', scale: true, name: '净值(起始=1)' },
+    series,
+  }
+})
 
 // ---------------------------------------------------------------------------
 // 异步回测任务：离开页面/刷新后仍可恢复进度，完成后自动展示结果
@@ -856,6 +1034,8 @@ const icOption = computed(() => {
 
 onMounted(async () => {
   loadStrategies()
+  // 加载「结果对比」收录数据
+  loadStrategyResults()
   // 恢复上次保存的回测结果（离开页面/刷新后仍可查看）
   strategyResult.value = loadResult<BacktestResult>('strategy')
   factorResult.value = loadResult<FactorBacktestResult>('factor')
@@ -1041,6 +1221,58 @@ onBeforeUnmount(() => {
   .text-red { color: var(--el-color-danger); font-weight: 600; }
   .text-green { color: var(--el-color-success); font-weight: 600; }
   .text-muted { color: var(--el-text-color-secondary); }
+
+  .compare-panel {
+    margin-bottom: 20px;
+    border-radius: 12px;
+
+    :deep(.el-card__header) {
+      background: linear-gradient(135deg, var(--el-color-primary-light-9) 0%, var(--el-color-primary-light-8) 100%);
+      padding: 14px 20px;
+    }
+
+    .panel-title { font-size: 15px; font-weight: 600; color: var(--el-text-color-primary); }
+
+    .compare-table {
+      .compare-strategy { font-weight: 600; color: var(--el-text-color-primary); }
+
+      :deep(.el-table__header th) {
+        background: var(--el-fill-color-light);
+        color: var(--el-text-color-primary);
+        font-weight: 600;
+      }
+
+      :deep(.el-table__row:hover) {
+        background: var(--el-color-primary-light-9) !important;
+      }
+    }
+
+    .compare-charts {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-top: 20px;
+
+      @media (max-width: 1100px) {
+        grid-template-columns: 1fr;
+      }
+
+      .chart-card {
+        border: 1px solid var(--el-border-color-lighter);
+        border-radius: 10px;
+        padding: 14px;
+
+        .chart-title {
+          font-size: 14px;
+          font-weight: 600;
+          color: var(--el-text-color-primary);
+          margin-bottom: 10px;
+        }
+
+        .chart { height: 340px; }
+      }
+    }
+  }
 
   .stat-cards {
     display: grid;
