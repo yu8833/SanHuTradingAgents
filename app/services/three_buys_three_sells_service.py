@@ -243,6 +243,49 @@ class ThreeBuysThreeSellsService:
             result[code] = sorted_quotes
         return result
 
+    async def _get_market_index_klines(
+        self,
+        start_date: str,
+        end_date: str,
+    ) -> list[dict[str, Any]]:
+        """获取上证指数日线（按日期升序、去重）。
+
+        🔥 必须用带交易所后缀的指数代码（000001.SH / sh000001 / 000001.XSHG）查询，
+        绝不能用裸代码 "000001"——库中该代码对应的是平安银行（000001.SZ），
+        会把个股价格误当成上证指数（历史教训见 strategy_system/backtest.py _build_benchmark）。
+        """
+        db = await self._get_db()
+        collection = db["stock_daily_quotes"]
+
+        cursor = collection.find(
+            {
+                "period": "daily",
+                "trade_date": {"$gte": start_date, "$lte": end_date},
+                "$or": [
+                    {"code": {"$in": self.INDEX_CODE_CANDIDATES}},
+                    {"symbol": {"$in": self.INDEX_CODE_CANDIDATES}},
+                ],
+            },
+            projection={
+                "_id": 0, "code": 1, "symbol": 1, "trade_date": 1,
+                "open": 1, "close": 1, "high": 1, "low": 1,
+                "volume": 1, "amount": 1, "pct_chg": 1, "data_source": 1,
+            },
+        ).sort("trade_date", 1)
+
+        docs = await cursor.to_list(length=3000)
+
+        # 同一交易日可能因指数以多种代码存储而命中多条，按日期去重（保留首条）
+        seen: set[str] = set()
+        result = []
+        for k in docs:
+            td = str(k.get("trade_date", ""))
+            if not td or td in seen:
+                continue
+            seen.add(td)
+            result.append(k)
+        return result
+
     def _precompute_indicators(
         self,
         kline_data: list[dict[str, Any]],
@@ -699,6 +742,10 @@ class ThreeBuysThreeSellsService:
 
     _PRICE_TOLERANCE_PCT = 0.003  # 滑点容错：±0.3%
     _MIN_KLINE_COVERAGE_RATIO = 0.7  # 回测区间最少需要70%的K线覆盖，否则丢弃该股票
+
+    # 上证指数代码候选（仅带交易所后缀，避免命中股票 000001.SZ 平安银行）
+    # 库中裸代码 "000001" 对应的是平安银行，绝不能用它当大盘指数
+    INDEX_CODE_CANDIDATES = ["000001.SH", "sh000001", "000001.XSHG"]
 
     def _validate_trade_price_in_kline(
         self,
@@ -1606,9 +1653,9 @@ class ThreeBuysThreeSellsService:
             except Exception as e:
                 logger.warning(f"📊 ΔG 查询失败: {e}")
 
-        # 大盘趋势（用上证指数代码 000001）
+        # 大盘趋势（上证指数，须用带交易所后缀的指数代码，避免命中平安银行 000001.SZ）
         market_trend = "neutral"
-        idx_quotes = quotes_by_stock.get("000001", [])
+        idx_quotes = await self._get_market_index_klines(start_str, end_str)
         if len(idx_quotes) > 60:
             idx_ind = self._precompute_indicators(idx_quotes, "000001", "上证指数", "", 0)
             if idx_ind:
@@ -1974,7 +2021,10 @@ class ThreeBuysThreeSellsService:
         market_rise_ratio: dict[str, float] = {}
         market_trend_map: dict[str, str] = {}
 
-        idx_klines = quotes_by_stock.get("000001", [])
+        idx_klines = await self._get_market_index_klines(
+            data_start.strftime('%Y-%m-%d'),
+            data_end.strftime('%Y-%m-%d')
+        )
         idx_ind = None
         if idx_klines:
             idx_ind = self._precompute_indicators(idx_klines, "000001", "上证指数", "", 0)
@@ -2186,7 +2236,11 @@ class ThreeBuysThreeSellsService:
                                 "idx": idx,
                                 "ind": ind
                             })
-                        break
+                            # 命中并入池后，该股在本回测区间不再重复产生信号，
+                            # 避免连续多日重复建仓（每只股票最多入池一次）。
+                            # 注意：若打分不达标，则不会走到这里 → 不 break，
+                            # 继续向后交易日重试，避免"一次低分就永久错过"。
+                            break
 
         # 模拟交易
         logger.info("📊 模拟交易...")
@@ -2471,15 +2525,19 @@ class ThreeBuysThreeSellsService:
             total_value = capital
             for _code, pos in positions.items():
                 ind = pos["ind"]
+                buy_idx = pos["buy_idx"]
                 idx = ind["date_to_idx"].get(td, -1)
                 if idx < 0:
                     # 停牌：使用上次有效价格索引
-                    idx = pos.get("last_valid_idx", pos["buy_idx"])
+                    idx = pos.get("last_valid_idx", buy_idx)
                 else:
                     # 更新上次有效索引
                     pos["last_valid_idx"] = idx
-                if idx >= 0 and idx < ind["n"]:
-                    total_value += pos["remaining_shares"] * ind["closes"][idx]
+                # 未到买入日（T+1 开盘买入，信号日当天不计入市值）→ 跳过，
+                # 避免把"明天才买入"的仓位提前按信号日收盘价估值（估值偏差）
+                if idx < buy_idx or idx >= ind["n"]:
+                    continue
+                total_value += pos["remaining_shares"] * ind["closes"][idx]
 
             capital_history.append(total_value)
             peak_capital = max(peak_capital, total_value)
