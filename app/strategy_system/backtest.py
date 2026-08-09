@@ -512,6 +512,27 @@ def _score_series(df: pd.DataFrame, scoring: dict) -> pd.Series:
     return scores * 100
 
 
+def _build_name_map(panel: pd.DataFrame, db) -> dict[str, str]:
+    """构建 symbol -> 股票名称 映射，供回测交易明细展示"名称"列。
+
+    优先取面板自带 name 列（若存在）；否则回退从 stock_basic_info 按代码补齐。
+    面板通常不含 name 列（data_adapter PANEL_COLUMNS 无 name），若不回退，
+    交易明细的名称列会全部为空。
+    """
+    name_map: dict[str, str] = {}
+    if "name" in panel.columns:
+        for sym, g in panel.groupby("symbol", sort=False):
+            nm = g["name"].dropna()
+            if not nm.empty:
+                name_map[str(sym)] = str(nm.iloc[0])
+    if not name_map:
+        try:
+            name_map = screener._stock_name_map(db)
+        except Exception:  # noqa: BLE001
+            name_map = {}
+    return name_map
+
+
 def _simulate_portfolio(panel, entry, exit_mask, scores, config, start_s, end_s, db,
                         progress_cb: Callable[[float, str], None] | None = None):
     """逐日组合模拟。返回 dict 含 stats/equity_curve/drawdown/trades/per_symbol。"""
@@ -540,14 +561,10 @@ def _simulate_portfolio(panel, entry, exit_mask, scores, config, start_s, end_s,
 
     # 预计算 close / name 查找表，避免逐日全表扫描（大幅提速）
     close_series: dict[str, tuple] = {}
-    name_map: dict[str, str] = {}
     for sym, g in panel.groupby("symbol", sort=False):
         g = g.sort_values("date")
         close_series[sym] = (g["date"].to_numpy(), g["close"].to_numpy(dtype=float))
-        if "name" in g.columns:
-            nm = g["name"].dropna()
-            if not nm.empty:
-                name_map[sym] = str(nm.iloc[0])
+    name_map = _build_name_map(panel, db)
 
     def _fast_last_close(sym, d):
         """返回 sym 在 <= d 的最近收盘价（用二分加速）。"""
