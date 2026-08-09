@@ -337,6 +337,8 @@ const StatCards = defineComponent({
   setup(props) {
     const s = props.stats || {}
     const pct = (v: number) => (v != null ? `${(v * 100).toFixed(2)}%` : '-')
+    // 平均盈利/平均亏损/最佳/最差 为单笔盈亏金额（元），非收益率，不能用 pct 放大成百分比
+    const money = (v: number) => (v != null ? `¥${Number(v).toLocaleString('zh-CN', { maximumFractionDigits: 2 })}` : '-')
     const cards = computed(() => [
       { label: '总收益', value: pct(s.total_return), color: (s.total_return ?? 0) >= 0 ? 'var(--el-color-danger)' : 'var(--el-color-success)' },
       { label: '年化收益', value: pct(s.annual_return), color: (s.annual_return ?? 0) >= 0 ? 'var(--el-color-danger)' : 'var(--el-color-success)' },
@@ -345,10 +347,10 @@ const StatCards = defineComponent({
       { label: '胜率', value: pct(s.win_rate), color: 'var(--el-color-primary)' },
       { label: '盈亏比', value: s.profit_factor != null ? s.profit_factor.toFixed(2) : '-', color: 'var(--el-color-primary)' },
       { label: '交易次数', value: String(s.n_trades ?? 0), color: 'var(--el-color-primary)' },
-      { label: '平均盈利', value: pct(s.avg_win), color: 'var(--el-color-danger)' },
-      { label: '平均亏损', value: pct(s.avg_loss), color: 'var(--el-color-success)' },
-      { label: '最佳', value: pct(s.best), color: 'var(--el-color-danger)' },
-      { label: '最差', value: pct(s.worst), color: 'var(--el-color-success)' },
+      { label: '平均盈利', value: money(s.avg_win), color: 'var(--el-color-danger)' },
+      { label: '平均亏损', value: money(s.avg_loss), color: 'var(--el-color-success)' },
+      { label: '最佳', value: money(s.best), color: 'var(--el-color-danger)' },
+      { label: '最差', value: money(s.worst), color: 'var(--el-color-success)' },
     ])
     return () =>
       h('div', { class: 'stat-cards' }, cards.value.map((c) =>
