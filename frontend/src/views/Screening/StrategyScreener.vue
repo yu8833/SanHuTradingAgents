@@ -1,17 +1,25 @@
 <template>
   <div class="strategy-screener">
-    <div class="page-header">
-      <h1 class="page-title">
-        <el-icon><TrendCharts /></el-icon>
-        策略
-      </h1>
-      <p class="page-description">基于本地行情数据 · 策略筛选与评分排序</p>
-      <p v-if="computedAt" class="computed-at">结果更新于 {{ computedAt }}</p>
+    <!-- 顶部横幅 -->
+    <div class="hero-banner">
+      <div class="hero-main">
+        <div class="hero-meta">
+          <span class="hero-icon"><el-icon><TrendCharts /></el-icon></span>
+          <div class="hero-text">
+            <h1 class="page-title">常用策略</h1>
+            <p class="page-description">基于本地行情数据 · 策略筛选与评分排序</p>
+          </div>
+        </div>
+        <p v-if="computedAt" class="computed-at">
+          <el-icon><Clock /></el-icon>
+          数据更新于 {{ computedAt }}
+        </p>
+      </div>
       <div class="header-actions">
-        <el-select v-model="asOf" placeholder="选择交易日" size="small" style="width: 150px" filterable @change="onAsOfChange">
+        <el-select v-model="asOf" placeholder="选择交易日" size="default" class="date-select" filterable @change="onAsOfChange">
           <el-option v-for="d in tradeDates" :key="d" :label="d" :value="d" />
         </el-select>
-        <el-button size="small" :loading="runningAll" @click="runAll(true)">
+        <el-button type="primary" size="default" :loading="runningAll" @click="runAll(true)">
           <el-icon><Refresh /></el-icon>
           运行全部
         </el-button>
@@ -22,29 +30,42 @@
     <el-card class="strategy-panel" shadow="never">
       <template #header>
         <div class="card-header">
-          <span>策略池 ({{ strategies.length }})</span>
-          <el-tag size="small" type="info" effect="plain">点击卡片查看选股结果</el-tag>
+          <div class="card-title">
+            <span class="panel-dot" />
+            策略池
+            <span class="panel-count">{{ strategies.length }}</span>
+          </div>
+          <el-tag size="small" type="info" effect="plain" round>点击卡片查看选股结果</el-tag>
         </div>
       </template>
       <el-empty v-if="!loading && strategies.length === 0" description="暂无可用策略" :image-size="120" />
       <div v-else class="strategy-grid">
         <div
-          v-for="s in strategies"
+          v-for="(s, i) in strategies"
           :key="s.id"
           class="strategy-card"
           :class="{ active: activeStrategy === s.id, loading: runningAll }"
+          :style="{ '--sc': palette[i % palette.length] }"
           @click="handleRun(s)"
         >
           <div class="strategy-top">
-            <div class="strategy-name">{{ s.name }}</div>
-            <el-tag v-if="hitCounts[s.id] !== undefined" size="small" :type="hitCounts[s.id] > 0 ? 'success' : 'info'">
-              {{ hitCounts[s.id] }} 只
-            </el-tag>
-            <el-icon v-else class="spinner"><Loading /></el-icon>
+            <div class="strategy-name">
+              <span class="strategy-icon">
+                <el-icon><component :is="cardIcon(i)" /></el-icon>
+              </span>
+              <span class="strategy-title">{{ s.name }}</span>
+            </div>
+            <div class="strategy-count">
+              <template v-if="hitCounts[s.id] !== undefined">
+                <span class="count-num">{{ hitCounts[s.id] }}</span>
+                <span class="count-unit">只</span>
+              </template>
+              <el-icon v-else class="spinner"><Loading /></el-icon>
+            </div>
           </div>
           <div class="strategy-desc">{{ s.description }}</div>
           <div class="strategy-tags">
-            <el-tag v-for="t in s.tags" :key="t" size="small" type="info" effect="plain">{{ t }}</el-tag>
+            <el-tag v-for="t in s.tags" :key="t" size="small" effect="plain" class="strategy-tag">{{ t }}</el-tag>
           </div>
         </div>
       </div>
@@ -54,11 +75,12 @@
     <el-card v-if="result || showAllResult" class="result-panel" shadow="never">
       <template #header>
         <div class="card-header">
-          <span>
-            <el-icon><DataLine /></el-icon>
-            {{ showAll ? '全部策略' : (activeStrategyName || '') }} 命中 {{ displayRows.length }} 只
+          <div class="card-title">
+            <span class="panel-dot result-dot" />
+            <span class="result-title">{{ showAll ? '全部策略' : (activeStrategyName || '') }}</span>
+            <span class="result-hit">命中 <b>{{ displayRows.length }}</b> 只</span>
             <span class="text-muted">· {{ asOf }}</span>
-          </span>
+          </div>
           <div class="header-actions">
             <el-button size="small" :type="showAll ? 'primary' : 'default'" @click="toggleShowAll" :disabled="!allStrategyRunning">
               <el-icon><Connection /></el-icon>
@@ -72,45 +94,48 @@
         </div>
       </template>
 
-      <el-table :data="displayRows" stripe border size="small" style="width: 100%">
-        <el-table-column prop="code" label="代码" width="110">
+      <el-table :data="displayRows" stripe border size="default" style="width: 100%" class="hit-table">
+        <el-table-column prop="code" label="代码" min-width="110">
           <template #default="{ row }">
-            <router-link :to="`/stocks/${row.code}`" target="_blank">{{ row.code }}</router-link>
+            <router-link class="link-code" :to="`/stocks/${row.code}`" target="_blank">{{ row.code }}</router-link>
           </template>
         </el-table-column>
-        <el-table-column prop="name" label="名称" width="120">
+        <el-table-column prop="name" label="名称" min-width="130">
           <template #default="{ row }">
-            <router-link :to="`/stocks/${row.code}`" target="_blank">{{ row.name || row.code }}</router-link>
+            <router-link class="link-name" :to="`/stocks/${row.code}`" target="_blank">{{ row.name || row.code }}</router-link>
           </template>
         </el-table-column>
-        <el-table-column prop="close" label="收盘价" width="100" align="right">
+        <el-table-column prop="close" label="收盘价" min-width="110" align="right">
           <template #default="{ row }">
             <span v-if="row.close != null">{{ row.close.toFixed(2) }}</span>
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="change_pct" label="涨跌幅" width="100" align="right">
+        <el-table-column prop="change_pct" label="涨跌幅" min-width="110" align="right">
           <template #default="{ row }">
-            <span v-if="row.change_pct != null" :class="row.change_pct >= 0 ? 'text-red' : 'text-green'">
+            <el-tag v-if="row.change_pct != null" size="small" :type="row.change_pct >= 0 ? 'danger' : 'success'" effect="plain" round class="pct-tag">
               {{ row.change_pct >= 0 ? '+' : '' }}{{ (row.change_pct * 100).toFixed(2) }}%
-            </span>
+            </el-tag>
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="vol_ratio" label="量比" width="90" align="right">
+        <el-table-column prop="vol_ratio" label="量比" min-width="100" align="right" sortable>
           <template #default="{ row }">
             <span v-if="row.vol_ratio != null">{{ row.vol_ratio.toFixed(2) }}</span>
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="score" label="评分" width="90" align="right" sortable>
+        <el-table-column prop="score" label="评分" min-width="110" align="right" sortable>
           <template #default="{ row }">
-            <span class="score-text">{{ (row.score ?? 0).toFixed(1) }}</span>
+            <span class="score-badge" :style="{ '--sc': scoreColor(row.score) }">{{ (row.score ?? 0).toFixed(1) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="120" fixed="right">
           <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="addToFavorite(row)">加自选</el-button>
+            <el-button type="primary" link size="small" @click="addToFavorite(row)">
+              <el-icon><Star /></el-icon>
+              加自选
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -123,11 +148,34 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { TrendCharts, DataLine, Refresh, Loading, Connection, Star } from '@element-plus/icons-vue'
+import {
+  TrendCharts, Refresh, Loading, Connection, Star, Clock,
+  Histogram, DataAnalysis, Odometer, Aim, MagicStick, Sunny, Cpu, Coin, Files, DataBoard,
+} from '@element-plus/icons-vue'
 import { strategyApi, type StrategyMeta, type StrategyRunItem, type StrategyRunAllItem } from '@/api/strategy'
 import { favoritesApi } from '@/api/favorites'
 
 defineOptions({ name: 'StrategyScreener' })
+
+// 策略卡片配色画板（通过 --sc 变量注入，保证深浅色主题下都清晰）
+const palette = [
+  '#1890ff', '#722ed1', '#13c2c2', '#fa8c16', '#f5222d', '#52c41a',
+  '#eb2f96', '#2f54eb', '#a0d911', '#fadb14', '#fa541c', '#36cfc9',
+]
+
+// 策略卡片图标画板（轮流使用，避免千篇一律）
+const cardIcons = [TrendCharts, Histogram, DataAnalysis, Odometer, Aim, MagicStick, Sunny, Cpu, Coin, Files, DataBoard, TrendCharts]
+const cardIcon = (i: number) => cardIcons[i % cardIcons.length]
+
+// 评分配色：越高越偏暖红，越低越偏蓝
+const scoreColor = (score: number) => {
+  const s = score ?? 0
+  if (s >= 80) return '#f5222d'
+  if (s >= 60) return '#fa8c16'
+  if (s >= 40) return '#faad14'
+  if (s >= 20) return '#13c2c2'
+  return '#1890ff'
+}
 
 const strategies = ref<StrategyMeta[]>([])
 const loading = ref(false)
@@ -318,94 +366,205 @@ onMounted(() => {
 
 <style lang="scss" scoped>
 .strategy-screener {
-  padding: 20px;
-  max-width: 1600px;
+  padding: 20px 24px 32px;
+  max-width: 1680px;
   margin: 0 auto;
 
-  .page-header {
-    margin-bottom: 24px;
-    padding-bottom: 16px;
-    border-bottom: 2px solid var(--el-border-color-lighter);
+  /* ===== 顶部横幅 ===== */
+  .hero-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    padding: 22px 26px;
+    margin-bottom: 22px;
+    border-radius: 14px;
+    background:
+      radial-gradient(120% 160% at 0% 0%, var(--el-color-primary-light-9) 0%, transparent 55%),
+      linear-gradient(135deg, var(--el-fill-color-lighter) 0%, var(--el-bg-color) 100%);
+    border: 1px solid var(--el-border-color-lighter);
 
-    .page-title {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      font-size: 28px;
-      font-weight: 700;
-      color: var(--el-text-color-primary);
-      margin: 0 0 8px 0;
+    .hero-main {
+      .hero-meta {
+        display: flex;
+        align-items: center;
+        gap: 14px;
 
-      .el-icon {
-        color: var(--el-color-primary);
-        font-size: 28px;
+        .hero-icon {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 46px;
+          height: 46px;
+          border-radius: 12px;
+          color: #fff;
+          font-size: 24px;
+          background: linear-gradient(135deg, var(--el-color-primary) 0%, var(--el-color-primary-light-3) 100%);
+          box-shadow: 0 6px 14px color-mix(in srgb, var(--el-color-primary) 35%, transparent);
+        }
+
+        .hero-text {
+          .page-title {
+            font-size: 24px;
+            font-weight: 700;
+            margin: 0;
+            color: var(--el-text-color-primary);
+            letter-spacing: 0.5px;
+          }
+
+          .page-description {
+            margin: 4px 0 0;
+            font-size: 13px;
+            color: var(--el-text-color-secondary);
+          }
+        }
       }
-    }
 
-    .page-description {
-      color: var(--el-text-color-regular);
-      margin: 0 0 16px 0;
-      font-size: 14px;
-    }
-
-    .computed-at {
-      color: var(--el-color-success);
-      margin: 0 0 12px 0;
-      font-size: 13px;
+      .computed-at {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        margin: 12px 0 0 60px;
+        font-size: 12px;
+        color: var(--el-color-success);
+        .el-icon { font-size: 13px; }
+      }
     }
 
     .header-actions {
       display: flex;
       align-items: center;
       gap: 12px;
+
+      .date-select {
+        width: 160px;
+      }
     }
   }
 
-  .strategy-panel {
-    margin-bottom: 24px;
-    border-radius: 12px;
+  /* ===== 卡片通用 ===== */
+  .strategy-panel,
+  .result-panel {
+    border-radius: 14px;
     overflow: hidden;
+    border: 1px solid var(--el-border-color-lighter);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
 
     :deep(.el-card__header) {
-      background: linear-gradient(135deg, var(--el-color-primary-light-9) 0%, var(--el-color-primary-light-8) 100%);
-      padding: 14px 20px;
+      padding: 14px 22px;
+      border-bottom: 1px solid var(--el-border-color-lighter);
+      background: var(--el-fill-color-lighter);
+    }
+
+    :deep(.el-card__body) {
+      padding: 20px 22px;
     }
 
     .card-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
 
-      span {
-        font-size: 16px;
+      .card-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 15px;
         font-weight: 600;
         color: var(--el-text-color-primary);
+
+        .panel-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: var(--el-color-primary);
+          box-shadow: 0 0 0 3px color-mix(in srgb, var(--el-color-primary) 18%, transparent);
+        }
+
+        .result-dot {
+          background: var(--el-color-success);
+          box-shadow: 0 0 0 3px color-mix(in srgb, var(--el-color-success) 18%, transparent);
+        }
+
+        .panel-count {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 22px;
+          height: 20px;
+          padding: 0 7px;
+          border-radius: 20px;
+          font-size: 12px;
+          color: #fff;
+          background: var(--el-color-primary);
+        }
+
+        .result-hit {
+          font-weight: 400;
+          color: var(--el-text-color-regular);
+          b {
+            color: var(--el-color-danger);
+            font-size: 16px;
+            margin: 0 2px;
+          }
+        }
+
+        .text-muted { font-weight: 400; }
       }
     }
+  }
+
+  /* ===== 策略卡片 ===== */
+  .strategy-panel {
+    margin-bottom: 22px;
 
     .strategy-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
       gap: 16px;
     }
 
     .strategy-card {
-      padding: 16px;
+      position: relative;
+      padding: 18px;
       background: var(--el-fill-color-light);
-      border-radius: 12px;
+      border-radius: 14px;
       cursor: pointer;
       border: 2px solid transparent;
-      transition: all 0.3s ease;
+      transition: all 0.25s ease;
+      overflow: hidden;
+
+      &::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 3px;
+        background: linear-gradient(90deg, var(--sc), transparent);
+        opacity: 0;
+        transition: opacity 0.25s ease;
+      }
 
       &:hover {
-        background: var(--el-fill-color-lighter);
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+        transform: translateY(-3px);
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+        border-color: color-mix(in srgb, var(--sc) 45%, transparent);
+        background: var(--el-bg-color);
+
+        &::before { opacity: 1; }
       }
 
       &.active {
-        border-color: var(--el-color-primary);
-        background: linear-gradient(135deg, var(--el-color-primary-light-9) 0%, var(--el-color-primary-light-8) 100%);
+        border-color: var(--sc);
+        background:
+          linear-gradient(135deg, color-mix(in srgb, var(--sc) 8%, transparent) 0%, transparent 60%),
+          var(--el-bg-color);
+
+        &::before { opacity: 1; }
       }
 
       &.loading {
@@ -417,81 +576,175 @@ onMounted(() => {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        margin-bottom: 8px;
+        margin-bottom: 12px;
 
         .strategy-name {
-          font-size: 16px;
-          font-weight: 700;
-          color: var(--el-text-color-primary);
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          min-width: 0;
+
+          .strategy-icon {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 38px;
+            height: 38px;
+            flex-shrink: 0;
+            border-radius: 10px;
+            font-size: 19px;
+            color: var(--sc);
+            background: color-mix(in srgb, var(--sc) 12%, transparent);
+          }
+
+          .strategy-title {
+            font-size: 15px;
+            font-weight: 700;
+            color: var(--el-text-color-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
+        }
+
+        .strategy-count {
+          display: flex;
+          align-items: baseline;
+          gap: 2px;
+          flex-shrink: 0;
+
+          .count-num {
+            font-size: 22px;
+            font-weight: 800;
+            line-height: 1;
+            color: var(--sc);
+          }
+
+          .count-unit {
+            font-size: 12px;
+            color: var(--el-text-color-secondary);
+          }
         }
 
         .spinner {
-          color: var(--el-color-primary);
+          color: var(--sc);
         }
       }
 
       .strategy-desc {
         font-size: 13px;
         color: var(--el-text-color-regular);
-        margin-bottom: 10px;
-        line-height: 1.4;
+        margin-bottom: 12px;
+        line-height: 1.5;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        min-height: 39px;
       }
 
       .strategy-tags {
         display: flex;
         gap: 6px;
         flex-wrap: wrap;
+
+        .strategy-tag {
+          --el-tag-bg-color: color-mix(in srgb, var(--sc) 9%, transparent);
+          --el-tag-border-color: color-mix(in srgb, var(--sc) 25%, transparent);
+          --el-tag-text-color: var(--sc);
+        }
       }
     }
   }
 
+  /* ===== 结果表格 ===== */
   .result-panel {
-    border-radius: 12px;
-    overflow: hidden;
+    .hit-table {
+      --el-table-header-bg-color: var(--el-fill-color-light);
+      --el-table-header-text-color: var(--el-text-color-primary);
 
-    :deep(.el-card__header) {
-      background: linear-gradient(135deg, var(--el-color-success-light-9) 0%, var(--el-color-success-light-8) 100%);
-      padding: 14px 20px;
+      :deep(.el-table__header th) {
+        font-weight: 600;
+        font-size: 13px;
+      }
+
+      :deep(.el-table__row) {
+        transition: background 0.2s ease;
+      }
     }
 
-    .card-header {
-      display: flex;
-      justify-content: space-between;
+    .link-code {
+      color: var(--el-color-primary);
+      font-weight: 600;
+      text-decoration: none;
+      &:hover { text-decoration: underline; }
+    }
+
+    .link-name {
+      color: var(--el-text-color-primary);
+      text-decoration: none;
+      &:hover { color: var(--el-color-primary); }
+    }
+
+    .pct-tag {
+      font-weight: 600;
+      min-width: 64px;
+      justify-content: center;
+    }
+
+    .score-badge {
+      display: inline-flex;
       align-items: center;
+      justify-content: center;
+      min-width: 36px;
+      height: 22px;
+      padding: 0 8px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 700;
+      color: #fff;
+      background: var(--sc);
+    }
 
-      span {
-        font-size: 15px;
-        font-weight: 600;
-        color: var(--el-text-color-primary);
-      }
+    .text-muted { color: var(--el-text-color-secondary); }
+  }
+}
 
-      .text-muted {
-        color: var(--el-text-color-secondary);
-        font-weight: 400;
-      }
+@media (max-width: 900px) {
+  .strategy-screener {
+    .hero-banner {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+    .strategy-grid {
+      grid-template-columns: 1fr;
     }
   }
-
-  .text-red { color: var(--el-color-danger); font-weight: 600; }
-  .text-green { color: var(--el-color-success); font-weight: 600; }
-  .text-muted { color: var(--el-text-color-secondary); }
-  .score-text { font-weight: 600; color: var(--el-color-primary); }
 }
 
 html.dark {
   .strategy-screener {
+    .hero-banner {
+      background:
+        radial-gradient(120% 160% at 0% 0%, var(--el-fill-color-dark) 0%, transparent 55%),
+        linear-gradient(135deg, var(--el-bg-color-overlay) 0%, var(--el-bg-color) 100%);
+    }
+
     .strategy-panel,
     .result-panel {
       :deep(.el-card__header) {
-        background: linear-gradient(135deg, var(--el-bg-color-overlay) 0%, var(--el-fill-color-darker) 100%);
+        background: var(--el-fill-color-dark);
       }
     }
+
     .strategy-card {
       background: var(--el-fill-color-darker);
-      &:hover { background: var(--el-fill-color-dark); }
+      &:hover {
+        background: var(--el-fill-color-dark);
+      }
       &.active {
-        background: linear-gradient(135deg, var(--el-fill-color-dark) 0%, var(--el-fill-color) 100%);
-        border-color: var(--el-text-color-secondary);
+        background: linear-gradient(135deg, color-mix(in srgb, var(--sc) 14%, transparent) 0%, transparent 60%),
+          var(--el-fill-color-dark);
       }
     }
   }
