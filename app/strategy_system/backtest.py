@@ -118,7 +118,13 @@ def _enrich_panel_fundamentals(db, df: pd.DataFrame,
         progress_cb(0.05, "正在注入每日估值数据…")
     val = _load_valuation_panel(db, symbols, df)
     if val.empty:
-        # 无每日估值数据 → 快照广播（历史行为）
+        # 无每日估值数据 → 快照广播（历史行为）。此时 PE/PB 在整个回测期恒定，
+        # 依赖估值条件的策略（如"低估值高股息龙头"）将无法在估值变化时触发卖出，
+        # 表现为"买入/卖出日期相同（从头持有到尾）"。给出醒目告警便于排查。
+        logger.warning(
+            "⚠️ stock_daily_basic 无数据（可能未启用每日估值同步），回测回退到每股最新快照广播。"
+            "依赖 PE/PB 的策略将不会因估值变化触发卖出，易出现全程持有。"
+        )
         if not fund.empty:
             df = df.merge(fund, on="symbol", how="left", suffixes=("", "_fund"))
     else:
