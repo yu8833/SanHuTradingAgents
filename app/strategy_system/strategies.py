@@ -255,7 +255,7 @@ BUILTIN_STRATEGIES: list[dict] = [
         [],
         {"momentum_20d": 0.5, "momentum_60d": 0.3, "change_pct": 0.2},
         _trend_breakout,
-        ["signal_n_day_high"], [],
+        ["signal_n_day_high"], ["signal_ma20_breakdown"],
     ),
     _def(
         "boll_breakout", "布林突破", "收盘突破布林上轨且收涨",

@@ -481,6 +481,33 @@ async def get_quote(
     # 兼容 pre_close 和 prev_close 两种字段名
     pre_close_saved = (q or {}).get("pre_close") or (q or {}).get("prev_close")
     prev_close = pre_close_saved
+
+    # 🔥 修复：昨收价兜底。market_quotes 中 pre_close 可能为 null（收盘后外部接口不返回昨收），
+    #    且历史版本残留的 prev_close 字段可能是陈旧脏值（如 300902 残留 7/31 的 14.67，而 8/7 真实收盘 16.65），
+    #    导致涨跌幅被虚高误算。以 stock_daily_quotes 最近交易日收盘作为权威昨收兜底，并据此重算涨跌幅。
+    try:
+        latest_dq = await db["stock_daily_quotes"].find_one(
+            {"$or": [{"code": code6}, {"symbol": code6}], "period": "daily"},
+            {"_id": 0, "trade_date": 1, "close": 1},
+            sort=[("trade_date", -1)],
+        )
+        if latest_dq and latest_dq.get("close") is not None:
+            dq_close = float(latest_dq["close"])
+            # 仅当库中最近收盘可作昨收（且与当前 close 不同）时才用，避免把当日自身当昨收
+            if dq_close > 0 and (close is None or abs(dq_close - float(close)) > 1e-9):
+                # 昨收缺失，或与权威昨收明显不符（脏残留）时，用权威昨收并重算涨幅
+                if prev_close is None or abs(prev_close - dq_close) / dq_close > 0.01:
+                    old_prev, old_pct = prev_close, pct
+                    prev_close = dq_close
+                    if close is not None:
+                        pct = round((float(close) / dq_close - 1.0) * 100.0, 2)
+                    logger.info(
+                        f"🔧 昨收修正: {code6} prev_close {old_prev} -> {dq_close}（stock_daily_quotes {latest_dq.get('trade_date')}），"
+                        f"pct_chg {old_pct} -> {pct}"
+                    )
+    except Exception as e:
+        logger.warning(f"⚠️ 昨收兜底修正失败（忽略）: {e}")
+
     if prev_close is None:
         try:
             if close is not None and pct is not None:
@@ -1026,36 +1053,38 @@ async def get_kline(
             logger.warning(f"⚠️ 外部 API 获取 K 线失败: {e}")
 
     # 🔥 3. 检查是否需要添加当天实时数据（仅针对日线）
+    #    修复：原先用 is_trading_time（仅 9:30-15:30）判断，导致收盘后（15:30~历史同步18:30）
+    #    时段内 K线不补当天实时数据，出现"K线滞后于 dashboard 实时快照"的矛盾。
+    #    现改为：只要是交易日（含收盘后），就从 market_quotes 补当天实时K线，
+    #    并以 market_quotes.trade_date 标记K线日期，避免把周末/节假日误当当天。
     if period == "day" and items:
         try:
-            # 检查历史数据中是否已有当天的数据（支持两种日期格式）
-            has_today_data = any(
-                item.get("time") in [today_str_yyyymmdd, today_str_formatted]
-                for item in items
-            )
+            from app.utils.trading_time import is_trading_day
 
-            # 判断是否在交易时间内或收盘后缓冲期
-            from app.utils.trading_time import is_trading_time as check_trading_time
-
-            is_trading_time = check_trading_time(now)
-
-            # 🔥 只在交易时间或收盘后缓冲期内才添加实时数据
-            # 非交易日（周末、节假日）不添加实时数据
-            should_fetch_realtime = is_trading_time
-
-            if should_fetch_realtime:
-                logger.info(f"🔥 尝试从 market_quotes 获取当天实时数据: {code_padded} (交易时间: {is_trading_time}, 已有当天数据: {has_today_data})")
-
+            # 仅交易日才补当天实时数据（周末/节假日不补，market_quotes 里存的是最后交易日快照）
+            if is_trading_day(now):
                 db = get_mongo_db()
                 market_quotes_coll = db["market_quotes"]
 
-                # 查询当天的实时行情
+                # 查询实时行情快照（含其对应交易日）
                 realtime_quote = await market_quotes_coll.find_one({"code": code_padded})
 
                 if realtime_quote:
-                    # 🔥 构造当天的K线数据（使用统一的日期格式 YYYY-MM-DD）
+                    # market_quotes.trade_date 为行情对应交易日（多为 YYYYMMDD），归一化为 YYYY-MM-DD
+                    rt_raw = str(realtime_quote.get("trade_date") or "")
+                    rt_date = rt_raw
+                    if len(rt_raw) == 8 and rt_raw.isdigit():
+                        rt_date = f"{rt_raw[:4]}-{rt_raw[4:6]}-{rt_raw[6:8]}"
+
+                    # 历史K线中是否已包含该交易日
+                    has_rt = any(
+                        item.get("time") in [rt_raw, rt_date]
+                        for item in items
+                    )
+
+                    # 🔥 构造当天的K线数据（使用统一的日期格式 YYYY-MM-DD，与历史数据保持一致）
                     today_kline = {
-                        "time": today_str_formatted,  # 🔥 使用 YYYY-MM-DD 格式，与历史数据保持一致
+                        "time": rt_date,
                         "open": float(realtime_quote.get("open", 0)),
                         "high": float(realtime_quote.get("high", 0)),
                         "low": float(realtime_quote.get("low", 0)),
@@ -1064,15 +1093,17 @@ async def get_kline(
                         "amount": float(realtime_quote.get("amount", 0)),
                     }
 
-                    # 如果历史数据中已有当天数据，替换；否则追加
-                    if has_today_data:
-                        # 替换最后一条数据（假设最后一条是当天的）
-                        items[-1] = today_kline
-                        logger.info(f"✅ 替换当天K线数据: {code_padded}")
+                    if has_rt:
+                        # 替换已有当天数据（可能为历史落库的当日K线，用最新实时快照覆盖）
+                        for i, it in enumerate(items):
+                            if it.get("time") in [rt_raw, rt_date]:
+                                items[i] = today_kline
+                                break
+                        logger.info(f"✅ 替换当天K线数据: {code_padded} ({rt_date})")
                     else:
                         # 追加到末尾
                         items.append(today_kline)
-                        logger.info(f"✅ 追加当天K线数据: {code_padded}")
+                        logger.info(f"✅ 追加当天K线数据: {code_padded} ({rt_date})")
 
                     source = f"{source}+market_quotes"
                 else:
