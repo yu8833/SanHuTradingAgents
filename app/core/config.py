@@ -250,9 +250,9 @@ class Settings(BaseSettings):
     TUSHARE_HISTORICAL_SYNC_ENABLED: bool = Field(default=True)
     TUSHARE_HISTORICAL_SYNC_CRON: str = Field(default="30 18 * * 1-5")  # 工作日18:30（Tushare当日日K发布通常16:00-18:00完成）
     TUSHARE_FINANCIAL_SYNC_ENABLED: bool = Field(default=True)
-    TUSHARE_FINANCIAL_SYNC_CRON: str = Field(default="0 3 * * 0")  # 周日凌晨3点
+    TUSHARE_FINANCIAL_SYNC_CRON: str = Field(default="0 2 * * 6")  # 周六凌晨2点（错峰：避开交易时段与其它长任务重叠）
     TUSHARE_DIVIDEND_SYNC_ENABLED: bool = Field(default=True)
-    TUSHARE_DIVIDEND_SYNC_CRON: str = Field(default="0 4 * * 0")  # 周日凌晨4点（分红公告频率低，周更即可）
+    TUSHARE_DIVIDEND_SYNC_CRON: str = Field(default="0 3 * * 6")  # 周六凌晨3点（错峰，与财务同步错开1小时；分红公告频率低，周更即可）
     TUSHARE_DAILY_BASIC_SYNC_ENABLED: bool = Field(default=True)
     TUSHARE_DAILY_BASIC_SYNC_CRON: str = Field(default="0 19 * * 1-5")  # 工作日19点（紧接历史日K同步后，补当日估值/市值）
     TUSHARE_DAILY_BASIC_SYNC_DAYS_BACK: int = Field(default=730)  # 每次回溯天数（默认约2年，增量跳过已同步交易日）

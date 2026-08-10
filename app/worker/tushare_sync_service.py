@@ -23,6 +23,20 @@ logger = logging.getLogger(__name__)
 # UTC+8 时区
 UTC_8 = timezone(timedelta(hours=8))
 
+# 模块级同步 MongoDB 客户端单例（供 _update_progress 使用）
+# 避免每次进度更新都新建 MongoClient 连接，减少连接开销与事件循环阻塞。
+_sync_mongo_client = None
+
+
+def _get_sync_db():
+    """获取同步 MongoDB 数据库单例"""
+    global _sync_mongo_client
+    if _sync_mongo_client is None:
+        from pymongo import MongoClient
+
+        _sync_mongo_client = MongoClient(settings.MONGO_URI)
+    return _sync_mongo_client[settings.MONGO_DB]
+
 
 def _to_float(v):
     """安全转 float，失败返回 None。"""
@@ -944,8 +958,10 @@ class TushareSyncService:
             stats["total_processed"] = len(symbols)
             logger.info(f"📊 需要同步 {len(symbols)} 只股票财务数据")
 
-            # 批量处理
-            for i, symbol in enumerate(symbols):
+            # 并发控制：信号量限制同时进行的请求数（实际调用频率仍受速率限制器约束）
+            semaphore = asyncio.Semaphore(20)
+
+            async def _process_one(symbol: str):
                 try:
                     # 速率限制
                     await self.rate_limiter.acquire()
@@ -956,50 +972,71 @@ class TushareSyncService:
                     if financial_data:
                         # 保存财务数据
                         success = await self._save_financial_data(symbol, financial_data)
-                        if success:
-                            stats["success_count"] += 1
-                        else:
-                            stats["error_count"] += 1
+                        return symbol, "success" if success else "error", "" if success else "保存财务数据失败"
                     else:
                         logger.warning(f"⚠️ {symbol}: 无财务数据")
-
-                    # 进度日志和进度跟踪
-                    if (i + 1) % 20 == 0:
-                        progress = int((i + 1) / len(symbols) * 100)
-                        logger.info(f"📈 财务数据同步进度: {i + 1}/{len(symbols)} ({progress}%) "
-                                   f"(成功: {stats['success_count']}, 错误: {stats['error_count']})")
-                        # 输出速率限制器统计
-                        limiter_stats = self.rate_limiter.get_stats()
-                        logger.info(f"   速率限制: {limiter_stats['current_calls']}/{limiter_stats['max_calls']}次")
-
-                        # 更新任务进度
-                        if job_id:
-                            from app.services.scheduler_service import TaskCancelledException, update_job_progress
-                            try:
-                                await update_job_progress(
-                                    job_id=job_id,
-                                    progress=progress,
-                                    message=f"正在同步 {symbol} 财务数据",
-                                    current_item=symbol,
-                                    total_items=len(symbols),
-                                    processed_items=i + 1
-                                )
-                            except TaskCancelledException:
-                                # 任务被取消，记录并退出
-                                logger.warning(f"⚠️ 财务数据同步任务被用户取消 (已处理 {i + 1}/{len(symbols)})")
-                                stats["end_time"] = datetime.utcnow()
-                                stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
-                                stats["cancelled"] = True
-                                raise
-
+                        return symbol, "success", ""
                 except Exception as e:
-                    stats["error_count"] += 1
-                    stats["errors"].append({
-                        "code": symbol,
-                        "error": str(e),
-                        "context": "sync_financial_data"
-                    })
                     logger.error(f"❌ {symbol} 财务数据同步失败: {e}")
+                    return symbol, "error", str(e)
+
+            async def _run(symbol: str):
+                async with semaphore:
+                    return await _process_one(symbol)
+
+            # 分批并发处理
+            BATCH = 50
+            processed = 0
+            for i in range(0, len(symbols), BATCH):
+                batch = symbols[i:i + BATCH]
+                results = await asyncio.gather(
+                    *[_run(s) for s in batch],
+                    return_exceptions=True
+                )
+                for r in results:
+                    if isinstance(r, Exception):
+                        stats["error_count"] += 1
+                        stats["errors"].append({
+                            "code": "?",
+                            "error": str(r),
+                            "context": "sync_financial_data"
+                        })
+                        continue
+                    symbol, status, err = r
+                    if status == "success":
+                        stats["success_count"] += 1
+                    else:
+                        stats["error_count"] += 1
+                        stats["errors"].append({
+                            "code": symbol,
+                            "error": err or "同步失败",
+                            "context": "sync_financial_data"
+                        })
+
+                processed += len(batch)
+                progress = int(processed / len(symbols) * 100)
+                logger.info(f"📈 财务数据同步进度: {processed}/{len(symbols)} ({progress}%) "
+                            f"(成功: {stats['success_count']}, 错误: {stats['error_count']})")
+
+                # 更新任务进度
+                if job_id:
+                    from app.services.scheduler_service import TaskCancelledException, update_job_progress
+                    try:
+                        await update_job_progress(
+                            job_id=job_id,
+                            progress=progress,
+                            message=f"正在同步财务数据 {processed}/{len(symbols)}",
+                            current_item=batch[-1],
+                            total_items=len(symbols),
+                            processed_items=processed
+                        )
+                    except TaskCancelledException:
+                        # 任务被取消，记录并退出
+                        logger.warning(f"⚠️ 财务数据同步任务被用户取消 (已处理 {processed}/{len(symbols)})")
+                        stats["end_time"] = datetime.utcnow()
+                        stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
+                        stats["cancelled"] = True
+                        raise
 
             # 完成统计
             stats["end_time"] = datetime.utcnow()
@@ -1089,46 +1126,70 @@ class TushareSyncService:
             stats["total_processed"] = len(symbols)
             logger.info(f"📋 需要同步 {len(symbols)} 只股票的分红数据")
 
-            for i, symbol in enumerate(symbols):
+            # 并发控制：信号量限制同时进行的请求数（实际调用频率仍受速率限制器约束）
+            semaphore = asyncio.Semaphore(20)
+
+            async def _process_one(symbol: str):
                 try:
                     await self.rate_limiter.acquire()
                     records = await self.provider.get_dividend_data(symbol)
                     if records:
                         saved = await self._save_dividend_data(symbol, records)
                         if saved > 0:
-                            stats["success_count"] += 1
-                            stats["record_count"] += saved
-                        else:
-                            stats["error_count"] += 1
-                            stats["errors"].append({
-                                "code": symbol,
-                                "error": "分红数据保存失败",
-                                "context": "sync_dividend_data"
-                            })
-                    else:
-                        # 无分红记录（如新股），计入成功但跳过
-                        stats["success_count"] += 1
-
-                    if (i + 1) % 50 == 0 or (i + 1) == len(symbols):
-                        progress = int((i + 1) / len(symbols) * 100)
-                        logger.info(f"📈 分红数据同步进度: {i + 1}/{len(symbols)} ({progress}%) "
-                                   f"(成功: {stats['success_count']}, 记录: {stats['record_count']}, "
-                                   f"错误: {stats['error_count']})")
-                        if job_id:
-                            await self._update_progress(
-                                job_id,
-                                progress,
-                                f"正在同步 {symbol} 分红数据 ({i + 1}/{len(symbols)})"
-                            )
-
+                            return symbol, "success", saved
+                        return symbol, "error", "分红数据保存失败"
+                    # 无分红记录（如新股），计入成功但跳过
+                    return symbol, "success", 0
                 except Exception as e:
-                    stats["error_count"] += 1
-                    stats["errors"].append({
-                        "code": symbol,
-                        "error": str(e),
-                        "context": "sync_dividend_data"
-                    })
                     logger.error(f"❌ {symbol} 分红数据同步失败: {e}")
+                    return symbol, "error", str(e)
+
+            async def _run(symbol: str):
+                async with semaphore:
+                    return await _process_one(symbol)
+
+            # 分批并发处理
+            BATCH = 50
+            processed = 0
+            for i in range(0, len(symbols), BATCH):
+                batch = symbols[i:i + BATCH]
+                results = await asyncio.gather(
+                    *[_run(s) for s in batch],
+                    return_exceptions=True
+                )
+                for r in results:
+                    if isinstance(r, Exception):
+                        stats["error_count"] += 1
+                        stats["errors"].append({
+                            "code": "?",
+                            "error": str(r),
+                            "context": "sync_dividend_data"
+                        })
+                        continue
+                    symbol, status, payload = r
+                    if status == "success":
+                        stats["success_count"] += 1
+                        if isinstance(payload, int):
+                            stats["record_count"] += payload
+                    else:
+                        stats["error_count"] += 1
+                        stats["errors"].append({
+                            "code": symbol,
+                            "error": payload or "同步失败",
+                            "context": "sync_dividend_data"
+                        })
+
+                processed += len(batch)
+                progress = int(processed / len(symbols) * 100)
+                logger.info(f"📈 分红数据同步进度: {processed}/{len(symbols)} ({progress}%) "
+                            f"(成功: {stats['success_count']}, 记录: {stats['record_count']}, "
+                            f"错误: {stats['error_count']})")
+                if job_id:
+                    await self._update_progress(
+                        job_id,
+                        progress,
+                        f"正在同步分红数据 {processed}/{len(symbols)}"
+                    )
 
             stats["end_time"] = datetime.utcnow()
             stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
@@ -1579,7 +1640,7 @@ class TushareSyncService:
         hours_back: int,
         max_news_per_stock: int
     ) -> dict[str, Any]:
-        """处理新闻批次"""
+        """处理新闻批次（并发拉取，避免逐只串行导致的低效与长耗时）"""
         batch_stats = {
             "success_count": 0,
             "error_count": 0,
@@ -1587,7 +1648,10 @@ class TushareSyncService:
             "errors": []
         }
 
-        for symbol in batch:
+        # 并发控制：信号量限制同时进行的请求数，避免瞬时请求过多
+        semaphore = asyncio.Semaphore(20)
+
+        async def _process_one(symbol: str):
             try:
                 # 从Tushare获取新闻数据
                 news_data = await self.provider.get_stock_news(
@@ -1603,27 +1667,37 @@ class TushareSyncService:
                         data_source="tushare",
                         market="CN"
                     )
-
-                    batch_stats["success_count"] += 1
-                    batch_stats["news_count"] += saved_count
-
                     logger.debug(f"✅ {symbol} 新闻同步成功: {saved_count}条")
+                    return "success", saved_count
                 else:
                     logger.debug(f"⚠️ {symbol} 未获取到新闻数据")
-                    batch_stats["success_count"] += 1  # 没有新闻也算成功
-
-                # 🔥 API限流：成功后休眠
-                await asyncio.sleep(0.2)
+                    return "success", 0  # 没有新闻也算成功
 
             except Exception as e:
-                batch_stats["error_count"] += 1
-                error_msg = f"{symbol}: {str(e)}"
-                batch_stats["errors"].append(error_msg)
-                logger.error(f"❌ {symbol} 新闻同步失败: {e}")
+                return "error", f"{symbol}: {str(e)}"
 
-                # 🔥 失败后也要休眠，避免"失败雪崩"
-                # 失败时休眠更长时间，给API服务器恢复的机会
-                await asyncio.sleep(1.0)
+        async def _run(symbol: str):
+            async with semaphore:
+                status, payload = await _process_one(symbol)
+                # API 限流：成功/失败后适度休眠，避免高频请求与"失败雪崩"
+                await asyncio.sleep(0.2 if status == "success" else 1.0)
+                return symbol, status, payload
+
+        results = await asyncio.gather(*[_run(s) for s in batch], return_exceptions=True)
+        for r in results:
+            if isinstance(r, Exception):
+                batch_stats["error_count"] += 1
+                batch_stats["errors"].append(str(r))
+                logger.error(f"❌ 新闻同步失败: {r}")
+                continue
+            symbol, status, payload = r
+            if status == "success":
+                batch_stats["success_count"] += 1
+                batch_stats["news_count"] += payload
+            else:
+                batch_stats["error_count"] += 1
+                batch_stats["errors"].append(payload)
+                logger.error(f"❌ {symbol} 新闻同步失败: {payload}")
 
         return batch_stats
 
@@ -1662,16 +1736,12 @@ class TushareSyncService:
             message: 进度消息
         """
         try:
-            from pymongo import MongoClient
-
-            from app.core.config import settings
             from app.services.scheduler_service import TaskCancelledException
 
             logger.info(f"📊 [进度更新] 开始更新任务 {job_id} 进度: {progress}% - {message}")
 
-            # 使用同步 PyMongo 客户端（避免事件循环冲突）
-            sync_client = MongoClient(settings.MONGO_URI)
-            sync_db = sync_client[settings.MONGODB_DATABASE]
+            # 使用模块级单例同步客户端（避免每次调用都新建 MongoClient）
+            sync_db = _get_sync_db()
 
             # 查找最新的 running 记录
             execution = sync_db.scheduler_executions.find_one(
@@ -1681,18 +1751,14 @@ class TushareSyncService:
 
             if not execution:
                 logger.warning(f"⚠️ 未找到任务 {job_id} 的执行记录")
-                sync_client.close()
                 return
-
-            logger.info(f"📊 [进度更新] 找到执行记录: _id={execution['_id']}, 当前进度={execution.get('progress', 0)}%")
 
             # 检查是否收到取消请求
             if execution.get("cancel_requested"):
-                sync_client.close()
                 raise TaskCancelledException(f"任务 {job_id} 已被用户取消")
 
             # 更新进度（使用 UTC+8 时间）
-            result = sync_db.scheduler_executions.update_one(
+            sync_db.scheduler_executions.update_one(
                 {"_id": execution["_id"]},
                 {
                     "$set": {
@@ -1703,13 +1769,10 @@ class TushareSyncService:
                 }
             )
 
-            logger.info(f"📊 [进度更新] 更新结果: matched={result.matched_count}, modified={result.modified_count}")
-
-            sync_client.close()
             logger.info(f"✅ 任务 {job_id} 进度更新成功: {progress}% - {message}")
 
         except Exception as e:
-            if "TaskCancelledException" in str(type(e).__name__):
+            if type(e).__name__ == "TaskCancelledException":
                 raise
             logger.error(f"❌ 更新任务进度失败: {e}", exc_info=True)
 
