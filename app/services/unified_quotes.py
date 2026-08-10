@@ -185,6 +185,22 @@ def get_single_quote(code: str) -> dict | None:
     return quotes.get(code)
 
 
+def refresh_quotes_cache_from_data(quotes: dict[str, dict]) -> int:
+    """用已拉取到的行情数据刷新统一行情分类缓存，避免再次全市场拉取。
+
+    行情入库服务在写库后调用本函数，将本次抓取的结果直接写入分类缓存，
+    取代原先 refresh_quotes_cache(None) 的二次全市场 AKShare 拉取。
+    """
+    from app.services.sync_cache_layer import set_cache_sync
+
+    if not quotes:
+        return 0
+    all_codes = list(quotes.keys())
+    key = _get_cache_key(all_codes)
+    set_cache_sync(key, quotes, category="realtime")
+    return len(quotes)
+
+
 def refresh_quotes_cache(codes: list[str] | None = None) -> int:
     """强制刷新行情缓存"""
     from app.services.sync_cache_layer import set_cache_sync

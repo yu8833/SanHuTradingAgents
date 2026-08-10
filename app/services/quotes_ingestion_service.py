@@ -1,4 +1,4 @@
-import contextlib
+import asyncio
 import logging
 import time
 from collections import deque
@@ -436,26 +436,26 @@ class QuotesIngestionService:
 
         # 修复 #B4：入库后立刻失效相关缓存，避免下一次 /quote 查询返回旧值
         try:
-            await self._invalidate_quotes_caches(list(quotes_map.keys()))
+            await self._invalidate_quotes_caches(quotes_map)
         except Exception as cache_e:
             logger.warning(f"失效行情缓存失败（不影响主流程）: {cache_e}")
 
         # 通知 SSE 订阅者行情已更新（前端通过 EventSource 接收信号后主动拉取最新行情）
         await self._publish_quotes_update_signal(trade_date, source, len(ops))
 
-    async def _invalidate_quotes_caches(self, updated_codes: list[str]) -> None:
+    async def _invalidate_quotes_caches(self, quotes_map: dict[str, dict] | None = None) -> None:
         """
-        行情入库后失效本地缓存层：
-        1) unified_quotes /sync_cache_layer 的 realtime 分类缓存（异步用 to_thread 调用同步版本）
-        2) KlineCache 中相关股票（所有常用 period/limit/adj 组合按前缀删除）
-        3) /api/stocks/{code}/quote 等使用的 sync_cache_layer key（按股票 key 删除）
+        行情入库后失效本地缓存层（批量宽前缀 SCAN，避免对每只股票逐条 SCAN）：
+        1) unified_quotes /sync_cache_layer 的 realtime 分类缓存（quotes:*, quote:*, stock:[0-9]*）
+        2) KlineCache 中相关股票（kline:* 前缀批量删除）
+        3) 用本次已拉取的数据刷新统一行情分类缓存，避免再次全市场拉取
         失败不抛异常，只记日志。
         """
-        if not updated_codes:
+        if not quotes_map:
             return
 
         code6_list: list[str] = []
-        for c in updated_codes:
+        for c in quotes_map:
             code6 = self._normalize_stock_code(c)
             if code6:
                 code6_list.append(code6)
@@ -464,53 +464,27 @@ class QuotesIngestionService:
 
         import asyncio
 
-        # --- 1. 失效 unified_quotes 的缓存（通过 refresh_quotes_cache 重新拉取，若数量少直接按 key 删除） ---
         def _clear_sync_caches_sync():
             cleared = 0
+            # 1) + 2) 宽前缀批量 SCAN 删除，替代原先对每只股票的逐条 SCAN。
+            # 全市场约 5000 只，逐条做 3~5 次 Redis 往返合计数万次，是行情入库耗时 80s+ 的主因。
+            # stock:[0-9]* 精准命中数字代码的行情 key（stock:{code} / stock:{code}:quote），
+            # 避免误删 stock:news / stock:sector / stock:kline 等其他缓存。
             try:
-                from app.services.sync_cache_layer import delete_cache_by_prefix_sync, delete_cache_sync
-                # 先按单只股票的 quotes-service 细粒度 key 删（通常 category=realtime,quotes,stock 等）
-                for c in code6_list:
-                    for prefix in [f"quotes:{c}", f"quote:{c}", f"stock:{c}:quote"]:
-                        try:
-                            delete_cache_by_prefix_sync(prefix)
-                            cleared += 1
-                        except Exception:
-                            pass
-                    # 完全匹配 category 型 key 不容易枚举，用 refresh 兜底
-                    with contextlib.suppress(Exception):
-                        delete_cache_sync(f"stock:{c}", category="quotes")
-            except Exception as e:
-                logger.debug(f"清理 sync_cache_layer 单股票 key 失败（忽略）: {e}")
-
-            # 2) KlineCache：用前缀 kline:{code}: 批量删除
-            try:
-                from app.core.sync_redis import get_sync_redis
+                from app.services.sync_cache_layer import delete_cache_by_prefix_sync
                 from app.services.screening_service import KlineCache
-                r = get_sync_redis()
-                if r is not None:
-                    # 用 scan_iter 找前缀键（避免 keys() 阻塞）
-                    for c in code6_list:
-                        prefix = f"{KlineCache.PREFIX}:{c}:"
-                        try:
-                            for k in r.scan_iter(match=f"{prefix}*"):
-                                try:
-                                    r.delete(k)
-                                    cleared += 1
-                                except Exception:
-                                    pass
-                        except Exception:
-                            pass
+                for prefix in ["quotes:", "quote:", "stock:[0-9]", f"{KlineCache.PREFIX}:"]:
+                    try:
+                        cleared += delete_cache_by_prefix_sync(prefix)
+                    except Exception:
+                        pass
             except Exception as e:
-                logger.debug(f"清理 KlineCache 失败（忽略）: {e}")
+                logger.debug(f"批量清理行情缓存失败（忽略）: {e}")
 
+            # 3) 用本次已拉取的数据刷新统一行情分类缓存，避免二次全市场拉取
             try:
-                # 3) unified_quotes 按数量策略：如果更新的是大量股票（>200），直接跑 refresh 重拉实时；否则删单票 key
-                from app.services.unified_quotes import refresh_quotes_cache
-                if len(code6_list) > 200:
-                    refresh_quotes_cache(None)
-                else:
-                    refresh_quotes_cache(code6_list)
+                from app.services.unified_quotes import refresh_quotes_cache_from_data
+                refresh_quotes_cache_from_data(quotes_map)
             except Exception as e:
                 logger.debug(f"refresh_quotes_cache 失败（忽略）: {e}")
             return cleared
@@ -834,7 +808,8 @@ class QuotesIngestionService:
             # 首次运行：检测 Tushare 权限
             if settings.QUOTES_AUTO_DETECT_TUSHARE_PERMISSION and not self._tushare_permission_checked:
                 logger.info("🔍 首次运行，检测 Tushare rt_k 接口权限...")
-                has_premium = self._check_tushare_permission()
+                # 权限检测为同步阻塞调用（可能发起网络请求），放入线程池避免阻塞事件循环
+                has_premium = await asyncio.to_thread(self._check_tushare_permission)
 
                 if has_premium:
                     logger.info(
@@ -849,8 +824,11 @@ class QuotesIngestionService:
             # 获取下一个数据源
             source_type, akshare_api = self._get_next_source()
 
-            # 尝试获取行情
-            quotes_map, source_name = self._fetch_quotes_from_source(source_type, akshare_api)
+            # 尝试获取行情：全市场抓取为同步阻塞调用（可能耗时数十秒），
+            # 放入线程池执行，避免阻塞事件循环导致其他 API 请求全部排队超时。
+            quotes_map, source_name = await asyncio.to_thread(
+                self._fetch_quotes_from_source, source_type, akshare_api
+            )
 
             if not quotes_map:
                 logger.warning(f"⚠️ {source_name or source_type} 未获取到行情数据，跳过本次入库")
@@ -863,10 +841,11 @@ class QuotesIngestionService:
                 )
                 return
 
-            # 获取交易日
+            # 获取交易日（同步阻塞调用，放入线程池避免阻塞事件循环）
             try:
                 manager = DataSourceManager()
-                trade_date = manager.find_latest_trade_date_with_fallback() or datetime.now(self.tz).strftime("%Y%m%d")
+                trade_date = await asyncio.to_thread(manager.find_latest_trade_date_with_fallback) or \
+                    datetime.now(self.tz).strftime("%Y%m%d")
             except Exception:
                 trade_date = datetime.now(self.tz).strftime("%Y%m%d")
 
