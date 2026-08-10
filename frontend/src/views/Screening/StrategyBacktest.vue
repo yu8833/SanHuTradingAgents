@@ -1042,6 +1042,18 @@ onMounted(async () => {
   optResult.value = loadResult<OptimizeResult>('optimizer')
   wfResult.value = loadResult<WalkForwardResult>('walkforward')
 
+  // 迁移：将 localStorage 中的历史策略回测结果上报到后端落库，
+  // 保证「结果对比」Tab 能收录落库功能上线前生成的旧结果。
+  const localResult = strategyResult.value
+  if (localResult && localResult.success && !localResult.error && localResult.stats) {
+    try {
+      await strategyApi.importBacktestResult(localResult)
+      loadStrategyResults() // 导入成功后刷新对比列表
+    } catch (e) {
+      console.warn('[结果对比] 历史结果导入失败:', e)
+    }
+  }
+
   // 恢复进行中的异步回测任务
   const active = loadActiveTask()
   if (active) {

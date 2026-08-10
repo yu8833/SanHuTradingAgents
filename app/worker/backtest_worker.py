@@ -27,6 +27,7 @@ from app.strategy_system.backtest_queue import (
     enqueue,
     mark_inflight,
 )
+from app.strategy_system.backtest_results_store import save_backtest_result
 from app.strategy_system.task_manager import make_progress_cb, task_manager
 
 logger = logging.getLogger("backtest_worker")
@@ -100,6 +101,9 @@ def run() -> None:
             result = _dispatch(kind, job["request"], db, task_id)
             clear_inflight()
             task_manager.update(task_id, status="success", result=result, progress=1.0)
+            # 落库：供「结果对比」Tab 跨策略持久化对比，缓存失效后仍保留
+            if kind == "strategy":
+                save_backtest_result(db, result)
             logger.info(f"✅ 回测任务完成: task_id={task_id} kind={kind}")
         except Exception as e:  # noqa: BLE001
             clear_inflight()

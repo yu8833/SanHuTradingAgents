@@ -18,6 +18,10 @@ from app.core.response import fail, ok
 from app.strategy_system import backtest as bt
 from app.strategy_system import screener
 from app.strategy_system.backtest_queue import enqueue as bt_enqueue
+from app.strategy_system.backtest_results_store import (
+    BACKTEST_RESULTS_COLLECTION,
+    save_backtest_result,
+)
 from app.strategy_system.task_manager import make_progress_cb, task_manager
 
 logger = logging.getLogger(__name__)
@@ -262,37 +266,6 @@ def _build_strategy_bt_config(req: BacktestRequest) -> bt.StrategyBtConfig:
     )
 
 
-BACKTEST_RESULTS_COLLECTION = "strategy_backtest_results"
-
-
-def _save_backtest_result(db, result: dict) -> None:
-    """将策略回测结果精炼后持久化到 MongoDB，供「结果对比」跨策略对比使用。
-
-    以 strategy_id 为主键 upsert：同一策略再次回测时覆盖更新，不同策略各自保留。
-    仅保存对比所需字段（stats / equity_curve / config / strategy_info），避免落库过大。
-    """
-    try:
-        info = result.get("strategy_info") or {}
-        cfg = result.get("config") or {}
-        record = {
-            "strategy_id": info.get("id") or cfg.get("strategy_id"),
-            "strategy_name": info.get("name") or cfg.get("strategy_id"),
-            "config": {"start": cfg.get("start"), "end": cfg.get("end")},
-            "stats": result.get("stats") or {},
-            "equity_curve": result.get("equity_curve") or [],
-            "saved_at": time.time(),
-        }
-        if not record["strategy_id"]:
-            return
-        db[BACKTEST_RESULTS_COLLECTION].update_one(
-            {"strategy_id": record["strategy_id"]},
-            {"$set": record},
-            upsert=True,
-        )
-    except Exception as e:
-        logger.warning("保存回测结果到MongoDB失败: %s", e)
-
-
 @router.post("/api/strategy/backtest/start")
 async def strategy_backtest_start(req: BacktestRequest):
     """发起异步策略回测，立即返回 task_id。"""
@@ -309,7 +282,7 @@ async def strategy_backtest_start(req: BacktestRequest):
                 result = bt.run_strategy_backtest(db, cfg, progress_cb=make_progress_cb(task_id))
                 task_manager.update(task_id, status="success", result=result, progress=1.0)
                 # 落库：供「结果对比」Tab 跨策略持久化对比，缓存失效后仍保留
-                _save_backtest_result(db, result)
+                save_backtest_result(db, result)
             except Exception as e:
                 logger.exception("策略回测任务异常")
                 task_manager.update(task_id, status="failure", error=str(e))
@@ -443,6 +416,22 @@ async def list_backtest_results():
     except Exception as e:
         logger.exception("获取回测结果对比数据失败")
         return fail(f"获取回测结果对比数据失败: {e}")
+
+
+@router.post("/api/strategy/backtest/results")
+async def import_backtest_result(body: dict):
+    """导入一条已存在的回测结果到持久化集合。
+
+    用于将前端 localStorage 中的历史结果（落库功能上线前生成）迁移到数据库，
+    保证「结果对比」Tab 能收录旧结果。
+    """
+    try:
+        db = get_mongo_db_sync()
+        save_backtest_result(db, body)
+        return ok({"saved": True})
+    except Exception as e:
+        logger.exception("导入回测结果失败")
+        return fail(f"导入回测结果失败: {e}")
 
 
 @router.delete("/api/strategy/backtest/results/{strategy_id}")

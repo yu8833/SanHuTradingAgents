@@ -265,6 +265,8 @@ export const strategyApi = {
 
   // ===== 回测结果对比（持久化到 MongoDB） =====
   backtestResults: () => ApiClient.get<CompareResultItem[]>('/api/strategy/backtest/results'),
+  importBacktestResult: (result: BacktestResult) =>
+    ApiClient.post<{ saved: boolean }>('/api/strategy/backtest/results', result),
   deleteBacktestResult: (strategyId: string) =>
     ApiClient.delete<{ deleted: number }>(`/api/strategy/backtest/results/${encodeURIComponent(strategyId)}`),
 }
