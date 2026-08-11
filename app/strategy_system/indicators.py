@@ -184,18 +184,20 @@ def compute_indicators(
     if len(symbols) <= _INDICATOR_CHUNK_SYMBOLS:
         return _concat_indicators(df)
 
-    # 分批：按 symbol 切块，每块独立计算后拼接，避免全量中间数组撑爆内存
-    chunks = []
-    for _, grp in df.groupby(
-        (symbols != symbols.shift()).fillna(True).cumsum(), sort=False
-    ):
-        chunks.append(grp)
-    n = len(chunks)
+    # 分批：按 symbol 编码切块，每块最多 _INDICATOR_CHUNK_SYMBOLS 只股票，
+    # 每块独立计算后拼接，避免全量中间数组撑爆内存。
+    # 注意：必须按“固定股票数”切块，而非按 symbol 变更处切块——若按 symbol 切，
+    # 每只股票单独成为一块（数千块），每块都要重新做十余次 groupby 滚动/EWM，
+    # 固定开销被放大数千倍，导致全市场计算从十几秒退化到数百秒（bug-023）。
+    codes, _ = pd.factorize(symbols)
+    chunk_id = codes // _INDICATOR_CHUNK_SYMBOLS
+    rows_by_chunk = df.groupby(chunk_id, sort=False).indices
+    n = len(rows_by_chunk)
     out = []
-    for i, comp in enumerate(chunks):
+    for i, idx in enumerate(rows_by_chunk.values()):
         if progress_cb:
             progress_cb((i + 1) / n, f"正在计算技术指标（{i + 1}/{n} 批）…")
-        out.append(_concat_indicators(comp))
+        out.append(_concat_indicators(df.iloc[idx]))
     return pd.concat(out, axis=0, ignore_index=True)
 
 
@@ -306,17 +308,18 @@ def compute_signals(
     if len(symbols) <= _INDICATOR_CHUNK_SYMBOLS:
         return _concat_signals(df)
 
-    chunks = []
-    for _, grp in df.groupby(
-        (symbols != symbols.shift()).fillna(True).cumsum(), sort=False
-    ):
-        chunks.append(grp)
-    n = len(chunks)
+    # 分批：按 symbol 编码切块，每块最多 _INDICATOR_CHUNK_SYMBOLS 只股票。
+    # 必须按“固定股票数”切块而非按 symbol 变更处切块，否则每只股票单独成块，
+    # 信号阶段十余次 groupby.shift 的固定开销被放大数千倍（bug-022）。
+    codes, _ = pd.factorize(symbols)
+    chunk_id = codes // _INDICATOR_CHUNK_SYMBOLS
+    rows_by_chunk = df.groupby(chunk_id, sort=False).indices
+    n = len(rows_by_chunk)
     out = []
-    for i, comp in enumerate(chunks):
+    for i, idx in enumerate(rows_by_chunk.values()):
         if progress_cb:
             progress_cb((i + 1) / n, f"正在计算信号（{i + 1}/{n} 批）…")
-        out.append(_concat_signals(comp))
+        out.append(_concat_signals(df.iloc[idx]))
     return pd.concat(out, axis=0, ignore_index=True)
 
 

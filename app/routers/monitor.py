@@ -38,6 +38,7 @@ async def get_options(current_user: dict = Depends(get_current_user)):
         ],
         "scopes": [
             {"key": "symbols", "label": "指定标的"},
+            {"key": "watchlist", "label": "自选股"},
             {"key": "all", "label": "全市场"},
         ],
         "logics": [
@@ -69,7 +70,13 @@ async def list_rules(current_user: dict = Depends(get_current_user)):
 async def save_rule(req: RuleModel, current_user: dict = Depends(get_current_user)):
     """新建或更新监控规则。"""
     try:
-        rule = await monitor_service.save_rule(req.model_dump())
+        rule = req.model_dump()
+        # 「自选股」作用域绑定创建/编辑用户，评估时动态解析其自选股
+        if rule.get("scope") == "watchlist":
+            rule["user_id"] = current_user["id"]
+        else:
+            rule.pop("user_id", None)
+        rule = await monitor_service.save_rule(rule)
         return ok({"rule": rule}, "规则保存成功")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

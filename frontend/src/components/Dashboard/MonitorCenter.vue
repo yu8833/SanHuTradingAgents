@@ -193,6 +193,10 @@
             placeholder="输入股票代码后回车"
             style="width: 320px; margin-left: 8px;"
           />
+          <span v-else-if="draft.scope === 'watchlist'" class="scope-hint">
+            <el-icon style="vertical-align: -2px"><InfoFilled /></el-icon>
+            自动监控全部自选股，新增自选股自动纳入
+          </span>
         </el-form-item>
 
         <el-form-item label="触发条件">
@@ -212,7 +216,23 @@
                   <el-option v-for="f in options.signal_fields" :key="f.key" :value="f.key" :label="f.label" />
                 </template>
                 <template v-else>
-                  <el-option v-for="f in options.threshold_fields" :key="f.key" :value="f.key" :label="f.label" />
+                  <el-option
+                    v-for="f in options.threshold_fields"
+                    :key="f.key"
+                    :value="f.key"
+                    :label="f.label"
+                    :disabled="!isThresholdFieldAvailable(f.key)"
+                  >
+                    <el-tooltip
+                      v-if="!isThresholdFieldAvailable(f.key)"
+                      :content="thresholdFieldTip(f)"
+                      placement="left"
+                      :show-after="200"
+                    >
+                      <span>{{ f.label }}</span>
+                    </el-tooltip>
+                    <template v-else>{{ f.label }}</template>
+                  </el-option>
                 </template>
               </el-select>
               <el-select v-model="cond.op" style="width: 120px">
@@ -258,7 +278,7 @@
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Lightning, Refresh, Bell, List, Plus, Delete, EditPen,
+  Lightning, Refresh, Bell, List, Plus, Delete, EditPen, InfoFilled,
 } from '@element-plus/icons-vue'
 import {
   monitorApi, genRuleId,
@@ -280,7 +300,7 @@ const editorVisible = ref(false)
 const editingRule = ref<MonitorRule | null>(null)
 const draft = reactive<{
   id: string; name: string; enabled: boolean; type: string; scope: string;
-  symbols: string[]; conditions: MonitorCondition[]; logic: string;
+  symbols: string[]; user_id?: string; conditions: MonitorCondition[]; logic: string;
   cooldown_seconds: number; severity: string; message: string;
 }>({
   id: '', name: '', enabled: true, type: 'signal', scope: 'symbols', symbols: [],
@@ -438,6 +458,7 @@ const openEdit = (rule: MonitorRule) => {
   Object.assign(draft, {
     id: rule.id, name: rule.name, enabled: rule.enabled, type: rule.type, scope: rule.scope,
     symbols: [...(rule.symbols || [])],
+    user_id: rule.user_id,
     conditions: (rule.conditions || []).map((c) => ({ ...c })),
     logic: rule.logic || 'and', cooldown_seconds: rule.cooldown_seconds ?? 3600,
     severity: rule.severity || 'info', message: rule.message || '',
@@ -492,9 +513,13 @@ const saveRule = async () => {
     }
     if (!payload.name.trim()) {
       const base = { signal: '信号监控', price: '价格监控', market: '市场异动监控' }[draft.type] || '监控规则'
-      payload.name = draft.scope === 'symbols' && draft.symbols.length > 0
-        ? `${base} · ${draft.symbols[0]}${draft.symbols.length > 1 ? ` 等${draft.symbols.length}只` : ''}`
-        : base
+      if (draft.scope === 'watchlist') {
+        payload.name = `${base} · 自选股`
+      } else {
+        payload.name = draft.scope === 'symbols' && draft.symbols.length > 0
+          ? `${base} · ${draft.symbols[0]}${draft.symbols.length > 1 ? ` 等${draft.symbols.length}只` : ''}`
+          : base
+      }
     }
     await monitorApi.saveRule(payload)
     ElMessage.success('规则保存成功')
@@ -524,12 +549,23 @@ const severityTag = (s: string): 'info' | 'warning' | 'danger' => {
   const map: Record<string, any> = { info: 'info', warn: 'warning', critical: 'danger' }
   return map[s] || 'info'
 }
-const scopeLabel = (s: string) => (s === 'all' ? '全市场' : '指定标的')
+const scopeLabel = (s: string) => (s === 'all' ? '全市场' : s === 'watchlist' ? '自选股' : '指定标的')
 const fieldLabel = (f: string) => {
   const all = [...options.threshold_fields, ...options.signal_fields]
   const found = all.find((item) => item.key === f)
   return found ? found.label : f
 }
+
+// ── 全市场作用域字段可用性 ─────────────────────────────
+// 全市场作用域走 monitor_service._fetch_all_quotes，只返回 latest price / pct_chg / amount，
+// 因此涨跌额、换手率、总市值、PE、PB 取不到值（条件永不命中）。选「全市场」时置灰并悬浮提示。
+const ALL_SCOPE_UNAVAILABLE_FIELDS = ['change_amt', 'turnover_pct', 'mcap_yi', 'pe_ttm', 'pb']
+
+const isThresholdFieldAvailable = (key: string) =>
+  draft.scope !== 'all' || !ALL_SCOPE_UNAVAILABLE_FIELDS.includes(key)
+
+const thresholdFieldTip = (f: { key: string; label: string }) =>
+  `全市场作用域下无法获取「${f.label}」，请改用「指定标的」或使用 最新价 / 涨跌幅 / 成交额`
 const formatTs = (ts: number) => {
   if (!ts) return ''
   const d = new Date(ts)
@@ -833,6 +869,15 @@ onBeforeUnmount(() => {
         .act-on { color: var(--el-color-primary); }
       }
     }
+  }
+
+  .scope-hint {
+    margin-left: 8px;
+    font-size: 12px;
+    color: var(--el-color-primary);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
   }
 
   .cond-editor {

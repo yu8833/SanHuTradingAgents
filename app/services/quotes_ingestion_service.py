@@ -1,4 +1,6 @@
 import asyncio
+import concurrent.futures
+import contextlib
 import logging
 import time
 from collections import deque
@@ -58,6 +60,18 @@ class QuotesIngestionService:
         # 接口轮换相关属性
         self._rotation_sources = ["tushare", "akshare_eastmoney", "akshare_sina"]
         self._rotation_index = 0  # 当前轮换索引
+
+        # 全市场行情抓取是重 CPU/网络 的同步阻塞调用。用独立单线程执行器跑，
+        # 避免占用 asyncio 默认线程池（筛查/回测等 API 的 to_thread 也用默认池），
+        # 降低全市场抓取与筛选重算之间的线程/CPU 争抢。
+        self._fetch_executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="quotes-fetch"
+        )
+        self._running = False  # 防重入：单次抓取未结束时不重复执行
+
+    def __del__(self) -> None:
+        with contextlib.suppress(Exception):
+            self._fetch_executor.shutdown(wait=False, cancel_futures=True)
 
     @staticmethod
     def _normalize_stock_code(code: str) -> str:
@@ -471,13 +485,11 @@ class QuotesIngestionService:
             # stock:[0-9]* 精准命中数字代码的行情 key（stock:{code} / stock:{code}:quote），
             # 避免误删 stock:news / stock:sector / stock:kline 等其他缓存。
             try:
-                from app.services.sync_cache_layer import delete_cache_by_prefix_sync
                 from app.services.screening_service import KlineCache
+                from app.services.sync_cache_layer import delete_cache_by_prefix_sync
                 for prefix in ["quotes:", "quote:", "stock:[0-9]", f"{KlineCache.PREFIX}:"]:
-                    try:
+                    with contextlib.suppress(Exception):
                         cleared += delete_cache_by_prefix_sync(prefix)
-                    except Exception:
-                        pass
             except Exception as e:
                 logger.debug(f"批量清理行情缓存失败（忽略）: {e}")
 
@@ -804,6 +816,13 @@ class QuotesIngestionService:
                 logger.info("⏭️ 非交易时段，跳过行情采集")
             return
 
+        # 防重入：上一轮全市场抓取尚未结束（可能耗时数十秒）时跳过本次，
+        # 避免 60s 调度与慢抓取叠加造成线程/CPU 堆积。
+        if self._running:
+            logger.info("⏭️ 上一轮行情抓取仍在进行，跳过本次采集")
+            return
+        self._running = True
+
         try:
             # 首次运行：检测 Tushare 权限
             if settings.QUOTES_AUTO_DETECT_TUSHARE_PERMISSION and not self._tushare_permission_checked:
@@ -825,9 +844,10 @@ class QuotesIngestionService:
             source_type, akshare_api = self._get_next_source()
 
             # 尝试获取行情：全市场抓取为同步阻塞调用（可能耗时数十秒），
-            # 放入线程池执行，避免阻塞事件循环导致其他 API 请求全部排队超时。
-            quotes_map, source_name = await asyncio.to_thread(
-                self._fetch_quotes_from_source, source_type, akshare_api
+            # 放入独立单线程执行器执行，避免阻塞事件循环，也不与筛查/回测争抢默认线程池。
+            loop = asyncio.get_running_loop()
+            quotes_map, source_name = await loop.run_in_executor(
+                self._fetch_executor, self._fetch_quotes_from_source, source_type, akshare_api
             )
 
             if not quotes_map:
@@ -869,4 +889,6 @@ class QuotesIngestionService:
                 records_count=0,
                 error_msg=str(e)
             )
+        finally:
+            self._running = False
 

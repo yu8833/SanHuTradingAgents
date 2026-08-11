@@ -5,7 +5,9 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
+from collections import OrderedDict
 from datetime import date, datetime, timedelta
 
 import numpy as np
@@ -32,6 +34,86 @@ SCREEN_MAX_WINDOW_DAYS = 70
 
 # run-all 筛选结果缓存集合：同一交易日结果幂等，缓存后再次打开页面可直接返回（含 computed_at）
 SCREEN_CACHE_COLLECTION = "strategy_screen_cache"
+
+# ──────────────────────────────────────────────────────────────
+# 进程内面板/目标日缓存（LRU + TTL）
+# 筛查最贵的两步是 load_daily_panel(全市场日线 ~7s) + compute_all(指标 ~17s) +
+# enrich_target(基本面/分红 ~4s)。同一交易日的面板与指标是确定的：
+#  - as_of 即最新交易日，交易日变化 → key 变化 → 自动失效，无脏数据；
+#  - refresh=True 只重算"策略结果"，底层面板/基本面数据不变，仍可复用缓存。
+# 缓存后重复请求（含单个策略筛选、频繁打开页面）从 ~60s 降到毫秒级。
+# 内存控制：仅保留最近 2 个面板 + 2 个目标日，8GB 受限容器内安全。
+# ──────────────────────────────────────────────────────────────
+_PANEL_CACHE_MAX = 2
+_TARGET_CACHE_MAX = 2
+_CACHE_TTL_SECONDS = 600  # 10 分钟；同时受 as_of 变化兜底
+_panel_cache: OrderedDict[tuple, tuple[float, pd.DataFrame]] = OrderedDict()
+_target_cache: OrderedDict[tuple, tuple[float, pd.DataFrame]] = OrderedDict()
+_cache_lock = threading.Lock()
+
+
+def _panel_cache_key(as_of: str, pool: list[str] | None) -> tuple:
+    return (as_of, tuple(sorted(pool)) if pool else None)
+
+
+def _cache_get(cache, key: tuple) -> pd.DataFrame | None:
+    now = time.monotonic()
+    with _cache_lock:
+        hit = cache.get(key)
+        if hit is None:
+            return None
+        ts, df = hit
+        if now - ts > _CACHE_TTL_SECONDS:
+            del cache[key]
+            return None
+        cache.move_to_end(key)  # LRU：命中后移到末尾
+        return df
+
+
+def _cache_put(cache, key: tuple, df: pd.DataFrame, max_size: int) -> None:
+    with _cache_lock:
+        if key in cache:
+            cache.move_to_end(key)
+        cache[key] = (time.monotonic(), df)
+        while len(cache) > max_size:
+            cache.popitem(last=False)
+
+
+def _load_computed_panel(db, pool: list[str] | None, as_of_date: str) -> pd.DataFrame:
+    """加载全市场日线面板并计算指标，结果按 (as_of, pool) 进程内缓存。
+
+    对应原流程：load_daily_panel → _trim_to_last_days → compute_all。
+    """
+    key = _panel_cache_key(as_of_date, pool)
+    cached = _cache_get(_panel_cache, key)
+    if cached is not None:
+        return cached
+
+    as_of_dt = pd.to_datetime(as_of_date)
+    start_dt = as_of_dt - timedelta(days=WARMUP_DAYS)
+    raw = data_adapter.load_daily_panel(db, pool, start_dt, as_of_date)
+    if raw.empty:
+        return raw
+    # 仅保留最近 SCREEN_MAX_WINDOW_DAYS 个交易日（足以为最长60日窗口提供warmup）
+    raw = _trim_to_last_days(raw, SCREEN_MAX_WINDOW_DAYS)
+    df = compute_all(raw)
+    _cache_put(_panel_cache, key, df, _PANEL_CACHE_MAX)
+    return df
+
+
+def _get_enriched_target(db, panel: pd.DataFrame, pool: list[str] | None, as_of_date: str) -> pd.DataFrame:
+    """取目标交易日行并注入基本面/分红，结果按 (as_of, pool) 进程内缓存。"""
+    key = _panel_cache_key(as_of_date, pool)
+    cached = _cache_get(_target_cache, key)
+    if cached is not None:
+        return cached
+
+    target = panel[panel["date"] == as_of_date].copy()
+    if target.empty:
+        return target
+    target = _enrich_target(db, target, as_of_date)
+    _cache_put(_target_cache, key, target, _TARGET_CACHE_MAX)
+    return target
 
 
 def _latest_trade_date(db) -> str:
@@ -185,6 +267,51 @@ def _load_fundamentals(db, symbols) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _load_valuation_asof(db, symbols, as_of_date: str) -> pd.DataFrame:
+    """加载截至 as_of_date 的每日估值（PE/PB/市值），每股取 as_of 当日或之前最近一条。
+
+    PIT（point-in-time）正确：筛选历史日期时使用当时的估值，而非最新快照，
+    避免"低估值高股息"等依赖估值条件的策略在未来函数下高估命中。
+    返回列：symbol, pe_ttm, pb, total_mv。无每日数据的股票不返回（由调用方兜底）。
+
+    性能：以 as_of 为界并回溯 90 天，用聚合按 (code/symbol) 取 trade_date 最新一条，
+    只返回每股一行。不能对全量历史 find + 逐条扫描——stock_daily_basic 达数百万行，
+    无下界查询会读整库导致筛选接口卡死（bug-021）。
+    """
+    if not symbols:
+        return pd.DataFrame(columns=["symbol", "pe_ttm", "pb", "total_mv"])
+    sym_list = [str(s) for s in symbols]
+    asof_dt = pd.to_datetime(as_of_date)
+    since = (asof_dt - pd.Timedelta(days=90)).strftime("%Y-%m-%d")
+    pipeline = [
+        {
+            "$match": {
+                "trade_date": {"$gte": since, "$lte": asof_dt.strftime("%Y-%m-%d")},
+                "$or": [{"code": {"$in": sym_list}}, {"symbol": {"$in": sym_list}}],
+            }
+        },
+        {"$sort": {"trade_date": -1}},
+        {
+            "$group": {
+                "_id": {"$ifNull": ["$code", "$symbol"]},
+                "pe_ttm": {"$first": "$pe_ttm"},
+                "pb": {"$first": "$pb"},
+                "total_mv": {"$first": "$total_mv"},
+            }
+        },
+    ]
+    rows = [
+        {
+            "symbol": str(doc["_id"]),
+            "pe_ttm": _to_float(doc.get("pe_ttm")),
+            "pb": _to_float(doc.get("pb")),
+            "total_mv": _to_float(doc.get("total_mv")),
+        }
+        for doc in db["stock_daily_basic"].aggregate(pipeline)
+    ]
+    return pd.DataFrame(rows)
+
+
 def _load_dividend_metrics(db, symbols, as_of_date: str) -> dict:
     """从 stock_dividend 计算每只股票的股息指标。
 
@@ -243,9 +370,27 @@ def _enrich_target(db, target: pd.DataFrame, as_of_date: str) -> pd.DataFrame:
     symbols = [str(s) for s in target["symbol"].unique().tolist()]
 
     out = target.copy()
-    fund = _load_fundamentals(db, symbols)
-    if not fund.empty:
-        out = out.merge(fund, on="symbol", how="left", suffixes=("", "_fund"))
+    fund = _load_fundamentals(db, symbols)  # 行业(静态) + 最新快照兜底
+
+    # PIT 每日估值：优先取 as_of 当日/最近估值，避免筛选历史日期用到未来快照（未来函数）。
+    # 无每日估值数据时回退到最新快照广播（保持历史行为）。
+    val = _load_valuation_asof(db, symbols, as_of_date)
+    if not val.empty:
+        # 行业为静态字段，始终来自快照
+        if not fund.empty:
+            out = out.merge(fund[["symbol", "industry"]], on="symbol",
+                            how="left", suffixes=("", "_fund"))
+        out = out.merge(val, on="symbol", how="left", suffixes=("", "_val"))
+        # 无每日估值的股票用最新快照兜底（保证列非空）
+        if not fund.empty:
+            snap = fund[["symbol", "total_mv", "pe_ttm", "pb"]]
+            out = out.merge(snap, on="symbol", how="left", suffixes=("", "_snap"))
+            for c in ("total_mv", "pe_ttm", "pb"):
+                out[c] = out[c].fillna(out[f"{c}_snap"])
+            out = out.drop(columns=[f"{c}_snap" for c in ("total_mv", "pe_ttm", "pb")])
+    else:
+        if not fund.empty:
+            out = out.merge(fund, on="symbol", how="left", suffixes=("", "_fund"))
 
     div_map = _load_dividend_metrics(db, symbols, as_of_date)
     out["div_12m_ps"] = out["symbol"].map(lambda s: div_map.get(str(s), {}).get("div_12m_ps", 0.0))
@@ -271,25 +416,14 @@ def run_strategy(
         raise ValueError(f"未知策略: {strategy_id}")
 
     as_of_date = _resolve_as_of(db, as_of)
-    as_of_dt = pd.to_datetime(as_of_date)
-    start_dt = as_of_dt - timedelta(days=WARMUP_DAYS)
 
-    df = data_adapter.load_daily_panel(db, pool, start_dt, as_of_date)
+    df = _load_computed_panel(db, pool, as_of_date)
     if df.empty:
         return _empty_result(as_of_date, strategy_id, "无行情数据")
 
-    # 仅保留最近 SCREEN_MAX_WINDOW_DAYS 个交易日（足以为最长60日窗口提供warmup），
-    # 避免对全量历史行计算指标，显著降低耗时
-    df = _trim_to_last_days(df, SCREEN_MAX_WINDOW_DAYS)
-    df = compute_all(df)
-
-    # 仅保留目标交易日并需要足够 warmup
-    target = df[df["date"] == as_of_date].copy()
+    target = _get_enriched_target(db, df, pool, as_of_date)
     if target.empty:
         return _empty_result(as_of_date, strategy_id, "目标交易日无数据")
-
-    # 注入基本面(行业/市值/估值)与分红数据，供价值/股息类策略使用
-    target = _enrich_target(db, target, as_of_date)
 
     # 过滤（对目标日行向量执行策略 filter）
     mask = run_strategy_filter(strategy_id, target, params or {})
@@ -372,23 +506,13 @@ def run_all_strategies(
             result["cached"] = True
             return result
 
-    as_of_dt = pd.to_datetime(as_of_date)
-    start_dt = as_of_dt - timedelta(days=WARMUP_DAYS)
-
-    df = data_adapter.load_daily_panel(db, pool, start_dt, as_of_date)
+    df = _load_computed_panel(db, pool, as_of_date)
     if df.empty:
         return {"as_of": as_of_date, "strategies": [], "elapsed_ms": 0}
 
-    # 仅保留最近 SCREEN_MAX_WINDOW_DAYS 个交易日（足以为最长60日窗口提供warmup），
-    # 避免对全量历史行计算指标，显著降低耗时
-    df = _trim_to_last_days(df, SCREEN_MAX_WINDOW_DAYS)
-    df = compute_all(df)
-    target = df[df["date"] == as_of_date].copy()
+    target = _get_enriched_target(db, df, pool, as_of_date)
     if target.empty:
         return {"as_of": as_of_date, "strategies": [], "elapsed_ms": 0}
-
-    # 注入基本面(行业/市值/估值)与分红数据，供价值/股息类策略使用
-    target = _enrich_target(db, target, as_of_date)
 
     strategies = []
     name_map = _stock_name_map(db)

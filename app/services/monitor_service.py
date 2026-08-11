@@ -13,8 +13,9 @@
   - op 比较:  阈值字段（最新价/涨跌幅/成交额/换手率/市值/PE/PB）+ 值
 
 作用域 (scope)：
-  - symbols: 指定标的（用 unified_quotes 实时行情，字段全）
-  - all:     全市场（用 market_quotes 已入库快照，字段为 close/pct_chg/amount）
+  - symbols:  指定标的（用 unified_quotes 实时行情，字段全）
+  - watchlist: 自选股（动态解析创建用户的自选股，用 unified_quotes 实时行情，字段全）
+  - all:      全市场（用 market_quotes 已入库快照，字段为 close/pct_chg/amount）
 
 冷却机制：同一 (rule_id, symbol) 在 cooldown_seconds 内不重复触发。
 
@@ -41,7 +42,7 @@ logger = logging.getLogger(__name__)
 # ── 常量 ────────────────────────────────────────────────
 ID_RE = re.compile(r"^[a-z0-9_]{1,40}$")
 RULE_TYPES = {"signal", "price", "market"}
-SCOPES = {"symbols", "all"}
+SCOPES = {"symbols", "watchlist", "all"}
 LOGICS = {"and", "or"}
 SEVERITIES = {"info", "warn", "critical"}
 OPS = {">", ">=", "<", "<=", "==", "!="}
@@ -84,8 +85,9 @@ class RuleModel(BaseModel):
     name: str
     enabled: bool = True
     type: str          # signal | price | market
-    scope: str = "symbols"   # symbols | all
+    scope: str = "symbols"   # symbols | watchlist | all
     symbols: list[str] = []
+    user_id: str | None = None   # scope=watchlist 时绑定自选股所属用户
     conditions: list[ConditionModel] = []
     logic: str = "and"        # and | or
     cooldown_seconds: int = 3600
@@ -113,6 +115,9 @@ def validate(rule: dict) -> None:
         syms = rule.get("symbols")
         if not isinstance(syms, list) or len(syms) == 0:
             raise ValueError("scope=symbols 时 symbols 不能为空")
+    elif rule.get("scope") == "watchlist":
+        if not rule.get("user_id"):
+            raise ValueError("scope=watchlist 时必须绑定 user_id")
     if rule.get("severity", "info") not in SEVERITIES:
         raise ValueError(f"severity 必须是 {SEVERITIES} 之一")
     cd = rule.get("cooldown_seconds", 3600)
@@ -154,6 +159,10 @@ def normalize(rule: dict) -> dict:
     r.setdefault("cooldown_seconds", 3600)
     r.setdefault("severity", "info")
     r.setdefault("message", "")
+    r.setdefault("user_id", None)
+    # 非「指定标的」作用域时清空 symbols，避免展示冗余代码
+    if r.get("scope") != "symbols":
+        r["symbols"] = []
     r.setdefault("created_at", datetime.now().isoformat())
     return r
 
@@ -296,6 +305,17 @@ class MonitorService:
             }
         return out
 
+    async def _resolve_watchlist_symbols(self, user_id: str | None) -> list[str]:
+        """解析某用户自选股的当前代码列表（动态，新增自选股自动纳入）。"""
+        if not user_id:
+            return []
+        try:
+            from app.services.favorites_service import favorites_service
+            return await favorites_service.get_user_symbols(user_id)
+        except Exception as e:
+            logger.error(f"❌ 解析自选股失败 user_id={user_id}: {e}", exc_info=True)
+            return []
+
     # ── 评估 ──────────────────────────────────────────
     def _compute_signals(self, q: dict[str, Any]) -> dict[str, bool]:
         """根据行情计算布尔信号。"""
@@ -395,13 +415,22 @@ class MonitorService:
             now = time.time()
             events: list[dict] = []
             symbol_rules = [r for r in rules if r.get("scope") == "symbols"]
+            watchlist_rules = [r for r in rules if r.get("scope") == "watchlist"]
             all_rules = [r for r in rules if r.get("scope") == "all"]
 
-            # 1. 指定标的：取并集按 unified_quotes
+            # 1. 指定标的 + 自选股：取并集按 unified_quotes（实时行情，字段全）
             symbol_quotes: dict[str, dict] = {}
-            if symbol_rules:
-                syms = list({str(s) for r in symbol_rules for s in r.get("symbols", []) if s})
-                symbol_quotes = await self._fetch_symbol_quotes(syms)
+            watchlist_by_rule: dict[str, list[str]] = {}
+            if symbol_rules or watchlist_rules:
+                syms: set[str] = set()
+                for r in symbol_rules:
+                    syms.update(str(s) for s in r.get("symbols", []) if s)
+                for r in watchlist_rules:
+                    resolved = await self._resolve_watchlist_symbols(r.get("user_id"))
+                    watchlist_by_rule[r["id"]] = resolved
+                    syms.update(resolved)
+                if syms:
+                    symbol_quotes = await self._fetch_symbol_quotes(list(syms))
 
             # 2. 全市场：从 market_quotes 读取
             all_quotes: dict[str, dict] = {}
@@ -410,11 +439,15 @@ class MonitorService:
 
             for rule in rules:
                 scope = rule.get("scope", "symbols")
-                quotes = symbol_quotes if scope == "symbols" else all_quotes
-                if scope == "symbols":
-                    symbols = [str(s) for s in rule.get("symbols", []) if s]
-                else:
+                if scope == "all":
+                    quotes = all_quotes
                     symbols = list(quotes.keys())
+                elif scope == "watchlist":
+                    quotes = symbol_quotes
+                    symbols = watchlist_by_rule.get(rule["id"], [])
+                else:
+                    quotes = symbol_quotes
+                    symbols = [str(s) for s in rule.get("symbols", []) if s]
                 for sym in symbols:
                     q = quotes.get(sym)
                     if not q:

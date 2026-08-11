@@ -85,9 +85,12 @@ def _volume_price_surge(df: pd.DataFrame, params: dict) -> pd.Series:
 
 
 def _pullback_ma20_bounce(df: pd.DataFrame, params: dict) -> pd.Series:
-    # 今日站上 MA20，且前一日收盘在 MA20 下方（回踩后反弹）
-    prev_close = df["close"].shift(1)
-    prev_ma20 = df["ma20"].shift(1)
+    # 今日站上 MA20，且前一日收盘在 MA20 下方（回踩后反弹）。
+    # 必须按 symbol 分组 shift：筛选模式传入的是"目标日单行/每股"的 DataFrame，
+    # 若直接 shift(1) 会取到上一行（另一只股票）的 close/ma20，造成跨股票数据污染；
+    # 回测模式在每股首行也会泄漏到上一只股票的末行。
+    prev_close = df.groupby("symbol")["close"].shift(1)
+    prev_ma20 = df.groupby("symbol")["ma20"].shift(1)
     m = (df["close"] > df["ma20"]) & (prev_close <= prev_ma20)
     m &= df["ma20"] > df["ma60"]
     return m

@@ -166,6 +166,24 @@ class FavoritesService:
 
         return items
 
+    async def get_user_symbols(self, user_id: str) -> list[str]:
+        """轻量获取用户自选股代码列表（不富集行情、不查基础信息）。
+
+        供监控规则以「自选股」为作用域时动态解析标的，保证新增自选股自动纳入已建规则。
+        """
+        db = await self._get_db()
+        doc = await db.user_favorites.find_one(
+            {"user_id": user_id}, {"favorites": 1, "_id": 0}
+        )
+        if not doc:
+            return []
+        codes = []
+        for fav in doc.get("favorites", []):
+            code = fav.get("stock_code") or fav.get("symbol")
+            if code:
+                codes.append(str(code))
+        return codes
+
     async def add_favorite(
         self,
         user_id: str,

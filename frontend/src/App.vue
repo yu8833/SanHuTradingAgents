@@ -3,6 +3,9 @@
     <!-- 网络状态指示器 -->
     <NetworkStatus />
 
+    <!-- 监控中心触发全局提醒弹窗 -->
+    <MonitorAlertPopup />
+
     <!-- 主要内容区域 -->
     <router-view v-slot="{ Component, route }">
       <transition
@@ -29,6 +32,7 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import NetworkStatus from '@/components/NetworkStatus.vue'
+import MonitorAlertPopup from '@/components/MonitorAlertPopup.vue'
 import axios from 'axios'
 import { configApi } from '@/api/config'
 

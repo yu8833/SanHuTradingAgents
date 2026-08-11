@@ -1,4 +1,4 @@
-import { ApiClient } from './request'
+import { ApiClient, type RequestConfig } from './request'
 
 // ── 类型定义 ────────────────────────────────────────────
 
@@ -13,8 +13,9 @@ export interface MonitorRule {
   name: string
   enabled: boolean
   type: string          // signal | price | market
-  scope: string         // symbols | all
+  scope: string         // symbols | watchlist | all
   symbols: string[]
+  user_id?: string
   conditions: MonitorCondition[]
   logic: string         // and | or
   cooldown_seconds: number
@@ -56,6 +57,7 @@ export interface MonitorRulePayload {
   type: string
   scope?: string
   symbols?: string[]
+  user_id?: string
   conditions: MonitorCondition[]
   logic?: string
   cooldown_seconds?: number
@@ -85,8 +87,8 @@ export const monitorApi = {
   },
 
   // 触发记录
-  async listAlerts(params?: { days?: number; limit?: number; source?: string }) {
-    return ApiClient.get<{ alerts: MonitorAlert[]; total: number }>('/api/monitor/alerts', params)
+  async listAlerts(params?: { days?: number; limit?: number; source?: string }, config?: RequestConfig) {
+    return ApiClient.get<{ alerts: MonitorAlert[]; total: number }>('/api/monitor/alerts', params, config)
   },
   async clearAlerts() {
     return ApiClient.delete<{ cleared: number }>('/api/monitor/alerts')
