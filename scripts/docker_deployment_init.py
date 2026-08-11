@@ -222,25 +222,25 @@ async def create_system_config(db):
                 "key": "system_version",
                 "value": "v1.0.0-preview",
                 "description": "系统版本号",
-                "updated_at": datetime.utcnow()
+                "updated_at": datetime.now()
             },
             {
                 "key": "max_concurrent_tasks",
                 "value": 3,
                 "description": "最大并发分析任务数",
-                "updated_at": datetime.utcnow()
+                "updated_at": datetime.now()
             },
             {
                 "key": "default_research_depth",
                 "value": 2,
                 "description": "默认分析深度",
-                "updated_at": datetime.utcnow()
+                "updated_at": datetime.now()
             },
             {
                 "key": "enable_realtime_pe_pb",
                 "value": True,
                 "description": "启用实时PE/PB计算",
-                "updated_at": datetime.utcnow()
+                "updated_at": datetime.now()
             }
         ]
         
@@ -272,8 +272,8 @@ async def create_model_config(db):
                     "max_tokens": 8000,
                     "temperature": 0.7
                 },
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow()
+                "created_at": datetime.now(),
+                "updated_at": datetime.now()
             }
         ]
         

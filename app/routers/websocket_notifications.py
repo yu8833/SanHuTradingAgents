@@ -62,7 +62,7 @@ async def websocket_notifications_endpoint(
         "type": "connected",
         "data": {
             "user_id": user_id,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now().isoformat(),
             "message": "WebSocket 连接成功"
         }
     })
@@ -75,7 +75,7 @@ async def websocket_notifications_endpoint(
                     await websocket.send_json({
                         "type": "heartbeat",
                         "data": {
-                            "timestamp": datetime.utcnow().isoformat()
+                            "timestamp": datetime.now().isoformat()
                         }
                     })
                 except Exception as e:
@@ -144,7 +144,7 @@ async def websocket_task_progress_endpoint(
         "data": {
             "task_id": task_id,
             "user_id": user_id,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now().isoformat(),
             "message": "已连接任务进度流"
         }
     })

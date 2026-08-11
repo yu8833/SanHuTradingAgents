@@ -44,7 +44,7 @@ async def fix_timezone_data():
         local_logs = []
         
         current_local = datetime.datetime.now()
-        current_utc = datetime.datetime.utcnow()
+        current_utc = datetime.datetime.now()
         
         for log in all_logs:
             timestamp = log.get('timestamp')

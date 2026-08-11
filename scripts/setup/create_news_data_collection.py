@@ -204,7 +204,7 @@ async def insert_sample_news_data(collection):
                 "keywords": ["业绩报告", "营业收入", "净利润", "增长"],
                 "importance": "high",
                 "language": "zh-CN",
-                "created_at": datetime.utcnow(),
+                "created_at": datetime.now(),
                 "data_source": "tushare",
                 "version": 1
             },
@@ -226,7 +226,7 @@ async def insert_sample_news_data(collection):
                 "keywords": ["房地产", "销售额", "回暖", "环比上升"],
                 "importance": "medium",
                 "language": "zh-CN",
-                "created_at": datetime.utcnow(),
+                "created_at": datetime.now(),
                 "data_source": "akshare",
                 "version": 1
             },
@@ -248,7 +248,7 @@ async def insert_sample_news_data(collection):
                 "keywords": ["央行", "降准", "流动性", "银行股", "上涨"],
                 "importance": "high",
                 "language": "zh-CN",
-                "created_at": datetime.utcnow(),
+                "created_at": datetime.now(),
                 "data_source": "finnhub",
                 "version": 1
             }

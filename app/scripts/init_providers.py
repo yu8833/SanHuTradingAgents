@@ -126,8 +126,8 @@ async def init_providers():
     
     # 插入新数据
     for provider_data in providers_data:
-        provider_data["created_at"] = datetime.utcnow()
-        provider_data["updated_at"] = datetime.utcnow()
+        provider_data["created_at"] = datetime.now()
+        provider_data["updated_at"] = datetime.now()
         
         result = await providers_collection.insert_one(provider_data)
         print(f"✅ 添加厂家: {provider_data['display_name']} (ID: {result.inserted_id})")

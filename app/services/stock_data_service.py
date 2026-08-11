@@ -300,7 +300,7 @@ class StockDataService:
             symbol6 = str(symbol).zfill(6)
 
             # 添加更新时间
-            update_data["updated_at"] = datetime.utcnow()
+            update_data["updated_at"] = datetime.now()
 
             # 确保symbol字段存在
             if "symbol" not in update_data:
@@ -345,7 +345,7 @@ class StockDataService:
             symbol6 = str(symbol).zfill(6)
 
             # 添加更新时间
-            quote_data["updated_at"] = datetime.utcnow()
+            quote_data["updated_at"] = datetime.now()
 
             # 🔥 确保 symbol 和 code 字段都存在（兼容旧索引）
             if "symbol" not in quote_data:

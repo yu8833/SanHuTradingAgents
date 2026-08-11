@@ -46,7 +46,7 @@ def migrate_one(doc, coll):
         updates["realized_pnl"] = {"CNY": float(pnl or 0.0), "HKD": 0.0, "USD": 0.0}
 
     if updates:
-        updates["updated_at"] = datetime.utcnow().isoformat()
+        updates["updated_at"] = datetime.now().isoformat()
         coll.update_one({"_id": doc["_id"]}, {"$set": updates})
         return True, updates
     return False, {}

@@ -31,10 +31,7 @@ async def check_log_timezone():
         
         # 显示当前时间信息
         now_local = datetime.datetime.now()
-        now_utc = datetime.datetime.utcnow()
-        print(f"📅 当前本地时间: {now_local}")
-        print(f"📅 当前UTC时间: {now_utc}")
-        print(f"📅 时差: {now_local - now_utc}")
+        print(f"📅 当前本地时间(北京时间): {now_local}")
         
         # 检查现有日志的时间
         print("\n🔍 检查现有操作日志:")
@@ -52,14 +49,11 @@ async def check_log_timezone():
                 print(f"  {i}. {stored_time} | {username} | {action}")
                 
                 if stored_time:
-                    # 计算与当前时间的差异
+                    # 计算与本地时间(北京时间)的差异
                     local_diff = abs((stored_time - now_local).total_seconds())
-                    utc_diff = abs((stored_time - now_utc).total_seconds())
                     
                     if local_diff < 3600:  # 1小时内
                         print(f"     ✅ 接近本地时间 (差{local_diff:.0f}秒)")
-                    elif utc_diff < 3600:  # 1小时内
-                        print(f"     ⚠️ 接近UTC时间 (差{utc_diff:.0f}秒)")
                     else:
                         print(f"     ❓ 时间差异较大")
         else:
@@ -74,7 +68,6 @@ async def check_log_timezone():
             action="时区测试 - 检查时间存储",
             details={
                 "test_time": now_local.isoformat(),
-                "test_utc": now_utc.isoformat(),
                 "timezone": "Asia/Shanghai"
             },
             success=True,

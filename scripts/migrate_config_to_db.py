@@ -161,8 +161,8 @@ class ConfigMigrator:
                 "data_source_configs": [],
                 "database_config": {},
                 "system_settings": {},
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow()
+                "created_at": datetime.now(),
+                "updated_at": datetime.now()
             }
         
         # 转换模型配置
@@ -216,7 +216,7 @@ class ConfigMigrator:
         
         # 更新或插入系统配置
         system_config['llm_configs'] = llm_configs
-        system_config['updated_at'] = datetime.utcnow()
+        system_config['updated_at'] = datetime.now()
         
         if self.force or not await self.db.system_configs.find_one({"config_type": "system"}):
             await self.db.system_configs.replace_one(
@@ -256,8 +256,8 @@ class ConfigMigrator:
                 "data_source_configs": [],
                 "database_config": {},
                 "system_settings": {},
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow()
+                "created_at": datetime.now(),
+                "updated_at": datetime.now()
             }
         
         # 转换系统设置
@@ -279,7 +279,7 @@ class ConfigMigrator:
         
         # 更新系统配置
         system_config['system_settings'] = system_settings
-        system_config['updated_at'] = datetime.utcnow()
+        system_config['updated_at'] = datetime.now()
         
         if self.force or not await self.db.system_configs.find_one({"config_type": "system"}):
             await self.db.system_configs.replace_one(

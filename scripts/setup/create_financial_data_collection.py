@@ -169,8 +169,8 @@ async def create_financial_data_collection():
             
             # 元数据
             "data_source": "example",
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow(),
+            "created_at": datetime.now(),
+            "updated_at": datetime.now(),
             "version": 1
         }
         

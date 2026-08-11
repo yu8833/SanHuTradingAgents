@@ -17,7 +17,7 @@ DB_NAME = "tradingagentscn"
 COLLECTION = "stock_basic_info"
 
 def now():
-    return datetime.now(timezone.utc)
+    return datetime.now()
 
 def main():
     print("=" * 60)

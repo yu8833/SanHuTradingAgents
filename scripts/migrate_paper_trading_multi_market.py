@@ -91,7 +91,7 @@ async def migrate_accounts(dry_run=False):
                     "cash": new_cash,
                     "realized_pnl": new_pnl,
                     "settings": settings,
-                    "updated_at": datetime.utcnow().isoformat()
+                    "updated_at": datetime.now().isoformat()
                 }}
             )
             print(f"   ✅ 迁移成功")
@@ -159,7 +159,7 @@ async def migrate_positions(dry_run=False):
                     "currency": currency,
                     "available_qty": quantity,  # 初始可用数量等于总数量
                     "frozen_qty": 0,
-                    "updated_at": datetime.utcnow().isoformat()
+                    "updated_at": datetime.now().isoformat()
                 }}
             )
             print(f"   ✅ 迁移成功")

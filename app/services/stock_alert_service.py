@@ -87,7 +87,7 @@ class StockAlertService:
         """创建预警规则"""
         try:
             db = await self._get_db()
-            now_iso = datetime.utcnow().isoformat()
+            now_iso = datetime.now().isoformat()
             doc = {
                 "user_id": user_id,
                 "code": rule.code,
@@ -131,7 +131,7 @@ class StockAlertService:
             if not filtered:
                 doc = await db[self.collection_name].find_one({"_id": ObjectId(alert_id)})
                 return self._serialize(doc)
-            filtered["updated_at"] = datetime.utcnow().isoformat()
+            filtered["updated_at"] = datetime.now().isoformat()
             result = await db[self.collection_name].find_one_and_update(
                 {"_id": ObjectId(alert_id)},
                 {"$set": filtered},
@@ -278,8 +278,8 @@ class StockAlertService:
                     {"_id": rule["_id"]},
                     {"$set": {
                         "triggered": True,
-                        "triggered_at": datetime.utcnow().isoformat(),
-                        "updated_at": datetime.utcnow().isoformat(),
+                        "triggered_at": datetime.now().isoformat(),
+                        "updated_at": datetime.now().isoformat(),
                     }}
                 )
 

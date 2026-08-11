@@ -230,8 +230,7 @@ class AnalysisService:
             trading_graph = self._get_trading_graph(config)
 
             # 执行分析
-            from datetime import timezone
-            start_time = datetime.now(timezone.utc)
+            start_time = datetime.now()
             analysis_date = task.parameters.analysis_date or datetime.now().strftime("%Y-%m-%d")
 
             # 创建进度回调函数
@@ -242,7 +241,7 @@ class AnalysisService:
             # 新接口 propagate(company_name, trade_date)，不再支持 progress_callback
             _, decision = trading_graph.propagate(task.symbol, analysis_date)
 
-            execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
+            execution_time = (datetime.now() - start_time).total_seconds()
 
             # 生成报告
             progress_tracker.update_progress("📊 生成分析报告")
@@ -324,14 +323,13 @@ class AnalysisService:
             trading_graph = self._get_trading_graph(config)
 
             # 执行分析
-            from datetime import timezone
-            start_time = datetime.now(timezone.utc)
+            start_time = datetime.now()
             analysis_date = task.parameters.analysis_date or datetime.now().strftime("%Y-%m-%d")
 
             # 调用现有的分析方法（同步调用）
             _, decision = trading_graph.propagate(task.symbol, analysis_date)
 
-            execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
+            execution_time = (datetime.now() - start_time).total_seconds()
 
             # 从决策中提取模型信息
             model_info = decision.get('model_info', 'Unknown') if isinstance(decision, dict) else 'Unknown'
@@ -710,13 +708,13 @@ class AnalysisService:
                 progress_callback(50, "执行股票分析...")
             
             # 执行分析
-            start_time = datetime.utcnow()
+            start_time = datetime.now()
             analysis_date = task.parameters.analysis_date or datetime.now().strftime("%Y-%m-%d")
             
             # 调用现有的分析方法
             _, decision = trading_graph.propagate(task.symbol, analysis_date)
             
-            execution_time = (datetime.utcnow() - start_time).total_seconds()
+            execution_time = (datetime.now() - start_time).total_seconds()
             
             if progress_callback:
                 progress_callback(80, "处理分析结果...")
@@ -857,7 +855,7 @@ class AnalysisService:
                         remaining_time = 0
                     else:
                         # 任务进行中
-                        elapsed_time = (datetime.utcnow() - start_time).total_seconds()
+                        elapsed_time = (datetime.now() - start_time).total_seconds()
 
                         # 使用任务的预估时长，如果没有则使用默认值（5分钟）
                         estimated_total_time = task.get("estimated_duration", 300)
@@ -943,10 +941,9 @@ class AnalysisService:
                 cost = (input_tokens / 1000 * input_price) + (output_tokens / 1000 * output_price)
                 currency = llm_config.currency or "CNY"
 
-            # 创建使用记录
-            # 修复：与其他时间戳字段统一使用 UTC（见 simple_analysis_service.py 中 updated_at/created_at 均用 utcnow）
+            # 创建使用记录（统一使用北京时间，与项目时区规范一致）
             usage_record = UsageRecord(
-                timestamp=datetime.utcnow().isoformat(),
+                timestamp=datetime.now().isoformat(),
                 provider=provider,
                 model_name=model_name,
                 input_tokens=input_tokens,

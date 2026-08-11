@@ -11,7 +11,7 @@ from app.core.database import get_mongo_db
 
 async def cleanup_old_data(days: int) -> dict[str, Any]:
     db = get_mongo_db()
-    cutoff_date = datetime.utcnow() - timedelta(days=days)
+    cutoff_date = datetime.now() - timedelta(days=days)
 
     deleted_count = 0
     cleaned_collections = []
@@ -43,7 +43,7 @@ async def cleanup_old_data(days: int) -> dict[str, Any]:
 
 async def cleanup_analysis_results(days: int) -> dict[str, Any]:
     db = get_mongo_db()
-    cutoff_date = datetime.utcnow() - timedelta(days=days)
+    cutoff_date = datetime.now() - timedelta(days=days)
 
     deleted_count = 0
     cleaned_collections = []
@@ -70,7 +70,7 @@ async def cleanup_analysis_results(days: int) -> dict[str, Any]:
 
 async def cleanup_operation_logs(days: int) -> dict[str, Any]:
     db = get_mongo_db()
-    cutoff_date = datetime.utcnow() - timedelta(days=days)
+    cutoff_date = datetime.now() - timedelta(days=days)
 
     deleted_count = 0
     cleaned_collections = []

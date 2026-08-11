@@ -231,7 +231,7 @@ async def health_check():
                 "status": "healthy",
                 "total_records": stats.get("total_records", 0),
                 "total_symbols": stats.get("total_symbols", 0),
-                "last_check": datetime.utcnow().isoformat()
+                "last_check": datetime.now().isoformat()
             },
             "message": "服务正常"
         }
@@ -244,7 +244,7 @@ async def health_check():
                 "service": "历史数据服务",
                 "status": "unhealthy",
                 "error": str(e),
-                "last_check": datetime.utcnow().isoformat()
+                "last_check": datetime.now().isoformat()
             },
             "message": "服务异常"
         }

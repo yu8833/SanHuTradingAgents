@@ -48,8 +48,8 @@ async def test_sync_history_api():
                 {
                     "job": "stock_basics_multi_source",
                     "status": "success",
-                    "started_at": datetime.utcnow().isoformat(),
-                    "finished_at": datetime.utcnow().isoformat(),
+                    "started_at": datetime.now().isoformat(),
+                    "finished_at": datetime.now().isoformat(),
                     "total": 5427,
                     "inserted": 0,
                     "updated": 5427,
@@ -60,8 +60,8 @@ async def test_sync_history_api():
                 {
                     "job": "stock_basics_multi_source",
                     "status": "success_with_errors",
-                    "started_at": (datetime.utcnow()).isoformat(),
-                    "finished_at": (datetime.utcnow()).isoformat(),
+                    "started_at": (datetime.now()).isoformat(),
+                    "finished_at": (datetime.now()).isoformat(),
                     "total": 5420,
                     "inserted": 15,
                     "updated": 5400,

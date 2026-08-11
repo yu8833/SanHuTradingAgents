@@ -229,7 +229,7 @@ async def _run_basic_initialization():
         "is_running": True,
         "current_step": "基础信息初始化",
         "progress": "0/1",
-        "started_at": datetime.utcnow()
+        "started_at": datetime.now()
     })
     
     try:
@@ -256,7 +256,7 @@ async def _run_full_initialization(historical_days: int, force_update: bool):
         "is_running": True,
         "current_step": "准备初始化",
         "progress": "0/6",
-        "started_at": datetime.utcnow()
+        "started_at": datetime.now()
     })
     
     try:

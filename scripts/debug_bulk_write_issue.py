@@ -51,8 +51,8 @@ async def debug_bulk_write_issue():
                 "low": 9.8,
                 "close": 10.2,
                 "volume": 1000000,
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow(),
+                "created_at": datetime.now(),
+                "updated_at": datetime.now(),
                 "version": 1
             },
             {
@@ -67,8 +67,8 @@ async def debug_bulk_write_issue():
                 "low": 10.0,
                 "close": 10.5,
                 "volume": 1200000,
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow(),
+                "created_at": datetime.now(),
+                "updated_at": datetime.now(),
                 "version": 1
             }
         ]

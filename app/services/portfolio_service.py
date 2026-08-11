@@ -145,7 +145,7 @@ class PortfolioService:
             db = await self._get_db()
             collection = db[self.collection_name]
 
-            now = datetime.utcnow()
+            now = datetime.now()
             now_iso = now.isoformat()
 
             # 检查是否已有同代码持仓（合并而非重复创建）
@@ -258,7 +258,7 @@ class PortfolioService:
                 doc = await collection.find_one({"_id": ObjectId(position_id)})
                 return self._serialize_position(doc)
 
-            filtered_updates["updated_at"] = datetime.utcnow().isoformat()
+            filtered_updates["updated_at"] = datetime.now().isoformat()
 
             result = await collection.find_one_and_update(
                 {"_id": ObjectId(position_id)},
@@ -323,7 +323,7 @@ class PortfolioService:
                 "exit_date": exit_date,
                 "exit_reason": exit_reason,
                 "status": "closed",
-                "updated_at": datetime.utcnow().isoformat(),
+                "updated_at": datetime.now().isoformat(),
             }
 
             result = await collection.find_one_and_update(
@@ -493,7 +493,7 @@ class PortfolioService:
             if not positions:
                 return 0
 
-            now = datetime.utcnow()
+            now = datetime.now()
             now_iso = now.isoformat()
             docs = []
             for position in positions:

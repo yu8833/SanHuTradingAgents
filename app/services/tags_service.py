@@ -40,8 +40,8 @@ class TagsService:
             "name": doc.get("name"),
             "color": doc.get("color") or "#409EFF",
             "sort_order": doc.get("sort_order", 0),
-            "created_at": (doc.get("created_at") or datetime.utcnow()).isoformat(),
-            "updated_at": (doc.get("updated_at") or datetime.utcnow()).isoformat(),
+            "created_at": (doc.get("created_at") or datetime.now()).isoformat(),
+            "updated_at": (doc.get("updated_at") or datetime.now()).isoformat(),
         }
 
     async def list_tags(self, user_id: str) -> list[dict[str, Any]]:
@@ -56,7 +56,7 @@ class TagsService:
     async def create_tag(self, user_id: str, name: str, color: str | None = None, sort_order: int = 0) -> dict[str, Any]:
         db = await self._get_db()
         await self.ensure_indexes()
-        now = datetime.utcnow()
+        now = datetime.now()
         doc = {
             "user_id": self._normalize_user_id(user_id),
             "name": name.strip(),
@@ -72,7 +72,7 @@ class TagsService:
     async def update_tag(self, user_id: str, tag_id: str, *, name: str | None = None, color: str | None = None, sort_order: int | None = None) -> bool:
         db = await self._get_db()
         await self.ensure_indexes()
-        update: dict[str, Any] = {"updated_at": datetime.utcnow()}
+        update: dict[str, Any] = {"updated_at": datetime.now()}
         if name is not None:
             update["name"] = name.strip()
         if color is not None:

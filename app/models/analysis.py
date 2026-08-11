@@ -117,7 +117,7 @@ class AnalysisBatch(BaseModel):
     progress: int = Field(default=0, ge=0, le=100, description="整体进度 0-100")
     
     # 时间戳
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=datetime.now)
     started_at: datetime | None = None
     completed_at: datetime | None = None
     

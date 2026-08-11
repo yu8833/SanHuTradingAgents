@@ -66,7 +66,7 @@ async def query_stock_news(
         service = await get_news_data_service()
 
         # 构建查询参数
-        start_time = datetime.utcnow() - timedelta(hours=hours_back)
+        start_time = datetime.now() - timedelta(hours=hours_back)
 
         params = NewsQueryParams(
             symbol=symbol,
@@ -289,7 +289,7 @@ async def get_news_statistics(
         service = await get_news_data_service()
         
         # 计算时间范围
-        start_time = datetime.utcnow() - timedelta(days=days_back)
+        start_time = datetime.now() - timedelta(days=days_back)
         
         # 获取统计信息
         stats = await service.get_news_statistics(
@@ -474,7 +474,7 @@ async def health_check():
         
         return ok(data={
                 "service_status": "healthy",
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.now().isoformat()
             },
             message="新闻数据服务运行正常"
         )

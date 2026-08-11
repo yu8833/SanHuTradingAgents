@@ -42,7 +42,7 @@ class TestTushareSyncService:
                 "industry": "银行",
                 "market_info": {"market": "CN", "exchange": "SZSE"},
                 "data_source": "tushare",
-                "updated_at": datetime.utcnow()
+                "updated_at": datetime.now()
             },
             {
                 "code": "000002",
@@ -52,7 +52,7 @@ class TestTushareSyncService:
                 "industry": "全国地产",
                 "market_info": {"market": "CN", "exchange": "SZSE"},
                 "data_source": "tushare",
-                "updated_at": datetime.utcnow()
+                "updated_at": datetime.now()
             }
         ]
     
@@ -124,7 +124,7 @@ class TestTushareSyncService:
     async def test_process_basic_info_batch_skip_fresh_data(self, sync_service, mock_stock_list):
         """测试跳过新鲜数据"""
         # 模拟存在新鲜数据
-        fresh_data = {"updated_at": datetime.utcnow()}
+        fresh_data = {"updated_at": datetime.now()}
         sync_service.stock_service.get_stock_basic_info = AsyncMock(return_value=fresh_data)
         sync_service._is_data_fresh = Mock(return_value=True)
         
@@ -259,11 +259,11 @@ class TestTushareSyncService:
     def test_is_data_fresh(self, sync_service):
         """测试数据新鲜度检查"""
         # 测试新鲜数据
-        fresh_time = datetime.utcnow() - timedelta(hours=1)
+        fresh_time = datetime.now() - timedelta(hours=1)
         assert sync_service._is_data_fresh(fresh_time, hours=24) is True
         
         # 测试过期数据
-        old_time = datetime.utcnow() - timedelta(hours=25)
+        old_time = datetime.now() - timedelta(hours=25)
         assert sync_service._is_data_fresh(old_time, hours=24) is False
         
         # 测试None
@@ -277,10 +277,10 @@ class TestTushareSyncService:
         sync_service.db.market_quotes.count_documents = AsyncMock(return_value=5000)
         
         sync_service.db.stock_basic_info.find_one = AsyncMock(return_value={
-            "updated_at": datetime.utcnow()
+            "updated_at": datetime.now()
         })
         sync_service.db.market_quotes.find_one = AsyncMock(return_value={
-            "updated_at": datetime.utcnow()
+            "updated_at": datetime.now()
         })
         
         result = await sync_service.get_sync_status()

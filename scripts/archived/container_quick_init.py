@@ -80,7 +80,7 @@ def create_admin_user(client):
                 {
                     "$set": {
                         "hashed_password": hash_password(admin_password),
-                        "updated_at": datetime.utcnow(),
+                        "updated_at": datetime.now(),
                         "is_active": True,
                         "is_verified": True,
                         "is_admin": True
@@ -97,8 +97,8 @@ def create_admin_user(client):
                 "is_active": True,
                 "is_verified": True,
                 "is_admin": True,
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow(),
+                "created_at": datetime.now(),
+                "updated_at": datetime.now(),
                 "last_login": None,
                 "profile": {
                     "display_name": "系统管理员",
@@ -184,7 +184,7 @@ def create_admin_password_config():
         # 创建管理员密码配置
         admin_config = {
             "password": "admin123",
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.now().isoformat(),
             "description": "系统管理员默认密码，请登录后立即修改"
         }
         

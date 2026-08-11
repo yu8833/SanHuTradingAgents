@@ -264,7 +264,7 @@ class HistoricalDataService:
         - 公理B（非负性）：open/high/low/close/volume/amount > 0
         不满足时自动修正并记录警告日志，避免脏数据流入下游回测引擎。
         """
-        now = datetime.utcnow()
+        now = datetime.now()
 
         # 获取日期 - 优先从列中获取，如果索引是日期类型才使用索引
         trade_date = None
@@ -534,7 +534,7 @@ class HistoricalDataService:
                     "latest_date": item.get("latest_date")
                 } for item in source_stats},
                 "by_market": {item["_id"]: item["count"] for item in market_stats},
-                "last_updated": datetime.utcnow().isoformat()
+                "last_updated": datetime.now().isoformat()
             }
             
         except Exception as e:

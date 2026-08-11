@@ -91,7 +91,7 @@ async def fix_accounts(dry_run=False):
                 {"user_id": user_id},
                 {"$set": {
                     "cash": new_cash,
-                    "updated_at": datetime.utcnow().isoformat()
+                    "updated_at": datetime.now().isoformat()
                 }}
             )
             print(f"   ✅ 修复成功")

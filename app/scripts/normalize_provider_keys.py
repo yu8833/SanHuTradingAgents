@@ -11,7 +11,7 @@ from tradingagents.llm_clients.provider_keys import canonical_aliases, normalize
 
 
 def _now() -> str:
-    return datetime.utcnow().isoformat()
+    return datetime.now().isoformat()
 
 
 def _merge_aliases(*values: Iterable[str]) -> list[str]:

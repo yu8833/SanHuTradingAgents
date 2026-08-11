@@ -109,7 +109,7 @@ def fetch_radar() -> dict:
         cfg = json.load(f)
     days = cfg.get("fetch", {}).get("recent_days", 7)
     per = cfg.get("fetch", {}).get("per_source", 6)
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    cutoff = datetime.now() - timedelta(days=days)
     redline = [k.lower() for k in cfg.get("redline_keywords", [])]
 
     byhint: dict[str, list] = {}

@@ -145,7 +145,7 @@ class TushareSyncService:
             "success_count": 0,
             "error_count": 0,
             "skipped_count": 0,
-            "start_time": datetime.utcnow(),
+            "start_time": datetime.now(),
             "errors": []
         }
         
@@ -195,7 +195,7 @@ class TushareSyncService:
                     await asyncio.sleep(self.rate_limit_delay)
             
             # 3. 完成统计
-            stats["end_time"] = datetime.utcnow()
+            stats["end_time"] = datetime.now()
             stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
             
             logger.info(f"✅ 股票基础信息同步完成: "
@@ -299,7 +299,7 @@ class TushareSyncService:
             "total_processed": 0,
             "success_count": 0,
             "error_count": 0,
-            "start_time": datetime.utcnow(),
+            "start_time": datetime.now(),
             "errors": [],
             "stopped_by_rate_limit": False,
             "skipped_non_trading_time": False,
@@ -345,7 +345,7 @@ class TushareSyncService:
                     stats["error_count"] = akshare_result.get("error_count", 0)
                     stats["total_processed"] = akshare_result.get("total_processed", 0)
                     stats["errors"] = akshare_result.get("errors", [])
-                    stats["end_time"] = datetime.utcnow()
+                    stats["end_time"] = datetime.now()
                     stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
 
                     logger.info(
@@ -420,7 +420,7 @@ class TushareSyncService:
             stats["error_count"] = error_count
 
             # 完成统计
-            stats["end_time"] = datetime.utcnow()
+            stats["end_time"] = datetime.now()
             stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
 
             logger.info(f"✅ 实时行情同步完成: "
@@ -601,7 +601,7 @@ class TushareSyncService:
             "error_count": 0,
             "skipped_count": 0,
             "total_records": 0,
-            "start_time": datetime.utcnow(),
+            "start_time": datetime.now(),
             "errors": []
         }
 
@@ -787,7 +787,7 @@ class TushareSyncService:
                         break
 
             # 4. 完成统计
-            stats["end_time"] = datetime.utcnow()
+            stats["end_time"] = datetime.now()
             stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
 
             logger.info(f"✅ {period_name}数据同步完成: "
@@ -935,7 +935,7 @@ class TushareSyncService:
             "total_processed": 0,
             "success_count": 0,
             "error_count": 0,
-            "start_time": datetime.utcnow(),
+            "start_time": datetime.now(),
             "errors": []
         }
 
@@ -1033,13 +1033,13 @@ class TushareSyncService:
                     except TaskCancelledException:
                         # 任务被取消，记录并退出
                         logger.warning(f"⚠️ 财务数据同步任务被用户取消 (已处理 {processed}/{len(symbols)})")
-                        stats["end_time"] = datetime.utcnow()
+                        stats["end_time"] = datetime.now()
                         stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
                         stats["cancelled"] = True
                         raise
 
             # 完成统计
-            stats["end_time"] = datetime.utcnow()
+            stats["end_time"] = datetime.now()
             stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
 
             logger.info(f"✅ 财务数据同步完成: "
@@ -1055,17 +1055,31 @@ class TushareSyncService:
             return stats
 
     async def _save_financial_data(self, symbol: str, financial_data) -> bool:
-        """保存财务数据"""
+        """保存财务数据。
+
+        兼容两种输入：
+        - str：旧版 get_fundamentals 返回的格式化文本，需先解析；
+        - dict：单期财务数据；
+        - list[dict]：多期财务数据（Tushare fina_indicator 新实现），逐期 upsert。
+        """
         try:
-            # 修复：get_fundamentals 返回的是格式化文本字符串而非 dict，
-            # 需要先解析为结构化 dict 再保存
+            # 兼容旧文本格式（get_fundamentals 返回文本）
             if isinstance(financial_data, str):
                 financial_data = self._parse_financial_text(symbol, financial_data)
                 if not financial_data:
                     logger.warning(f"⚠️ {symbol} 财务数据文本解析后为空，跳过保存")
                     return False
 
-            if not isinstance(financial_data, dict):
+            if isinstance(financial_data, list):
+                # 多期数据：过滤空条目，逐期保存（report_period 由每期记录自带）
+                financial_data = [d for d in financial_data if isinstance(d, dict)]
+                if not financial_data:
+                    logger.warning(f"⚠️ {symbol} 财务数据列表为空，跳过保存")
+                    return False
+                report_period = None
+            elif isinstance(financial_data, dict):
+                report_period = financial_data.get("report_period")
+            else:
                 logger.warning(f"⚠️ {symbol} 财务数据类型异常: {type(financial_data)}, 跳过保存")
                 return False
 
@@ -1080,8 +1094,9 @@ class TushareSyncService:
                 financial_data=financial_data,
                 data_source="tushare",
                 market="CN",
-                report_period=financial_data.get("report_period"),
-                report_type=financial_data.get("report_type", "quarterly")
+                report_period=report_period,
+                report_type=financial_data[-1].get("report_type", "quarterly")
+                if isinstance(financial_data, list) else financial_data.get("report_type", "quarterly")
             )
 
             return saved_count > 0
@@ -1104,7 +1119,7 @@ class TushareSyncService:
             "success_count": 0,
             "error_count": 0,
             "record_count": 0,
-            "start_time": datetime.utcnow(),
+            "start_time": datetime.now(),
             "errors": []
         }
 
@@ -1191,7 +1206,7 @@ class TushareSyncService:
                         f"正在同步分红数据 {processed}/{len(symbols)}"
                     )
 
-            stats["end_time"] = datetime.utcnow()
+            stats["end_time"] = datetime.now()
             stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
 
             logger.info(f"✅ 分红数据同步完成: "
@@ -1307,7 +1322,7 @@ class TushareSyncService:
             "error_count": 0,
             "skipped_count": 0,
             "total_records": 0,
-            "start_time": datetime.utcnow(),
+            "start_time": datetime.now(),
             "errors": [],
         }
 
@@ -1413,7 +1428,7 @@ class TushareSyncService:
                     f"正在同步每日估值 {td} ({i + 1}/{len(trade_days)})…",
                 )
 
-        stats["finished_at"] = datetime.utcnow().isoformat()
+        stats["finished_at"] = datetime.now().isoformat()
         logger.info(f"✅ 每日估值数据同步完成: 交易日={stats['total_processed']}, "
                     f"入库={stats['success_count']}, 跳过={stats['skipped_count']}, "
                     f"记录={stats['total_records']}, 失败={stats['error_count']}")
@@ -1493,7 +1508,7 @@ class TushareSyncService:
         if not updated_at:
             return False
 
-        threshold = datetime.utcnow() - timedelta(hours=hours)
+        threshold = datetime.now() - timedelta(hours=hours)
         return updated_at > threshold
 
     async def get_sync_status(self) -> dict[str, Any]:
@@ -1525,7 +1540,7 @@ class TushareSyncService:
                         "latest_update": latest_quotes.get("updated_at") if (latest_quotes and isinstance(latest_quotes, dict)) else None
                     }
                 },
-                "status_time": datetime.utcnow()
+                "status_time": datetime.now()
             }
 
         except Exception as e:
@@ -1562,7 +1577,7 @@ class TushareSyncService:
             "success_count": 0,
             "error_count": 0,
             "news_count": 0,
-            "start_time": datetime.utcnow(),
+            "start_time": datetime.now(),
             "errors": []
         }
 
@@ -1617,7 +1632,7 @@ class TushareSyncService:
                     await asyncio.sleep(self.rate_limit_delay)
 
             # 3. 完成统计
-            stats["end_time"] = datetime.utcnow()
+            stats["end_time"] = datetime.now()
             stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
 
             logger.info(f"✅ 新闻数据同步完成: "

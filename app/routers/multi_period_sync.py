@@ -61,7 +61,7 @@ async def start_multi_period_sync(
             message="多周期数据同步已启动",
             data={
                 "request_params": request.dict(),
-                "start_time": datetime.utcnow().isoformat()
+                "start_time": datetime.now().isoformat()
             }
         )
         
@@ -92,7 +92,7 @@ async def start_daily_sync(
             message="日线数据同步已启动",
             data={
                 "period": "daily",
-                "start_time": datetime.utcnow().isoformat()
+                "start_time": datetime.now().isoformat()
             }
         )
         
@@ -123,7 +123,7 @@ async def start_weekly_sync(
             message="周线数据同步已启动",
             data={
                 "period": "weekly",
-                "start_time": datetime.utcnow().isoformat()
+                "start_time": datetime.now().isoformat()
             }
         )
         
@@ -154,7 +154,7 @@ async def start_monthly_sync(
             message="月线数据同步已启动",
             data={
                 "period": "monthly",
-                "start_time": datetime.utcnow().isoformat()
+                "start_time": datetime.now().isoformat()
             }
         )
 
@@ -190,7 +190,7 @@ async def start_all_history_sync(
                 "periods": periods or ["daily", "weekly", "monthly"],
                 "data_sources": data_sources or ["tushare", "akshare", "baostock"],
                 "date_range": "1990-01-01 到 今天",
-                "start_time": datetime.utcnow().isoformat(),
+                "start_time": datetime.now().isoformat(),
                 "warning": "全历史数据同步可能需要很长时间，请耐心等待"
             }
         )
@@ -236,7 +236,7 @@ async def start_incremental_sync(
                 "data_sources": data_sources or ["tushare", "akshare", "baostock"],
                 "date_range": f"{start_date} 到 {end_date}",
                 "days_back": days_back,
-                "start_time": datetime.utcnow().isoformat()
+                "start_time": datetime.now().isoformat()
             }
         )
 
@@ -375,7 +375,7 @@ async def health_check():
                 "service": "多周期同步服务",
                 "status": "healthy",
                 "statistics": stats,
-                "last_check": datetime.utcnow().isoformat()
+                "last_check": datetime.now().isoformat()
             },
             "message": "服务正常"
         }
@@ -388,7 +388,7 @@ async def health_check():
                 "service": "多周期同步服务",
                 "status": "unhealthy",
                 "error": str(e),
-                "last_check": datetime.utcnow().isoformat()
+                "last_check": datetime.now().isoformat()
             },
             "message": "服务异常"
         }

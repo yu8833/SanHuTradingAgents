@@ -90,7 +90,7 @@ async def sync_single_stock_financial_data(
             "symbol": code6,
             "report_period": latest.get('报告期', ''),
             "data_source": "akshare",
-            "updated_at": datetime.utcnow(),
+            "updated_at": datetime.now(),
 
             # 盈利能力指标
             "roe": _safe_float(latest.get('净资产收益率')),  # ROE
@@ -196,7 +196,7 @@ async def sync_single_stock_financial_data(
                 "pb": financial_data.get('pb'),
                 "ps": financial_data.get('ps'),
                 "roe": financial_data.get('roe'),
-                "updated_at": datetime.utcnow()
+                "updated_at": datetime.now()
             }},
             upsert=False  # 不创建新文档，只更新已存在的
         )

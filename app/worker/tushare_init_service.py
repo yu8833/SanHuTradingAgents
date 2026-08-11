@@ -101,7 +101,7 @@ class TushareInitService:
         total_steps = 1 + len(sync_items) + 1
 
         self.stats = InitializationStats(
-            started_at=datetime.utcnow(),
+            started_at=datetime.now(),
             total_steps=total_steps
         )
 
@@ -154,7 +154,7 @@ class TushareInitService:
             # 最后: 验证数据完整性
             await self._step_verify_data_integrity()
             
-            self.stats.finished_at = datetime.utcnow()
+            self.stats.finished_at = datetime.now()
             duration = (self.stats.finished_at - self.stats.started_at).total_seconds()
             
             logger.info(f"🎉 Tushare数据初始化完成！耗时: {duration:.2f}秒")
@@ -166,7 +166,7 @@ class TushareInitService:
             self.stats.errors.append({
                 "step": self.stats.current_step,
                 "error": str(e),
-                "timestamp": datetime.utcnow()
+                "timestamp": datetime.now()
             })
             return self._get_initialization_summary()
     

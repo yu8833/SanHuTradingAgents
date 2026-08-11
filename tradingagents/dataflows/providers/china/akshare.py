@@ -173,7 +173,7 @@ class AkshareProvider:
                     "updated_at": None
                 }
                 from datetime import datetime
-                quote_data["updated_at"] = datetime.utcnow()
+                quote_data["updated_at"] = datetime.now()
                 result[code] = quote_data
 
             if symbols:

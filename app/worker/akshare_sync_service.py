@@ -76,7 +76,7 @@ class AKShareSyncService:
             "success_count": 0,
             "error_count": 0,
             "skipped_count": 0,
-            "start_time": datetime.utcnow(),
+            "start_time": datetime.now(),
             "end_time": None,
             "duration": 0,
             "errors": []
@@ -113,7 +113,7 @@ class AKShareSyncService:
                     await asyncio.sleep(self.rate_limit_delay)
             
             # 3. 完成统计
-            stats["end_time"] = datetime.utcnow()
+            stats["end_time"] = datetime.now()
             stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
             
             logger.info("🎉 股票基础信息同步完成！")
@@ -222,7 +222,7 @@ class AKShareSyncService:
             else:
                 updated_at = updated_at.replace(tzinfo=None)
             
-            now = datetime.utcnow()
+            now = datetime.now()
             time_diff = now - updated_at
             
             return time_diff.total_seconds() < (hours * 3600)
@@ -252,7 +252,7 @@ class AKShareSyncService:
             "total_processed": 0,
             "success_count": 0,
             "error_count": 0,
-            "start_time": datetime.utcnow(),
+            "start_time": datetime.now(),
             "end_time": None,
             "duration": 0,
             "errors": []
@@ -370,7 +370,7 @@ class AKShareSyncService:
                                    f"(成功: {stats['success_count']}, 错误: {stats['error_count']})")
 
             # 4. 完成统计
-            stats["end_time"] = datetime.utcnow()
+            stats["end_time"] = datetime.now()
             stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
 
             logger.info("🎉 实时行情同步完成！")
@@ -560,7 +560,7 @@ class AKShareSyncService:
             "success_count": 0,
             "error_count": 0,
             "total_records": 0,
-            "start_time": datetime.utcnow(),
+            "start_time": datetime.now(),
             "end_time": None,
             "duration": 0,
             "errors": []
@@ -649,7 +649,7 @@ class AKShareSyncService:
                     await asyncio.sleep(self.rate_limit_delay)
 
             # 4. 完成统计
-            stats["end_time"] = datetime.utcnow()
+            stats["end_time"] = datetime.now()
             stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
 
             logger.info("🎉 历史数据同步完成！")
@@ -851,7 +851,7 @@ class AKShareSyncService:
                     "$set": {
                         "progress": progress,
                         "progress_message": message,
-                        "updated_at": datetime.utcnow()
+                        "updated_at": datetime.now()
                     }
                 }
             )
@@ -879,7 +879,7 @@ class AKShareSyncService:
             "total_processed": 0,
             "success_count": 0,
             "error_count": 0,
-            "start_time": datetime.utcnow(),
+            "start_time": datetime.now(),
             "end_time": None,
             "duration": 0,
             "errors": []
@@ -928,7 +928,7 @@ class AKShareSyncService:
                     await asyncio.sleep(self.rate_limit_delay)
 
             # 3. 完成统计
-            stats["end_time"] = datetime.utcnow()
+            stats["end_time"] = datetime.now()
             stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
 
             logger.info("🎉 财务数据同步完成！")
@@ -1045,7 +1045,7 @@ class AKShareSyncService:
             status_result = {
                 "provider_connected": provider_connected,
                 "collections": collections_status,
-                "status_time": datetime.utcnow()
+                "status_time": datetime.now()
             }
 
             logger.info(f"✅ AKShare状态检查完成: {status_result}")
@@ -1056,7 +1056,7 @@ class AKShareSyncService:
             return {
                 "provider_connected": False,
                 "error": str(e),
-                "status_time": datetime.utcnow()
+                "status_time": datetime.now()
             }
 
     # ==================== 新闻数据同步 ====================
@@ -1133,7 +1133,7 @@ class AKShareSyncService:
             "success_count": 0,
             "error_count": 0,
             "news_count": 0,
-            "start_time": datetime.utcnow(),
+            "start_time": datetime.now(),
             "favorites_only": favorites_only,
             "errors": []
         }
@@ -1184,7 +1184,7 @@ class AKShareSyncService:
                     await asyncio.sleep(self.rate_limit_delay)
 
             # 3. 完成统计
-            stats["end_time"] = datetime.utcnow()
+            stats["end_time"] = datetime.now()
             stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
 
             logger.info(f"✅ AKShare新闻数据同步完成: "

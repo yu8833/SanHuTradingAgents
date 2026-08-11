@@ -61,7 +61,7 @@ def migrate_auth_to_db():
                 {
                     "$set": {
                         "hashed_password": hash_password(admin_password),
-                        "updated_at": datetime.utcnow()
+                        "updated_at": datetime.now()
                     }
                 }
             )
@@ -75,8 +75,8 @@ def migrate_auth_to_db():
                 "is_active": True,
                 "is_verified": True,
                 "is_admin": True,
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow(),
+                "created_at": datetime.now(),
+                "updated_at": datetime.now(),
                 "last_login": None,
                 "preferences": {
                     "default_market": "A股",
@@ -125,8 +125,8 @@ def migrate_auth_to_db():
                         "is_active": True,
                         "is_verified": False,
                         "is_admin": False,
-                        "created_at": datetime.utcnow(),
-                        "updated_at": datetime.utcnow(),
+                        "created_at": datetime.now(),
+                        "updated_at": datetime.now(),
                         "last_login": None,
                         "preferences": {
                             "default_market": "A股",

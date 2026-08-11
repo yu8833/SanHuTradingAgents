@@ -117,8 +117,8 @@ class QuickAnalysisHandler(AnalysisModeHandler):
                 "mode": "quick",
                 "quick_result": result.get('quick_result'),
                 "analysis_date": self.analysis_date,
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow(),
+                "created_at": datetime.now(),
+                "updated_at": datetime.now(),
                 "status": "completed",
             }
             db.reports.insert_one(report_doc)
@@ -302,8 +302,8 @@ class DeepAnalysisHandler(AnalysisModeHandler):
                 "reports": result.get('reports'),
                 "decision": result.get('decision'),
                 "analysis_date": self.analysis_date,
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow(),
+                "created_at": datetime.now(),
+                "updated_at": datetime.now(),
                 "status": "completed",
             }
             db.reports.insert_one(report_doc)

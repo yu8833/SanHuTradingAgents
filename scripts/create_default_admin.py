@@ -91,8 +91,8 @@ def create_admin_user(
         "is_active": True,
         "is_verified": True,
         "is_admin": True,
-        "created_at": datetime.utcnow(),
-        "updated_at": datetime.utcnow(),
+        "created_at": datetime.now(),
+        "updated_at": datetime.now(),
         "last_login": None,
         "preferences": {
             "default_market": "A股",

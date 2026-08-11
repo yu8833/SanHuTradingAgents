@@ -11,7 +11,6 @@ import sys
 def check_timezone():
     print('🕐 系统时区信息:')
     print(f'当前时间: {datetime.datetime.now()}')
-    print(f'UTC时间: {datetime.datetime.utcnow()}')
     print(f'时区偏移: {time.timezone}秒 ({time.timezone/3600}小时)')
     print(f'时区名称: {time.tzname}')
     print(f'夏令时: {time.daylight}')
@@ -19,12 +18,6 @@ def check_timezone():
     # 检查环境变量
     tz_env = os.environ.get('TZ', '未设置')
     print(f'TZ环境变量: {tz_env}')
-    
-    # 计算时差
-    local_time = datetime.datetime.now()
-    utc_time = datetime.datetime.utcnow()
-    diff = local_time - utc_time
-    print(f'本地时间与UTC时差: {diff}')
     
     # 检查MongoDB时间
     print('\n🗄️ 检查MongoDB中的时间:')
@@ -39,7 +32,6 @@ def check_timezone():
             test_doc = {
                 "test": True,
                 "python_now": datetime.datetime.now(),
-                "python_utcnow": datetime.datetime.utcnow(),
                 "created_at": datetime.datetime.now()
             }
             
@@ -50,7 +42,6 @@ def check_timezone():
             doc = await db.timezone_test.find_one({"_id": result.inserted_id})
             print(f'📄 MongoDB中存储的时间:')
             print(f'  python_now: {doc["python_now"]}')
-            print(f'  python_utcnow: {doc["python_utcnow"]}')
             print(f'  created_at: {doc["created_at"]}')
             
             # 清理测试文档

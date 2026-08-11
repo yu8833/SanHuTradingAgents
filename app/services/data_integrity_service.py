@@ -58,7 +58,7 @@ class DataIntegrityService:
         """
         db = await self._get_db()
         result = {
-            "check_time": datetime.utcnow().isoformat(),
+            "check_time": datetime.now().isoformat(),
             "trade_date": None,
             "expected_count": 0,
             "actual_count": 0,

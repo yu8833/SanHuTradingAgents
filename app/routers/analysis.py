@@ -68,7 +68,7 @@ async def submit_single_analysis(
             "symbol": stock_code,
             "stock_code": stock_code,
             "user_id": str(user_id),
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.now().isoformat(),
             **params_dict
         }
 
@@ -172,7 +172,7 @@ async def get_task_status_new(
 
                 # 计算时间信息
                 start_time = task_result.get("started_at") or task_result.get("created_at")
-                current_time = datetime.utcnow()
+                current_time = datetime.now()
                 elapsed_time = 0
                 if start_time:
                     elapsed_time = (current_time - start_time).total_seconds()
@@ -1283,8 +1283,8 @@ async def mark_task_as_failed(
                 "$set": {
                     "status": "failed",
                     "last_error": "用户手动标记为失败",
-                    "completed_at": datetime.utcnow(),
-                    "updated_at": datetime.utcnow()
+                    "completed_at": datetime.now(),
+                    "updated_at": datetime.now()
                 }
             }
         )

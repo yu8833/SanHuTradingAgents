@@ -273,7 +273,7 @@ class MessageCrawlerScheduler:
             internal_service = await get_internal_message_service()
             
             # 计算时间范围（最近24小时）
-            end_time = datetime.utcnow()
+            end_time = datetime.now()
             start_time = end_time - timedelta(hours=24)
             
             # 获取统计信息

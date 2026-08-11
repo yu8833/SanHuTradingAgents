@@ -8,7 +8,7 @@
 import sys
 import time
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pymongo import MongoClient
 
@@ -25,7 +25,7 @@ except ImportError:
 
 
 def now():
-    return datetime.now(timezone.utc)
+    return datetime.now()
 
 
 def _sanitize(val, default):

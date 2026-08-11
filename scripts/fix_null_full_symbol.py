@@ -141,7 +141,7 @@ async def fix_null_full_symbol():
                 {
                     "$set": {
                         "full_symbol": new_full_symbol,
-                        "updated_at": datetime.utcnow()
+                        "updated_at": datetime.now()
                     }
                 }
             )

@@ -27,7 +27,7 @@ from __future__ import annotations
 import logging
 import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from bson import ObjectId
@@ -154,7 +154,7 @@ def normalize(rule: dict) -> dict:
     r.setdefault("cooldown_seconds", 3600)
     r.setdefault("severity", "info")
     r.setdefault("message", "")
-    r.setdefault("created_at", datetime.now(timezone.utc).isoformat())
+    r.setdefault("created_at", datetime.now().isoformat())
     return r
 
 

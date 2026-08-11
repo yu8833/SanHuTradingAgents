@@ -22,7 +22,7 @@ class NewsSyncStats:
     failed_saves: int = 0
     duplicate_skipped: int = 0
     sources_used: list[str] = field(default_factory=list)
-    start_time: datetime = field(default_factory=datetime.utcnow)
+    start_time: datetime = field(default_factory=datetime.now)
     end_time: datetime | None = None
     
     @property
@@ -173,12 +173,12 @@ class NewsDataSyncService:
                 
                 self.logger.info(f"💾 {symbol} 新闻同步完成: {saved_count}条保存成功")
             
-            stats.end_time = datetime.utcnow()
+            stats.end_time = datetime.now()
             return stats
             
         except Exception as e:
             self.logger.error(f"❌ 同步股票新闻失败 {symbol}: {e}")
-            stats.end_time = datetime.utcnow()
+            stats.end_time = datetime.now()
             return stats
     
     async def _sync_tushare_news(
@@ -550,12 +550,12 @@ class NewsDataSyncService:
                 
                 self.logger.info(f"💾 市场新闻同步完成: {saved_count}条保存成功")
             
-            stats.end_time = datetime.utcnow()
+            stats.end_time = datetime.now()
             return stats
             
         except Exception as e:
             self.logger.error(f"❌ 同步市场新闻失败: {e}")
-            stats.end_time = datetime.utcnow()
+            stats.end_time = datetime.now()
             return stats
 
 

@@ -336,7 +336,7 @@ class MultiPeriodSyncService:
             
             return {
                 "period_statistics": stats,
-                "last_updated": datetime.utcnow().isoformat()
+                "last_updated": datetime.now().isoformat()
             }
             
         except Exception as e:

@@ -627,7 +627,7 @@ class SimpleAnalysisService:
                         "progress": progress,
                         "current_step": message,
                         "message": message,
-                        "updated_at": datetime.utcnow()
+                        "updated_at": datetime.now()
                     }
                 }
             )
@@ -796,7 +796,7 @@ class SimpleAnalysisService:
                         "stock_name": name,
                         "status": "pending",
                         "progress": 0,
-                        "created_at": datetime.utcnow(),
+                        "created_at": datetime.now(),
                     }},
                     upsert=True
                 )
@@ -1045,7 +1045,7 @@ class SimpleAnalysisService:
                 currency = "CNY"
 
                 usage_record = UsageRecord(
-                    timestamp=datetime.utcnow().isoformat(),
+                    timestamp=datetime.now().isoformat(),
                     provider="dashscope",
                     model_name=model_info,
                     input_tokens=input_tokens,
@@ -1206,7 +1206,7 @@ class SimpleAnalysisService:
                                 "progress": progress,
                                 "current_step": step,
                                 "message": message,
-                                "updated_at": datetime.utcnow()
+                                "updated_at": datetime.now()
                             }
                         }
                     )
@@ -1416,7 +1416,7 @@ class SimpleAnalysisService:
                                                 "progress": int(progress_pct),
                                                 "current_step": message,
                                                 "message": message,
-                                                "updated_at": datetime.utcnow()
+                                                "updated_at": datetime.now()
                                             }
                                         }
                                     )
@@ -2413,7 +2413,7 @@ class SimpleAnalysisService:
             # 2) 清理 MongoDB 中的僵尸任务
             db = get_mongo_db()
             from datetime import timedelta
-            cutoff_time = datetime.utcnow() - timedelta(hours=max_running_hours)
+            cutoff_time = datetime.now() - timedelta(hours=max_running_hours)
 
             # 查找长时间处于 processing 状态的任务
             zombie_filter = {
@@ -2431,8 +2431,8 @@ class SimpleAnalysisService:
                     "$set": {
                         "status": "failed",
                         "last_error": f"任务超时（运行时间超过 {max_running_hours} 小时）",
-                        "completed_at": datetime.utcnow(),
-                        "updated_at": datetime.utcnow()
+                        "completed_at": datetime.now(),
+                        "updated_at": datetime.now()
                     }
                 }
             )
@@ -2471,7 +2471,7 @@ class SimpleAnalysisService:
         try:
             db = get_mongo_db()
             from datetime import timedelta
-            cutoff_time = datetime.utcnow() - timedelta(hours=max_running_hours)
+            cutoff_time = datetime.now() - timedelta(hours=max_running_hours)
 
             # 查找长时间处于 processing 状态的任务
             zombie_filter = {
@@ -2500,7 +2500,7 @@ class SimpleAnalysisService:
                 # 计算运行时长
                 start_time = doc.get("started_at") or doc.get("created_at")
                 if start_time:
-                    running_seconds = (datetime.utcnow() - start_time).total_seconds()
+                    running_seconds = (datetime.now() - start_time).total_seconds()
                     task["running_hours"] = round(running_seconds / 3600, 2)
 
                 zombie_tasks.append(task)
@@ -2527,16 +2527,16 @@ class SimpleAnalysisService:
             update_data = {
                 "status": status,
                 "progress": progress,
-                "updated_at": datetime.utcnow()
+                "updated_at": datetime.now()
             }
 
             if status == AnalysisStatus.PROCESSING and progress == 10:
-                update_data["started_at"] = datetime.utcnow()
+                update_data["started_at"] = datetime.now()
             elif status == AnalysisStatus.COMPLETED:
-                update_data["completed_at"] = datetime.utcnow()
+                update_data["completed_at"] = datetime.now()
             elif status == AnalysisStatus.FAILED:
                 update_data["last_error"] = error_message
-                update_data["completed_at"] = datetime.utcnow()
+                update_data["completed_at"] = datetime.now()
 
             await db.analysis_tasks.update_one(
                 {"task_id": task_id},
@@ -2567,7 +2567,7 @@ class SimpleAnalysisService:
 
             # 生成分析ID（与web目录保持一致）
             from datetime import datetime
-            timestamp = datetime.utcnow()  # 存储 UTC 时间（标准做法）
+            timestamp = datetime.now()  # 北京时间（与项目时区规范一致）
             stock_symbol = result.get('stock_symbol') or result.get('stock_code', 'UNKNOWN')
             analysis_id = f"{stock_symbol}_{timestamp.strftime('%Y%m%d_%H%M%S')}"
 
@@ -2849,7 +2849,7 @@ class SimpleAnalysisService:
                     'task_id': task_id,
                     'success': result.get('success', True),
                     'error': str(e),
-                    'completed_at': datetime.utcnow().isoformat()
+                    'completed_at': datetime.now().isoformat()
                 }
                 await db.analysis_tasks.update_one(
                     {"task_id": task_id},

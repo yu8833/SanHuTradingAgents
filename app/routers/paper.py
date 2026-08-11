@@ -74,7 +74,7 @@ async def _get_or_create_account(user_id: str) -> dict[str, Any]:
     db = get_mongo_db()
     acc = await db["paper_accounts"].find_one({"user_id": user_id})
     if not acc:
-        now = datetime.utcnow().isoformat()
+        now = datetime.now().isoformat()
         acc = {
             "user_id": user_id,
             # 多货币现金账户
@@ -113,7 +113,7 @@ async def _get_or_create_account(user_id: str) -> dict[str, Any]:
                 updates["realized_pnl"] = {"CNY": base_pnl, "HKD": 0.0, "USD": 0.0}
 
             if updates:
-                updates["updated_at"] = datetime.utcnow().isoformat()
+                updates["updated_at"] = datetime.now().isoformat()
                 await db["paper_accounts"].update_one({"user_id": user_id}, {"$set": updates})
                 # 重新读取迁移后的账户
                 acc = await db["paper_accounts"].find_one({"user_id": user_id})
@@ -180,7 +180,7 @@ async def _get_available_quantity(user_id: str, code: str, market: str) -> int:
         rules = await _get_market_rules(market)
         if rules and rules.get("t_plus", 0) > 0:
             # 查询今天的买入数量
-            today = datetime.utcnow().date().isoformat()
+            today = datetime.now().date().isoformat()
             pipeline = [
                 {"$match": {
                     "user_id": user_id,
@@ -397,7 +397,7 @@ async def place_order(payload: PlaceOrderRequest, current_user: dict = Depends(g
     # 7. 获取持仓
     pos = await db["paper_positions"].find_one({"user_id": current_user["id"], "code": normalized_code})
 
-    now_iso = datetime.utcnow().isoformat()
+    now_iso = datetime.now().isoformat()
     realized_pnl_delta = 0.0
 
     # 8. 执行买卖逻辑
@@ -441,7 +441,7 @@ async def place_order(payload: PlaceOrderRequest, current_user: dict = Depends(g
                 "take_profit_price": payload.take_profit_price,
                 "thesis": payload.thesis,
                 "stock_name": payload.stock_name or "",
-                "buy_date": datetime.utcnow().strftime("%Y-%m-%d"),
+                "buy_date": datetime.now().strftime("%Y-%m-%d"),
             }
             await db["paper_positions"].insert_one(new_pos)
         else:
@@ -518,7 +518,7 @@ async def place_order(payload: PlaceOrderRequest, current_user: dict = Depends(g
                     "frozen_qty": 0,
                     "status": "closed",
                     "exit_price": price,
-                    "exit_date": datetime.utcnow().strftime("%Y-%m-%d"),
+                    "exit_date": datetime.now().strftime("%Y-%m-%d"),
                     "exit_reason": "sell_order",
                     "realized_pnl": pnl,
                     "updated_at": now_iso,

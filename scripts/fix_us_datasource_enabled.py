@@ -93,7 +93,7 @@ def fix_us_datasource_enabled():
                     "$set": {
                         "enabled": update["enabled"],
                         "priority": update["priority"],
-                        "updated_at": datetime.utcnow()
+                        "updated_at": datetime.now()
                     }
                 }
             )

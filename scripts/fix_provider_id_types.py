@@ -71,7 +71,7 @@ async def fix_provider_id_types():
             # 复制数据（除了 _id）
             new_provider = {k: v for k, v in provider.items() if k != "_id"}
             new_provider["_id"] = new_id
-            new_provider["updated_at"] = datetime.utcnow()
+            new_provider["updated_at"] = datetime.now()
             
             # 插入新记录
             await providers_collection.insert_one(new_provider)

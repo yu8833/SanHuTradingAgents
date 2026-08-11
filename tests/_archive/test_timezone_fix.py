@@ -27,7 +27,7 @@ async def test_timezone_fix():
         
         # 显示当前时间信息
         now_local = datetime.datetime.now()
-        now_utc = datetime.datetime.utcnow()
+        now_utc = datetime.datetime.now()
         print(f"📅 当前本地时间: {now_local}")
         print(f"📅 当前UTC时间: {now_utc}")
         print(f"📅 时差: {now_local - now_utc}")

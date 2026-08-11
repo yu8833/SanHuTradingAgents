@@ -81,7 +81,7 @@ class ResearchNotesService:
         try:
             db = await self._get_db()
 
-            now = datetime.utcnow()
+            now = datetime.now()
             note = {
                 "user_id": user_id,
                 "kind": kind,

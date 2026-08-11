@@ -63,7 +63,7 @@ async def check_news_data():
         
         # 4. 检查最近24小时的新闻
         print("\n⏰ 最近 24 小时的新闻:")
-        start_time = datetime.utcnow() - timedelta(hours=24)
+        start_time = datetime.now() - timedelta(hours=24)
         recent_count = await collection.count_documents({
             "publish_time": {"$gte": start_time}
         })

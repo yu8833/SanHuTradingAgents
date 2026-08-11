@@ -373,8 +373,8 @@ async def import_positions_csv(
                 stop_loss_price=stop_loss,
                 take_profit_price=take_profit,
                 thesis=None,
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow(),
+                created_at=datetime.now(),
+                updated_at=datetime.now(),
             ))
 
         if not positions:

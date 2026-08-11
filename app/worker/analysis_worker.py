@@ -205,7 +205,7 @@ class AnalysisWorker:
 
             heartbeat_data = {
                 "worker_id": self.worker_id,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now().isoformat(),
                 "current_task": self.current_task,
                 "status": "active" if self.running else "stopping"
             }

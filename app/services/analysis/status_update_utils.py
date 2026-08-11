@@ -29,13 +29,13 @@ async def perform_update_task_status(
     update_data: dict[str, Any] = {
         "status": status,
         "progress": progress,
-        "updated_at": datetime.utcnow(),
+        "updated_at": datetime.now(),
     }
 
     if status == AnalysisStatus.PROCESSING and "started_at" not in update_data:
-        update_data["started_at"] = datetime.utcnow()
+        update_data["started_at"] = datetime.now()
     elif status in [AnalysisStatus.COMPLETED, AnalysisStatus.FAILED]:
-        update_data["completed_at"] = datetime.utcnow()
+        update_data["completed_at"] = datetime.now()
         if result:
             update_data["result"] = result.dict()
 
@@ -48,7 +48,7 @@ async def perform_update_task_status(
             "task_id": task_id,
             "status": status,
             "progress": progress,
-            "updated_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.now().isoformat(),
         },
         ttl=3600,
     )
@@ -74,13 +74,13 @@ async def perform_update_task_status_with_tracker(
         "progress": progress_data["progress"],
         "current_step": progress_data["current_step"],
         "message": progress_data["message"],
-        "updated_at": datetime.utcnow(),
+        "updated_at": datetime.now(),
     }
 
     if status == AnalysisStatus.PROCESSING and "started_at" not in update_data:
-        update_data["started_at"] = datetime.utcnow()
+        update_data["started_at"] = datetime.now()
     elif status in [AnalysisStatus.COMPLETED, AnalysisStatus.FAILED]:
-        update_data["completed_at"] = datetime.utcnow()
+        update_data["completed_at"] = datetime.now()
         if result:
             update_data["result"] = result.dict()
 
@@ -98,7 +98,7 @@ async def perform_update_task_status_with_tracker(
             "elapsed_time": progress_data["elapsed_time"],
             "remaining_time": progress_data["remaining_time"],
             "steps": progress_data["steps"],
-            "updated_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.now().isoformat(),
         },
         ttl=3600,
     )

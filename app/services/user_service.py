@@ -103,8 +103,8 @@ class UserService:
                 "is_active": True,
                 "is_verified": False,
                 "is_admin": False,
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow(),
+                "created_at": datetime.now(),
+                "updated_at": datetime.now(),
                 "last_login": None,
                 "preferences": {
                     # 分析偏好
@@ -184,7 +184,7 @@ class UserService:
             # 更新最后登录时间
             self.users_collection.update_one(
                 {"_id": user_doc["_id"]},
-                {"$set": {"last_login": datetime.utcnow()}}
+                {"$set": {"last_login": datetime.now()}}
             )
 
             logger.info(f"✅ [authenticate_user] 用户认证成功: {username}")
@@ -222,7 +222,7 @@ class UserService:
     async def update_user(self, username: str, user_data: UserUpdate) -> User | None:
         """更新用户信息"""
         try:
-            update_data = {"updated_at": datetime.utcnow()}
+            update_data = {"updated_at": datetime.now()}
             
             # 只更新提供的字段
             if user_data.email:
@@ -277,7 +277,7 @@ class UserService:
                 {
                     "$set": {
                         "hashed_password": new_hashed_password,
-                        "updated_at": datetime.utcnow()
+                        "updated_at": datetime.now()
                     }
                 }
             )
@@ -302,7 +302,7 @@ class UserService:
                 {
                     "$set": {
                         "hashed_password": new_hashed_password,
-                        "updated_at": datetime.utcnow()
+                        "updated_at": datetime.now()
                     }
                 }
             )
@@ -335,8 +335,8 @@ class UserService:
                 "is_active": True,
                 "is_verified": True,
                 "is_admin": True,
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow(),
+                "created_at": datetime.now(),
+                "updated_at": datetime.now(),
                 "last_login": None,
                 "preferences": {
                     "default_market": "A股",
@@ -404,7 +404,7 @@ class UserService:
                 {
                     "$set": {
                         "is_active": False,
-                        "updated_at": datetime.utcnow()
+                        "updated_at": datetime.now()
                     }
                 }
             )
@@ -428,7 +428,7 @@ class UserService:
                 {
                     "$set": {
                         "is_active": True,
-                        "updated_at": datetime.utcnow()
+                        "updated_at": datetime.now()
                     }
                 }
             )

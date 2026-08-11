@@ -78,8 +78,8 @@ async def migrate_env_direct():
             update_data = {
                 "api_key": api_key,
                 "is_active": True,  # 有API密钥的自动启用
-                "extra_config": {"source": "environment", "migrated_at": datetime.utcnow().isoformat()},
-                "updated_at": datetime.utcnow()
+                "extra_config": {"source": "environment", "migrated_at": datetime.now().isoformat()},
+                "updated_at": datetime.now()
             }
             
             await providers_collection.update_one(
@@ -161,9 +161,9 @@ async def migrate_env_direct():
                 "name": provider_name,
                 "api_key": api_key,
                 "is_active": True,
-                "extra_config": {"source": "environment", "migrated_at": datetime.utcnow().isoformat()},
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow(),
+                "extra_config": {"source": "environment", "migrated_at": datetime.now().isoformat()},
+                "created_at": datetime.now(),
+                "updated_at": datetime.now(),
                 **info
             }
             

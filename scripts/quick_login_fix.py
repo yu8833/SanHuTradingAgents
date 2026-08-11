@@ -184,8 +184,8 @@ def create_basic_mongodb_data(client):
                 "role": "admin",
                 "is_active": True,
                 "is_superuser": True,
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow(),
+                "created_at": datetime.now(),
+                "updated_at": datetime.now(),
                 "settings": {
                     "default_research_depth": 2,
                     "enable_notifications": True,
@@ -203,13 +203,13 @@ def create_basic_mongodb_data(client):
                 "key": "system_version",
                 "value": "v1.0.0-preview",
                 "description": "系统版本号",
-                "updated_at": datetime.utcnow()
+                "updated_at": datetime.now()
             },
             {
                 "key": "max_concurrent_tasks",
                 "value": 3,
                 "description": "最大并发分析任务数",
-                "updated_at": datetime.utcnow()
+                "updated_at": datetime.now()
             }
         ]
         

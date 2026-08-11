@@ -4,7 +4,7 @@
 统一管理三数据源的财务数据存储和查询
 """
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from pymongo import ReplaceOne
@@ -279,7 +279,7 @@ class FinancialDataService:
                 "total_records": total_records,
                 "total_symbols": len(total_symbols),
                 "by_source": stats,
-                "last_updated": datetime.utcnow().isoformat()
+                "last_updated": datetime.now().isoformat()
             }
             
         except Exception as e:
@@ -297,7 +297,7 @@ class FinancialDataService:
     ) -> dict[str, Any] | list[dict[str, Any]] | None:
         """标准化财务数据"""
         try:
-            now = datetime.now(timezone.utc)
+            now = datetime.now()
             
             # 如果是列表，遍历处理每个元素
             if isinstance(financial_data, list):

@@ -1573,7 +1573,7 @@ async def get_reports_list(
                 market_type = "A股"
 
             # 创建时间
-            created_at = doc.get("created_at", datetime.utcnow())
+            created_at = doc.get("created_at", datetime.now())
             created_at_tz = to_config_tz(created_at)
 
             # 决策建议：列表页简化提取，避免完整结构化解析以提升性能
@@ -1747,8 +1747,8 @@ async def get_report_detail(
                 stock_name = get_stock_name(stock_symbol)
 
             # 获取时间（数据库中是 UTC 时间，需要转换为 UTC+8）
-            created_at = doc.get("created_at", datetime.utcnow())
-            updated_at = doc.get("updated_at", datetime.utcnow())
+            created_at = doc.get("created_at", datetime.now())
+            updated_at = doc.get("updated_at", datetime.now())
 
             # 转换时区：数据库中是 UTC 时间，转换为 UTC+8
             created_at_tz = to_config_tz(created_at)

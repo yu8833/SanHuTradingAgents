@@ -82,7 +82,7 @@ async def _sync_latest_to_market_quotes(symbol: str) -> None:
         "pct_chg": latest_doc.get("pct_chg"),
         "pre_close": latest_doc.get("pre_close"),
         "trade_date": latest_doc.get("trade_date"),
-        "updated_at": datetime.utcnow()
+        "updated_at": datetime.now()
     }
 
     # 🔥 日志：记录同步的成交量
@@ -383,7 +383,7 @@ async def sync_single_stock(
 
                             # Step 3: 构建文档（参考 basics_sync_service 的逻辑）
                             # 🔥 先获取当前时间，避免作用域问题
-                            now_iso = datetime.utcnow().isoformat()
+                            now_iso = datetime.now().isoformat()
 
                             name = stock_row.get("name") or ""
                             area = stock_row.get("area") or ""
@@ -506,7 +506,7 @@ async def sync_single_stock(
                         basic_data["code"] = symbol6
                         basic_data["symbol"] = symbol6
                         basic_data["source"] = "akshare"
-                        basic_data["updated_at"] = datetime.utcnow().isoformat()
+                        basic_data["updated_at"] = datetime.now().isoformat()
 
                         # 更新到数据库
                         await db.stock_basic_info.update_one(
@@ -687,7 +687,7 @@ async def sync_batch_stocks(
                                     # 添加必要字段
                                     basic_info["code"] = symbol6
                                     basic_info["source"] = "tushare"
-                                    basic_info["updated_at"] = datetime.utcnow()
+                                    basic_info["updated_at"] = datetime.now()
 
                                     await db.stock_basic_info.update_one(
                                         {"code": symbol6, "source": "tushare"},

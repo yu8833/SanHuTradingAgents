@@ -9,7 +9,7 @@
 """
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from pymongo import MongoClient, UpdateOne
 
 try:
@@ -24,7 +24,7 @@ COLLECTION = "stock_basic_info"
 
 
 def now():
-    return datetime.now(timezone.utc)
+    return datetime.now()
 
 
 def main():

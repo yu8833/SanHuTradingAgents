@@ -5,7 +5,7 @@
 import asyncio
 import sys
 import os
-from datetime import datetime, timezone
+from datetime import datetime
 
 # 添加项目根目录到Python路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -39,8 +39,8 @@ async def add_302ai_provider():
         "default_base_url": "https://api.302.ai/v1",
         "is_active": True,
         "supported_features": ["chat", "completion", "embedding", "image", "vision", "function_calling", "streaming"],
-        "created_at": datetime.now(timezone.utc),
-        "updated_at": datetime.now(timezone.utc)
+        "created_at": datetime.now(),
+        "updated_at": datetime.now()
     }
     
     # 插入数据

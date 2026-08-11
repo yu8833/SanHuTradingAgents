@@ -627,7 +627,7 @@ async def update_user_status(
         if not update_fields:
             raise HTTPException(status_code=400, detail="没有需要更新的字段")
 
-        update_fields["updated_at"] = datetime.utcnow()
+        update_fields["updated_at"] = datetime.now()
 
         # 直接更新数据库
         from pymongo import MongoClient

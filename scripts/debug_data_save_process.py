@@ -83,7 +83,7 @@ async def debug_data_save_process():
         
         for i, (date, row) in enumerate(df.iterrows()):
             # 模拟 _standardize_record 方法
-            now = datetime.utcnow()
+            now = datetime.now()
             
             # 处理日期
             if hasattr(date, 'strftime'):

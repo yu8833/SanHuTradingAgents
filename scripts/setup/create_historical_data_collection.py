@@ -114,8 +114,8 @@ async def create_historical_data_collection():
             "pb": 0.8,
             "ps": 1.1,
             "data_source": "example",
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow(),
+            "created_at": datetime.now(),
+            "updated_at": datetime.now(),
             "version": 1
         }
         

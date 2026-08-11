@@ -108,7 +108,7 @@ async def sync_stock_basic_info(
                 if basic_info:
                     # 添加 symbol 字段（向后兼容）
                     basic_info["symbol"] = code
-                    basic_info["updated_at"] = datetime.utcnow()
+                    basic_info["updated_at"] = datetime.now()
                     
                     # 更新数据库
                     await collection.update_one(
@@ -177,7 +177,7 @@ async def sync_stock_basic_info(
                     
                     if basic_info:
                         basic_info["symbol"] = code
-                        basic_info["updated_at"] = datetime.utcnow()
+                        basic_info["updated_at"] = datetime.now()
                         
                         await collection.update_one(
                             {"code": code},

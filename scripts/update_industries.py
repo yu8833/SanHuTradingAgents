@@ -136,7 +136,7 @@ async def update_industry_in_db():
                     {'_id': doc['_id']},
                     {'$set': {
                         'industry': new_industry,
-                        'updated_at': datetime.utcnow()
+                        'updated_at': datetime.now()
                     }}
                 )
                 updated += 1

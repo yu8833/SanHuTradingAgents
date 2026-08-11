@@ -154,7 +154,7 @@ class TushareProvider:
                     "updated_at": None
                 }
                 from datetime import datetime
-                quote_data["updated_at"] = datetime.utcnow()
+                quote_data["updated_at"] = datetime.now()
                 result[code] = quote_data
 
             logger.info(f"[TushareProvider] 获取到 {len(result)} 只股票的实时行情")
@@ -252,23 +252,64 @@ class TushareProvider:
             logger.error(f"[TushareProvider] 获取 {symbol} 历史数据失败: {e}")
             return None
 
-    async def get_financial_data(self, symbol: str, limit: int = 20) -> Optional[Dict[str, Any]]:
-        """获取财务数据
+    async def get_financial_data(self, symbol: str, limit: int = 20) -> Optional[Any]:
+        """获取财务数据（Tushare pro.fina_indicator 结构化多期数据）
+
+        替代原先逐只爬取多个免费 HTTP 源的 get_fundamentals，改用 Tushare 官方
+        财务指标接口，单次调用即可返回最近 limit 期结构化数据，大幅降低同步耗时。
 
         Args:
-            symbol: 股票代码
+            symbol: 股票代码（6 位，如 "600519"）
             limit: 获取期数
 
         Returns:
-            财务数据字典
+            list[dict] 按报告期倒序的多期财务数据；无数据返回 None
         """
         try:
-            from tradingagents.dataflows.a_stock import get_fundamentals
-            result = await asyncio.to_thread(get_fundamentals, symbol)
-            return result if result else None
+            adapter = self._get_adapter()
+            if adapter is None:
+                return None
+
+            # 归一化 ts_code（带交易所后缀）
+            if "." not in symbol:
+                if symbol.startswith(("6", "9")):
+                    ts_code = f"{symbol}.SH"
+                elif symbol.startswith(("8", "4")):
+                    ts_code = f"{symbol}.BJ"
+                else:
+                    ts_code = f"{symbol}.SZ"
+            else:
+                ts_code = symbol
+
+            df = await asyncio.to_thread(adapter.get_financial_data, ts_code, limit=limit)
+            if df is None or df.empty:
+                return None
+
+            records = df.to_dict("records")
+            # 补充统一字段（供 financial_data_service 标准化与 upsert 使用）
+            for rec in records:
+                rec["symbol"] = symbol
+                rec["code"] = symbol
+                rec["data_source"] = "tushare"
+                rec["report_type"] = "quarterly"
+                rec["report_period"] = self._norm_end_date(rec.get("end_date"))
+            return records
         except Exception as e:
             logger.error(f"[TushareProvider] 获取 {symbol} 财务数据失败: {e}")
             return None
+
+    @staticmethod
+    def _norm_end_date(d) -> str:
+        """将 yyyymmdd 归一为 yyyymmdd（原生即为该格式，输入非法返回空串）。"""
+        if not d:
+            return ""
+        s = str(d).strip()
+        if len(s) == 8 and s.isdigit():
+            return s
+        parts = s.replace("/", "-").split("-")
+        if len(parts) == 3:
+            return f"{parts[0]}{parts[1]}{parts[2]}"
+        return s[:8]
 
     async def get_dividend_data(self, symbol: str) -> List[Dict[str, Any]]:
         """获取个股分红送配数据（Tushare pro.dividend）。

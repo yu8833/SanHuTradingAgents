@@ -250,7 +250,7 @@ async def get_statistics(
         service = await get_internal_message_service()
         
         # 计算时间范围
-        end_time = datetime.utcnow()
+        end_time = datetime.now()
         start_time = end_time - timedelta(hours=hours_back)
         
         stats = await service.get_internal_statistics(symbol, start_time, end_time)

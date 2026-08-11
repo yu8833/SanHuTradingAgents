@@ -101,8 +101,8 @@ class SocialMediaService:
             operations = []
             for message in messages:
                 # 添加时间戳
-                message["created_at"] = datetime.utcnow()
-                message["updated_at"] = datetime.utcnow()
+                message["created_at"] = datetime.now()
+                message["updated_at"] = datetime.now()
                 
                 # 使用message_id和platform作为唯一标识
                 filter_dict = {

@@ -222,9 +222,8 @@ class SchedulerService:
             if kwargs:
                 logger.info(f"📝 任务 {job_id} 收到手动触发参数（仅记录，不修改原任务配置）: {kwargs}")
 
-            # 手动触发任务 - 使用带时区的当前时间
-            from datetime import timezone
-            now = datetime.now(timezone.utc)
+            # 手动触发任务 - 使用北京时间
+            now = datetime.now()
             job.modify(next_run_time=now)
             logger.info(f"🚀 手动触发任务 {job_id} (next_run_time={now}, was_paused={was_paused}, kwargs={kwargs})")
 

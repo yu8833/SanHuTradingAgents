@@ -184,6 +184,53 @@ class TushareAdapter(DataSourceAdapter):
             logger.error(f"Tushare: Failed to fetch dividend data for {ts_code}: {e}")
         return None
 
+    def get_financial_data(self, ts_code: str, limit: int = 20) -> pd.DataFrame | None:
+        """获取个股多期财务指标（Tushare pro.fina_indicator）。
+
+        返回按报告期（end_date）倒序的多期财务数据，字段已映射为统一命名：
+        - report_period 由 end_date 归一为 YYYYMMDD
+        - grossprofit_margin -> gross_margin, or_yoy -> revenue_yoy
+        - 其余保留 Tushare 原生字段名（roe/roa/netprofit_margin/q_profit_yoy/...）
+
+        Args:
+            ts_code: 带交易所后缀的代码，如 "600519.SH"
+            limit: 最多返回的报告期数（默认 20 期，约 5 年）
+        """
+        if not self.is_available():
+            return None
+        try:
+            import tushare as ts
+            token = getattr(self._provider, 'token', None)
+            if not token:
+                import os
+                token = os.getenv('TUSHARE_TOKEN', '').strip().strip('"').strip("'")
+            if not token:
+                return None
+            ts.set_token(token)
+            pro = ts.pro_api()
+            fields = ("ts_code,ann_date,end_date,roe,roa,netprofit_margin,"
+                      "grossprofit_margin,q_profit_yoy,netprofit_yoy,or_yoy,"
+                      "debt_to_assets,eps,bps,cfps,ocfps")
+            df = pro.fina_indicator(ts_code=ts_code, fields=fields)
+            if df is None or getattr(df, 'empty', True):
+                return None
+            # 按报告期倒序，取最近 limit 期
+            df = df.sort_values('end_date', ascending=False).head(limit)
+            # 字段映射为统一命名（保留原字段，另加别名，兼容筛选与个股详情两处消费方）
+            df = df.rename(columns={
+                'grossprofit_margin': 'gross_margin',
+                'or_yoy': 'revenue_yoy',
+            })
+            if 'netprofit_margin' in df.columns:
+                df['net_margin'] = df['netprofit_margin']
+            if 'netprofit_yoy' in df.columns:
+                df['net_profit_yoy'] = df['netprofit_yoy']
+            logger.info(f"Tushare: Successfully fetched {len(df)} financial periods for {ts_code}")
+            return df
+        except Exception as e:
+            logger.error(f"Tushare: Failed to fetch financial data for {ts_code}: {e}")
+            return None
+
     def get_realtime_quotes(self):
         """Get full-market near real-time quotes via Tushare rt_k fallback
         Returns dict keyed by 6-digit code: {'000001': {'close': ..., 'pct_chg': ..., 'amount': ...}}
