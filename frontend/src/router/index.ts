@@ -87,9 +87,9 @@ const routes: RouteRecordRaw[] = [
     path: '/screening',
     name: 'StockScreening',
     component: () => import('@/layouts/BasicLayout.vue'),
-    redirect: '/screening/three-buys-three-sells',
+    redirect: '/screening/common',
     meta: {
-      title: '选股',
+      title: '策略',
       icon: 'Search',
       requiresAuth: true,
       transition: 'slide-up'
@@ -101,7 +101,7 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Screening/StrategyScreener.vue'),
         meta: {
           title: '常用策略',
-          parentTitle: '选股',
+          parentTitle: '策略',
           requiresAuth: true
         }
       },
@@ -111,62 +111,8 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Screening/StrategyBacktest.vue'),
         meta: {
           title: '策略回测',
-          parentTitle: '选股',
+          parentTitle: '策略',
           requiresAuth: true
-        }
-      },
-      {
-        path: 'limit-up-pullback',
-        name: 'LimitUpPullback',
-        component: () => import('@/views/Screening/LimitUpPullback.vue'),
-        meta: {
-          title: '涨停回调',
-          parentTitle: '选股',
-          requiresAuth: true,
-          hidden: true // 暂时隐藏，后续可恢复
-        }
-      },
-      {
-        path: 'three-buys-three-sells',
-        name: 'ThreeBuysThreeSells',
-        component: () => import('@/views/Screening/ThreeBuysThreeSells.vue'),
-        meta: {
-          title: '三买三卖',
-          parentTitle: '选股',
-          requiresAuth: true
-        }
-      },
-      {
-        path: 'extreme-reversal',
-        name: 'ExtremeReversal',
-        component: () => import('@/views/Screening/ExtremeReversal.vue'),
-        meta: {
-          title: '极端反转',
-          parentTitle: '选股',
-          requiresAuth: true,
-          hidden: true // 暂时隐藏，后续可恢复
-        }
-      },
-      {
-        path: 'turnaround',
-        name: 'Turnaround',
-        component: () => import('@/views/Screening/Turnaround.vue'),
-        meta: {
-          title: '困境反转',
-          parentTitle: '选股',
-          requiresAuth: true,
-          hidden: true // 暂时隐藏，后续可恢复
-        }
-      },
-      {
-        path: 'small-cap-value',
-        name: 'SmallCapValue',
-        component: () => import('@/views/Screening/SmallCapValue.vue'),
-        meta: {
-          title: '小盘价值',
-          parentTitle: '选股',
-          requiresAuth: true,
-          hidden: true // 暂时隐藏，后续可恢复
         }
       },
       {
@@ -175,20 +121,8 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Screening/ConvertibleArbitrage.vue'),
         meta: {
           title: '转债博弈',
-          parentTitle: '选股',
-          requiresAuth: true,
-          hidden: true // 暂时隐藏，后续可恢复
-        }
-      },
-      {
-        path: 'ma-crossover',
-        name: 'MaCrossover',
-        component: () => import('@/views/Screening/MaCrossover.vue'),
-        meta: {
-          title: '均线交叉',
-          parentTitle: '选股',
-          requiresAuth: true,
-          hidden: true // 暂时隐藏，后续可恢复
+          parentTitle: '策略',
+          requiresAuth: true
         }
       },
       {
@@ -197,42 +131,42 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Screening/MacdDivergence.vue'),
         meta: {
           title: 'MACD背离',
-          parentTitle: '选股',
+          parentTitle: '策略',
           requiresAuth: true,
-          hidden: true // 暂时隐藏，后续可恢复
+          hidden: true // 高级变体，折叠保留
         }
       },
       {
-        path: 'volume-price',
-        name: 'VolumePrice',
-        component: () => import('@/views/Screening/VolumePrice.vue'),
+        path: 'extreme-reversal',
+        name: 'ExtremeReversal',
+        component: () => import('@/views/Screening/ExtremeReversal.vue'),
         meta: {
-          title: '量价配合',
-          parentTitle: '选股',
+          title: '极端反转',
+          parentTitle: '策略',
           requiresAuth: true,
-          hidden: true // 暂时隐藏，后续可恢复
+          hidden: true // 高级变体，折叠保留
         }
-      },
+      }
+    ]
+  },
+  {
+    path: '/candidate',
+    name: 'Candidate',
+    component: () => import('@/layouts/BasicLayout.vue'),
+    meta: {
+      title: '候选',
+      icon: 'Aim',
+      requiresAuth: true,
+      transition: 'slide-up'
+    },
+    children: [
       {
-        path: 'comparison',
-        name: 'StrategyComparison',
-        component: () => import('@/views/Screening/StrategyComparison.vue'),
+        path: '',
+        name: 'CandidateHome',
+        component: () => import('@/views/Candidate/index.vue'),
         meta: {
-          title: '策略对比',
-          parentTitle: '选股',
-          requiresAuth: true,
-          hidden: true // 暂时隐藏，后续可恢复
-        }
-      },
-      {
-        path: 'retail-center',
-        name: 'RetailCenter',
-        component: () => import('@/views/Screening/RetailCenter.vue'),
-        meta: {
-          title: '散户策略中心',
-          parentTitle: '选股',
-          requiresAuth: true,
-          hidden: true // 暂时隐藏，后续可恢复
+          title: '候选池',
+          requiresAuth: true
         }
       }
     ]
@@ -648,6 +582,15 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/StockAlerts/StockAlertsView.vue'),
         meta: {
           title: '监控中心',
+          requiresAuth: true
+        }
+      },
+      {
+        path: 'review',
+        name: 'PaperReview',
+        component: () => import('@/views/PaperTrading/Review.vue'),
+        meta: {
+          title: '交易复盘',
           requiresAuth: true
         }
       }

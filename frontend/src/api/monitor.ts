@@ -12,8 +12,8 @@ export interface MonitorRule {
   id: string
   name: string
   enabled: boolean
-  type: string          // signal | price | market
-  scope: string         // symbols | watchlist | all
+  type: string          // signal | price | market | aux | tbs
+  scope: string         // symbols | watchlist | all | positions
   symbols: string[]
   user_id?: string
   conditions: MonitorCondition[]
@@ -21,6 +21,9 @@ export interface MonitorRule {
   cooldown_seconds: number
   severity: string      // info | warn | critical
   message: string
+  tbs_dir?: string      // type=tbs 时：buy | sell | both
+  tbs_signals?: string[] // type=tbs 时：限定监听的信号（B1/B2/B3/S1/S2/S3）
+  builtin?: boolean     // 内置规则（三买三卖核心，不可删除）
   created_at?: string
 }
 
@@ -49,6 +52,9 @@ export interface MonitorOptions {
   scopes: { key: string; label: string }[]
   logics: { key: string; label: string }[]
   severities: { key: string; label: string }[]
+  tbs_dirs?: { key: string; label: string }[]
+  tbs_signals?: { key: string; label: string }[]
+  aux_fields?: { key: string; label: string }[]
 }
 
 export interface MonitorRulePayload {
@@ -63,6 +69,27 @@ export interface MonitorRulePayload {
   cooldown_seconds?: number
   severity?: string
   message?: string
+  tbs_dir?: string
+  tbs_signals?: string[]
+}
+
+export interface TbsOrder {
+  id: string
+  rule_id: string
+  rule_name: string
+  symbol: string
+  name: string
+  signal_type: string
+  signal_label: string
+  direction: string       // buy | sell
+  position_pct: number
+  reference_price: number
+  status: string          // pending | executed | cancelled | dismissed
+  created_at: string
+  executed_at?: string
+  executed_qty?: number
+  executed_price?: number
+  reason?: string
 }
 
 // 生成规则 id（小写字母数字下划线，1-40字符）
@@ -100,5 +127,19 @@ export const monitorApi = {
   // 手动触发评估
   async manualCheck() {
     return ApiClient.post<{ triggered: number }>('/api/monitor/check')
+  },
+
+  // 三买三卖待确认指令
+  async listTbsOrders(params?: { status?: string; limit?: number }) {
+    return ApiClient.get<{ orders: TbsOrder[] }>('/api/monitor/tbs/orders', params)
+  },
+  async executeTbsOrder(orderId: string) {
+    return ApiClient.post<{ order: Record<string, unknown> }>(`/api/monitor/tbs/orders/${orderId}/execute`)
+  },
+  async cancelTbsOrder(orderId: string) {
+    return ApiClient.post<{ order_id: string }>(`/api/monitor/tbs/orders/${orderId}/cancel`)
+  },
+  async dismissTbsOrder(orderId: string) {
+    return ApiClient.post<{ order_id: string }>(`/api/monitor/tbs/orders/${orderId}/dismiss`)
   },
 }

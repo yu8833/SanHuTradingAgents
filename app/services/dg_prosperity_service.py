@@ -12,11 +12,23 @@
 
 import contextlib
 import logging
+import math
 from datetime import datetime
 
 from app.core.database import get_mongo_db
 
 logger = logging.getLogger(__name__)
+
+
+def _finite(v):
+    """返回有限数值（过滤 NaN/±inf），非有限或 None 返回 False。"""
+    if v is None:
+        return False
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(f)
 
 QUADRANT_LABELS = {
     "double_click": "戴维斯双击",
@@ -133,6 +145,11 @@ class DgProsperityService:
                 doc = latest[code]
                 g = doc.get("g")
                 dg = doc.get("dg")
+                # 过滤非有限值：NaN/±inf 无法 JSON 序列化，且会污染聚合/象限判定
+                if not _finite(g):
+                    g = None
+                if not _finite(dg):
+                    dg = None
                 q = classify_quadrant(g, dg)
                 result[code] = {
                     "quadrant": q,
@@ -326,6 +343,9 @@ class DgProsperityService:
                 curr_g = docs_sorted[i].get("g")
                 if prev_g is not None and curr_g is not None:
                     dg = curr_g - prev_g
+                    # 避免写入 NaN/±inf（上季或当季数据缺失导致）
+                    if not _finite(dg):
+                        continue
                     with contextlib.suppress(Exception):
                         await collection.update_one(
                             {"_id": docs_sorted[i]["_id"]},
@@ -333,9 +353,76 @@ class DgProsperityService:
                         )
 
     async def get_sector_dg(self, industry: str) -> dict:
-        """获取行业平均 ΔG（宏观层面判断）"""
-        # 简化实现：返回空
-        return self._empty_quadrant()
+        """获取行业级 ΔG 景气（宏观层面判断，对齐教材四层链路）。
+
+        以本地 `stock_basic_info.industry` 反查该行业成分股，再批量取每只股票
+        `dg_prosperity` 的最新一期 G/ΔG/象限，聚合出行业级景气：
+        - 成分股数 / 有数据数
+        - 平均 G / 平均 ΔG
+        - 四象限分布
+        - 主导象限（按数量，平局按 双击>反转>见顶>双杀 优先级）
+
+        Args:
+            industry: 行业名（本地 stock_basic_info.industry 口径）
+
+        Returns:
+            {industry, quadrant, quadrant_label, quadrant_color, avg_g, avg_dg,
+             member_count, data_count, distribution, report_period, available}
+        """
+        from collections import Counter
+
+        db = await self._get_db()
+        # 1. 该行业全部成分股代码
+        cursor = db["stock_basic_info"].find(
+            {"industry": industry},
+            {"_id": 0, "code": 1},
+        )
+        codes = [str(s.get("code") or "") for s in await cursor.to_list(length=6000)]
+        codes = [c for c in codes if c]
+        member_count = len(codes)
+        if not codes:
+            return {**self._empty_quadrant(), "industry": industry, "member_count": 0,
+                    "data_count": 0, "distribution": {}}
+
+        # 2. 批量取每只股票最新一期象限（过滤非有限 g，避免 NaN/±inf 污染聚合）
+        batch = await self.get_quadrant_batch(codes)
+        valid = [d for d in batch.values()
+                 if d.get("available") and _finite(d.get("g"))]
+        data_count = len(valid)
+        if not valid:
+            return {**self._empty_quadrant(), "industry": industry, "member_count": member_count,
+                    "data_count": 0, "distribution": {}}
+
+        # 3. 聚合：平均 G / 平均 ΔG（均过滤非有限值）
+        gs = [float(d["g"]) for d in valid if _finite(d.get("g"))]
+        dg_list = [float(d["dg"]) for d in valid if _finite(d.get("dg"))]
+        avg_g = round(sum(gs) / len(gs), 2) if gs else None
+        avg_dg = round(sum(dg_list) / len(dg_list), 2) if dg_list else None
+
+        # 4. 四象限分布 + 主导象限（平局按优先级）
+        dist = Counter(d.get("quadrant") for d in valid)
+        priority = ["double_click", "reversal", "peaking", "double_kill"]
+        dominant = max(priority, key=lambda q: dist.get(q, 0))
+        if dist.get(dominant, 0) == 0:
+            dominant = "unknown"
+
+        # 5. 最新报告期（取成分股中最新的）
+        periods = [str(d.get("report_period") or "") for d in valid if d.get("report_period")]
+        report_period = max(periods) if periods else ""
+
+        return {
+            "industry": industry,
+            "quadrant": dominant,
+            "quadrant_label": QUADRANT_LABELS.get(dominant, "数据不足"),
+            "quadrant_color": QUADRANT_COLORS.get(dominant, "info"),
+            "avg_g": avg_g,
+            "avg_dg": avg_dg,
+            "member_count": member_count,
+            "data_count": data_count,
+            "distribution": {q: dist.get(q, 0) for q in QUADRANT_LABELS},
+            "report_period": report_period,
+            "available": True,
+        }
 
 
 _dg_service_instance: DgProsperityService | None = None

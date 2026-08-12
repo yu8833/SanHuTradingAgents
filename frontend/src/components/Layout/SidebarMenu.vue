@@ -16,47 +16,6 @@
       <template #title>资料</template>
     </el-menu-item>
 
-    <el-sub-menu index="/analysis">
-      <template #title>
-        <el-icon><TrendCharts /></el-icon>
-        <span>分析</span>
-      </template>
-      <el-menu-item index="/analysis/single">单股分析</el-menu-item>
-      <el-menu-item index="/analysis/batch">批量分析</el-menu-item>
-      <el-menu-item index="/reports">分析报告</el-menu-item>
-    </el-sub-menu>
-
-    <el-menu-item index="/tasks">
-      <el-icon><List /></el-icon>
-      <template #title>任务</template>
-    </el-menu-item>
-
-    <el-sub-menu index="/screening">
-      <template #title>
-        <el-icon><Search /></el-icon>
-        <span>选股</span>
-      </template>
-      <!-- 以下菜单项暂时隐藏，后续可恢复：移除 v-show="false" 即可 -->
-      <el-menu-item index="/screening/common">常用策略</el-menu-item>
-      <el-menu-item index="/screening/backtest">策略回测</el-menu-item>
-      <el-menu-item index="/screening/limit-up-pullback" v-show="false">涨停回调</el-menu-item>
-      <el-menu-item index="/screening/three-buys-three-sells">三买三卖</el-menu-item>
-      <el-menu-item index="/screening/extreme-reversal" v-show="false">极端反转</el-menu-item>
-      <el-menu-item index="/screening/turnaround" v-show="false">困境反转</el-menu-item>
-      <el-menu-item index="/screening/small-cap-value" v-show="false">小盘价值</el-menu-item>
-      <el-menu-item index="/screening/convertible-arbitrage" v-show="false">转债博弈</el-menu-item>
-      <el-menu-item index="/screening/ma-crossover" v-show="false">均线交叉</el-menu-item>
-      <el-menu-item index="/screening/macd-divergence" v-show="false">MACD背离</el-menu-item>
-      <el-menu-item index="/screening/volume-price" v-show="false">量价配合</el-menu-item>
-      <el-menu-item index="/screening/comparison" v-show="false">策略对比</el-menu-item>
-      <el-menu-item index="/screening/retail-center" v-show="false">散户策略中心</el-menu-item>
-    </el-sub-menu>
-
-    <el-menu-item index="/favorites">
-      <el-icon><Star /></el-icon>
-      <template #title>自选</template>
-    </el-menu-item>
-
     <el-sub-menu index="/vibe-review">
       <template #title>
         <el-icon><DataAnalysis /></el-icon>
@@ -68,6 +27,16 @@
       <el-menu-item index="/vibe/intel/radar">资讯雷达</el-menu-item>
     </el-sub-menu>
 
+    <el-menu-item index="/candidate">
+      <el-icon><Aim /></el-icon>
+      <template #title>候选</template>
+    </el-menu-item>
+
+    <el-menu-item index="/favorites">
+      <el-icon><Star /></el-icon>
+      <template #title>自选</template>
+    </el-menu-item>
+
     <el-sub-menu index="/paper-root">
       <template #title>
         <el-icon><CreditCard /></el-icon>
@@ -76,7 +45,37 @@
       <el-menu-item index="/paper">模拟交易</el-menu-item>
       <el-menu-item index="/portfolio">持仓追踪</el-menu-item>
       <el-menu-item index="/stock-alerts">监控中心</el-menu-item>
+      <el-menu-item index="/paper/review">交易复盘</el-menu-item>
     </el-sub-menu>
+
+    <el-sub-menu index="/analysis">
+      <template #title>
+        <el-icon><TrendCharts /></el-icon>
+        <span>分析</span>
+      </template>
+      <el-menu-item index="/analysis/single">单股分析</el-menu-item>
+      <el-menu-item index="/analysis/batch">批量分析</el-menu-item>
+      <el-menu-item index="/reports">分析报告</el-menu-item>
+    </el-sub-menu>
+
+    <el-sub-menu index="/screening">
+      <template #title>
+        <el-icon><Search /></el-icon>
+        <span>策略</span>
+      </template>
+      <el-menu-item index="/screening/common">常用策略</el-menu-item>
+      <el-menu-item index="/screening/backtest">策略回测</el-menu-item>
+      <!-- 转债博弈（资产类型独立，单独保留入口） -->
+      <el-menu-item index="/screening/convertible-arbitrage">转债博弈</el-menu-item>
+      <!-- 高级变体（折叠，保留但不并列展示） -->
+      <el-menu-item index="/screening/macd-divergence" v-show="false">MACD背离</el-menu-item>
+      <el-menu-item index="/screening/extreme-reversal" v-show="false">极端反转</el-menu-item>
+    </el-sub-menu>
+
+    <el-menu-item index="/tasks">
+      <el-icon><List /></el-icon>
+      <template #title>任务</template>
+    </el-menu-item>
 
     <el-sub-menu index="/settings-root">
       <template #title>
@@ -139,7 +138,8 @@ import {
   DataAnalysis,
   Wallet,
   Bell,
-  ChatDotRound
+  ChatDotRound,
+  Aim
 } from '@element-plus/icons-vue'
 
 const route = useRoute()

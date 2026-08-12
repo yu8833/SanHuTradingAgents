@@ -27,6 +27,7 @@ from typing import Any
 import numpy as np
 
 from app.core.database import get_mongo_db
+from app.services.candidate_pool.auxiliary_signal_layer import compute_auxiliary
 from app.utils.technical_indicators import (
     calc_atr_np,
     calc_bias_np,
@@ -1631,6 +1632,14 @@ class ThreeBuysThreeSellsService:
         total_scanned = len(stock_list)
         logger.info(f"📊 待扫描股票数量: {total_scanned}")
 
+        # 支持 pool 白名单：候选池等场景只扫指定代码集，避免全市场 5000 只耗时
+        pool = params.get("pool")
+        if pool:
+            pool_set = {str(c).zfill(6) for c in pool}
+            stock_list = [s for s in stock_list if str(s.get("code", "")).zfill(6) in pool_set]
+            total_scanned = len(stock_list)
+            logger.info(f"📊 候选池限扫: {total_scanned}")
+
         if total_scanned == 0:
             return {"total": 0, "items": [], "took_ms": 0, "scanned_count": 0, "params": params}
 
@@ -1778,8 +1787,16 @@ class ThreeBuysThreeSellsService:
                 macd_div = self._check_macd_divergence(ind, last_idx)
                 vp_div = self._check_volume_price_divergence(ind, last_idx)
 
-                # 至少有一个买卖信号才返回
-                if not signals and not bottom and not macd_div and not vp_div:
+                # 辅助信号系统（教材第三章）：复用同一套 ind，对主信号做确认/降权/预警
+                try:
+                    aux = compute_auxiliary(ind, market_trend, last_idx)
+                except Exception as e:
+                    logger.warning(f"📊 辅助信号计算失败 {code}: {e}")
+                    aux = {"details": {}, "warnings": [], "score": 50.0}
+
+                # 至少有一个买卖信号才返回（候选池模式 include_signaless 时保留全部，供辅助信号展示）
+                include_signaless = bool(params.get("include_signaless", False))
+                if not include_signaless and not signals and not bottom and not macd_div and not vp_div:
                     return None
 
                 # 计算主要买入信号评分
@@ -1797,7 +1814,8 @@ class ThreeBuysThreeSellsService:
                 if primary_signal is None and signals:
                     primary_signal = signals[0]
 
-                if (params.get("min_score", 5) > 0 and score < params.get("min_score", 5)
+                if (not include_signaless
+                        and params.get("min_score", 5) > 0 and score < params.get("min_score", 5)
                         and primary_signal and primary_signal["type"] in ("B1", "B2", "B3", "B2G")):
                     return None
 
@@ -1844,6 +1862,9 @@ class ThreeBuysThreeSellsService:
                     "dg_g": dg_info.get("g") if dg_info else None,
                     "dg_dg": dg_info.get("dg") if dg_info else None,
                     "market_trend": market_trend,
+                    "aux_score": aux.get("score", 50.0),
+                    "auxiliary": aux.get("details", {}),
+                    "aux_warnings": aux.get("warnings", []),
                     "trigger_date": ind["dates"][last_idx]
                 }
                 return item
@@ -1873,6 +1894,130 @@ class ThreeBuysThreeSellsService:
             "scanned_count": total_scanned,
             "params": params,
             "market_trend": market_trend
+        }
+
+    async def check_single_stock(self, code: str) -> dict[str, Any]:
+        """单股三买三卖买卖点检查 + 辅助检查点（供个股详情页展示）。
+
+        复用 scan 的指标预计算与信号检测，对单只股票返回：
+          - signals: 当前索引触发的三买三卖信号（B1/B2/B3/B2G/S1/S2/S3/SafetyNet）
+          - stock_trend / market_trend: 个股与大盘趋势
+          - checkpoints: MACD确认 / 抄底 / 上影洗筹 / 密集成交突破 / 大盘-个股联动 等辅助检查点
+          - aux_warnings / aux_score: 辅助预警与综合分
+        """
+        code = str(code).zfill(6)
+        db = await self._get_db()
+
+        # 个股基础信息（行业/市值，用于指标预计算）
+        info = await db["stock_basic_info"].find_one({"code": code})
+        info = info or {}
+        name = info.get("name", "")
+        industry = ""
+        raw_ind = info.get("industry")
+        if isinstance(raw_ind, dict):
+            industry = next((v for v in raw_ind.values() if v), "")
+        elif raw_ind:
+            industry = str(raw_ind)
+        market_cap = 0.0
+        try:
+            market_cap = float(info.get("total_mv") or 0)
+        except (ValueError, TypeError):
+            market_cap = 0.0
+
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=150)
+        start_str = start_date.strftime('%Y-%m-%d')
+        end_str = end_date.strftime('%Y-%m-%d')
+
+        quotes = await self._batch_get_quotes([code], start_str, end_str)
+        kline = quotes.get(code, [])
+        if len(kline) < 70:
+            return {"success": False, "message": f"{code} 历史数据不足"}
+
+        ind = self._precompute_indicators(kline, code, name, industry, market_cap)
+        if ind is None:
+            return {"success": False, "message": f"{code} 指标计算失败"}
+
+        last_idx = ind["n"] - 1
+        if last_idx < 60:
+            return {"success": False, "message": f"{code} 数据不足，无法分析"}
+
+        # 大盘趋势（上证指数）
+        market_trend = "neutral"
+        try:
+            idx_quotes = await self._get_market_index_klines(start_str, end_str)
+            if len(idx_quotes) > 60:
+                idx_ind = self._precompute_indicators(idx_quotes, "000001", "上证指数", "", 0)
+                if idx_ind:
+                    market_trend = calc_market_trend(
+                        idx_ind["closes"], idx_ind["ma60"], idx_ind["ma20"]
+                    )
+        except Exception as e:
+            logger.warning(f"📊 单股大盘趋势计算失败 {code}: {e}")
+
+        # 检测所有三买三卖信号
+        signals: list[dict[str, Any]] = []
+        local_params: dict[str, Any] = {"_market_trend": market_trend}
+        gmma_strong_bull = bool(ind["gmma_strong_bull"][last_idx])
+        overheated = self._check_overheat(ind, last_idx, local_params)
+
+        b1 = self._check_b1(ind, last_idx, local_params)
+        if b1:
+            signals.append(b1)
+        if gmma_strong_bull and not overheated:
+            b2 = self._check_b2(ind, last_idx, local_params)
+            if b2:
+                signals.append(b2)
+            b3 = self._check_b3(ind, last_idx, local_params)
+            if b3:
+                signals.append(b3)
+            b2g = self._check_gmma_b2(ind, last_idx, local_params)
+            if b2g:
+                signals.append(b2g)
+
+        s1 = self._check_s1(ind, last_idx, local_params)
+        if s1:
+            signals.append(s1)
+        s2 = self._check_s2(ind, last_idx, local_params)
+        if s2:
+            signals.append(s2)
+        s3 = self._check_s3(ind, last_idx)
+        if s3:
+            signals.append(s3)
+        safetynet = self._check_safety_net(ind, last_idx, local_params)
+        if safetynet:
+            signals.append(safetynet)
+
+        # 辅助检查点（教材第三章）
+        try:
+            aux = compute_auxiliary(ind, market_trend, last_idx)
+        except Exception as e:
+            logger.warning(f"📊 辅助检查点计算失败 {code}: {e}")
+            aux = {"details": {}, "warnings": [], "score": 50.0}
+
+        bottom = self._check_bottom_pickup(ind, last_idx)
+        macd_div = self._check_macd_divergence(ind, last_idx)
+        vp_div = self._check_volume_price_divergence(ind, last_idx)
+
+        stock_trend = str(ind["stock_trend"][last_idx])
+
+        return {
+            "success": True,
+            "code": code,
+            "name": name,
+            "close": round(float(ind["closes"][last_idx]), 2),
+            "pct_chg": round(float(ind["pct_chgs"][last_idx]), 2),
+            "trigger_date": ind["dates"][last_idx],
+            "market_trend": market_trend,
+            "stock_trend": stock_trend,
+            "signals": signals,
+            "signal_types": [s["type"] for s in signals],
+            "bottom_pickup": bottom,
+            "macd_divergence": macd_div,
+            "volume_price_divergence": vp_div,
+            "checkpoints": aux.get("details", {}),
+            "aux_warnings": aux.get("warnings", []),
+            "aux_score": aux.get("score", 50.0),
         }
 
     # ===== 卖点判断（回测用） =====

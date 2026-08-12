@@ -1224,6 +1224,35 @@ def _calculate_confidence(reports: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def recompute_confidence(result_data: dict[str, Any]) -> dict[str, Any]:
+    """根据 result_data 中的 reports 用当前算法重算置信度，修正历史入库的陈旧/错误值。
+
+    历史分析任务入库时可能由旧版算法或结构不匹配计算出异常低的置信度（如 0.02），
+    而当前算法对同一批完整报告可得到合理分数。读取时用当前算法重算，保证展示与算法一致。
+    同时补充从 reports 提取的维度评分（技术面/基本面/情绪面/消息面/资金面/政策面/解禁面），
+    供前端短线博弈/长线博弈各面分数展示。
+    """
+    if not isinstance(result_data, dict):
+        return result_data
+    reports = result_data.get("reports")
+    if not isinstance(reports, dict) or not reports:
+        return result_data
+    conf = _calculate_confidence(reports)
+    if conf:
+        result_data["confidence_score"] = conf.get("score", result_data.get("confidence_score", 0.0))
+        result_data["置信度详情"] = conf.get("details", [])
+    # 补充维度评分（历史结果可能缺失，从 reports 现算）
+    try:
+        extracted = extract_structured_fields(reports)
+        for field in ("技术面评分", "基本面评分", "情绪面评分", "消息面评分", "资金面评分", "政策面评分", "解禁面评分", "维度评分详情"):
+            val = extracted.get(field)
+            if val is not None and not result_data.get(field):
+                result_data[field] = val
+    except Exception:
+        pass
+    return result_data
+
+
 def _match_rating(text: str, aliases: list[str]) -> str | None:
     """
     从文本中抽取"操作建议/评级"的关键字（买入/持有/卖出等）。

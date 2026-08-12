@@ -78,6 +78,14 @@ export interface GlobalIndex {
   change_pct: number | null
 }
 
+export interface GlobalStock {
+  query: string
+  name: string
+  region: string
+  price: number | null
+  change_pct: number | null
+}
+
 export interface MarketSentiment {
   up: number
   down: number
@@ -373,6 +381,10 @@ export const vibeApi = {
 
   async getGlobalIndices() {
     return cachedGet<GlobalIndex[]>('/api/vibe/global-indices', undefined, 600000)
+  },
+
+  async getGlobalStocks() {
+    return cachedGet<GlobalStock[]>('/api/vibe/global-stocks', undefined, 600000)
   },
 
   async getMarketOverview() {

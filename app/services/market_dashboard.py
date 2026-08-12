@@ -86,7 +86,8 @@ def _load_market_rows() -> list[dict]:
                 "close": _num(doc.get("close")),
                 "pct_chg": pct,
                 "amount": _num(doc.get("amount")),
-                "turnover_rate": _num(doc.get("turnover_rate")),
+                # 保留 None 以区分「换手率缺失」与「真实为 0」，供量能兜底逻辑判断
+                "turnover_rate": doc.get("turnover_rate"),
                 "industry": doc.get("industry") or "",
             })
         return rows
@@ -180,6 +181,9 @@ def _build() -> dict:
     avg_turnover = sum(turnovers) / len(turnovers) if turnovers else 0
     high_turnover = sum(1 for v in turnovers if v >= 5.0)
     high_turnover_pct = high_turnover / total * 100 if total else 0
+    # 量能兜底：换手率缺失（如历史回填来源）时，用成交额占比近似资金活跃度，
+    # 避免情绪雷达「量能」维度恒为 0。
+    high_amount_pct = (sum(1 for r in rows if r["amount"] >= 1e8) / total * 100) if total else 0
 
     # 涨停/跌停/封板率/最高连板/梯队（短线情绪，失败时降级为空）
     zt_count = int(_num(sentiment.get("zt_real"))) if sentiment else 0
@@ -213,6 +217,8 @@ def _build() -> dict:
         {"key": "money", "label": "量能", "value": round(
             _score(avg_turnover, 0.6, 4.0) * 0.6
             + _score(high_turnover_pct, 2, 15) * 0.4
+            if turnovers else
+            _score(high_amount_pct, 2, 15)
         )},
         {"key": "speculation", "label": "投机", "value": round(
             _score(zt_count, 5, 90) * 0.25

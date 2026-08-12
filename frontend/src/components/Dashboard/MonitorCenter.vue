@@ -134,6 +134,7 @@
                   <div class="rule-top">
                     <el-tag size="small" :type="typeTag(rule.type)" effect="plain">{{ typeLabel(rule.type) }}</el-tag>
                     <span class="rule-name">{{ rule.name || '未命名规则' }}</span>
+                    <el-tag v-if="rule.builtin" size="small" type="danger" effect="plain">内置</el-tag>
                     <span v-if="!rule.enabled" class="rule-desc">已停用</span>
                   </div>
                   <div class="rule-meta">
@@ -155,7 +156,7 @@
                   <el-button size="small" text @click="openEdit(rule)">
                     <el-icon><EditPen /></el-icon>
                   </el-button>
-                  <el-button size="small" text type="danger" @click="deleteRule(rule.id)">
+                  <el-button size="small" text type="danger" :disabled="rule.builtin" :title="rule.builtin ? '内置规则不可删除，可关闭或修改' : '删除'">
                     <el-icon><Delete /></el-icon>
                   </el-button>
                 </div>
@@ -165,6 +166,69 @@
         </el-card>
       </el-col>
     </el-row>
+
+    <!-- 三买三卖待确认指令 -->
+    <el-card class="monitor-card" shadow="hover">
+      <template #header>
+        <div class="card-header">
+          <div class="card-title">
+            <el-icon><Promotion /></el-icon>
+            <span>三买三卖待确认指令</span>
+            <el-tag size="small" type="warning" effect="plain">{{ pendingOrders.length }}</el-tag>
+          </div>
+          <div class="card-actions">
+            <el-radio-group v-model="tbsStatusFilter" size="small" @change="loadTbsOrders">
+              <el-radio-button value="pending">待确认</el-radio-button>
+              <el-radio-button value="executed">已执行</el-radio-button>
+              <el-radio-button value="all">全部</el-radio-button>
+            </el-radio-group>
+          </div>
+        </div>
+      </template>
+
+      <div v-loading="loadingOrders" class="tbs-body">
+        <el-empty
+          v-if="!loadingOrders && tbsOrders.length === 0"
+          description="暂无待确认指令"
+          :image-size="80"
+        >
+          <p class="empty-hint">
+            配置「三买三卖自动执行」规则后，择时信号会生成指令。买1监自选→买入，卖1/2/3监持仓→减仓/清仓。
+          </p>
+        </el-empty>
+        <div v-else class="tbs-list">
+          <div v-for="o in tbsOrders" :key="o.id" :class="['tbs-item', { done: o.status !== 'pending' }]">
+            <div :class="['tbs-dir', o.direction]">{{ o.direction === 'buy' ? '买' : '卖' }}</div>
+            <div class="tbs-main">
+              <div class="tbs-top">
+                <span class="tbs-symbol">{{ o.symbol }}</span>
+                <span class="tbs-name">{{ o.name }}</span>
+                <el-tag size="small" :type="o.direction === 'buy' ? 'danger' : 'success'" effect="dark">
+                  {{ o.signal_label }}
+                </el-tag>
+                <el-tag size="small" effect="plain" type="info">{{ statusLabel(o.status) }}</el-tag>
+              </div>
+              <div class="tbs-meta">
+                <span>参考价 {{ o.reference_price }}</span>
+                <span>建议仓位 {{ pctLabel(o.position_pct) }}</span>
+                <span>{{ o.rule_name }}</span>
+              </div>
+              <div v-if="o.reason" class="tbs-reason">{{ o.reason }}</div>
+              <div v-if="o.status === 'executed'" class="tbs-result">
+                已成交 {{ o.executed_qty }} 股 @ {{ o.executed_price }}
+              </div>
+            </div>
+            <div class="tbs-actions" v-if="o.status === 'pending'">
+              <el-button size="small" type="primary" :loading="executingId === o.id" @click="executeOrder(o)">
+                执行
+              </el-button>
+              <el-button size="small" @click="cancelOrder(o)">取消</el-button>
+              <el-button size="small" text @click="dismissOrder(o)">忽略</el-button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </el-card>
 
     <!-- 规则编辑对话框 -->
     <el-dialog v-model="editorVisible" :title="editingRule ? '编辑监控规则' : '新建监控规则'" width="680px" top="6vh">
@@ -199,7 +263,22 @@
           </span>
         </el-form-item>
 
-        <el-form-item label="触发条件">
+        <!-- 三买三卖专用配置：无需触发条件，只需方向 + 监听信号 -->
+        <template v-if="draft.type === 'tbs'">
+          <el-form-item label="信号方向">
+            <el-select v-model="draft.tbs_dir" style="width: 200px">
+              <el-option v-for="d in options.tbs_dirs || []" :key="d.key" :value="d.key" :label="d.label" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="监听信号">
+            <el-select v-model="draft.tbs_signals" multiple clearable style="width: 100%">
+              <el-option v-for="s in options.tbs_signals || []" :key="s.key" :value="s.key" :label="s.label" />
+            </el-select>
+            <span class="scope-hint">留空表示监听该方向全部信号；三买三卖择时信号由系统自动计算，无需填写触发条件</span>
+          </el-form-item>
+        </template>
+
+        <el-form-item v-if="draft.type !== 'tbs'" label="触发条件">
           <div class="cond-editor">
             <div class="cond-toolbar">
               <el-select v-model="draft.logic" style="width: 160px">
@@ -213,7 +292,7 @@
               <span class="cond-logic-prefix">{{ condPrefix(idx) }}</span>
               <el-select v-model="cond.field" style="width: 200px">
                 <template v-if="cond.op === 'truth'">
-                  <el-option v-for="f in options.signal_fields" :key="f.key" :value="f.key" :label="f.label" />
+                  <el-option v-for="f in signalFieldOptions" :key="f.key" :value="f.key" :label="f.label" />
                 </template>
                 <template v-else>
                   <el-option
@@ -275,7 +354,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Lightning, Refresh, Bell, List, Plus, Delete, EditPen, InfoFilled,
@@ -302,12 +381,22 @@ const draft = reactive<{
   id: string; name: string; enabled: boolean; type: string; scope: string;
   symbols: string[]; user_id?: string; conditions: MonitorCondition[]; logic: string;
   cooldown_seconds: number; severity: string; message: string;
+  tbs_dir: string; tbs_signals: string[];
 }>({
   id: '', name: '', enabled: true, type: 'signal', scope: 'symbols', symbols: [],
   conditions: [], logic: 'and', cooldown_seconds: 3600, severity: 'info', message: '',
+  tbs_dir: 'buy', tbs_signals: [],
 })
 
 let pollTimer: number | null = null
+
+// 选择「三买三卖」类型时，默认作用域切到「自选股」（买1建仓），避免停留在不合适的 symbols
+watch(() => draft.type, (t) => {
+  if (t === 'tbs' && !editingRule.value) {
+    draft.scope = 'watchlist'
+    draft.conditions = []
+  }
+})
 
 // ── 汇总指标 ──────────────────────────────────────────
 // 今日触发（ts 为毫秒时间戳）
@@ -448,7 +537,7 @@ const openCreate = () => {
   Object.assign(draft, {
     id: genRuleId(), name: '', enabled: true, type: 'signal', scope: 'symbols',
     symbols: [], conditions: [], logic: 'and', cooldown_seconds: 3600,
-    severity: 'info', message: '',
+    severity: 'info', message: '', tbs_dir: 'buy', tbs_signals: [],
   })
   editorVisible.value = true
 }
@@ -462,13 +551,20 @@ const openEdit = (rule: MonitorRule) => {
     conditions: (rule.conditions || []).map((c) => ({ ...c })),
     logic: rule.logic || 'and', cooldown_seconds: rule.cooldown_seconds ?? 3600,
     severity: rule.severity || 'info', message: rule.message || '',
+    tbs_dir: rule.tbs_dir || 'buy', tbs_signals: [...(rule.tbs_signals || [])],
   })
   editorVisible.value = true
 }
 
 // ── 条件编辑 ──────────────────────────────────────────
+// 辅助信号规则（type=aux）用 aux_* 预警字段作为信号条件；其余用通用信号字段
+const signalFieldOptions = computed(() =>
+  draft.type === 'aux'
+    ? (options.aux_fields && options.aux_fields.length ? options.aux_fields : options.signal_fields)
+    : options.signal_fields
+)
 const addSignalCond = () => {
-  const field = options.signal_fields[0]?.key || 'signal_limit_up'
+  const field = signalFieldOptions.value[0]?.key || 'signal_limit_up'
   draft.conditions.push({ field, op: 'truth' })
 }
 const addThresholdCond = () => {
@@ -493,7 +589,8 @@ const saveRule = async () => {
     ElMessage.warning('请至少选择一只标的')
     return
   }
-  if (draft.conditions.length === 0) {
+  // 三买三卖规则无需触发条件（择时信号由系统自动计算）
+  if (draft.type !== 'tbs' && draft.conditions.length === 0) {
     ElMessage.warning('请至少添加一个触发条件')
     return
   }
@@ -511,9 +608,15 @@ const saveRule = async () => {
       logic: draft.logic, cooldown_seconds: draft.cooldown_seconds,
       severity: draft.severity, message: draft.message,
     }
+    if (draft.type === 'tbs') {
+      payload.tbs_dir = draft.tbs_dir
+      payload.tbs_signals = draft.tbs_signals
+    }
     if (!payload.name.trim()) {
-      const base = { signal: '信号监控', price: '价格监控', market: '市场异动监控' }[draft.type] || '监控规则'
-      if (draft.scope === 'watchlist') {
+      const base = { signal: '信号监控', price: '价格监控', market: '市场异动监控', aux: '辅助信号预警', tbs: '三买三卖自动执行' }[draft.type] || '监控规则'
+      if (draft.type === 'tbs') {
+        payload.name = `${base} · ${draft.tbs_dir === 'buy' ? '买入' : draft.tbs_dir === 'sell' ? '卖出' : '双向'}`
+      } else if (draft.scope === 'watchlist') {
         payload.name = `${base} · 自选股`
       } else {
         payload.name = draft.scope === 'symbols' && draft.symbols.length > 0
@@ -534,24 +637,24 @@ const saveRule = async () => {
 
 // ── 展示辅助 ──────────────────────────────────────────
 const typeLabel = (t: string) => {
-  const map: Record<string, string> = { signal: '信号', price: '价格/涨跌', market: '市场异动' }
+  const map: Record<string, string> = { signal: '信号', price: '价格/涨跌', market: '市场异动', aux: '辅助信号预警', tbs: '三买三卖自动执行' }
   return map[t] || t
 }
 const typeTag = (t: string): 'success' | 'info' | 'warning' | 'primary' => {
-  const map: Record<string, any> = { signal: 'success', price: 'warning', market: 'primary' }
+  const map: Record<string, any> = { signal: 'success', price: 'warning', market: 'primary', aux: 'info', tbs: 'danger' }
   return map[t] || 'info'
 }
 const sourceLabel = (s: string) => {
-  const map: Record<string, string> = { signal: '信号', price: '价格/涨跌', market: '市场异动' }
+  const map: Record<string, string> = { signal: '信号', price: '价格/涨跌', market: '市场异动', aux: '辅助信号预警', tbs: '三买三卖' }
   return map[s] || s
 }
 const severityTag = (s: string): 'info' | 'warning' | 'danger' => {
   const map: Record<string, any> = { info: 'info', warn: 'warning', critical: 'danger' }
   return map[s] || 'info'
 }
-const scopeLabel = (s: string) => (s === 'all' ? '全市场' : s === 'watchlist' ? '自选股' : '指定标的')
+const scopeLabel = (s: string) => (s === 'all' ? '全市场' : s === 'watchlist' ? '自选股' : s === 'positions' ? '纸面持仓' : '指定标的')
 const fieldLabel = (f: string) => {
-  const all = [...options.threshold_fields, ...options.signal_fields]
+  const all = [...options.threshold_fields, ...options.signal_fields, ...(options.aux_fields || [])]
   const found = all.find((item) => item.key === f)
   return found ? found.label : f
 }

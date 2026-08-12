@@ -152,6 +152,12 @@ def load_daily_panel(
 
     df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")
     df = df.sort_values(["symbol", "date"]).reset_index(drop=True)
+
+    # 补充涨跌幅：源数据 stock_daily_quotes 未存 pct_chg，用收盘价环比补齐（缺失处填充，保留真实源值）。
+    # 约定与前端一致：pct_chg 为小数（0.052 = +5.2%）。
+    if int(df["pct_chg"].notna().sum()) < len(df):
+        computed = df.groupby("symbol")["close"].pct_change().astype("float32")
+        df["pct_chg"] = df["pct_chg"].fillna(computed)
     return df
 
 

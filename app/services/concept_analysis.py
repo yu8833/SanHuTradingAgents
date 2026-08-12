@@ -249,24 +249,33 @@ def _build_rotation(top_n: int = 40) -> dict:
     """构建概念轮动 RPS 矩阵：取当日涨幅前 top_n 的概念，计算多窗口累计涨幅。
 
     说明：多窗口累计涨幅需逐个拉取概念指数历史，成本较高，故仅对「当日热门概念」
-    子集计算。结果按类别缓存。
+    子集计算，并用线程池并发拉取以加速。结果按类别缓存。
     """
+    import concurrent.futures
+
     concepts = _fetch_concept_board()
     valid = [c for c in concepts if c["pct_chg"] is not None]
     valid.sort(key=lambda c: c["pct_chg"], reverse=True)
     hot = valid[:top_n]
 
     rows = []
-    for c in hot:
-        rets = _concept_index_returns(c["name"])
-        if rets is None:
-            continue
-        rows.append({
-            "code": c["code"],
-            "name": c["name"],
-            "pct_chg": c["pct_chg"],
-            "returns": rets,
-        })
+    # 并发拉取各概念指数历史（akshare 为同步阻塞，放入线程池）
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+        future_map = {ex.submit(_concept_index_returns, c["name"]): c for c in hot}
+        for fut in concurrent.futures.as_completed(future_map):
+            c = future_map[fut]
+            try:
+                rets = fut.result()
+            except Exception:
+                rets = None
+            if rets is None:
+                continue
+            rows.append({
+                "code": c["code"],
+                "name": c["name"],
+                "pct_chg": c["pct_chg"],
+                "returns": rets,
+            })
 
     return {
         "windows": _PCT_WINDOWS,

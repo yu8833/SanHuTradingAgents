@@ -228,6 +228,7 @@ def _load_fundamentals(db, symbols) -> pd.DataFrame:
         {
             "_id": 0, "code": 1, "symbol": 1, "industry": 1,
             "total_mv": 1, "pe": 1, "pb": 1, "pe_ttm": 1, "pb_mrq": 1,
+            "roe": 1,
         },
     )
 
@@ -251,6 +252,7 @@ def _load_fundamentals(db, symbols) -> pd.DataFrame:
         pe = _to_float(doc.get("pe_ttm")) or _to_float(doc.get("pe"))
         pb = _to_float(doc.get("pb")) or _to_float(doc.get("pb_mrq"))
         mv = _to_float(doc.get("total_mv"))
+        roe = _to_float(doc.get("roe"))
         score = _pick_score(industry, pe, pb, mv)
         prev = best.get(code)
         if prev is None or score > prev["_score"]:
@@ -261,6 +263,7 @@ def _load_fundamentals(db, symbols) -> pd.DataFrame:
                 "total_mv": mv,
                 "pe_ttm": pe,
                 "pb": pb,
+                "roe": roe,
             }
 
     rows = [v for v in best.values()]
@@ -360,10 +363,39 @@ def _load_dividend_metrics(db, symbols, as_of_date: str) -> dict:
     return out
 
 
-def _enrich_target(db, target: pd.DataFrame, as_of_date: str) -> pd.DataFrame:
-    """把基本面(行业/市值/估值)与分红数据 join 进目标日筛选 DataFrame。
+def _load_growth_metrics(db, symbols) -> dict:
+    """从 stock_financial_data 加载每只股票最新一期财务增速与盈利指标。
 
-    新增列：industry, total_mv, pe_ttm, pb, div_12m_ps, div_paying_years, div_yield。
+    返回 {symbol: {"revenue_yoy": 营收同比, "net_profit_yoy": 净利同比, "roe": 净资产收益率}}。
+    每股取 report_period 倒序的第一条（最新报告期），供困境反转/小盘价值等策略过滤。
+    性能：按 symbol 查询该股最新一期，避免全量扫描。
+    """
+    if not symbols:
+        return {}
+    sym_list = [str(s) for s in symbols]
+    out: dict[str, dict] = {}
+    for sym in sym_list:
+        doc = db["stock_financial_data"].find_one(
+            {"symbol": sym},
+            {"_id": 0, "revenue_yoy": 1, "net_profit_yoy": 1,
+             "roe": 1, "report_period": 1},
+            sort=[("report_period", -1)],
+        )
+        if not doc:
+            continue
+        out[sym] = {
+            "revenue_yoy": _to_float(doc.get("revenue_yoy")),
+            "net_profit_yoy": _to_float(doc.get("net_profit_yoy")),
+            "roe": _to_float(doc.get("roe")),
+        }
+    return out
+
+
+def _enrich_target(db, target: pd.DataFrame, as_of_date: str) -> pd.DataFrame:
+    """把基本面(行业/市值/估值)、分红与财务增速数据 join 进目标日筛选 DataFrame。
+
+    新增列：industry, total_mv, pe_ttm, pb, div_12m_ps, div_paying_years, div_yield,
+    revenue_yoy, net_profit_yoy。
     """
     if target.empty:
         return target
@@ -383,11 +415,16 @@ def _enrich_target(db, target: pd.DataFrame, as_of_date: str) -> pd.DataFrame:
         out = out.merge(val, on="symbol", how="left", suffixes=("", "_val"))
         # 无每日估值的股票用最新快照兜底（保证列非空）
         if not fund.empty:
-            snap = fund[["symbol", "total_mv", "pe_ttm", "pb"]]
+            snap_cols = ["symbol", "total_mv", "pe_ttm", "pb"]
+            snap = fund[snap_cols]
             out = out.merge(snap, on="symbol", how="left", suffixes=("", "_snap"))
             for c in ("total_mv", "pe_ttm", "pb"):
-                out[c] = out[c].fillna(out[f"{c}_snap"])
-            out = out.drop(columns=[f"{c}_snap" for c in ("total_mv", "pe_ttm", "pb")])
+                snap_col = f"{c}_snap"
+                # 仅对存在 _snap 后缀列的字段做快照兜底，避免 KeyError。
+                if snap_col in out.columns:
+                    out[c] = out[c].fillna(out[snap_col])
+            out = out.drop(columns=[f"{c}_snap" for c in ("total_mv", "pe_ttm", "pb")
+                                    if f"{c}_snap" in out.columns])
     else:
         if not fund.empty:
             out = out.merge(fund, on="symbol", how="left", suffixes=("", "_fund"))
@@ -398,6 +435,14 @@ def _enrich_target(db, target: pd.DataFrame, as_of_date: str) -> pd.DataFrame:
 
     close = pd.to_numeric(out["close"], errors="coerce")
     out["div_yield"] = (out["div_12m_ps"] / close.where(close > 0)).round(4)
+
+    # 财务指标：每股取最新报告期，注入 revenue_yoy / net_profit_yoy / roe
+    # （困境反转、小盘价值等策略依赖）。roe 权威来源为 stock_financial_data，
+    # 不从 stock_basic_info 快照读取（该集合无 roe 字段）。
+    growth = _load_growth_metrics(db, symbols)
+    out["revenue_yoy"] = out["symbol"].map(lambda s: growth.get(str(s), {}).get("revenue_yoy"))
+    out["net_profit_yoy"] = out["symbol"].map(lambda s: growth.get(str(s), {}).get("net_profit_yoy"))
+    out["roe"] = out["symbol"].map(lambda s: growth.get(str(s), {}).get("roe"))
     return out
 
 

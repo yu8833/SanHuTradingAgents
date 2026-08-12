@@ -20,8 +20,6 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 
-from app.services.cache_layer import cached as cache_layer_cached
-
 HERE = os.path.dirname(os.path.abspath(__file__))
 SOURCES_FILE = os.path.join(HERE, "news_sources.json")
 CACHE_DIR = os.path.join(HERE, ".cache")
@@ -102,6 +100,13 @@ def _fetch_source(src: dict, per: int, cutoff, redline: list[str]):
         return None
 
 
+def _has_content(data: dict | None) -> bool:
+    """判断雷达数据是否含实际资讯条目（避免全空结果被当作有效缓存）。"""
+    if not data:
+        return False
+    return any(ind.get("items") for ind in data.get("industries") or [])
+
+
 def fetch_radar() -> dict:
     """抓全部源，返回 12 赛道数据并落盘缓存。"""
     # 修复：使用 with 语句确保文件句柄正确关闭
@@ -109,7 +114,7 @@ def fetch_radar() -> dict:
         cfg = json.load(f)
     days = cfg.get("fetch", {}).get("recent_days", 7)
     per = cfg.get("fetch", {}).get("per_source", 6)
-    cutoff = datetime.now() - timedelta(days=days)
+    cutoff = datetime.now(BEIJING) - timedelta(days=days)
     redline = [k.lower() for k in cfg.get("redline_keywords", [])]
 
     byhint: dict[str, list] = {}
@@ -163,11 +168,13 @@ def fetch_radar() -> dict:
         "industries": industries,
         "stats": {"industries": len(cfg["industries"]), "total_sources": len(cfg["sources"]), "failed_sources": failed},
     }
-    os.makedirs(CACHE_DIR, exist_ok=True)
-    tmp = CACHE_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False)
-    os.replace(tmp, CACHE_FILE)
+    # 仅当抓取到实际内容时才落盘，避免网络故障把已有的好缓存覆盖成空数据。
+    if _has_content(data):
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        tmp = CACHE_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        os.replace(tmp, CACHE_FILE)
     return data
 
 
@@ -209,12 +216,32 @@ def get_radar(force: bool = False) -> dict:
 
 
 async def get_radar_cached(force: bool = False) -> dict:
-    """带Redis缓存的资讯雷达读取，优先Redis，兜底本地文件。"""
+    """带Redis缓存的资讯雷达读取：Redis → 本地文件缓存 →（后台线程抓取）。
+
+    - force=True 时直接抓取（放入线程池，避免阻塞事件循环）。
+    - 冷缓存且本地文件有内容时快速返回，不做阻塞式全量 RSS 抓取。
+    - 抓取放入 asyncio.to_thread，避免 15s 全量抓取阻塞事件循环拖慢同进程其它请求。
+    """
+    import asyncio
+    from app.services.cache_layer import get_cache, set_cache
+
     if force:
-        return fetch_radar()
-    return await cache_layer_cached(
-        "vibe:news_radar",
-        fetch_radar,
-        category="news",
-        valid=lambda v: bool(v.get("industries"))
-    )
+        return await asyncio.to_thread(fetch_radar)
+
+    hit = await get_cache("vibe:news_radar")
+    if hit is not None:
+        return hit
+
+    local_data = load_cache()
+    if _has_content(local_data):
+        return local_data
+
+    data = await asyncio.to_thread(fetch_radar)
+    if _has_content(data):
+        await set_cache("vibe:news_radar", data, category="news")
+    else:
+        # 抓取为空（网络故障等）时兜底返回既有本地缓存，避免前端看到空数据
+        fallback = load_cache()
+        if _has_content(fallback):
+            return fallback
+    return data

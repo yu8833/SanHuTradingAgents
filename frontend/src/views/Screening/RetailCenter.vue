@@ -645,15 +645,6 @@ const strategyQuickEntries = [
     tagType: 'danger',
     borderColor: '#f56c6c',
     route: '/screening/limit-up-pullback'
-  },
-  {
-    key: 'three_buys_three_sells',
-    name: '三买三卖',
-    description: '缠论三买三卖策略，技术面趋势跟踪',
-    marketTag: '趋势市',
-    tagType: 'warning',
-    borderColor: '#e6a23c',
-    route: '/screening/three-buys-three-sells'
   }
 ]
 

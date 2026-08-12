@@ -14,6 +14,9 @@
       </el-button>
     </div>
 
+    <el-tabs v-model="activeTab" class="overview-tabs">
+      <!-- ============ A股市场 ============ -->
+      <el-tab-pane label="A股市场" name="ashare">
     <!-- 大盘指数 -->
     <section class="block">
       <div class="block-head">
@@ -213,32 +216,6 @@
       </div>
     </section>
 
-    <!-- 全球市场 -->
-    <section class="block">
-      <div class="block-head">
-        <span class="block-title"><el-icon><DataLine /></el-icon> 全球市场</span>
-      </div>
-      <div class="grid grid-5">
-        <el-card
-          v-for="item in globalIndices"
-          :key="item.key"
-          shadow="never"
-          class="idx-card"
-        >
-          <div class="idx-name">
-            {{ item.name }}<span class="region">{{ item.region }}</span>
-          </div>
-          <div class="idx-price">{{ item.price == null ? '—' : formatPrice(item.price) }}</div>
-          <div class="idx-change" :class="colorClass(item.change_pct)">
-            {{ item.change_pct == null ? '—' : sign(item.change_pct) + formatPct(item.change_pct) + '%' }}
-          </div>
-        </el-card>
-        <el-card v-if="!globalIndices.length && !loading" shadow="never" class="idx-card empty-card">
-          <el-empty :image-size="48" description="暂无全球指数" />
-        </el-card>
-      </div>
-    </section>
-
     <!-- 市场情绪 -->
     <section class="block">
       <div class="block-head">
@@ -308,6 +285,62 @@
         </div>
       </div>
     </section>
+      </el-tab-pane>
+
+      <!-- ============ 全球市场 ============ -->
+      <el-tab-pane label="全球市场" name="global">
+        <section class="block">
+          <div class="block-head">
+            <span class="block-title"><el-icon><DataLine /></el-icon> 全球指数</span>
+          </div>
+          <div class="grid grid-5">
+            <el-card
+              v-for="item in globalIndices"
+              :key="item.key"
+              shadow="never"
+              class="idx-card"
+            >
+              <div class="idx-name">
+                {{ item.name }}<span class="region">{{ item.region }}</span>
+              </div>
+              <div class="idx-price">{{ item.price == null ? '—' : formatPrice(item.price) }}</div>
+              <div class="idx-change" :class="colorClass(item.change_pct)">
+                {{ item.change_pct == null ? '—' : sign(item.change_pct) + formatPct(item.change_pct) + '%' }}
+              </div>
+            </el-card>
+            <el-card v-if="!globalIndices.length && !loading" shadow="never" class="idx-card empty-card">
+              <el-empty :image-size="48" description="暂无全球指数" />
+            </el-card>
+          </div>
+        </section>
+
+        <section class="block">
+          <div class="block-head">
+            <span class="block-title"><el-icon><DataAnalysis /></el-icon> 全球著名股票</span>
+            <span class="block-hint">美股 / 港股大盘蓝筹涨跌</span>
+          </div>
+          <div class="grid grid-5">
+            <el-card
+              v-for="item in globalStocks"
+              :key="item.secid"
+              shadow="never"
+              class="idx-card"
+            >
+              <div class="idx-name">
+                {{ item.name }}<span class="region">{{ item.region }}</span>
+              </div>
+              <div class="idx-price">{{ item.price == null ? '—' : formatPrice(item.price) }}</div>
+              <div class="idx-change" :class="colorClass(item.change_pct)">
+                {{ item.change_pct == null ? '—' : sign(item.change_pct) + formatPct(item.change_pct) + '%' }}
+              </div>
+            </el-card>
+            <el-card v-if="!globalStocks.length && !loading" shadow="never" class="idx-card empty-card">
+              <el-empty :image-size="48" description="暂无著名股票数据" />
+            </el-card>
+          </div>
+        </section>
+      </el-tab-pane>
+    </el-tabs>
 
     <!-- 免责声明 -->
     <p class="disclaimer">以上数据来自公开源，仅供参考，不构成投资建议</p>
@@ -330,13 +363,16 @@ import {
   vibeApi,
   type IndexQuote,
   type GlobalIndex,
+  type GlobalStock,
   type MarketSentiment,
   type MarketDashboard,
 } from '@/api/vibe'
 
 const loading = ref(false)
+const activeTab = ref('ashare')
 const indices = ref<IndexQuote[]>([])
 const globalIndices = ref<GlobalIndex[]>([])
+const globalStocks = ref<GlobalStock[]>([])
 const sentiment = ref<MarketSentiment | null>(null)
 const dashboard = ref<MarketDashboard | null>(null)
 
@@ -503,17 +539,21 @@ const loadAll = async () => {
     const results = await Promise.allSettled([
       withTimeout(vibeApi.getIndices(), 15000),
       withTimeout(vibeApi.getGlobalIndices(), 15000),
+      withTimeout(vibeApi.getGlobalStocks(), 15000),
       withTimeout(vibeApi.getMarketOverview(), 15000),
       withTimeout(vibeApi.getDashboard(), 20000),
     ])
 
     // 逐个处理结果，失败不影响其他数据显示
-    const [idxRes, gRes, ovRes, dashRes] = results
+    const [idxRes, gRes, gsRes, ovRes, dashRes] = results
     if (idxRes.status === 'fulfilled') {
       indices.value = idxRes.value.data || []
     }
     if (gRes.status === 'fulfilled') {
       globalIndices.value = gRes.value.data || []
+    }
+    if (gsRes.status === 'fulfilled') {
+      globalStocks.value = gsRes.value.data || []
     }
     if (ovRes.status === 'fulfilled') {
       sentiment.value = ovRes.value.data?.sentiment || null
@@ -543,6 +583,14 @@ onMounted(() => {
 <style scoped>
 .vibe-overview {
   padding: 4px;
+}
+
+.overview-tabs {
+  margin-bottom: 8px;
+}
+
+.overview-tabs :deep(.el-tabs__header) {
+  margin-bottom: 16px;
 }
 
 .page-header {

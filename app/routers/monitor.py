@@ -12,8 +12,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.core.response import ok
 from app.routers.auth_db import get_current_user
 from app.services.monitor_service import (
+    AUX_WARNING_FIELDS,
     SIGNAL_FIELDS,
     THRESHOLD_FIELDS,
+    TBS_DIRS,
     RuleModel,
     monitor_service,
 )
@@ -30,16 +32,31 @@ async def get_options(current_user: dict = Depends(get_current_user)):
     return ok({
         "threshold_fields": [{"key": k, "label": v} for k, v in THRESHOLD_FIELDS.items()],
         "signal_fields": [{"key": k, "label": v} for k, v in SIGNAL_FIELDS.items()],
+        "aux_fields": [{"key": k, "label": v} for k, v in AUX_WARNING_FIELDS.items()],
         "operators": [">", ">=", "<", "<=", "==", "!="],
         "types": [
             {"key": "signal", "label": "信号"},
             {"key": "price", "label": "价格/涨跌"},
             {"key": "market", "label": "市场异动"},
+            {"key": "aux", "label": "辅助信号预警"},
+            {"key": "tbs", "label": "三买三卖自动执行"},
         ],
         "scopes": [
             {"key": "symbols", "label": "指定标的"},
             {"key": "watchlist", "label": "自选股"},
             {"key": "all", "label": "全市场"},
+            {"key": "positions", "label": "纸面持仓"},
+        ],
+        "tbs_dirs": [{"key": "buy", "label": "买入信号(B1/B2/B3)"},
+                     {"key": "sell", "label": "卖出信号(S1/S2/S3)"},
+                     {"key": "both", "label": "买卖双向"}],
+        "tbs_signals": [
+            {"key": "B1", "label": "买1（均线/BIAS买点）"},
+            {"key": "B2", "label": "买2（加仓）"},
+            {"key": "B3", "label": "买3（加仓）"},
+            {"key": "S1", "label": "卖1（减仓）"},
+            {"key": "S2", "label": "卖2（减仓）"},
+            {"key": "S3", "label": "卖3（清仓）"},
         ],
         "logics": [
             {"key": "and", "label": "全部满足 (AND)"},
@@ -58,7 +75,7 @@ async def get_options(current_user: dict = Depends(get_current_user)):
 async def list_rules(current_user: dict = Depends(get_current_user)):
     """监控规则列表。"""
     try:
-        rules = await monitor_service.list_rules()
+        rules = await monitor_service.list_rules(current_user["id"])
         return ok({"rules": rules})
     except Exception as e:
         logger.error(f"❌ 获取监控规则失败: {e}", exc_info=True)
@@ -71,8 +88,8 @@ async def save_rule(req: RuleModel, current_user: dict = Depends(get_current_use
     """新建或更新监控规则。"""
     try:
         rule = req.model_dump()
-        # 「自选股」作用域绑定创建/编辑用户，评估时动态解析其自选股
-        if rule.get("scope") == "watchlist":
+        # 「自选股」/「持仓」/「三买三卖」作用域绑定创建/编辑用户，评估时动态解析并归属执行账户
+        if rule.get("scope") in ("watchlist", "positions") or rule.get("type") == "tbs":
             rule["user_id"] = current_user["id"]
         else:
             rule.pop("user_id", None)
@@ -96,6 +113,8 @@ async def delete_rule(rule_id: str, current_user: dict = Depends(get_current_use
         return ok({"rule_id": rule_id}, "规则已删除")
     except HTTPException:
         raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"❌ 删除监控规则失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"删除监控规则失败: {str(e)}")
@@ -154,3 +173,63 @@ async def manual_check(current_user: dict = Depends(get_current_user)):
     except Exception as e:
         logger.error(f"❌ 手动监控评估失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"手动监控评估失败: {str(e)}")
+
+
+# ── 三买三卖待确认指令（type=tbs） ───────────────────────
+@router.get("/tbs/orders")
+async def list_tbs_orders(
+    status: str | None = Query(default=None, description="pending/executed/cancelled/dismissed/all"),
+    limit: int = Query(default=200, ge=1, le=1000),
+    current_user: dict = Depends(get_current_user),
+):
+    """列出当前用户的待确认交易指令（时间倒序）。"""
+    try:
+        orders = await monitor_service.list_tbs_orders(
+            user_id=current_user["id"], status=status, limit=limit)
+        return ok({"orders": orders})
+    except Exception as e:
+        logger.error(f"❌ 获取待确认指令失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取待确认指令失败: {str(e)}")
+
+
+@router.post("/tbs/orders/{order_id}/execute")
+async def execute_tbs_order(order_id: str, current_user: dict = Depends(get_current_user)):
+    """确认执行待确认指令（走纸面交易成交入口）。"""
+    try:
+        order = await monitor_service.execute_tbs_order(order_id, current_user["id"])
+        return ok({"order": order}, "指令已执行")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ 执行待确认指令失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"执行待确认指令失败: {str(e)}")
+
+
+@router.post("/tbs/orders/{order_id}/cancel")
+async def cancel_tbs_order(order_id: str, current_user: dict = Depends(get_current_user)):
+    """取消待确认指令（标记为已取消）。"""
+    try:
+        ok_flag = await monitor_service.cancel_tbs_order(order_id, current_user["id"])
+        if not ok_flag:
+            raise HTTPException(status_code=400, detail="指令不存在或已处理")
+        return ok({"order_id": order_id}, "指令已取消")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 取消待确认指令失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"取消待确认指令失败: {str(e)}")
+
+
+@router.post("/tbs/orders/{order_id}/dismiss")
+async def dismiss_tbs_order(order_id: str, current_user: dict = Depends(get_current_user)):
+    """忽略待确认指令（标记为已忽略，不执行）。"""
+    try:
+        ok_flag = await monitor_service.dismiss_tbs_order(order_id, current_user["id"])
+        if not ok_flag:
+            raise HTTPException(status_code=400, detail="指令不存在或已处理")
+        return ok({"order_id": order_id}, "指令已忽略")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 忽略待确认指令失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"忽略待确认指令失败: {str(e)}")

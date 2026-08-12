@@ -416,27 +416,36 @@ class QuotesIngestionService:
             if code6 in ["300750", "000001", "600000"]:  # 只记录几个示例股票
                 logger.info(f"📊 [写入market_quotes] {code6} - volume={volume}, amount={q.get('amount')}, source={source}")
 
+            # 换手率/量比：仅当本次数据源提供有效值时写入，避免「历史数据回填」等
+            # 无换手率来源的路径用 None 覆盖掉实时行情已入库的换手率，导致情绪雷达量能恒为 0。
+            turnover_rate = _s_turnover(q.get("turnover_rate"))
+            vol_ratio = _s_turnover(q.get("vol_ratio"))
+            name = str(q.get("name") or "").strip() or None
+            set_fields = {
+                "code": code6,
+                "symbol": code6,  # 添加 symbol 字段，与 code 保持一致
+                "close": _s_price(q.get("close")),
+                "pct_chg": _s_pct(q.get("pct_chg")),
+                "amount": _s_amount(q.get("amount")),
+                "volume": _s_volume(volume),
+                "open": _s_price(q.get("open")),
+                "high": _s_price(q.get("high")),
+                "low": _s_price(q.get("low")),
+                "pre_close": _s_price(q.get("pre_close")),
+                "trade_date": trade_date,
+                "updated_at": updated_at,
+            }
+            # 补充字段：换手率/量比/名称（供情绪雷达量能维度、榜单与名称解析使用）。
+            # None 时用 $setOnInsert 兜底（仅新文档写入时生效），避免覆盖既有实时值。
+            if turnover_rate is not None or vol_ratio is not None or name is not None:
+                set_fields["turnover_rate"] = turnover_rate
+                set_fields["vol_ratio"] = vol_ratio
+                set_fields["name"] = name
+
             ops.append(
                 UpdateOne(
                     {"code": code6},
-                    {"$set": {
-                        "code": code6,
-                        "symbol": code6,  # 添加 symbol 字段，与 code 保持一致
-                        "close": _s_price(q.get("close")),
-                        "pct_chg": _s_pct(q.get("pct_chg")),
-                        "amount": _s_amount(q.get("amount")),
-                        "volume": _s_volume(volume),
-                        "open": _s_price(q.get("open")),
-                        "high": _s_price(q.get("high")),
-                        "low": _s_price(q.get("low")),
-                        "pre_close": _s_price(q.get("pre_close")),
-                        "trade_date": trade_date,
-                        "updated_at": updated_at,
-                        # 补充字段：换手率/量比/名称（供情绪雷达量能维度、榜单与名称解析使用）
-                        "turnover_rate": _s_turnover(q.get("turnover_rate")),
-                        "vol_ratio": _s_turnover(q.get("vol_ratio")),
-                        "name": str(q.get("name") or "").strip() or None,
-                    }},
+                    {"$set": set_fields},
                     upsert=True,
                 )
             )

@@ -2282,6 +2282,12 @@ class SimpleAnalysisService:
                         # 为兼容前端，这里沿用 memory_manager 的字段名
                         "result_data": doc.get("result"),
                     }
+                    # 🔥 用当前算法重算置信度，修正历史入库的陈旧/错误值
+                    try:
+                        from app.routers.reports import recompute_confidence
+                        item["result_data"] = recompute_confidence(item.get("result_data"))
+                    except Exception:
+                        pass
                     # 时间格式转为 ISO 字符串（添加时区信息）
                     for k in ("start_time", "end_time"):
                         if item.get(k) and hasattr(item[k], "isoformat"):

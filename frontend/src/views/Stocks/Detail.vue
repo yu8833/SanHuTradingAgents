@@ -184,7 +184,70 @@
             <div class="hint">{{ analysisMessage || '正在生成分析报告…' }}</div>
           </div>
           <div v-else class="detail">
-            <!-- 分析时间和信心度 -->
+            <!-- 决策建议（仅呈现结果标签，不显示内容） -->
+            <div v-if="decisionRecommendation" class="decision-box">
+              <div class="decision-header">
+                <span class="decision-icon">🎯</span>
+                <span class="decision-label">决策建议</span>
+                <el-tag :type="recommendationTagType" effect="dark" size="small">{{ recommendationLabel }}</el-tag>
+              </div>
+            </div>
+
+            <!-- 短线博弈 -->
+            <div v-if="shortTermScores.length" class="score-section">
+              <div class="score-section-title">⚡ 短线博弈</div>
+              <div class="score-grid">
+                <el-tooltip
+                  v-for="item in shortTermScores"
+                  :key="item.field"
+                  placement="top"
+                  effect="dark"
+                >
+                  <template #content>
+                    <div style="max-width: 250px; line-height: 1.6;">
+                      <div style="font-weight: bold; margin-bottom: 6px;">{{ item.analyst }} · {{ item.max_score }}分制</div>
+                      <div style="font-size: 12px; opacity: 0.9;">{{ item.basis }}</div>
+                    </div>
+                  </template>
+                  <div class="score-card" :class="scoreClass(item.score)">
+                    <div class="score-name">{{ item.name }}</div>
+                    <div class="score-value">{{ formatScore(item.score) }}<span class="score-unit">分</span></div>
+                    <div class="score-bar">
+                      <div class="score-bar-fill" :style="{ width: getScorePercent(item.score) + '%' }"></div>
+                    </div>
+                  </div>
+                </el-tooltip>
+              </div>
+            </div>
+
+            <!-- 长线博弈 -->
+            <div v-if="longTermScores.length" class="score-section">
+              <div class="score-section-title">💎 长线博弈</div>
+              <div class="score-grid">
+                <el-tooltip
+                  v-for="item in longTermScores"
+                  :key="item.field"
+                  placement="top"
+                  effect="dark"
+                >
+                  <template #content>
+                    <div style="max-width: 250px; line-height: 1.6;">
+                      <div style="font-weight: bold; margin-bottom: 6px;">{{ item.analyst }} · {{ item.max_score }}分制</div>
+                      <div style="font-size: 12px; opacity: 0.9;">{{ item.basis }}</div>
+                    </div>
+                  </template>
+                  <div class="score-card" :class="scoreClass(item.score)">
+                    <div class="score-name">{{ item.name }}</div>
+                    <div class="score-value">{{ formatScore(item.score) }}<span class="score-unit">分</span></div>
+                    <div class="score-bar">
+                      <div class="score-bar-fill" :style="{ width: getScorePercent(item.score) + '%' }"></div>
+                    </div>
+                  </div>
+                </el-tooltip>
+              </div>
+            </div>
+
+            <!-- 分析时间和信心度（放在最后） -->
             <div class="analysis-meta">
               <span class="analysis-time">
                 <el-icon><Clock /></el-icon>
@@ -206,19 +269,294 @@
           </div>
         </el-card>
 
-        <!-- K线蜡烛图 -->
-        <el-card shadow="hover" class="kline-card" style="margin-top: 16px;">
+        <!-- 🔥 三买三卖买卖点检查（检测当前股价处于三买三卖哪个阶段） -->
+        <el-card shadow="hover" class="tbs-check-card" style="margin-top: 16px;">
           <template #header>
             <div class="card-hd">
-              <div>价格K线</div>
+              <div>
+                三买三卖买卖点检查
+                <el-tooltip content="基于三买三卖交易系统，检测当前股价是否触发买点（B1/B2/B3）或卖点（S1/S2/S3），判断当前所处买卖阶段。" placement="top">
+                  <el-icon class="help-icon-inline"><QuestionFilled /></el-icon>
+                </el-tooltip>
+              </div>
+              <el-tag v-if="buySellCheckData" type="info" size="small">{{ buySellCheckData.trigger_date }}</el-tag>
+            </div>
+          </template>
+
+          <el-empty v-if="buySellCheckLoading" description="检查中..." :image-size="60" />
+          <el-alert
+            v-else-if="!buySellCheckData"
+            type="info"
+            :closable="false"
+            title="三买三卖数据暂不可用"
+          >
+            仅A股支持，或历史数据不足。
+          </el-alert>
+          <div v-else>
+            <!-- 个股/大盘趋势 + 收盘概览 -->
+            <div class="tbs-overview">
+              <el-tag :type="tbsTrendTone(buySellCheckData.stock_trend)" effect="dark" size="small">
+                个股 {{ tbsTrendLabel(buySellCheckData.stock_trend) }}
+              </el-tag>
+              <el-tag :type="tbsTrendTone(buySellCheckData.market_trend)" size="small">
+                大盘 {{ tbsTrendLabel(buySellCheckData.market_trend) }}
+              </el-tag>
+              <span class="tbs-close">收盘 {{ fmtPrice(buySellCheckData.close) }}（{{ fmtNum(buySellCheckData.pct_chg) }}%）</span>
+            </div>
+
+            <!-- 当前所处阶段 -->
+            <div class="tbs-stage">
+              <template v-if="buySellCheckData.signals && buySellCheckData.signals.length">
+                <div class="tbs-stage-title">当前触发信号</div>
+                <div v-for="sig in buySellCheckData.signals" :key="sig.type" class="tbs-signal" :class="tbsSignalClass(sig.type)">
+                  <span class="tbs-signal-type">{{ sig.type }}</span>
+                  <span class="tbs-signal-label">{{ sig.type_label }}</span>
+                  <span class="tbs-signal-desc">{{ tbsSignalDesc(sig.type) }}</span>
+                </div>
+              </template>
+              <el-empty v-else description="当前未触发三买三卖信号" :image-size="50" />
+            </div>
+          </div>
+        </el-card>
+
+        <!-- 🔥 量价分析（价格K线+成交量融合图 + 五步分析法 + 综合结论） -->
+        <el-card shadow="hover" class="volume-price-card" style="margin-top: 16px;">
+          <template #header>
+            <div class="card-hd">
+              <div>
+                量价分析
+                <el-tooltip content="价格K线与成交量同图联动，支持日/周/月切换；下方为五步量价分析。" placement="top">
+                  <el-icon class="help-icon-inline"><QuestionFilled /></el-icon>
+                </el-tooltip>
+              </div>
               <div class="periods">
                 <el-segmented v-model="period" :options="periodOptions" size="small" />
               </div>
+              <el-tag v-if="volumePriceData" type="info" size="small">{{ volumePriceData.date }}</el-tag>
             </div>
           </template>
-          <div class="kline-container">
-            <v-chart class="k-chart" :option="kOption" autoresize />
+
+          <!-- 价格K线+成交量 融合图（数据来自 getKline，随周期切换） -->
+          <div v-if="klineItems.length" class="vp-chart-wrap">
+            <v-chart class="vp-chart" :option="vpOption" autoresize />
             <div class="legend">当前周期：{{ period }} · 数据源：{{ klineSource || '-' }} · 最近：{{ lastKTime || '-' }} · 收：{{ fmtPrice(lastKClose) }}</div>
+          </div>
+
+          <el-empty v-if="volumePriceLoading" description="分析中..." :image-size="60" />
+          <el-alert
+            v-else-if="!volumePriceData"
+            type="info"
+            :closable="false"
+            title="量价分析数据暂不可用"
+          >
+            仅A股支持量价分析，或历史数据不足。
+          </el-alert>
+          <div v-else>
+            <!-- 综合结论 -->
+            <div class="vp-overall" :class="'vp-bias-' + vpBiasClass(volumePriceData.overall?.bias)">
+              <div class="vp-overall-head">
+                <span class="vp-overall-label">综合判断</span>
+                <!-- 偏多/偏空/中性 标签：悬浮展示该判断的详细依据（信号列表） -->
+                <el-tooltip placement="top" :show-after="200">
+                  <template #content>
+                    <div class="vp-bias-tip">
+                      <div>{{ vpBiasTip(volumePriceData.overall) }}</div>
+                      <div v-if="volumePriceData.overall?.bias_basis?.length" class="vp-bias-basis">
+                        <div class="vp-bias-basis-title">判断依据</div>
+                        <div v-for="s in volumePriceData.overall.bias_basis" :key="s" class="vp-bias-basis-item">· {{ s }}</div>
+                      </div>
+                    </div>
+                  </template>
+                  <el-tag :type="vpBiasTagType(volumePriceData.overall?.bias)" effect="dark" size="small" class="vp-bias-tag">
+                    {{ volumePriceData.overall?.bias || '中性' }}
+                  </el-tag>
+                </el-tooltip>
+                <el-tooltip
+                  v-if="volumePriceData.overall?.scenario"
+                  placement="top"
+                >
+                  <template #content>
+                    <div class="vp-scenario-tip">{{ volumePriceData.overall.scenario_meaning || volumePriceData.overall.scenario }}</div>
+                  </template>
+                  <el-tag
+                    type="warning"
+                    effect="plain"
+                    size="small"
+                    class="vp-scenario-tag"
+                  >
+                    {{ volumePriceData.overall.scenario }}
+                  </el-tag>
+                </el-tooltip>
+              </div>
+              <!-- 当前量价状态（结构化模块，替代长段落） -->
+              <div v-if="volumePriceData.overall?.current_state" class="vp-block">
+                <span class="vp-block-label vp-label-state">当前状态</span>
+                <span class="vp-block-text">{{ volumePriceData.overall.current_state }}</span>
+              </div>
+
+              <!-- 情景关键信号（低位缩量等情景给出可落地企稳/见顶信号） -->
+              <div v-if="volumePriceData.overall?.signal_note" class="vp-block">
+                <span class="vp-block-label vp-label-signal">关键信号</span>
+                <span class="vp-block-text">{{ volumePriceData.overall.signal_note }}</span>
+              </div>
+            </div>
+
+            <!-- 五步分析明细（默认折叠，需要时点击展开） -->
+            <el-collapse v-model="vpStepsActive" class="vp-collapse">
+              <el-collapse-item name="steps">
+                <template #title>
+                  <span class="vp-collapse-title">五步分析明细</span>
+                  <el-tag size="small" type="info" effect="plain" class="vp-collapse-hint">点击展开 / 收起</el-tag>
+                </template>
+                <div class="vp-steps">
+              <div v-for="step in volumePriceData.steps" :key="step.step" class="vp-step">
+                <div class="vp-step-header">
+                  <span class="vp-step-num">{{ step.step }}</span>
+                  <span class="vp-step-title">{{ step.title }}</span>
+                  <!-- 每个分析内容的具体含义：鼠标停留显示 -->
+                  <el-tooltip v-if="step.meaning" :content="step.meaning" placement="top">
+                    <el-icon class="help-icon-inline"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                  <!-- 第一步：位置标签 -->
+                  <el-tag v-if="step.step === 1 && step.position" :type="vpPositionTagType(step.position)" size="small">
+                    {{ step.position }}
+                  </el-tag>
+                  <!-- 第二步：趋势标签 + OBV 背离辅助 -->
+                  <el-tag v-if="step.step === 2 && step.trend" :type="step.trend === '多头排列' ? 'danger' : step.trend === '空头排列' ? 'success' : 'info'" size="small">
+                    {{ step.trend }}
+                  </el-tag>
+                  <el-tag v-if="step.step === 2 && step.divergence && step.divergence !== '无背离'" :type="step.divergence === '底背离' ? 'success' : 'warning'" size="small">
+                    {{ step.divergence }}
+                  </el-tag>
+                  <!-- 第三步：活跃度 -->
+                  <el-tag v-if="step.step === 3 && step.level" :type="vpLevelTagType(step.level)" size="small">
+                    {{ step.level }}
+                  </el-tag>
+                  <!-- 第四步：主导象限 -->
+                  <el-tag v-if="step.step === 4 && step.dominant" :type="vpQuadrantTagType(step.dominant)" size="small">
+                    {{ step.dominant }}
+                  </el-tag>
+                </div>
+                <!-- 第一步：位置 -->
+                <div v-if="step.step === 1" class="vp-step-body">
+                  <el-descriptions :column="3" border size="small">
+                    <el-descriptions-item label="收盘价">{{ fmtNum(step.close) }}</el-descriptions-item>
+                    <el-descriptions-item label="60日高点">{{ fmtNum(step.high_60d) }}</el-descriptions-item>
+                    <el-descriptions-item label="60日低点">{{ fmtNum(step.low_60d) }}</el-descriptions-item>
+                  </el-descriptions>
+                </div>
+                <!-- 第二步：趋势（含 OBV 辅助验证） -->
+                <div v-if="step.step === 2" class="vp-step-body">
+                  <el-descriptions :column="4" border size="small" style="margin-bottom: 8px;">
+                    <el-descriptions-item label="收盘价">{{ fmtNum(step.close) }}</el-descriptions-item>
+                    <el-descriptions-item label="MA5">{{ fmtNum(step.ma5) }}</el-descriptions-item>
+                    <el-descriptions-item label="MA20">{{ fmtNum(step.ma20) }}</el-descriptions-item>
+                    <el-descriptions-item label="MA60">{{ fmtNum(step.ma60) }}</el-descriptions-item>
+                  </el-descriptions>
+                  <div class="vp-obv-row">
+                    <span class="vp-obv-label">OBV 辅助</span>
+                    <el-tag size="small" effect="plain" :type="step.obv_direction === '上升' ? 'danger' : step.obv_direction === '下降' ? 'success' : 'info'">
+                      OBV {{ step.obv_direction }}
+                    </el-tag>
+                    <el-tag size="small" effect="plain" :type="step.price_direction === '上升' ? 'danger' : step.price_direction === '下降' ? 'success' : 'info'">
+                      价格 {{ step.price_direction }}
+                    </el-tag>
+                    <el-tag v-if="step.divergence" size="small" :type="step.divergence === '底背离' ? 'success' : step.divergence === '顶背离' ? 'warning' : 'info'">
+                      {{ step.divergence }}
+                    </el-tag>
+                  </div>
+                </div>
+                <!-- 第三步：量能 -->
+                <div v-if="step.step === 3" class="vp-step-body">
+                  <el-descriptions :column="3" border size="small">
+                    <el-descriptions-item label="量比(5日)">{{ fmtNum(step.vol_ratio_5d) }}</el-descriptions-item>
+                    <el-descriptions-item label="5日均量">{{ fmtVol(step.vol_ma5) }}</el-descriptions-item>
+                    <el-descriptions-item label="量能趋势">{{ step.vol_trend }}</el-descriptions-item>
+                  </el-descriptions>
+                </div>
+                <!-- 第四步：象限分布（每个象限鼠标停留显示含义） -->
+                <div v-if="step.step === 4" class="vp-step-body">
+                  <div class="vp-quad-grid">
+                    <el-tooltip
+                      v-for="(cnt, name) in step.distribution"
+                      :key="name"
+                      placement="top"
+                      :content="step.quadrant_meanings?.[name] || name"
+                    >
+                      <div class="vp-quad-cell" :class="{ 'vp-quad-active': name === step.dominant }">
+                        <span class="vp-quad-name">{{ name }}</span>
+                        <span class="vp-quad-cnt">{{ cnt }}/5</span>
+                      </div>
+                    </el-tooltip>
+                  </div>
+                </div>
+                <!-- 第五步：关键位量能 -->
+                <div v-if="step.step === 5" class="vp-step-body">
+                  <div v-for="lv in step.levels" :key="lv.name" class="vp-level-row">
+                    <span class="vp-level-name">{{ lv.name }}</span>
+                    <span class="vp-level-val">{{ fmtNum(lv.value) }}</span>
+                    <span class="vp-level-note" :class="{ 'vp-level-near': lv.nearby }">{{ lv.note }}</span>
+                  </div>
+                </div>
+                <!-- 结论 -->
+                <div class="vp-conclusion">{{ step.conclusion }}</div>
+              </div>
+            </div>
+              </el-collapse-item>
+            </el-collapse>
+          </div>
+        </el-card>
+
+        <!-- 🔥 辅助检查点（MACD辅助确认/抄底信号/上影洗筹模型/密集成交突破模型/大盘-个股联动分析） -->
+        <el-card shadow="hover" class="checkpoint-card" style="margin-top: 16px;">
+          <template #header>
+            <div class="card-hd">
+              <div>
+                辅助检查点
+                <el-tooltip content="基于三买三卖交易系统（教材第三章辅助信号系统），滚动验证主信号的可靠性：MACD辅助确认、抄底信号、上影洗筹模型、密集成交突破模型、大盘-个股联动分析。辅助信号不独立产生买卖，只对三买三卖主信号做确认/降权/预警。" placement="top">
+                  <el-icon class="help-icon-inline"><QuestionFilled /></el-icon>
+                </el-tooltip>
+              </div>
+              <el-tag v-if="buySellCheckData && buySellCheckData.aux_score != null" type="info" size="small">
+                辅助综合分 {{ buySellCheckData.aux_score }}
+              </el-tag>
+            </div>
+          </template>
+
+          <el-empty v-if="buySellCheckLoading" description="检查中..." :image-size="60" />
+          <el-alert
+            v-else-if="!buySellCheckData || !buySellCheckData.checkpoints"
+            type="info"
+            :closable="false"
+            title="辅助检查点暂不可用"
+          >
+            仅A股支持，或历史数据不足。
+          </el-alert>
+          <div v-else>
+            <div class="cp-grid">
+              <div
+                v-for="item in auxCheckpoints"
+                :key="item.key"
+                class="cp-item"
+                :class="'cp-level-' + item.value?.level"
+              >
+                <div class="cp-head">
+                  <span class="cp-title">{{ checkpointTitle(item.key) }}</span>
+                  <el-tag :type="checkpointLevelType(item.value?.level)" size="small" effect="dark">
+                    {{ checkpointLevelLabel(item.value?.level) }}
+                  </el-tag>
+                </div>
+                <div class="cp-label">{{ item.value?.label || '无信号' }}</div>
+                <div class="cp-detail">{{ item.value?.detail || '—' }}</div>
+              </div>
+            </div>
+            <div v-if="buySellCheckData.aux_warnings && buySellCheckData.aux_warnings.length" class="cp-warnings">
+              <div class="cp-warnings-title">预警提示</div>
+              <div v-for="(w, i) in buySellCheckData.aux_warnings" :key="i" class="cp-warning">
+                <el-icon class="cp-warning-icon"><Warning /></el-icon>
+                {{ w }}
+              </div>
+            </div>
           </div>
         </el-card>
 
@@ -477,7 +815,7 @@
           </div>
         </el-card>
 
-      </el-col>
+        </el-col>
 
       <el-col :span="6">
         <!-- 基本面快照 -->
@@ -695,7 +1033,7 @@ import { ApiClient } from '@/api/request'
 import { stockSyncApi } from '@/api/stockSync'
 import { clearAllCache } from '@/api/cache'
 import { use as echartsUse } from 'echarts/core'
-import { CandlestickChart } from 'echarts/charts'
+import { CandlestickChart, LineChart, BarChart } from 'echarts/charts'
 
 import { GridComponent, TooltipComponent, DataZoomComponent, LegendComponent, TitleComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
@@ -705,7 +1043,7 @@ import { favoritesApi } from '@/api/favorites'
 import { subscribeQuotesUpdate } from '@/utils/quotesSSE'
 
 
-echartsUse([CandlestickChart, GridComponent, TooltipComponent, DataZoomComponent, LegendComponent, TitleComponent, CanvasRenderer])
+echartsUse([CandlestickChart, LineChart, BarChart, GridComponent, TooltipComponent, DataZoomComponent, LegendComponent, TitleComponent, CanvasRenderer])
 
 const route = useRoute()
 const router = useRouter()
@@ -738,41 +1076,8 @@ const stockName = ref('')
 const market = ref('')
 const isFav = ref(false)
 
-// ECharts K线配置
-const kOption = ref<EChartsOption>({
-  grid: { left: 40, right: 20, top: 20, bottom: 40 },
-  tooltip: {
-    trigger: 'axis',
-    axisPointer: { type: 'cross' }
-  },
-  xAxis: {
-    type: 'category',
-    data: [],
-    boundaryGap: true,
-    axisLine: { onZero: false }
-  },
-  yAxis: {
-    scale: true,
-    type: 'value'
-  },
-  dataZoom: [
-    { type: 'inside', start: 70, end: 100 },
-    { start: 70, end: 100 }
-  ],
-  series: [
-    {
-      type: 'candlestick',
-      name: 'K线',
-      data: [],
-      itemStyle: {
-        color: '#ef4444',
-        color0: '#16a34a',
-        borderColor: '#ef4444',
-        borderColor0: '#16a34a'
-      }
-    }
-  ]
-})
+// K线原始数据（价格K线+成交量融合图的数据源，来自 getKline）
+const klineItems = ref<any[]>([])
 const lastKTime = ref<string | null>(null)
 const lastKClose = ref<number | null>(null)
 
@@ -1098,6 +1403,7 @@ async function checkFavorite() {
 }
 
 async function loadPageData() {
+  // 所有数据请求并行发起，避免串行等待拖慢页面加载
   await Promise.allSettled([
     fetchKline(),
     fetchNews(),
@@ -1107,9 +1413,11 @@ async function loadPageData() {
     fetchSectorInfo(),
     fetchMoneyFlow(),
     fetchQuote(),
-    fetchFundamentals()
+    fetchFundamentals(),
+    fetchVolumePriceAnalysis(),
+    fetchRiskAnalysis(),
+    fetchBuySellCheck()
   ])
-  await fetchRiskAnalysis()
 }
 
 function resetPageState() {
@@ -1125,6 +1433,9 @@ function resetPageState() {
   analysisProgress.value = 0
   analysisMessage.value = ''
   currentTaskId.value = null
+  volumePriceData.value = null
+  klineItems.value = []
+  buySellCheckData.value = null
 }
 
 onMounted(async () => {
@@ -1138,6 +1449,101 @@ onMounted(async () => {
     fetchQuote(false)
   })
 })
+
+// ── 详细分析结果：决策建议 + 短线/长线博弈各面分数 ──
+const dimensionScoreFields = ['技术面评分', '基本面评分', '情绪面评分', '消息面评分', '资金面评分', '政策面评分', '解禁面评分']
+const defaultBasis: Record<string, { analyst: string; basis: string }> = {
+  '技术面评分': { analyst: '技术分析师', basis: '基于技术指标（均线、KDJ、MACD、RSI等）、趋势形态、量价关系等综合评估，满分100分。' },
+  '基本面评分': { analyst: '基本面分析师', basis: '基于财务数据（营收、利润、ROE等）、行业地位、护城河、估值水平等综合评估，满分100分。' },
+  '情绪面评分': { analyst: '市场情绪分析师', basis: '基于市场情绪指标、舆情热度、散户情绪逆向指标等综合评估，满分100分。' },
+  '消息面评分': { analyst: '新闻分析师', basis: '基于公司公告、研报动态、新闻事件冲击、重要消息面影响等综合评估，满分100分。' },
+  '资金面评分': { analyst: '游资追踪师', basis: '基于主力资金流向、龙虎榜数据、北向资金动向、机构持仓变化等综合评估，满分100分。' },
+  '政策面评分': { analyst: '政策分析师', basis: '基于产业政策、宏观调控、监管动向、行业利好/利空政策等综合评估，满分100分。' },
+  '解禁面评分': { analyst: '解禁追踪师', basis: '基于限售股解禁规模、大股东减持计划、解禁压力与市场承接能力等综合评估，满分100分。' }
+}
+
+interface DimensionScoreItem {
+  name: string
+  field: string
+  score: number
+  max_score: number
+  analyst: string
+  basis: string
+}
+
+const dimensionScoreList = computed((): DimensionScoreItem[] => {
+  const analysis = lastAnalysis.value
+  if (!analysis) return []
+  // 优先使用结构化详情
+  const detail = analysis['维度评分详情']
+  if (Array.isArray(detail) && detail.length > 0) {
+    return detail.map((d: any) => ({
+      name: (d.name || String(d.field || '')).replace('评分', ''),
+      field: d.field || d.name,
+      score: Number(d.score ?? 0),
+      max_score: d.max_score || 100,
+      analyst: d.analyst || '分析师',
+      basis: d.basis || ''
+    }))
+  }
+  // 兜底：从顶层字段读取
+  const result: DimensionScoreItem[] = []
+  for (const field of dimensionScoreFields) {
+    const val = analysis[field]
+    if (val === null || val === undefined || val === '') continue
+    const num = Number(val)
+    if (isNaN(num)) continue
+    const info = defaultBasis[field] || { analyst: '分析师', basis: '' }
+    result.push({ name: field.replace('评分', ''), field, score: num, max_score: 100, analyst: info.analyst, basis: info.basis })
+  }
+  return result
+})
+
+const shortTermFields = ['技术面评分', '情绪面评分', '消息面评分', '资金面评分']
+const longTermFields = ['基本面评分', '政策面评分', '解禁面评分']
+const shortTermScores = computed(() => dimensionScoreList.value.filter(i => shortTermFields.includes(i.field)))
+const longTermScores = computed(() => dimensionScoreList.value.filter(i => longTermFields.includes(i.field)))
+
+// 决策建议
+const decisionRecommendation = computed(() => {
+  const a = lastAnalysis.value
+  if (!a) return ''
+  return a.recommendation || a.investment_recommendation || ''
+})
+const recommendationLabel = computed(() => {
+  const text = decisionRecommendation.value || ''
+  if (/卖出|Sell|清仓|强烈看空/i.test(text)) return '卖出'
+  if (/减持|减仓|看空/i.test(text)) return '减持'
+  if (/买入|Buy|加仓|强烈看多/i.test(text)) return '买入'
+  if (/增持|看多/i.test(text)) return '增持'
+  if (/持有|Hold|观望/i.test(text)) return '持有'
+  return '参考'
+})
+const recommendationTagType = computed(() => {
+  const l = recommendationLabel.value
+  if (l === '买入' || l === '增持') return 'danger'
+  if (l === '卖出') return 'success'
+  if (l === '减持') return 'warning'
+  if (l === '持有') return 'info'
+  return 'info'
+})
+
+function formatScore(v: number | null): string {
+  if (v === null || v === undefined) return '暂无'
+  if (Number.isInteger(v)) return v.toString()
+  return v.toFixed(1)
+}
+function getScorePercent(v: number | null): number {
+  if (v === null || v === undefined) return 0
+  if (v <= 10) return (v / 10) * 100
+  if (v <= 100) return v
+  return 100
+}
+function scoreClass(v: number): string {
+  if (v >= 80) return 'score-high'
+  if (v >= 60) return 'score-mid'
+  return 'score-low'
+}
 onUnmounted(() => {
   if (timer) clearInterval(timer)
   if (sseUnsubscribe) {
@@ -1191,42 +1597,13 @@ async function fetchKline() {
       return
     }
 
-    const category: string[] = []
-    const values: number[][] = [] // [open, close, low, high]
+    klineItems.value = items
+    const last = items[items.length - 1]
+    lastKTime.value = String(last.time || last.trade_time || last.trade_date || '')
+    lastKClose.value = Number(last.close ?? NaN)
 
-    for (const it of items) {
-      const t = String(it.time || it.trade_time || it.trade_date || '')
-      const o = Number(it.open ?? NaN)
-      const h = Number(it.high ?? NaN)
-      const l = Number(it.low ?? NaN)
-      const c = Number(it.close ?? NaN)
-      if (!Number.isFinite(o) || !Number.isFinite(h) || !Number.isFinite(l) || !Number.isFinite(c) || !t) continue
-      category.push(t)
-      values.push([o, c, l, h])
-    }
-
-    if (category.length) {
-      lastKTime.value = category[category.length - 1]
-      lastKClose.value = values[values.length - 1][1]
-    }
-
-    kOption.value = {
-      ...kOption.value,
-      xAxis: { type: 'category', data: category, boundaryGap: true, axisLine: { onZero: false } },
-      series: [
-        {
-          type: 'candlestick',
-          name: 'K线',
-          data: values,
-          itemStyle: {
-            color: '#ef4444',
-            color0: '#16a34a',
-            borderColor: '#ef4444',
-            borderColor0: '#16a34a'
-          }
-        }
-      ]
-    }
+    // 重建融合图（价格K线+成交量）
+    buildVpOption()
   } catch (e: any) {
     console.error('获取K线失败', e)
     // 🔥 增强错误提示
@@ -1304,6 +1681,201 @@ async function fetchRiskAnalysis() {
   } finally {
     riskAnalysisLoading.value = false
   }
+}
+
+// 🔥 量价分析（五步分析法）
+const volumePriceData = ref<any>(null)
+const volumePriceLoading = ref(false)
+const vpOption = ref<EChartsOption>({})
+// 五步分析明细默认折叠（综合判断常显），点击展开查看每一步明细
+const vpStepsActive = ref<string[]>([])
+async function fetchVolumePriceAnalysis() {
+  volumePriceLoading.value = true
+  try {
+    const res = await stocksApi.getVolumePriceAnalysis(code.value)
+    volumePriceData.value = (res as any)?.data || null
+  } catch (e) {
+    console.error('获取量价分析失败', e)
+    volumePriceData.value = null
+  } finally {
+    volumePriceLoading.value = false
+  }
+}
+
+// 🔥 三买三卖买卖点检查 + 辅助检查点
+const buySellCheckData = ref<any>(null)
+const buySellCheckLoading = ref(false)
+async function fetchBuySellCheck() {
+  buySellCheckLoading.value = true
+  try {
+    const res = await stocksApi.getBuySellCheck(code.value)
+    buySellCheckData.value = (res as any)?.data || null
+  } catch (e) {
+    console.error('获取三买三卖检查失败', e)
+    buySellCheckData.value = null
+  } finally {
+    buySellCheckLoading.value = false
+  }
+}
+
+// 三买三卖信号中文说明
+const TBS_SIGNAL_DESC: Record<string, string> = {
+  B1: '左侧买点：BIAS(60) 深度超卖（-30%~-20%），配合 W底/放量/MACD金叉三重确认，逢低左侧建仓',
+  B2: '突破买点：放量中阳站上 MA55/MA60，趋势突破，右侧加仓',
+  B3: '主升买点：强势放量中阳突破，趋势加速，顺应主升浪',
+  B2G: '加仓信号：GMMA 强多状态下的突破加仓',
+  S1: '加速卖点：BIAS 超阈值或 GMMA 慢组压缩，先减仓 1/3 预警',
+  S2: '主减仓：连续跌破 MA5/MA8/MA13，趋势转弱，主减仓',
+  S3: '清仓卖出：跌破 MA55/MA60 且 MA60 拐头向下，中期趋势破坏，清仓',
+  SafetyNet: '安全网：ATR×3 急跌破位，无条件止损',
+  TrailingStop: '移动止损：跟随趋势抬高止盈位，跌破即止盈'
+}
+function tbsSignalDesc(type: string): string {
+  return TBS_SIGNAL_DESC[type] || ''
+}
+function tbsSignalClass(type: string): string {
+  if (type.startsWith('B')) return 'tbs-signal-buy'
+  if (type === 'S1') return 'tbs-signal-s1'
+  return 'tbs-signal-sell'
+}
+function tbsTrendLabel(t: string): string {
+  return t === 'up' ? '↑偏多' : t === 'down' ? '↓偏空' : '→震荡'
+}
+function tbsTrendTone(t: string): string {
+  return t === 'up' ? 'danger' : t === 'down' ? 'success' : 'info'
+}
+
+// 辅助检查点中文标题
+const CHECKPOINT_TITLES: Record<string, string> = {
+  macd: 'MACD辅助确认',
+  bottom_fishing: '抄底信号',
+  washout: '上影洗筹模型',
+  dense_break: '密集成交突破模型',
+  regime_quadrant: '大盘-个股联动分析',
+  qty_verification: '量价关系确认'
+}
+function checkpointTitle(key: string): string {
+  return CHECKPOINT_TITLES[key] || key
+}
+function checkpointLevelType(level: string): string {
+  return level === 'confirm' ? 'danger' : level === 'warn' ? 'warning' : 'info'
+}
+function checkpointLevelLabel(level: string): string {
+  return level === 'confirm' ? '确认' : level === 'warn' ? '预警' : '中性'
+}
+// 辅助检查点仅展示用户关心的 5 项（量价关系确认已由上方「量价分析」模块覆盖，故排除 qty_verification）
+const AUX_KEY_ORDER = ['macd', 'bottom_fishing', 'washout', 'dense_break', 'regime_quadrant']
+const auxCheckpoints = computed(() => {
+  const cps = buySellCheckData.value?.checkpoints || {}
+  const out: Array<{ key: string; value: any }> = []
+  for (const key of AUX_KEY_ORDER) {
+    if (cps[key] !== undefined) out.push({ key, value: cps[key] })
+  }
+  return out
+})
+
+// 价格K线+成交量融合图：K线 + MA5/MA20/MA60 + 成交量（数据来自 getKline，随周期切换）
+function calculateMA(series: any[], n: number): Array<number | null> {
+  return series.map((_, i) => {
+    if (i < n - 1) return null
+    let sum = 0
+    for (let j = i - n + 1; j <= i; j++) sum += Number(series[j]?.close ?? 0)
+    return sum / n
+  })
+}
+
+function buildVpOption() {
+  const series = klineItems.value
+  if (!series || !series.length) return
+  const dates = series.map((s: any) => String(s.time || s.trade_time || s.trade_date || ''))
+  const klineData = series.map((s: any) => [Number(s.open ?? NaN), Number(s.close ?? NaN), Number(s.low ?? NaN), Number(s.high ?? NaN)])
+  const volData = series.map((s: any) => ({
+    value: Number(s.volume ?? 0),
+    itemStyle: { color: (Number(s.close ?? 0) >= Number(s.open ?? 0)) ? '#ef4444' : '#16a34a' }
+  }))
+  const ma5 = calculateMA(series, 5)
+  const ma20 = calculateMA(series, 20)
+  const ma60 = calculateMA(series, 60)
+  vpOption.value = {
+    backgroundColor: 'transparent',
+    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
+    legend: { data: ['K线', 'MA5', 'MA20', 'MA60', '成交量'], top: 0, left: 0, textStyle: { fontSize: 11 } },
+    axisPointer: { link: [{ xAxisIndex: 'all' }] },
+    grid: [
+      { left: 48, right: 16, top: 24, height: '58%' },
+      { left: 48, right: 16, top: '72%', height: '18%' }
+    ],
+    xAxis: [
+      { type: 'category', data: dates, boundaryGap: true, axisLine: { onZero: false }, axisLabel: { fontSize: 10 } },
+      { type: 'category', gridIndex: 1, data: dates, boundaryGap: true, axisLabel: { show: false }, axisTick: { show: false } }
+    ],
+    yAxis: [
+      { scale: true, type: 'value', axisLabel: { fontSize: 10 } },
+      { gridIndex: 1, scale: true, type: 'value', axisLabel: { fontSize: 10, formatter: (v: number) => v >= 1e8 ? (v / 1e8).toFixed(1) + '亿' : v >= 1e4 ? (v / 1e4).toFixed(0) + '万' : v } }
+    ],
+    dataZoom: [
+      { type: 'inside', xAxisIndex: [0, 1], start: 65, end: 100 },
+      { type: 'slider', xAxisIndex: [0, 1], start: 65, end: 100, height: 16, bottom: 4 }
+    ],
+    series: [
+      {
+        name: 'K线', type: 'candlestick', data: klineData,
+        itemStyle: { color: '#ef4444', color0: '#16a34a', borderColor: '#ef4444', borderColor0: '#16a34a' }
+      },
+      { name: 'MA5', type: 'line', data: ma5, smooth: true, showSymbol: false, lineStyle: { width: 1, color: '#f97316' } },
+      { name: 'MA20', type: 'line', data: ma20, smooth: true, showSymbol: false, lineStyle: { width: 1, color: '#f59e0b' } },
+      { name: 'MA60', type: 'line', data: ma60, smooth: true, showSymbol: false, lineStyle: { width: 1, color: '#3b82f6' } },
+      { name: '成交量', type: 'bar', xAxisIndex: 1, yAxisIndex: 1, data: volData }
+    ]
+  }
+}
+
+function vpBiasClass(bias?: string): string {
+  if (bias === '偏多') return 'bull'
+  if (bias === '偏空') return 'bear'
+  return 'flat'
+}
+function vpBiasTagType(bias?: string): string {
+  if (bias === '偏多') return 'danger'
+  if (bias === '偏空') return 'success'
+  return 'info'
+}
+
+// 综合判断倾向的悬浮说明（重点解释"中性"的含义，并给出判断依据信号）
+function vpBiasTip(overall: any): string {
+  const bias = overall?.bias
+  if (bias === '偏多') return '当前多数量价信号偏向看多，多空力量中多方占优，短期更可能延续上行。'
+  if (bias === '偏空') return '当前多数量价信号偏向看空，多空力量中空方占优，短期更可能承压下行。'
+  return '中性表示当前多空信号相互抵消、未形成明确方向，短期多半震荡整理，需等待放量突破或跌破关键位后才能确认方向。'
+}
+
+function vpQuadrantTagType(q: string): string {
+  if (q === '价涨量增') return 'danger'
+  if (q === '价跌量增') return 'warning'
+  if (q === '价跌量缩') return 'success'
+  return 'info'
+}
+function vpLevelTagType(level: string): string {
+  if (level === '显著放量') return 'danger'
+  if (level === '温和放量') return 'warning'
+  if (level === '缩量') return 'info'
+  return 'success'
+}
+function vpPositionTagType(pos: string): string {
+  if (pos === '高位') return 'danger'
+  if (pos === '低位') return 'success'
+  return 'info'
+}
+function fmtNum(v: any): string {
+  if (v === null || v === undefined || isNaN(v)) return '-'
+  return Number(v).toFixed(2)
+}
+function fmtVol(v: any): string {
+  if (v === null || v === undefined || isNaN(v)) return '-'
+  const n = Number(v)
+  if (n >= 1e8) return (n / 1e8).toFixed(2) + '亿'
+  if (n >= 1e4) return (n / 1e4).toFixed(2) + '万'
+  return n.toFixed(0)
 }
 
 const filteredNews = computed(() => {
@@ -1803,14 +2375,6 @@ function exportReport() {
   padding: 0 4px;
 }
 
-.kline-card {
-  border-radius: 16px;
-  border: 1px solid var(--el-border-color-light);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
-}
-
-.k-chart { height: 340px; }
-
 .legend {
   margin-top: 8px;
   font-size: 12px;
@@ -1945,6 +2509,111 @@ function exportReport() {
   justify-content: flex-start;
 }
 
+/* 决策建议盒子 */
+.decision-box {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 12px;
+  padding: 16px 20px;
+  box-shadow: 0 4px 16px rgba(102, 126, 234, 0.25);
+}
+.decision-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 15px;
+  font-weight: 600;
+}
+.decision-icon { font-size: 18px; }
+.decision-label { flex: 0 0 auto; }
+.decision-text {
+  background: rgba(255, 255, 255, 0.98);
+  border-radius: 8px;
+  padding: 12px 16px;
+  color: #1f2937;
+  font-size: 14px;
+  line-height: 1.8;
+  font-weight: 500;
+  word-wrap: break-word;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+/* 短线/长线博弈评分 */
+.score-section {
+  padding: 14px;
+  background: var(--el-fill-color-lighter);
+  border-radius: 10px;
+}
+.score-section-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+  margin-bottom: 12px;
+}
+.score-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+.score-card {
+  padding: 10px 12px;
+  background: var(--el-bg-color);
+  border-radius: 8px;
+  border: 1px solid var(--el-border-color-lighter);
+  cursor: pointer;
+  transition: transform .2s ease, box-shadow .2s ease;
+}
+.score-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+.score-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  margin-bottom: 6px;
+}
+.score-value {
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1;
+  margin-bottom: 6px;
+}
+.score-unit { font-size: 12px; font-weight: 500; color: var(--el-text-color-secondary); margin-left: 2px; }
+.score-high .score-value { color: #ef4444; }
+.score-mid .score-value { color: #f59e0b; }
+.score-low .score-value { color: #10b981; }
+.score-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--el-fill-color);
+  overflow: hidden;
+}
+.score-bar-fill { height: 100%; border-radius: 3px; }
+.score-high .score-bar-fill { background: linear-gradient(90deg, #fdba74, #ef4444); }
+.score-mid .score-bar-fill { background: linear-gradient(90deg, #fde68a, #f59e0b); }
+.score-low .score-bar-fill { background: linear-gradient(90deg, #86efac, #10b981); }
+
+/* 量价综合判断增强 */
+.vp-overall-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 6px;
+}
+.vp-meta-chip {
+  font-size: 12px;
+  padding: 2px 10px;
+  border-radius: 12px;
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color-lighter);
+  color: var(--el-text-color-regular);
+}
+.vp-scenario-tag { margin-left: 4px; }
+.vp-scenario-tag .help-icon-inline { margin-left: 4px; }
+
 /* 板块联动卡片美化 */
 .sector-card {
   border-radius: 16px;
@@ -1964,6 +2633,431 @@ function exportReport() {
   border-radius: 16px;
   border: 1px solid var(--el-border-color-light);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+
+/* 量价分析卡片样式 */
+.volume-price-card {
+  border-radius: 16px;
+  border: 1px solid var(--el-border-color-light);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+/* 五步分析明细折叠 */
+.vp-collapse {
+  border: none;
+  background: transparent;
+}
+.vp-collapse :deep(.el-collapse-item__header) {
+  background: transparent;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+.vp-collapse :deep(.el-collapse-item__wrap) {
+  background: transparent;
+  border-bottom: none;
+}
+.vp-collapse-title {
+  margin-right: 8px;
+}
+.vp-collapse-hint {
+  font-weight: 400;
+}
+/* 三买三卖买卖点检查卡片 */
+.tbs-check-card {
+  border-radius: 16px;
+  border: 1px solid var(--el-border-color-light);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+.tbs-overview {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.tbs-close {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  margin-left: auto;
+}
+.tbs-stage-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-regular);
+  margin-bottom: 8px;
+}
+.tbs-signal {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  border: 1px solid var(--el-border-color-lighter);
+  background: var(--el-bg-color);
+}
+.tbs-signal-buy { border-left: 4px solid var(--el-color-danger); }
+.tbs-signal-sell { border-left: 4px solid var(--el-color-success); }
+.tbs-signal-s1 { border-left: 4px solid var(--el-color-warning); }
+.tbs-signal-type {
+  flex-shrink: 0;
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--el-color-primary);
+}
+.tbs-signal-label {
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+.tbs-signal-desc {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.6;
+}
+/* 辅助检查点卡片 */
+.checkpoint-card {
+  border-radius: 16px;
+  border: 1px solid var(--el-border-color-light);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+.cp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
+}
+.cp-item {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: var(--el-bg-color);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
+}
+.cp-item.cp-level-confirm { border-left: 4px solid var(--el-color-danger); }
+.cp-item.cp-level-warn { border-left: 4px solid var(--el-color-warning); }
+.cp-item.cp-level-neutral { border-left: 4px solid var(--el-color-info); }
+.cp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.cp-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+.cp-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-regular);
+  margin-bottom: 4px;
+}
+.cp-detail {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.6;
+}
+.cp-warnings {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--el-color-warning-light-9);
+  border: 1px solid var(--el-color-warning-light-7);
+}
+.cp-warnings-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-color-warning-dark-2);
+  margin-bottom: 6px;
+}
+.cp-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+  line-height: 1.6;
+}
+.cp-warning-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--el-color-warning);
+}
+/* 综合结论横幅 */
+.vp-overall {
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  border: 1px solid var(--el-border-color-lighter);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+.vp-bias-bull { background: linear-gradient(135deg, var(--el-color-danger-light-9) 0%, var(--el-color-danger-light-8) 100%); border-color: var(--el-color-danger-light-5); }
+.vp-bias-bear { background: linear-gradient(135deg, var(--el-color-success-light-9) 0%, var(--el-color-success-light-8) 100%); border-color: var(--el-color-success-light-5); }
+.vp-bias-flat { background: linear-gradient(135deg, var(--el-fill-color-light) 0%, var(--el-bg-color) 100%); border-color: var(--el-border-color-lighter); }
+.vp-overall-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.vp-overall-label {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+}
+.vp-bias-tag {
+  cursor: help;
+  transition: transform .15s ease;
+}
+.vp-bias-tag:hover {
+  transform: translateY(-1px);
+}
+/* 综合判断：当前状态 / 关键信号 结构化模块展示 */
+.vp-block {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--el-text-color-regular);
+  padding: 4px 0;
+}
+.vp-block + .vp-block {
+  margin-top: 2px;
+}
+.vp-block-label {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color-lighter);
+}
+.vp-label-state { color: var(--el-color-primary); background: var(--el-color-primary-light-9); border-color: var(--el-color-primary-light-5); }
+.vp-label-signal { color: var(--el-color-warning); background: var(--el-color-warning-light-9); border-color: var(--el-color-warning-light-5); }
+.vp-block-text {
+  flex: 1 1 auto;
+  color: var(--el-text-color-regular);
+}
+/* 综合判断：方向预判 + 操作建议 醒目展示 */
+.vp-overall-decision {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color-lighter);
+}
+.vp-overall.vp-bias-bull .vp-overall-decision { border-left: 4px solid var(--el-color-danger); }
+.vp-overall.vp-bias-bear .vp-overall-decision { border-left: 4px solid var(--el-color-success); }
+.vp-overall.vp-bias-flat .vp-overall-decision { border-left: 4px solid var(--el-color-info); }
+.vp-direction, .vp-action {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.vp-decision-label {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--el-color-primary);
+}
+.vp-overall.vp-bias-bull .vp-decision-label { background: var(--el-color-danger); }
+.vp-overall.vp-bias-bear .vp-decision-label { background: var(--el-color-success); }
+.vp-overall.vp-bias-flat .vp-decision-label { background: var(--el-color-info); }
+.vp-decision-text {
+  flex: 1 1 auto;
+  color: var(--el-text-color-primary);
+  font-weight: 500;
+}
+/* 综合判断依据悬浮提示 */
+.vp-bias-tip {
+  max-width: 320px;
+  line-height: 1.6;
+  font-size: 12px;
+}
+.vp-bias-basis {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.3);
+}
+.vp-bias-basis-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.vp-bias-basis-item {
+  color: inherit;
+  opacity: 0.92;
+}
+.vp-scenario-tip {
+  max-width: 300px;
+  line-height: 1.6;
+  font-size: 12px;
+}
+/* OBV 辅助验证行 */
+.vp-obv-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 10px;
+  background: var(--el-fill-color-light);
+  border-radius: 8px;
+  border-left: 3px solid var(--el-color-info);
+}
+.vp-obv-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+  margin-right: 2px;
+}
+.vp-overall-signals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.vp-signal-chip {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 20px;
+  border: 1px solid var(--el-border-color-lighter);
+  background: var(--el-bg-color);
+}
+.vp-signal-chip.chip-多 { color: var(--el-color-danger); border-color: var(--el-color-danger-light-5); background: var(--el-color-danger-light-9); }
+.vp-signal-chip.chip-空 { color: var(--el-color-success); border-color: var(--el-color-success-light-5); background: var(--el-color-success-light-9); }
+.vp-signal-chip.chip-中性 { color: var(--el-text-color-secondary); }
+.vp-chart-wrap {
+  margin-bottom: 14px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  padding: 6px;
+}
+.vp-chart {
+  width: 100%;
+  height: 320px;
+}
+.vp-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.vp-step {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 12px;
+  padding: 14px 16px;
+  background: var(--el-bg-color);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
+  transition: box-shadow .2s ease, transform .2s ease;
+}
+.vp-step:hover {
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.07);
+  transform: translateY(-1px);
+}
+.vp-step-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.vp-step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--el-color-primary) 0%, var(--el-color-primary-light-5) 100%);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+  box-shadow: 0 2px 6px rgba(64, 158, 255, 0.3);
+}
+.vp-step-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+.vp-step-body {
+  margin-bottom: 8px;
+}
+.vp-conclusion {
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+  line-height: 1.7;
+  padding: 10px 12px;
+  background: var(--el-fill-color-light);
+  border-radius: 8px;
+  border-left: 3px solid var(--el-color-primary);
+}
+.vp-quad-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+.vp-quad-cell {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--el-border-color-lighter);
+  background: var(--el-bg-color);
+  font-size: 13px;
+}
+.vp-quad-active {
+  border-color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+  font-weight: 600;
+}
+.vp-quad-name {
+  color: var(--el-text-color-primary);
+}
+.vp-quad-cnt {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+.vp-level-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+  font-size: 13px;
+  border-bottom: 1px dashed var(--el-border-color-lighter);
+}
+.vp-level-row:last-child {
+  border-bottom: none;
+}
+.vp-level-name {
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  min-width: 70px;
+}
+.vp-level-val {
+  color: var(--el-text-color-regular);
+  min-width: 70px;
+}
+.vp-level-note {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+.vp-level-near {
+  color: var(--el-color-warning);
+  font-weight: 600;
 }
 
 .risk-score {

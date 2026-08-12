@@ -19,7 +19,7 @@ from app.models.analysis import (
     SingleAnalysisRequest,
 )
 from app.routers.auth_db import get_current_user
-from app.routers.reports import _calculate_confidence, extract_structured_fields
+from app.routers.reports import _calculate_confidence, extract_structured_fields, recompute_confidence
 from app.services.queue_service import QueueService, get_queue_service
 from app.services.simple_analysis_service import get_simple_analysis_service
 from app.services.websocket_manager import get_websocket_manager
@@ -623,6 +623,12 @@ async def get_task_result(
                         result_data['recommendation'] = rec[:2000]
         except Exception as da_err:
             logger.warning(f"⚠️ [RESULT] 从detailed_analysis补全失败: {da_err}")
+
+        # 🔥 用当前算法重算置信度，修正历史入库的陈旧/错误值（如异常低的 0.02）
+        try:
+            result_data = recompute_confidence(result_data)
+        except Exception as conf_err:
+            logger.warning(f"⚠️ [RESULT] 重算置信度失败: {conf_err}")
 
         # 严格的数据格式化和验证
         def safe_string(value, default=""):

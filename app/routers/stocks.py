@@ -696,9 +696,14 @@ async def get_fundamentals(
             enabled_sources = ['tushare', 'akshare', 'baostock']
 
         # 按数据源优先级查询财务数据
+        # 🔥 增加 end_date 非空过滤，跳过历史残留的无报告期污染记录（如 report_period=20260730 的行情快照垃圾数据）
         for data_source in enabled_sources:
             financial_data = await db["stock_financial_data"].find_one(
-                {"$or": [{"symbol": code6}, {"code": code6}], "data_source": data_source},
+                {
+                    "$or": [{"symbol": code6}, {"code": code6}],
+                    "data_source": data_source,
+                    "end_date": {"$nin": [None, ""]},
+                },
                 {"_id": 0},
                 sort=[("report_period", -1)]  # 按报告期降序，获取该数据源的最新数据
             )
@@ -2059,5 +2064,103 @@ async def get_risk_analysis(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取风险分析数据失败: {str(e)}"
+        )
+
+
+@router.get("/{code}/volume-price", response_model=dict)
+async def get_volume_price_analysis(
+    code: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    获取单股票量价分析（五步分析法）
+
+    从量和价两个维度逐步分析：
+    1. 位置判断：收盘价相对 MA5/MA20/MA60 的位置
+    2. 量价象限：近 5 日量价关系归类（价涨量增/价涨量缩/价跌量增/价跌量缩）
+    3. 量比/成交活跃度
+    4. OBV 趋势及背离
+    5. 关键位量能分析
+
+    仅支持A股（需 stock_daily_quotes 历史数据）。
+    """
+    market, normalized_code = _detect_market_and_code(code)
+
+    if market != 'CN':
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="量价分析仅支持A股"
+        )
+
+    try:
+        from app.services.volume_price_analysis import analyze_volume_price
+        from app.core.database import get_mongo_db_sync
+
+        db = get_mongo_db_sync()
+        result = await analyze_volume_price(db, normalized_code)
+
+        if not result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=result.get("message", "量价分析数据不足")
+            )
+
+        return ok(result)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"量价分析失败 {code}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"量价分析失败: {str(e)}"
+        )
+
+
+@router.get("/{code}/buy-sell-check", response_model=dict)
+async def get_buy_sell_check(
+    code: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    单股三买三卖买卖点检查 + 辅助检查点。
+
+    返回：
+      - signals: 当前触发的三买三卖信号（B1/B2/B3/S1/S2/S3 等），判断当前股价处于哪个买卖阶段
+      - stock_trend / market_trend: 个股与大盘趋势
+      - checkpoints: MACD辅助确认 / 抄底信号 / 上影洗筹模型 / 密集成交突破模型 / 大盘-个股联动
+      - aux_warnings / aux_score: 辅助预警与综合分
+
+    仅支持A股（需 stock_daily_quotes 历史数据）。
+    """
+    market, normalized_code = _detect_market_and_code(code)
+
+    if market != 'CN':
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="三买三卖检查仅支持A股"
+        )
+
+    try:
+        from app.services.three_buys_three_sells_service import get_three_buys_three_sells_service
+
+        service = get_three_buys_three_sells_service()
+        result = await service.check_single_stock(normalized_code)
+
+        if not result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=result.get("message", "三买三卖数据不足")
+            )
+
+        return ok(result)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"三买三卖检查失败 {code}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"三买三卖检查失败: {str(e)}"
         )
 

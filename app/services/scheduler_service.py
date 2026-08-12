@@ -50,6 +50,26 @@ def get_utc8_now():
 LONG_RUNNING_THRESHOLD_HOURS = 6
 
 
+# 一次性补跑任务（catch-up）识别规则：id 以 `_catchup` 结尾，或名称以 `启动补跑-` 开头。
+# 这类任务只在服务启动时临时注册、执行一次即完成，不应出现在 /tasks 任务列表中，
+# 否则会造成"任务太多、无法分辨"的错觉。
+CATCHUP_ID_SUFFIX = "_catchup"
+CATCHUP_NAME_PREFIX = "启动补跑-"
+
+# 系统内部维护任务（非用户数据任务，不应展示在任务列表，用户无需管理）
+INTERNAL_JOB_IDS = {"check_zombie_tasks"}
+
+
+def _is_transient_catchup_job(job_id: str, job_name: str) -> bool:
+    """判断是否为一次性的启动补跑任务（应从任务列表隐藏）。"""
+    return job_id.endswith(CATCHUP_ID_SUFFIX) or (job_name or "").startswith(CATCHUP_NAME_PREFIX)
+
+
+def _is_internal_job(job_id: str) -> bool:
+    """判断是否为系统内部维护任务（如僵尸检测），应从任务列表隐藏。"""
+    return job_id in INTERNAL_JOB_IDS
+
+
 # 模块级同步 MongoDB 客户端单例（供 update_job_progress 等同步函数使用）
 # 避免每次调用都新建 MongoClient，减少连接开销和事件循环阻塞
 _sync_mongo_client = None
@@ -110,6 +130,9 @@ class SchedulerService:
         """
         jobs = []
         for job in self.scheduler.get_jobs():
+            # 隐藏一次性启动补跑任务与系统内部维护任务，避免任务列表"又乱又多"
+            if _is_transient_catchup_job(job.id, job.name) or _is_internal_job(job.id):
+                continue
             job_dict = self._job_to_dict(job)
             # 获取任务元数据（触发器名称和备注）
             metadata = await self._get_job_metadata(job.id)

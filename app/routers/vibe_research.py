@@ -71,6 +71,57 @@ async def global_indices(current_user: dict = Depends(get_optional_current_user)
         return ok([])
 
 
+# 全球市场 Tab 内展示的「著名股票」清单（美股/港股大盘蓝筹，人为精选、仅客观行情）
+# 使用硬编码 secid（与全球指数一致），避免依赖东财搜索 API（容器内 searchapi 不可达导致解析失败）
+_GLOBAL_FAMOUS_STOCKS = [
+    # 美股
+    {"secid": "105.AAPL", "name": "苹果", "region": "美股"},
+    {"secid": "105.MSFT", "name": "微软", "region": "美股"},
+    {"secid": "105.NVDA", "name": "英伟达", "region": "美股"},
+    {"secid": "105.GOOGL", "name": "谷歌", "region": "美股"},
+    {"secid": "105.AMZN", "name": "亚马逊", "region": "美股"},
+    {"secid": "105.META", "name": "Meta", "region": "美股"},
+    {"secid": "105.TSLA", "name": "特斯拉", "region": "美股"},
+    # 港股
+    {"secid": "116.00700", "name": "腾讯", "region": "港股"},
+    {"secid": "116.09988", "name": "阿里巴巴", "region": "港股"},
+    {"secid": "116.03690", "name": "美团", "region": "港股"},
+    {"secid": "116.09999", "name": "网易", "region": "港股"},
+    {"secid": "116.09618", "name": "京东", "region": "港股"},
+    {"secid": "116.01810", "name": "小米", "region": "港股"},
+]
+
+
+@router.get("/global-stocks")
+async def global_famous_stocks(current_user: dict = Depends(get_optional_current_user)):
+    """全球市场著名股票涨跌（美股/港股蓝筹），分级TTL缓存"""
+    try:
+        from concurrent.futures import ThreadPoolExecutor
+        from app.services.vibe_gstock import _push2_stock_get, _quote_from
+
+        def _fetch(item: dict) -> dict:
+            try:
+                d = _push2_stock_get(item["secid"], "f43,f57,f58,f59,f60,f170")
+                q = _quote_from(d or {})
+                return {
+                    "secid": item["secid"],
+                    "name": q.get("name") or item["name"],
+                    "region": item["region"],
+                    "price": q.get("price"),
+                    "change_pct": q.get("change_pct"),
+                }
+            except Exception as e:
+                logger.warning(f"全球著名股票 {item['secid']} 获取失败（跳过）: {e}")
+                return None
+
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            rows = [r for r in ex.map(_fetch, _GLOBAL_FAMOUS_STOCKS) if r is not None]
+        return ok(rows)
+    except Exception as e:
+        logger.error(f"全球著名股票异常: {e}")
+        return ok([])
+
+
 @router.get("/market/overview")
 async def market_overview(current_user: dict = Depends(get_optional_current_user)):
     """市场情绪 + 板块资金流（Redis分级TTL缓存）"""

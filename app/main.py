@@ -94,8 +94,6 @@ from app.worker.baostock_sync_service import (
 )
 from app.worker.tushare_sync_service import (
     run_tushare_daily_basic_sync,
-    run_tushare_dividend_sync,
-    run_tushare_financial_sync,
     run_tushare_historical_sync,
     run_tushare_status_check,
 )
@@ -440,29 +438,33 @@ async def lifespan(app: FastAPI):
             else:
                 logger.info(f"⏭️ Tushare历史数据同步跳过（未启用）: {settings.TUSHARE_HISTORICAL_SYNC_CRON}")
 
-            # 财务数据同步任务
+            # 财务数据同步任务（含分红送配：合并为单任务串行执行，减少任务数量）
+            # 财务与分红同为低频周更，拆成两个任务会造成任务列表冗余；此处合并为一次执行。
             if settings.TUSHARE_FINANCIAL_SYNC_ENABLED:
+                async def run_tushare_financial_dividend_sync():
+                    """合并执行财务+分红同步（串行，避免 scheduler 任务数量膨胀）"""
+                    try:
+                        from app.worker.tushare_sync_service import (
+                            run_tushare_financial_sync,
+                            run_tushare_dividend_sync,
+                        )
+                        await run_tushare_financial_sync()
+                        if settings.TUSHARE_DIVIDEND_SYNC_ENABLED:
+                            await run_tushare_dividend_sync()
+                        return {"financial": True, "dividend": settings.TUSHARE_DIVIDEND_SYNC_ENABLED}
+                    except Exception as e:
+                        logger.error(f"❌ 财务+分红合并同步失败: {e}")
+                        raise
+
                 scheduler.add_job(
-                    run_tushare_financial_sync,
+                    run_tushare_financial_dividend_sync,
                     CronTrigger.from_crontab(settings.TUSHARE_FINANCIAL_SYNC_CRON, timezone=settings.TIMEZONE),
                     id="tushare_financial_sync",
-                    name="财务数据同步（Tushare）"
+                    name="财务+分红数据同步（Tushare）"
                 )
-                logger.info(f"💰 Tushare财务数据同步已配置: {settings.TUSHARE_FINANCIAL_SYNC_CRON}")
+                logger.info(f"💰 Tushare财务+分红合并同步已配置: {settings.TUSHARE_FINANCIAL_SYNC_CRON}")
             else:
                 logger.info(f"⏭️ Tushare财务数据同步跳过（未启用）: {settings.TUSHARE_FINANCIAL_SYNC_CRON}")
-
-            # 分红送配数据同步任务
-            if settings.TUSHARE_DIVIDEND_SYNC_ENABLED:
-                scheduler.add_job(
-                    run_tushare_dividend_sync,
-                    CronTrigger.from_crontab(settings.TUSHARE_DIVIDEND_SYNC_CRON, timezone=settings.TIMEZONE),
-                    id="tushare_dividend_sync",
-                    name="分红数据同步（Tushare）"
-                )
-                logger.info(f"💰 Tushare分红数据同步已配置: {settings.TUSHARE_DIVIDEND_SYNC_CRON}")
-            else:
-                logger.info(f"⏭️ Tushare分红数据同步跳过（未启用）: {settings.TUSHARE_DIVIDEND_SYNC_CRON}")
 
             # 每日估值/市值数据同步任务（为回测提供按日 PE/PB/市值）
             if settings.TUSHARE_DAILY_BASIC_SYNC_ENABLED:
@@ -1065,6 +1067,10 @@ app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"])
 # app.include_router(quick_analysis.router, prefix="/api", tags=["quick-analysis"])
 app.include_router(reports.router, tags=["reports"])
 app.include_router(screening.router, prefix="/api/screening", tags=["screening"])
+# 候选池（行业→个股→择时 流水线）
+from app.routers import candidate as candidate_router
+
+app.include_router(candidate_router.router, prefix="/api", tags=["candidate"])
 app.include_router(queue.router, prefix="/api/queue", tags=["queue"])
 app.include_router(favorites.router, prefix="/api", tags=["favorites"])
 app.include_router(stocks_router.router, prefix="/api", tags=["stocks"])

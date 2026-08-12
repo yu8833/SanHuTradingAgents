@@ -185,12 +185,14 @@ class TushareAdapter(DataSourceAdapter):
         return None
 
     def get_financial_data(self, ts_code: str, limit: int = 20) -> pd.DataFrame | None:
-        """获取个股多期财务指标（Tushare pro.fina_indicator）。
+        """获取个股多期财务指标（Tushare pro.fina_indicator + income）。
 
         返回按报告期（end_date）倒序的多期财务数据，字段已映射为统一命名：
         - report_period 由 end_date 归一为 YYYYMMDD
         - grossprofit_margin -> gross_margin, or_yoy -> revenue_yoy
-        - 其余保留 Tushare 原生字段名（roe/roa/netprofit_margin/q_profit_yoy/...）
+        - roe/roa/gross_margin/net_margin/revenue_yoy/net_profit_yoy/eps/bps 来自 fina_indicator
+        - current_ratio/quick_ratio/debt_to_assets 来自 fina_indicator
+        - revenue/net_profit（营收/净利绝对额）来自 pro.income，按报告期合并
 
         Args:
             ts_code: 带交易所后缀的代码，如 "600519.SH"
@@ -210,7 +212,7 @@ class TushareAdapter(DataSourceAdapter):
             pro = ts.pro_api()
             fields = ("ts_code,ann_date,end_date,roe,roa,netprofit_margin,"
                       "grossprofit_margin,q_profit_yoy,netprofit_yoy,or_yoy,"
-                      "debt_to_assets,eps,bps,cfps,ocfps")
+                      "debt_to_assets,current_ratio,quick_ratio,eps,bps,cfps,ocfps")
             df = pro.fina_indicator(ts_code=ts_code, fields=fields)
             if df is None or getattr(df, 'empty', True):
                 return None
@@ -225,6 +227,26 @@ class TushareAdapter(DataSourceAdapter):
                 df['net_margin'] = df['netprofit_margin']
             if 'netprofit_yoy' in df.columns:
                 df['net_profit_yoy'] = df['netprofit_yoy']
+
+            # 补充营收/净利绝对额（pro.income），按报告期(end_date)合并
+            try:
+                inc_fields = "ts_code,end_date,revenue,total_revenue,n_income,n_income_attr_p"
+                inc = pro.income(ts_code=ts_code, fields=inc_fields)
+                if inc is not None and not getattr(inc, 'empty', True):
+                    # 营收优先用 revenue（营业收入），缺失时回退 total_revenue（营业总收入）
+                    if 'revenue' not in inc.columns and 'total_revenue' in inc.columns:
+                        inc['revenue'] = inc['total_revenue']
+                    elif 'revenue' in inc.columns and 'total_revenue' in inc.columns:
+                        inc['revenue'] = inc['revenue'].fillna(inc['total_revenue'])
+                    inc = inc.rename(columns={
+                        'n_income': 'net_profit',
+                        'n_income_attr_p': 'net_profit_attr',
+                    })
+                    sub = inc[['end_date', 'revenue', 'net_profit', 'net_profit_attr']].copy()
+                    df = df.merge(sub, on='end_date', how='left')
+            except Exception as inc_err:
+                logger.warning(f"Tushare: income 补充失败（不影响 fina_indicator）: {inc_err}")
+
             logger.info(f"Tushare: Successfully fetched {len(df)} financial periods for {ts_code}")
             return df
         except Exception as e:

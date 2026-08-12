@@ -272,7 +272,11 @@ async function loadAll() {
   await Promise.all([loadAnalysis(), loadRotation()])
 }
 
-onMounted(loadAnalysis)
+onMounted(() => {
+  // 首次进入自动加载概念行情 + 轮动 RPS，避免"暂无数据、手动点加载"
+  loadAnalysis()
+  loadRotation()
+})
 </script>
 
 <style lang="scss" scoped>

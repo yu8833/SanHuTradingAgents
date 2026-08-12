@@ -257,7 +257,7 @@ class Settings(BaseSettings):
     TUSHARE_DAILY_BASIC_SYNC_CRON: str = Field(default="0 19 * * 1-5")  # 工作日19点（紧接历史日K同步后，补当日估值/市值）
     TUSHARE_DAILY_BASIC_SYNC_DAYS_BACK: int = Field(default=730)  # 每次回溯天数（默认约2年，增量跳过已同步交易日）
     TUSHARE_STATUS_CHECK_ENABLED: bool = Field(default=True)
-    TUSHARE_STATUS_CHECK_CRON: str = Field(default="0 * * * *")  # 每小时
+    TUSHARE_STATUS_CHECK_CRON: str = Field(default="30 8 * * *")  # 每天8:30（原每小时，降频减少无意义轮询）
 
     # ΔG 景气度数据季度刷新配置
     # 财报披露时间：Q1季报4月底、Q2中报8月底、Q3季报10月底、Q4年报次年4月底

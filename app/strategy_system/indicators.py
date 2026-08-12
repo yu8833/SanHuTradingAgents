@@ -27,6 +27,7 @@ INDICATOR_COLUMNS = [
     "momentum_5d", "momentum_10d", "momentum_20d", "momentum_30d", "momentum_60d",
     "annual_vol_20d",
     "rsi_6", "rsi_14", "rsi_24",
+    "obv", "obv_ma5",
 ]
 
 SIGNAL_COLUMNS = [
@@ -129,6 +130,12 @@ def _compute_symbol_indicators(g: pd.DataFrame) -> pd.DataFrame:
         avg_loss = loss.ewm(alpha=1.0 / n, adjust=False).mean()
         rs = avg_gain / avg_loss.replace(0, np.nan)
         out[f"rsi_{n}"] = 100 - 100 / (1 + rs)
+
+    # OBV: 上涨日累加成交量，下跌日累减，平盘不变
+    direction = np.sign(close.diff())
+    obv = (direction * volume).cumsum()
+    out["obv"] = obv
+    out["obv_ma5"] = obv.rolling(5).mean()
 
     return out
 
@@ -282,6 +289,13 @@ def _concat_indicators(df: pd.DataFrame) -> pd.DataFrame:
         avg_loss = _group_ewm(loss, symbols, 1.0 / n)
         rs = avg_gain / avg_loss.replace(0, np.nan)
         out[f"rsi_{n}"] = 100 - 100 / (1 + rs)
+
+    # OBV: 上涨日累加成交量，下跌日累减，平盘不变
+    direction = close.groupby(symbols, sort=False).diff()
+    direction = np.sign(direction)
+    obv = (direction * volume).groupby(symbols, sort=False).cumsum()
+    out["obv"] = obv
+    out["obv_ma5"] = _group_rolling(obv, symbols, 5, "mean")
 
     # 全市场 407 万行 × 60 列面板在 8GB 容器中会触发 OOM，将 float64 指标列
     # 统一降为 float32（精度对信号判定足够，内存减半）

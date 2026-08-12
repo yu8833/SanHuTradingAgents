@@ -281,19 +281,12 @@ def register_retail_jobs(scheduler, settings):
 
     tz = settings.TIMEZONE
 
-    # 1. 持仓退出信号扫描：工作日 9:30-14:59 每30分钟 + 15:00 收盘前
+    # 1. 持仓退出信号扫描：工作日 9:30-15:00 每30分钟（含收盘前最后一次，不再单独注册收盘任务）
     scheduler.add_job(
         check_all_users_exit_signals,
-        CronTrigger.from_crontab("*/30 9-14 * * 1-5", timezone=tz),
+        CronTrigger.from_crontab("*/30 9-15 * * 1-5", timezone=tz),
         id="retail_exit_check",
-        name="散户持仓退出信号扫描（盘中每30分钟）",
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        check_all_users_exit_signals,
-        CronTrigger.from_crontab("0 15 * * 1-5", timezone=tz),
-        id="retail_exit_check_close",
-        name="散户持仓收盘退出扫描",
+        name="散户持仓退出信号扫描（盘中每30分钟+收盘）",
         replace_existing=True,
     )
 
@@ -306,23 +299,16 @@ def register_retail_jobs(scheduler, settings):
         replace_existing=True,
     )
 
-    # 3. 个股预警检查：工作日 9:30-15:00 每10分钟
+    # 3. 个股预警检查：工作日 9:30-15:00 每10分钟（含收盘前最后一次，不再单独注册收盘任务）
     scheduler.add_job(
         _check_stock_alerts_wrapper,
-        CronTrigger.from_crontab("*/10 9-14 * * 1-5", timezone=tz),
+        CronTrigger.from_crontab("*/10 9-15 * * 1-5", timezone=tz),
         id="stock_alert_check",
-        name="个股预警检查（盘中每10分钟）",
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        _check_stock_alerts_wrapper,
-        CronTrigger.from_crontab("0 15 * * 1-5", timezone=tz),
-        id="stock_alert_check_close",
-        name="个股预警收盘检查",
+        name="个股预警检查（盘中每10分钟+收盘）",
         replace_existing=True,
     )
 
-    logger.info("📊 散户策略定时任务已注册: 退出扫描(盘中每30分钟+收盘) + 环境检测(每日9:30) + 个股预警(每10分钟)")
+    logger.info("📊 散户策略定时任务已注册: 退出扫描(盘中每30分钟+收盘) + 环境检测(每日9:30) + 个股预警(每10分钟+收盘)")
 
 
 async def _check_stock_alerts_wrapper():

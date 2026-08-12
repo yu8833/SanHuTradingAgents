@@ -176,6 +176,63 @@ def _low_pe_high_dividend_leader(df: pd.DataFrame, params: dict) -> pd.Series:
     return leader
 
 
+def _turnaround(df: pd.DataFrame, params: dict) -> pd.Series:
+    """困境反转：基本面（营收/净利增速）由负转正、估值修复，且价格企稳。
+
+    依赖 _enrich_target 注入的列：revenue_yoy, net_profit_yoy, roe, pe_ttm, close。
+    回测/技术面板若无这些列，则返回全 False（无信号），不崩溃。
+    逻辑：
+    1. 营收或净利同比>=0（增速转正/已转正），且非双降；
+    2. 估值合理（PE>0 且 <= max_pe）；
+    3. 价格企稳：收盘价至少站上 MA20 或 MA5>MA10（趋势初步修复）。
+    """
+    min_growth = float(params.get("min_growth", 0.0))
+    max_pe = float(params.get("max_pe", 60))
+    rev = _num_col(df, "revenue_yoy")
+    npf = _num_col(df, "net_profit_yoy")
+    pe = _num_col(df, "pe_ttm")
+
+    # 基本面止跌：营收或净利同比 >= min_growth（允许一个为负，但至少一个转正）
+    grow = (rev >= min_growth) | (npf >= min_growth)
+    grow = grow.fillna(False)
+    # 排除双降：营收与净利均 < 0
+    both_neg = (rev.fillna(0) < 0) & (npf.fillna(0) < 0)
+    m = grow & ~both_neg
+    # 估值合理
+    m &= (pe > 0) & (pe <= max_pe)
+    # 价格企稳：close >= ma20（column 可选）
+    if "ma20" in df.columns:
+        m &= df["close"] >= df["ma20"]
+    return m.fillna(False)
+
+
+def _small_cap_value(df: pd.DataFrame, params: dict) -> pd.Series:
+    """小盘价值：中小市值 + 低估值 + 盈利为正。
+
+    依赖 _enrich_target 注入的列：total_mv, pe_ttm, pb, roe。
+    回测/技术面板若无这些列（技术指标面板），则返回全 False（无信号），不崩溃。
+    逻辑：
+    1. 市值区间 [min_mv, max_mv]（亿元）；
+    2. 低估值：PE>0 且 <= max_pe，PB>0 且 <= max_pb；
+    3. 盈利为正：ROE>0。
+    """
+    min_mv = float(params.get("min_mv", 10))
+    max_mv = float(params.get("max_mv", 50))
+    max_pe = float(params.get("max_pe", 25))
+    max_pb = float(params.get("max_pb", 3.0))
+
+    mv = _num_col(df, "total_mv")
+    pe = _num_col(df, "pe_ttm")
+    pb = _num_col(df, "pb")
+    roe = _num_col(df, "roe")
+
+    m = (mv >= min_mv) & (mv <= max_mv)
+    m &= (pe > 0) & (pe <= max_pe)
+    m &= (pb > 0) & (pb <= max_pb)
+    m &= (roe.fillna(0) > 0)
+    return m.fillna(False)
+
+
 def _def(id_, name, description, tags, params, scoring, filter_fn,
          entry_signals, exit_signals, order_by="score", descending=True, limit=100):
     return {
@@ -322,6 +379,30 @@ BUILTIN_STRATEGIES: list[dict] = [
         ],
         {"div_yield": 0.4, "total_mv": 0.3, "div_paying_years": 0.3},
         _low_pe_high_dividend_leader,
+        [], [],
+    ),
+    _def(
+        "turnaround", "困境反转", "基本面(营收/净利增速)由负转正、估值合理且价格企稳",
+        ["反转", "基本面", "困境"],
+        [
+            {"id": "min_growth", "label": "最低增速(营收/净利任一)", "type": "float", "default": 0.0, "min": -0.5, "max": 0.5, "step": 0.05},
+            {"id": "max_pe", "label": "市盈率上限", "type": "float", "default": 60, "min": 10, "max": 200, "step": 5},
+        ],
+        {"revenue_yoy": 0.4, "net_profit_yoy": 0.4, "momentum_20d": 0.2},
+        _turnaround,
+        [], [],
+    ),
+    _def(
+        "small_cap_value", "小盘价值", "中小市值(10~50亿) + 低估值(PE/PB) + 盈利为正",
+        ["小盘", "价值"],
+        [
+            {"id": "min_mv", "label": "最小市值(亿)", "type": "float", "default": 10, "min": 5, "max": 100, "step": 5},
+            {"id": "max_mv", "label": "最大市值(亿)", "type": "float", "default": 50, "min": 10, "max": 200, "step": 5},
+            {"id": "max_pe", "label": "市盈率上限", "type": "float", "default": 25, "min": 5, "max": 100, "step": 5},
+            {"id": "max_pb", "label": "市净率上限", "type": "float", "default": 3.0, "min": 0.5, "max": 10, "step": 0.1},
+        ],
+        {"total_mv": 0.3, "pe_ttm": 0.3, "pb": 0.2, "roe": 0.2},
+        _small_cap_value,
         [], [],
     ),
 ]

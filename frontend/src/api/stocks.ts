@@ -114,6 +114,21 @@ export interface RiskAnalysisResponse {
   source: string
 }
 
+export interface VolumePriceStep {
+  step: number
+  title: string
+  conclusion: string
+  [key: string]: any
+}
+
+export interface VolumePriceAnalysisResponse {
+  success: boolean
+  symbol: string
+  date: string
+  close: number
+  steps: VolumePriceStep[]
+}
+
 export const stocksApi = {
   /**
    * 获取股票行情
@@ -174,6 +189,22 @@ export const stocksApi = {
    */
   async getRiskAnalysis(symbol: string) {
     return ApiClient.get<RiskAnalysisResponse>(`/api/stocks/${symbol}/risk-analysis`)
+  },
+
+  /**
+   * 获取量价分析（五步分析法）
+   * @param symbol 6位股票代码
+   */
+  async getVolumePriceAnalysis(symbol: string) {
+    return ApiClient.get<VolumePriceAnalysisResponse>(`/api/stocks/${symbol}/volume-price`)
+  },
+
+  /**
+   * 获取三买三卖买卖点检查 + 辅助检查点
+   * @param symbol 6位股票代码
+   */
+  async getBuySellCheck(symbol: string) {
+    return ApiClient.get<any>(`/api/stocks/${symbol}/buy-sell-check`)
   }
 }
 
