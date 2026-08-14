@@ -38,6 +38,41 @@
       </div>
     </el-alert>
 
+    <!-- 账户级回撤风控状态（教材5.2账户级止损） -->
+    <el-alert
+      v-if="risk"
+      :type="risk.level === 0 ? 'success' : (risk.level === 3 ? 'error' : 'warning')"
+      :closable="false"
+      show-icon
+      style="margin-bottom: 16px;"
+    >
+      <template #title>
+        <div style="font-weight: 600; font-size: 14px;">
+          {{ risk.account_paused ? '🔒 账户已暂停交易（月回撤>8%）' : `账户回撤风控：${risk.level_label}` }}
+        </div>
+      </template>
+      <div style="font-size: 13px; line-height: 1.8;">
+        <template v-if="risk.account_paused">
+          <p style="margin: 0;">{{ risk.account_paused_reason }}。暂停期间禁止新建买入指令。</p>
+        </template>
+        <template v-else>
+          <p style="margin: 0;">
+            周回撤 <strong>{{ risk.weekly_dd_pct }}%</strong>（峰值 ¥{{ fmtAmount(risk.weekly_peak) }}）｜
+            月回撤 <strong>{{ risk.monthly_dd_pct }}%</strong>（峰值 ¥{{ fmtAmount(risk.monthly_peak) }}）｜
+            总仓位上限 <strong>{{ Math.round(risk.max_position_pct * 100) }}%</strong>（{{ risk.level_action }}）
+          </p>
+          <p v-if="risk.holding_health" style="margin: 6px 0 0 0;">
+            持仓全红率 <strong :style="{ color: risk.holding_health.all_red_rate >= 80 ? '#67C23A' : '#E6A23C' }">{{ risk.holding_health.all_red_rate }}%</strong>
+            （{{ risk.holding_health.red }} 红 / {{ risk.holding_health.green }} 绿，共 {{ risk.holding_health.total }} 只）
+            <span style="color: #909399;">—— 加仓优先盈利标的，大盘下跌优先减亏单</span>
+          </p>
+          <p style="margin: 6px 0 0 0; color: #909399;">
+            连续止损 ≥ {{ risk.consecutive_stop_loss_limit }} 次将暂停该标的交易；买入将按风控上限自动约束股数。
+          </p>
+        </template>
+      </div>
+    </el-alert>
+
     <el-row :gutter="16" class="body">
       <el-col :span="8">
         <el-card shadow="hover" class="account-card">
@@ -279,6 +314,7 @@ const router = useRouter()
 const account = ref<any | null>(null)
 const positions = ref<any[]>([])
 const orders = ref<any[]>([])
+const risk = ref<any | null>(null)
 const loading = ref({ account: false, positions: false, orders: false })
 
 const orderDialog = ref(false)
@@ -405,6 +441,18 @@ async function fetchOrders() {
   }
 }
 
+async function fetchRisk() {
+  try {
+    const res = await paperApi.getRisk()
+    if (res.success) {
+      risk.value = res.data.risk
+    }
+  } catch (e) {
+    // 风控状态加载失败不影响主流程
+    console.warn('获取风控状态失败', e)
+  }
+}
+
 // 批量获取股票名称
 async function fetchStockNames(items: any[]) {
   if (!items || items.length === 0) return
@@ -467,7 +515,7 @@ async function confirmReset() {
 }
 
 async function refreshAll() {
-  await Promise.all([fetchAccount(), fetchPositions(), fetchOrders()])
+  await Promise.all([fetchAccount(), fetchPositions(), fetchOrders(), fetchRisk()])
 }
 
 // 盘中持仓自动刷新：SSE 信号触发 + 15秒轮询兜底

@@ -304,6 +304,17 @@ async def get_account(current_user: dict = Depends(get_current_user)):
     return ok({"account": summary, "positions": detailed_positions})
 
 
+@router.get("/risk", response_model=dict)
+async def get_risk_status(current_user: dict = Depends(get_current_user)):
+    """账户级回撤风控状态（教材5.2账户级止损 + 连续止损暂停）。
+
+    返回当前周/月回撤、风控等级、总仓位上限、账户/标的暂停状态。
+    """
+    from app.services.retail.drawdown_risk_control import get_risk_control
+    risk = await get_risk_control(current_user["id"])
+    return ok({"risk": risk})
+
+
 @router.post("/order", response_model=dict)
 async def place_order(payload: PlaceOrderRequest, current_user: dict = Depends(get_current_user)):
     """提交市价单，按最新价即时成交（支持多市场）。

@@ -40,6 +40,37 @@ export interface GetAccountResponse {
   positions: PaperPositionItem[]
 }
 
+export interface HoldingHealth {
+  total: number
+  red: number
+  green: number
+  all_red_rate: number
+  holdings: Array<{
+    code: string
+    name?: string
+    pnl: number | null
+    pnl_pct: number | null
+    status: 'red' | 'green' | 'unknown'
+    market_value: number
+  }>
+}
+
+export interface RiskControlStatus {
+  current_equity: number
+  weekly_peak: number
+  monthly_peak: number
+  weekly_dd_pct: number
+  monthly_dd_pct: number
+  level: number
+  max_position_pct: number
+  level_label: string
+  level_action: string
+  account_paused: boolean
+  account_paused_reason?: string
+  consecutive_stop_loss_limit?: number
+  holding_health?: HoldingHealth
+}
+
 export interface PlaceOrderPayload {
   code: string
   side: 'buy' | 'sell'
@@ -56,6 +87,9 @@ export interface PlaceOrderPayload {
 export const paperApi = {
   async getAccount() {
     return ApiClient.get<GetAccountResponse>('/api/paper/account')
+  },
+  async getRisk() {
+    return ApiClient.get<{ risk: RiskControlStatus }>('/api/paper/risk')
   },
   async placeOrder(data: PlaceOrderPayload) {
     return ApiClient.post<{ order: PaperOrderItem }>('/api/paper/order', data, { showLoading: true })
