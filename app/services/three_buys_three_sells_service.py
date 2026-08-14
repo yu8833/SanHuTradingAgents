@@ -1420,6 +1420,43 @@ class ThreeBuysThreeSellsService:
         overheat_bias = params.get("overheat_bias_pct", 40.0)
         return separation > overheat_sep or bias > overheat_bias
 
+    def _build_trade_plan(
+        self, ind: dict[str, Any], idx: int, signal: dict[str, Any]
+    ) -> dict[str, Any]:
+        """为三买三卖买入信号生成教材交易计划（C1 止损价 + C5 交易计划字段）
+
+        教材 2.2 节三类买点操作规则 + 5.2 节定量止损规则：
+          - B1 左侧买点: BIAS 继续扩大到 -35% 以下则止损
+              stop_loss = MA60 * (1 - 35%)
+          - B2 突破买点: 3 日内重新跌破中期均线组(MA55/MA60)则止损
+          - B3 回踩买点: 跌破中期均线组且 3 日不收回则止损
+          - B2G 加仓: 沿用 B2 同一止损规则
+
+        返回的字段与回测路径(L2465-2500)保持一致，供前端下单时写入 paper_positions。
+        """
+        sig_type = signal.get("type")
+        trigger = float(signal.get("trigger_price") or ind["closes"][idx])
+        ma55 = float(ind["ma55"][idx])
+        ma60 = float(ind["ma60"][idx])
+
+        if sig_type == "B1":
+            # B1 止损: BIAS 继续扩大到 -35% 以下（教材：BIAS(60) 跌至 -35% 以下止损出局）
+            stop_loss_bias = float(signal.get("stop_loss_bias", -35.0))
+            stop_loss = round(ma60 * (1 + stop_loss_bias / 100.0), 2)
+        else:
+            # B2/B3/B2G: 跌破中期均线组止损（取 MA55/MA60 较低者作为触发线）
+            stop_loss = round(min(ma55, ma60), 2)
+
+        return {
+            "stop_loss_price": stop_loss,
+            "entry_price": round(trigger, 2),
+            "stop_loss_bias": round((stop_loss - ma60) / ma60 * 100.0, 2) if ma60 > 0 else 0.0,
+            "stop_loss_rule": (
+                "BIAS<-35%止损" if sig_type == "B1"
+                else ("3日跌破中期均线组止损" if sig_type in ("B2", "B2G") else "跌破中期均线组3日不收回止损")
+            ),
+        }
+
     def _get_position_multiplier(
         self,
         market_trend: str,
@@ -1784,6 +1821,12 @@ class ThreeBuysThreeSellsService:
                 if safetynet:
                     signals.append(safetynet)
 
+                # C1/C5: 为买入信号补充教材止损价与交易计划字段（供下单写入 paper_positions）
+                for sig in signals:
+                    if sig.get("type") in ("B1", "B2", "B3", "B2G"):
+                        plan = self._build_trade_plan(ind, last_idx, sig)
+                        sig.update(plan)
+
                 bottom = self._check_bottom_pickup(ind, last_idx)
                 macd_div = self._check_macd_divergence(ind, last_idx)
                 vp_div = self._check_volume_price_divergence(ind, last_idx)
@@ -1991,6 +2034,12 @@ class ThreeBuysThreeSellsService:
         safetynet = self._check_safety_net(ind, last_idx, local_params)
         if safetynet:
             signals.append(safetynet)
+
+        # C1/C5: 为买入信号补充教材止损价与交易计划字段（供下单写入 paper_positions）
+        for sig in signals:
+            if sig.get("type") in ("B1", "B2", "B3", "B2G"):
+                plan = self._build_trade_plan(ind, last_idx, sig)
+                sig.update(plan)
 
         # 辅助检查点（教材第三章）
         try:

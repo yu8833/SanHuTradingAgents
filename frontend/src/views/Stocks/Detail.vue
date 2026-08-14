@@ -311,6 +311,7 @@
                 <div v-for="sig in buySellCheckData.signals" :key="sig.type" class="tbs-signal" :class="tbsSignalClass(sig.type)">
                   <span class="tbs-signal-type">{{ sig.type_label || sig.type }}</span>
                   <span class="tbs-signal-desc">{{ tbsSignalDesc(sig.type) }}</span>
+                  <span v-if="sig.stop_loss_price" class="tbs-signal-stop">止损 {{ fmtPrice(sig.stop_loss_price) }}</span>
                 </div>
               </template>
               <el-empty v-else description="当前未触发三买三卖信号" :image-size="50" />

@@ -587,6 +587,7 @@ class MonitorService:
                         "signal_label": sig.get("type_label", stype),
                         "direction": direction,
                         "position_pct": position_pct,
+                        "stop_loss_price": sig.get("stop_loss_price") if direction == "buy" else None,
                         "reference_price": item.get("close"),
                         "status": "pending",
                         "created_at": now_iso,
@@ -695,6 +696,7 @@ class MonitorService:
             market="CN",
             strategy="tbs",
             stock_name=order.get("name"),
+            stop_loss_price=order.get("stop_loss_price") if direction == "buy" else None,
         )
         await db[self.tbs_orders_coll].update_one(
             {"_id": order["_id"]},
