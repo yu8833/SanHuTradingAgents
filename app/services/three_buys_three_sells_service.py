@@ -583,10 +583,9 @@ class ThreeBuysThreeSellsService:
         close = ind["closes"][idx]
         ma55 = ind["ma55"][idx]
         ma60 = ind["ma60"][idx]
-        ma65 = ind["ma65"][idx]
 
-        above_count = sum([close > ma55, close > ma60, close > ma65])
-        if above_count < 2:
+        # 教材定义: 收盘价站上 MA55 和 MA60（两条中期均线都上）
+        if not (close > ma55 and close > ma60):
             return None
 
         # 前一天不在中期均线上方（刚突破）—— 用前一天的MA值判断
@@ -595,8 +594,7 @@ class ThreeBuysThreeSellsService:
         prev_close = ind["closes"][idx - 1]
         prev_above = sum([
             prev_close > ind["ma55"][idx - 1],
-            prev_close > ind["ma60"][idx - 1],
-            prev_close > ind["ma65"][idx - 1]
+            prev_close > ind["ma60"][idx - 1]
         ])
         if prev_above >= 2:
             return None
@@ -631,16 +629,16 @@ class ThreeBuysThreeSellsService:
         if ind["ma13"][idx] <= ind["ma55"][idx]:
             return None
 
-        # 放量中阳确认
+        # 放量中阳确认（教材标准: 放量 VOL>MA20×1.5、中阳实体≥5%，无折扣）
         vol_ratio = ind["volume_ratio"][idx]
         vol_threshold = params.get("breakout_volume_ratio", 1.5)
         zhongyang_threshold = params.get("zhongyang_threshold", 0.05)
 
-        if vol_ratio < vol_threshold * 0.8:
+        if vol_ratio < vol_threshold:
             return None
 
         zhongyang_arr = is_zhongyang_np(
-            ind["closes"], ind["opens"], zhongyang_threshold * 0.8
+            ind["closes"], ind["opens"], zhongyang_threshold
         )
         if not zhongyang_arr[idx]:
             return None
@@ -1200,7 +1198,7 @@ class ThreeBuysThreeSellsService:
         """S1 减仓预警: BIAS 超阈值 或 GMMA Pro慢组压缩触发
 
         GMMA Pro实战手册 3.2 节 S1减仓信号定义：
-          条件A（乖离超阈值）: BIAS60 >= 个股类型阈值（大盘28%/中盘32%/小盘40%）
+          条件A（乖离超阈值）: BIAS60 >= 个股类型阈值（普通30%/科技龙头65%/辨识度龙头100%，ST 20%）
           条件B（慢组高位压缩）:
               1. 压缩度 > 30%（慢组3条均线高度粘合）
               2. 快组与慢组分度拉开（快慢分离度 < -5%？不，分离度>正值表示快组在慢组上=已经上涨一段）
@@ -1760,17 +1758,18 @@ class ThreeBuysThreeSellsService:
                         if b2:
                             b2["position_pct"] = round(b2["position_pct"] * b2_multiplier, 4)
                             signals.append(b2)
-                    # B3/B2G 是强多头中的回踩/加仓信号，仍需要 GMMA 强多确认，且不能过热
-                    if (not enable_gmma or gmma_strong_bull) and not overheated:
+                    # B3 回踩买点: 教材前提仅需 MA13>MA55（_check_b3内部判定），仅需不过热
+                    if not overheated:
                         b3 = self._check_b3(ind, last_idx, local_params)
                         if b3:
                             b3["position_pct"] = round(b3["position_pct"] * b3_multiplier, 4)
                             signals.append(b3)
-                        # GMMA版B2（加仓信号）
-                        b2g = self._check_gmma_b2(ind, last_idx, local_params)
-                        if b2g:
-                            b2g["position_pct"] = round(b2g["position_pct"] * b2g_multiplier, 4)
-                            signals.append(b2g)
+                        # GMMA版B2（加仓信号）是GMMA专属信号，仍需 GMMA 强多确认
+                        if (not enable_gmma or gmma_strong_bull) and not overheated:
+                            b2g = self._check_gmma_b2(ind, last_idx, local_params)
+                            if b2g:
+                                b2g["position_pct"] = round(b2g["position_pct"] * b2g_multiplier, 4)
+                                signals.append(b2g)
 
                 s1 = self._check_s1(ind, last_idx, params)
                 if s1:
@@ -1970,10 +1969,12 @@ class ThreeBuysThreeSellsService:
             b2 = self._check_b2(ind, last_idx, local_params)
             if b2:
                 signals.append(b2)
-        if gmma_strong_bull and not overheated:
+        if not overheated:
             b3 = self._check_b3(ind, last_idx, local_params)
             if b3:
                 signals.append(b3)
+        # GMMA版B2（加仓信号）是GMMA专属信号，仍需 GMMA 强多确认
+        if gmma_strong_bull and not overheated:
             b2g = self._check_gmma_b2(ind, last_idx, local_params)
             if b2g:
                 signals.append(b2g)
@@ -2352,9 +2353,10 @@ class ThreeBuysThreeSellsService:
                 # B2 突破买点独立触发（突破本身即确认），仅需不过热
                 if not sig and not overheated:
                     sig = self._check_b2(ind, idx, local_params)
-                # B3/B2G 是强多头中的回踩/加仓信号，仍需 GMMA 强多确认
-                if not sig and (not enable_gmma or gmma_strong_bull) and not overheated:
+                # B3 回踩买点: 教材前提仅需 MA13>MA55（_check_b3内部判定），仅需不过热
+                if not sig and not overheated:
                     sig = self._check_b3(ind, idx, local_params)
+                # GMMA版B2（加仓信号）是GMMA专属信号，仍需 GMMA 强多确认
                 if not sig and (not enable_gmma or gmma_strong_bull) and not overheated:
                     sig = self._check_gmma_b2(ind, idx, local_params)
 
