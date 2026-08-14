@@ -1,5 +1,18 @@
 <template>
-  <div class="dashboard">
+  <div class="dashboard app-page">
+    <!-- 顶部横幅（全局统一） -->
+    <div class="page-hero">
+      <div class="page-hero-main">
+        <div class="page-hero-icon">
+          <el-icon :size="26"><Odometer /></el-icon>
+        </div>
+        <div class="page-hero-text">
+          <h2 class="page-hero-title">总览</h2>
+          <p class="page-hero-sub">数据健康 · 模拟账户 · 自选行情 · 监控动态</p>
+        </div>
+      </div>
+    </div>
+
     <!-- 顶部核心监控：数据健康 + 模拟账户 + 自选股行情 -->
     <el-row :gutter="24" class="monitor-top">
       <el-col :xs="24" :md="8">
@@ -173,6 +186,7 @@ import {
   ArrowRight,
   InfoFilled,
   Loading,
+  Odometer,
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import DataHealthCard from '@/components/Dashboard/DataHealthCard.vue'
@@ -671,9 +685,28 @@ onMounted(async () => {
 
 <style lang="scss" scoped>
 .dashboard {
+  // 页面容器交给全局 .app-page；顶部横幅由全局 .page-hero 提供
+
+  // 顶部卡片统一样式
   .monitor-top {
     .el-col {
       margin-bottom: 24px;
+    }
+    .el-card {
+      border-radius: 14px;
+      border: 1px solid var(--el-border-color-light);
+      box-shadow: var(--el-box-shadow-light);
+      transition: transform .2s, box-shadow .2s;
+      &:hover {
+        box-shadow: var(--el-box-shadow-medium);
+      }
+      .el-card__header {
+        border-bottom: 1px solid var(--el-border-color-lighter);
+        padding: 14px 18px;
+      }
+      .el-card__body {
+        padding: 16px 18px;
+      }
     }
   }
 

@@ -1,13 +1,16 @@
 <template>
-  <div class="favorites">
-    <div class="page-header">
-      <h1 class="page-title">
-        <el-icon><Star /></el-icon>
-        我的自选股
-      </h1>
-      <p class="page-description">
-        管理您关注的股票
-      </p>
+  <div class="favorites app-page">
+    <!-- 顶部横幅（全局统一） -->
+    <div class="page-hero">
+      <div class="page-hero-main">
+        <div class="page-hero-icon">
+          <el-icon :size="26"><Star /></el-icon>
+        </div>
+        <div class="page-hero-text">
+          <h2 class="page-hero-title">我的自选股</h2>
+          <p class="page-hero-sub">管理您关注的股票</p>
+        </div>
+      </div>
     </div>
 
     <!-- 操作栏 -->
@@ -1216,25 +1219,6 @@ onMounted(() => {
 
 <style lang="scss" scoped>
 .favorites {
-  .page-header {
-    margin-bottom: 24px;
-
-    .page-title {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 24px;
-      font-weight: 600;
-      color: var(--el-text-color-primary);
-      margin: 0 0 8px 0;
-    }
-
-    .page-description {
-      color: var(--el-text-color-regular);
-      margin: 0;
-    }
-  }
-
   .action-card {
     margin-bottom: 24px;
 

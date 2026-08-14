@@ -1482,7 +1482,7 @@ const applyToTrading = async () => {
 
     // 显示可编辑的确认对话框
     const actionText = recommendation.action === 'buy' ? '买入' : '卖出'
-    const actionColor = recommendation.action === 'buy' ? '#67C23A' : '#F56C6C'
+    const actionColor = recommendation.action === 'buy' ? 'var(--app-up)' : 'var(--app-down)'
 
     // 创建一个响应式的消息组件
     const MessageComponent = {

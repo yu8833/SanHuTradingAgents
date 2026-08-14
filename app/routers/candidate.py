@@ -59,7 +59,7 @@ async def candidate_members(industry: str, as_of: str | None = None,
 async def candidate_stocks(industry: str, limit: int = 30, as_of: str | None = None,
                            with_timing: bool = True,
                            _: dict = Depends(get_current_user)):
-    """第2层+第3层：某行业候选个股（top30，ΔG 过滤 + 择时预览，仅保留 B1/B2/B3 信号）。"""
+    """第2层+第3层：某行业候选个股（top30，ΔG 过滤 + 择时预览，仅保留三买三卖信号）。"""
     try:
         data = await candidate_pool_service.get_candidate_stocks(
             industry=industry, limit=limit, as_of=as_of, with_timing=with_timing)
@@ -73,7 +73,7 @@ async def candidate_stocks(industry: str, limit: int = 30, as_of: str | None = N
 async def candidate_stocks_overview(top_n: int = 10, as_of: str | None = None,
                                     industries: str | None = None,
                                     _: dict = Depends(get_current_user)):
-    """个股筛选默认视图（未选行业）：前 top_n 个行业，每行业 top 3 只 B 信号个股，共约 30 只。
+    """个股筛选默认视图（未选行业）：前 top_n 个行业，每行业 top 3 只三买三卖信号个股，共约 30 只。
 
     industries 为逗号分隔的行业名列表（默认取行业资金流排名的前 top_n 个）。
     """

@@ -1,17 +1,21 @@
 <template>
-  <div class="vibe-overview">
-    <!-- 页面标题 -->
-    <div class="page-header">
-      <div class="title-block">
-        <h1 class="page-title">
-          <el-icon class="title-icon"><DataAnalysis /></el-icon>
-          {{ today }} · 大盘看板
-        </h1>
-        <p class="page-subtitle">大盘指数 / 全球市场 / 市场情绪一屏看全</p>
+  <div class="vibe-overview app-page">
+    <!-- 顶部横幅（全局统一） -->
+    <div class="page-hero">
+      <div class="page-hero-main">
+        <div class="page-hero-icon">
+          <el-icon :size="26"><DataAnalysis /></el-icon>
+        </div>
+        <div class="page-hero-text">
+          <h2 class="page-hero-title">{{ today }} · 大盘看板</h2>
+          <p class="page-hero-sub">大盘指数 / 全球市场 / 市场情绪一屏看全</p>
+        </div>
       </div>
-      <el-button type="primary" plain :icon="Refresh" :loading="loading" @click="loadAll">
-        刷新
-      </el-button>
+      <div class="page-hero-meta">
+        <el-button type="primary" plain :icon="Refresh" :loading="loading" @click="loadAll">
+          刷新
+        </el-button>
+      </div>
     </div>
 
     <el-tabs v-model="activeTab" class="overview-tabs">
@@ -591,33 +595,6 @@ onMounted(() => {
 
 .overview-tabs :deep(.el-tabs__header) {
   margin-bottom: 16px;
-}
-
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 20px;
-}
-
-.page-title {
-  font-size: 22px;
-  font-weight: 600;
-  margin: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--el-text-color-primary);
-}
-
-.title-icon {
-  color: var(--el-color-primary);
-}
-
-.page-subtitle {
-  margin: 6px 0 0;
-  font-size: 13px;
-  color: var(--el-text-color-secondary);
 }
 
 .block {

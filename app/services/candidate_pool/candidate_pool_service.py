@@ -290,10 +290,10 @@ async def get_candidate_stocks(industry: str, limit: int = 30, as_of=None,
     if with_timing:
         items = await _apply_dg_filter(items)
         items = await _attach_timing_preview(items)
-        # 个股筛选只展示三买信号（B1/B2/B3）个股，其余剔除
-        items = [it for it in items if it.get("signal_type") in ("B1", "B2", "B3")]
+        # 个股筛选展示三买三卖信号（B1/B2/B3 买入 + S1/S2/S3 卖出），其余剔除
+        items = [it for it in items if it.get("signal_type") in ("B1", "B2", "B3", "S1", "S2", "S3")]
 
-    # 此时已全部为 B 信号，按质量分排序
+    # 此时已全部为三买三卖信号，按质量分排序
     items.sort(key=lambda x: x.get("quality_score", 0), reverse=True)
     items = items[:limit]
 

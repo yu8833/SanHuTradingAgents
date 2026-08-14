@@ -1,12 +1,20 @@
 <template>
-  <div class="candidate-page">
-    <div class="page-header">
-      <div>
-        <h2>候选</h2>
-        <p class="sub">资金为王 · 行业资金流筛选 → 个股资金流 → 择时进出</p>
+  <div class="candidate-page app-page">
+    <!-- 顶部横幅：资金为王主线导航 -->
+    <div class="page-hero">
+      <div class="page-hero-main">
+        <div class="page-hero-icon">
+          <el-icon :size="26"><TrendCharts /></el-icon>
+        </div>
+        <div class="page-hero-text">
+          <h2 class="page-hero-title">候选</h2>
+          <p class="page-hero-sub">资金为王 · 行业资金流排序 → 个股资金流 → 择时进出</p>
+        </div>
       </div>
-      <div class="header-actions">
-        <el-tag v-if="screenAsOf" type="info" effect="plain">数据日 {{ screenAsOf }}</el-tag>
+      <div class="page-hero-meta">
+        <span v-if="screenAsOf" class="page-hero-tag">
+          <el-icon :size="14"><Calendar /></el-icon> 数据日 {{ screenAsOf }}
+        </span>
       </div>
     </div>
 
@@ -18,54 +26,17 @@
           :closable="false"
           show-icon
           class="tab-hint"
-          title="资金为王：按行业主题 ETF 主力净流入分位排名（动量/量能仅展示不参与排序），同花顺行业资金流交叉核验方向。点击行业进入个股筛选。"
+          title="资金为王：按行业主题 ETF 主力净流入分位排名（主力净流入=超大单+大单），同花顺行业净流入交叉核验方向。点击行进入个股筛选。"
         />
         <div class="screening-toolbar">
           <el-button type="primary" :icon="Lightning" :loading="screenRefreshing" @click="loadScreening(true)">
             实时采集
           </el-button>
           <el-button :icon="Refresh" :loading="screenLoading" @click="loadScreening(false)">刷新快照</el-button>
-          <span class="screening-hint">共 {{ screenCount }} 个行业 · 点行业进入个股筛选</span>
+          <span class="screening-hint">共 {{ screenCount }} 个行业 · 点行进入个股筛选</span>
         </div>
 
-        <!-- Top 卡片 -->
-        <div v-if="screenRankings.length" class="top-grid">
-          <div
-            v-for="(item, i) in screenTop"
-            :key="item.etf_code"
-            class="top-card"
-            :class="`rank-${i + 1}`"
-            @click="goToStockScreening(item)"
-          >
-            <div class="card-head">
-              <span class="rank-badge">{{ i + 1 }}</span>
-              <span class="ind-name">{{ item.industry }}</span>
-            </div>
-            <div class="card-score">
-              <span class="score-val" :class="(item.fund_net_inflow || 0) >= 0 ? 'up' : 'down'">
-                {{ fmtYi(item.fund_net_inflow) }}亿
-              </span>
-              <span class="score-label">资金流分 {{ item.fund_flow_score }}</span>
-            </div>
-            <div class="card-etf">
-              <span class="etf-name">{{ item.etf_name }}</span>
-              <span class="etf-code">{{ item.etf_code }}</span>
-            </div>
-            <div class="card-metrics">
-              <div class="metric">
-                <span class="m-label">涨跌幅</span>
-                <span class="m-val" :class="(item.pct_chg || 0) >= 0 ? 'up' : 'down'">{{ fmtSign(item.pct_chg) }}%</span>
-              </div>
-              <div class="metric">
-                <span class="m-label">行业净流入</span>
-                <span class="m-val" :class="(item.sector_net_inflow || 0) >= 0 ? 'up' : 'down'">
-                  {{ fmtNum(item.sector_net_inflow) }}亿
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-        <el-empty v-else-if="!screenLoading && !screenRefreshing" description="暂无行业资金流数据（点击「实时采集」获取，或等待盘中任务入库）" />
+        <el-empty v-if="!screenRankings.length && !screenLoading && !screenRefreshing" description="暂无行业资金流数据（点击「实时采集」获取，或等待盘中任务入库）" />
 
         <!-- 全排名表 -->
         <div class="section-title">行业资金流排名（{{ screenRankings.length }}）</div>
@@ -84,9 +55,7 @@
           </el-table-column>
           <el-table-column label="行业" min-width="150">
             <template #default="{ row }">
-              <div class="ind-cell">
-                <span class="ind-name">{{ row.industry }}</span>
-              </div>
+              <span class="ind-name">{{ row.industry }}</span>
             </template>
           </el-table-column>
           <el-table-column label="代表ETF" min-width="140">
@@ -95,29 +64,26 @@
               <span class="muted etf-code">{{ row.etf_code }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="资金流分" width="90" align="center">
+          <el-table-column label="资金流分" width="90" align="center" sortable :sort-method="(a, b) => (a.fund_flow_score||0) - (b.fund_flow_score||0)">
             <template #default="{ row }">
               <span class="score-num" :class="scoreTone(row.fund_flow_score)">{{ row.fund_flow_score }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="主力净流入" min-width="130" align="right">
+          <el-table-column label="主力净流入" min-width="130" align="right" sortable :sort-method="(a, b) => (a.fund_net_inflow||0) - (b.fund_net_inflow||0)">
             <template #default="{ row }">
               <span :class="(row.fund_net_inflow || 0) >= 0 ? 'up' : 'down'">{{ fmtYi(row.fund_net_inflow) }}亿</span>
               <span class="muted">({{ fmtSign(row.fund_net_inflow_pct) }}%)</span>
             </template>
           </el-table-column>
-          <el-table-column label="涨跌幅" width="90" align="right">
+          <el-table-column label="涨跌幅" width="90" align="right" sortable>
             <template #default="{ row }">
               <span :class="(row.pct_chg || 0) >= 0 ? 'up' : 'down'">{{ fmtSign(row.pct_chg) }}%</span>
             </template>
           </el-table-column>
-          <el-table-column label="行业净流入(亿)" min-width="120" align="right">
+          <el-table-column label="行业净流入(亿)" min-width="120" align="right" sortable>
             <template #default="{ row }">
               <span :class="(row.sector_net_inflow || 0) >= 0 ? 'up' : 'down'">{{ fmtNum(row.sector_net_inflow) }}</span>
             </template>
-          </el-table-column>
-          <el-table-column label="量比" width="80" align="right">
-            <template #default="{ row }">{{ fmtNum(row.volume_ratio) }}</template>
           </el-table-column>
           <el-table-column label="操作" width="110" align="center" fixed="right">
             <template #default="{ row }">
@@ -151,6 +117,9 @@
             <el-radio-button value="B1">左侧买点 {{ signalStats.B1 }}</el-radio-button>
             <el-radio-button value="B2">突破买点 {{ signalStats.B2 }}</el-radio-button>
             <el-radio-button value="B3">回踩买点 {{ signalStats.B3 }}</el-radio-button>
+            <el-radio-button value="S1">加速卖点 {{ signalStats.S1 }}</el-radio-button>
+            <el-radio-button value="S2">跌破卖点 {{ signalStats.S2 }}</el-radio-button>
+            <el-radio-button value="S3">清仓卖出 {{ signalStats.S3 }}</el-radio-button>
           </el-radio-group>
           <span class="stocks-hint">{{ selectedIndustry ? `行业 ${selectedIndustry} · top ${limit}` : `前10行业 · 每行业top3 · 共${signalStats.all}只` }} · 显示 {{ filteredCandidates.length }} 只</span>
         </div>
@@ -173,19 +142,6 @@
               <span class="muted">{{ row.industry || '-' }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="质量分" width="150">
-            <template #default="{ row }">
-              <div class="qscore">
-                <el-progress
-                  :percentage="Number(row.quality_score || 0)"
-                  :stroke-width="7"
-                  :color="scoreColor(row.quality_score)"
-                  :show-text="false"
-                />
-                <span class="score-num">{{ row.quality_score }}</span>
-              </div>
-            </template>
-          </el-table-column>
           <el-table-column label="涨跌幅" width="90" align="right">
             <template #default="{ row }">
               <span :class="(row.pct_chg || 0) >= 0 ? 'up' : 'down'">{{ fmtPct(row.pct_chg) }}</span>
@@ -205,21 +161,6 @@
                 {{ row.signal_label || row.signal_type }}
               </el-tag>
               <span v-else class="muted">-</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="辅助分" width="130">
-            <template #default="{ row }">
-              <el-tooltip :content="auxTooltip(row)" placement="top" :disabled="!row.auxiliary">
-                <div class="aux-cell">
-                  <el-progress
-                    :percentage="Number(row.aux_score || 0)"
-                    :stroke-width="7"
-                    :color="auxColor(row.aux_score)"
-                    :show-text="false"
-                  />
-                  <span class="score-num">{{ row.aux_score }}</span>
-                </div>
-              </el-tooltip>
             </template>
           </el-table-column>
           <el-table-column label="预警" min-width="150">
@@ -248,7 +189,7 @@
             <template #default="{ row }">{{ fmtNum(row.roe) }}%</template>
           </el-table-column>
           <el-table-column label="营收YOY" width="90" align="right">
-            <template #default="{ row }">{{ fmtPct(row.revenue_yoy) }}</template>
+            <template #default="{ row }">{{ fmtPct(row.or_yoy) }}</template>
           </el-table-column>
           <el-table-column label="PE(TTM)" width="90" align="right">
             <template #default="{ row }">{{ fmtNum(row.pe_ttm) }}</template>
@@ -270,12 +211,18 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Refresh, Lightning } from '@element-plus/icons-vue'
+import { Refresh, Lightning, TrendCharts, Calendar } from '@element-plus/icons-vue'
 import {
   candidateApi,
   type CandidateStock,
   type IndustryScreeningItem
 } from '@/api/candidate'
+import {
+  fmtNum,
+  fmtYi,
+  fmtPctFromFraction as fmtPct,
+  fmtSigned as fmtSign
+} from '@/utils/format'
 
 // 外层 Tab：行业筛选 / 个股筛选
 const activeTab = ref('screening')
@@ -293,23 +240,21 @@ const screenCount = ref(0)
 const selectedIndustry = ref('')
 const candidates = ref<CandidateStock[]>([])
 const limit = 30
-// 择时信号筛选：all(全部B) / B1 / B2 / B3
-const signalFilter = ref<'all' | 'B1' | 'B2' | 'B3'>('all')
+// 择时信号筛选：all(全部) / B1/B2/B3(三买) / S1/S2/S3(三卖)
+const signalFilter = ref<'all' | 'B1' | 'B2' | 'B3' | 'S1' | 'S2' | 'S3'>('all')
 
-/** 按择时信号筛选后的候选个股（后端已只返回 B1/B2/B3 信号） */
+/** 按择时信号筛选后的候选个股（后端已只返回三买三卖信号） */
 const filteredCandidates = computed(() => {
   const f = signalFilter.value
   if (f === 'all') return candidates.value
   return candidates.value.filter((r) => r.signal_type === f)
 })
 
-/** 择时信号统计：{all, B1, B2, B3} */
+/** 择时信号统计：{all, B1, B2, B3, S1, S2, S3} */
 const signalStats = computed(() => {
-  const s = { all: candidates.value.length, B1: 0, B2: 0, B3: 0 }
+  const s: Record<string, number> = { all: candidates.value.length, B1: 0, B2: 0, B3: 0, S1: 0, S2: 0, S3: 0 }
   for (const r of candidates.value) {
-    if (r.signal_type === 'B1') s.B1++
-    else if (r.signal_type === 'B2') s.B2++
-    else if (r.signal_type === 'B3') s.B3++
+    if (r.signal_type && s[r.signal_type] !== undefined) s[r.signal_type]++
   }
   return s
 })
@@ -333,28 +278,6 @@ function scoreTone(v: number | null | undefined) {
   if (s >= 70) return 'tone-strong'
   if (s >= 50) return 'tone-mid'
   return 'tone-weak'
-}
-
-function fmtPct(v: number | null | undefined) {
-  if (v === null || v === undefined || Number.isNaN(Number(v))) return '-'
-  return `${Number(v) >= 0 ? '+' : ''}${(Number(v) * 100).toFixed(1)}%`
-}
-
-function fmtNum(v: number | null | undefined) {
-  if (v === null || v === undefined || Number.isNaN(Number(v))) return '-'
-  return Number(v).toFixed(2)
-}
-
-/** 元 -> 亿 */
-function fmtYi(v: number | null | undefined) {
-  if (v === null || v === undefined || Number.isNaN(Number(v))) return '-'
-  return (Number(v) / 1e8).toFixed(2)
-}
-
-/** 带符号数值（输入为百分数数值，如 1.23 代表 1.23%，模板后续拼 %） */
-function fmtSign(v: number | null | undefined) {
-  if (v === null || v === undefined || Number.isNaN(Number(v))) return '-'
-  return `${Number(v) >= 0 ? '+' : ''}${Number(v).toFixed(2)}`
 }
 
 function dgTagType(q: string) {
@@ -456,10 +379,21 @@ onMounted(() => {
 
 <style scoped>
 .candidate-page {
-  padding: 24px;
-  max-width: 1280px;
-  margin: 0 auto;
+  /* 页面容器交给全局 .app-page，这里仅保留业务布局扩展 */
 }
+
+/* 顶部横幅已由全局 .page-hero 提供，此处无需重复定义 */
+
+/* Tab 导航（外观由全局统一，仅保留高度） */
+.candidate-tabs {
+  --el-tabs-header-height: 46px;
+}
+.candidate-tabs :deep(.el-tabs__item) {
+  height: 46px;
+  line-height: 46px;
+  font-size: 15px;
+}
+
 .page-header {
   display: flex;
   justify-content: space-between;
@@ -498,6 +432,28 @@ onMounted(() => {
   font-weight: 600;
   color: var(--el-text-color-primary);
   margin: 16px 0 8px;
+}
+
+/* 表格美化 */
+.rank-table, .candidate-table {
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: var(--el-box-shadow-light);
+  border: 1px solid var(--el-border-color-light);
+}
+.rank-table :deep(.el-table__header th),
+.candidate-table :deep(.el-table__header th) {
+  background: #f4f7fb;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+.rank-table :deep(.el-table__row),
+.candidate-table :deep(.el-table__row) {
+  transition: background-color .15s;
+}
+.rank-table :deep(.el-table__row:hover),
+.candidate-table :deep(.el-table__row:hover) {
+  background: #f0f7ff;
 }
 .top-grid {
   display: grid;
@@ -631,7 +587,7 @@ onMounted(() => {
   color: var(--el-text-color-secondary);
 }
 .signal-filter {
-  flex-shrink: 0;
+  flex-wrap: wrap;
 }
 .qscore, .aux-cell {
   display: flex;
@@ -670,6 +626,7 @@ onMounted(() => {
 .stocks-toolbar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
   margin-bottom: 12px;
 }

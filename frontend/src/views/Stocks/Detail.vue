@@ -1,13 +1,20 @@
 <template>
-  <div class="stock-detail">
-    <!-- 顶部：代码 / 名称 / 操作 -->
-    <div class="header">
-      <div class="title">
-        <div class="code">{{ code }}</div>
-        <div class="name">{{ stockName || '-' }}</div>
-        <el-tag size="small">{{ market || '-' }}</el-tag>
+  <div class="stock-detail app-page">
+    <!-- 顶部横幅（全局统一） -->
+    <div class="page-hero">
+      <div class="page-hero-main">
+        <div class="page-hero-icon">
+          <el-icon :size="26"><TrendCharts /></el-icon>
+        </div>
+        <div class="page-hero-text">
+          <h2 class="page-hero-title">{{ code }}</h2>
+          <p class="page-hero-sub">
+            {{ stockName || '-' }}
+            <el-tag size="small" style="margin-left: 6px;">{{ market || '-' }}</el-tag>
+          </p>
+        </div>
       </div>
-      <div class="actions">
+      <div class="page-hero-meta">
         <el-button @click="onToggleFavorite">
           <el-icon><Star /></el-icon> {{ isFav ? '已自选' : '加自选' }}
         </el-button>
@@ -696,7 +703,7 @@
             <el-descriptions :column="3" border size="small" style="margin-bottom: 12px;">
               <el-descriptions-item label="板块名称">{{ sectorData.sector_name }}</el-descriptions-item>
               <el-descriptions-item label="板块均涨幅">
-                <span :style="{color: sectorData.sector_avg_change >= 0 ? '#e53935' : '#16a34a', fontWeight: 'bold'}">
+                <span :style="{color: sectorData.sector_avg_change >= 0 ? 'var(--app-up)' : 'var(--app-down)', fontWeight: 'bold'}">
                   {{ sectorData.sector_avg_change >= 0 ? '+' : '' }}{{ sectorData.sector_avg_change }}%
                 </span>
               </el-descriptions-item>
@@ -722,7 +729,7 @@
               </el-table-column>
               <el-table-column label="涨跌幅" prop="change_pct" width="100">
                 <template #default="{ row }">
-                  <span :style="{color: row.change_pct >= 0 ? '#e53935' : '#16a34a', fontWeight: 'bold'}">
+                  <span :style="{color: row.change_pct >= 0 ? 'var(--app-up)' : 'var(--app-down)', fontWeight: 'bold'}">
                     {{ row.change_pct >= 0 ? '+' : '' }}{{ row.change_pct?.toFixed(2) || '0.00' }}%
                   </span>
                 </template>
@@ -769,32 +776,32 @@
             <!-- 实时资金流向 -->
             <el-descriptions :column="2" border size="small" style="margin-bottom: 12px;">
               <el-descriptions-item label="主力净流入">
-                <span :style="{color: moneyFlowData.realtime.main_net_inflow >= 0 ? '#e53935' : '#16a34a', fontWeight: 'bold'}">
+                <span :style="{color: moneyFlowData.realtime.main_net_inflow >= 0 ? 'var(--app-up)' : 'var(--app-down)', fontWeight: 'bold'}">
                   {{ fmtAmount(moneyFlowData.realtime.main_net_inflow) }} 元
                 </span>
               </el-descriptions-item>
               <el-descriptions-item label="主力净占比">
-                <span :style="{color: moneyFlowData.realtime.main_net_inflow >= 0 ? '#e53935' : '#16a34a'}">
+                <span :style="{color: moneyFlowData.realtime.main_net_inflow >= 0 ? 'var(--app-up)' : 'var(--app-down)'}">
                   {{ moneyFlowData.realtime.main_net_inflow_pct?.toFixed(2) || '0.00' }}%
                 </span>
               </el-descriptions-item>
               <el-descriptions-item label="超大单净流入">
-                <span :style="{color: moneyFlowData.realtime.super_large_net >= 0 ? '#e53935' : '#16a34a'}">
+                <span :style="{color: moneyFlowData.realtime.super_large_net >= 0 ? 'var(--app-up)' : 'var(--app-down)'}">
                   {{ fmtAmount(moneyFlowData.realtime.super_large_net) }}
                 </span>
               </el-descriptions-item>
               <el-descriptions-item label="大单净流入">
-                <span :style="{color: moneyFlowData.realtime.large_net >= 0 ? '#e53935' : '#16a34a'}">
+                <span :style="{color: moneyFlowData.realtime.large_net >= 0 ? 'var(--app-up)' : 'var(--app-down)'}">
                   {{ fmtAmount(moneyFlowData.realtime.large_net) }}
                 </span>
               </el-descriptions-item>
               <el-descriptions-item label="中单净流入">
-                <span :style="{color: moneyFlowData.realtime.medium_net >= 0 ? '#e53935' : '#16a34a'}">
+                <span :style="{color: moneyFlowData.realtime.medium_net >= 0 ? 'var(--app-up)' : 'var(--app-down)'}">
                   {{ fmtAmount(moneyFlowData.realtime.medium_net) }}
                 </span>
               </el-descriptions-item>
               <el-descriptions-item label="小单净流入">
-                <span :style="{color: moneyFlowData.realtime.small_net >= 0 ? '#e53935' : '#16a34a'}">
+                <span :style="{color: moneyFlowData.realtime.small_net >= 0 ? 'var(--app-up)' : 'var(--app-down)'}">
                   {{ fmtAmount(moneyFlowData.realtime.small_net) }}
                 </span>
               </el-descriptions-item>
@@ -804,10 +811,10 @@
               <div style="font-size: 12px; color: var(--el-text-color-secondary); margin-bottom: 8px;">近{{ moneyFlowData.days }}日资金流向</div>
               <div v-for="(h, i) in moneyFlowData.history" :key="i" class="flow-history-item">
                 <span class="flow-date">{{ h.date }}</span>
-                <span class="flow-change" :style="{color: h.main_net_inflow_pct >= 0 ? '#e53935' : '#16a34a'}">
+                <span class="flow-change" :style="{color: h.main_net_inflow_pct >= 0 ? 'var(--app-up)' : 'var(--app-down)'}">
                   {{ h.main_net_inflow_pct >= 0 ? '+' : '' }}{{ h.main_net_inflow_pct?.toFixed(2) || '0.00' }}%
                 </span>
-                <span class="flow-inflow" :style="{color: h.main_net_inflow >= 0 ? '#e53935' : '#16a34a'}">
+                <span class="flow-inflow" :style="{color: h.main_net_inflow >= 0 ? 'var(--app-up)' : 'var(--app-down)'}">
                   {{ h.main_net_inflow >= 0 ? '+' : '' }}{{ fmtAmount(h.main_net_inflow) }}
                 </span>
               </div>
@@ -1791,7 +1798,7 @@ function buildVpOption() {
   const klineData = series.map((s: any) => [Number(s.open ?? NaN), Number(s.close ?? NaN), Number(s.low ?? NaN), Number(s.high ?? NaN)])
   const volData = series.map((s: any) => ({
     value: Number(s.volume ?? 0),
-    itemStyle: { color: (Number(s.close ?? 0) >= Number(s.open ?? 0)) ? '#ef4444' : '#16a34a' }
+    itemStyle: { color: (Number(s.close ?? 0) >= Number(s.open ?? 0)) ? '#f56c6c' : '#67c23a' }
   }))
   const ma5 = calculateMA(series, 5)
   const ma20 = calculateMA(series, 20)
@@ -1820,7 +1827,7 @@ function buildVpOption() {
     series: [
       {
         name: 'K线', type: 'candlestick', data: klineData,
-        itemStyle: { color: '#ef4444', color0: '#16a34a', borderColor: '#ef4444', borderColor0: '#16a34a' }
+        itemStyle: { color: '#f56c6c', color0: '#67c23a', borderColor: '#f56c6c', borderColor0: '#67c23a' }
       },
       { name: 'MA5', type: 'line', data: ma5, smooth: true, showSymbol: false, lineStyle: { width: 1, color: '#f97316' } },
       { name: 'MA20', type: 'line', data: ma20, smooth: true, showSymbol: false, lineStyle: { width: 1, color: '#f59e0b' } },
@@ -1865,17 +1872,6 @@ function vpPositionTagType(pos: string): string {
   if (pos === '高位') return 'danger'
   if (pos === '低位') return 'success'
   return 'info'
-}
-function fmtNum(v: any): string {
-  if (v === null || v === undefined || isNaN(v)) return '-'
-  return Number(v).toFixed(2)
-}
-function fmtVol(v: any): string {
-  if (v === null || v === undefined || isNaN(v)) return '-'
-  const n = Number(v)
-  if (n >= 1e8) return (n / 1e8).toFixed(2) + '亿'
-  if (n >= 1e4) return (n / 1e4).toFixed(2) + '万'
-  return n.toFixed(0)
 }
 
 const filteredNews = computed(() => {
@@ -2022,26 +2018,7 @@ async function fetchLatestAnalysis() {
   }
 }
 
-// 格式化
-function fmtPrice(v: any) { const n = Number(v); return Number.isFinite(n) ? n.toFixed(2) : '-' }
-function fmtPercent(v: any) { const n = Number(v); return Number.isFinite(n) ? `${n>0?'+':''}${n.toFixed(2)}%` : '-' }
-function fmtVolume(v: any) {
-  const n = Number(v)
-  if (!Number.isFinite(n)) return '-'
-
-  // 🔥 数据库存储的是"股"，直接显示为"万股"或"亿股"
-  if (n >= 1e8) return (n/1e8).toFixed(2) + '亿股'
-  if (n >= 1e4) return (n/1e4).toFixed(2) + '万股'
-  return n.toFixed(0) + '股'
-}
-function fmtAmount(v: any) {
-  const n = Number(v)
-  if (!Number.isFinite(n)) return '-'
-  if (n >= 1e12) return (n/1e12).toFixed(2) + '万亿'
-  if (n >= 1e8) return (n/1e8).toFixed(2) + '亿'
-  if (n >= 1e4) return (n/1e4).toFixed(2) + '万'
-  return n.toFixed(0)
-}
+// 格式化（fmtPrice/fmtPercent/fmtVolume/fmtAmount/fmtNum/fmtVol 均由 utils/format.ts 提供）
 
 // 财务金额格式化（后端可能为元，也可能为亿元，统一做友好显示）
 function fmtFinAmount(v: any) {
@@ -2144,6 +2121,7 @@ function fmtConf(v: any) {
 }
 
 import { formatDateTimeWithRelative, formatDateTime } from '@/utils/datetime'
+import { fmtNum, fmtVol, fmtPrice, fmtPct as fmtPercent, fmtVolume, fmtAmount } from '@/utils/format'
 
 // 格式化分析时间（处理UTC时间转换为中国本地时间）
 function formatAnalysisTime(dateStr: any): string {
@@ -2296,20 +2274,7 @@ function exportReport() {
   background: linear-gradient(135deg, var(--el-bg-color-page) 0%, var(--el-fill-color-lighter) 100%);
 }
 
-.header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 16px 20px;
-  background: var(--el-bg-color);
-  border-radius: 16px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-}
-
 .title { display: flex; align-items: center; gap: 12px; }
-.code { font-size: 24px; font-weight: 700; color: var(--el-text-color-primary); }
-.name { font-size: 20px; color: var(--el-text-color-regular); }
-.actions { display: flex; gap: 8px; }
 
 .quote-card {
   border-radius: 16px;
@@ -2334,8 +2299,6 @@ function exportReport() {
 
 .price { font-size: 36px; font-weight: 800; letter-spacing: -1px; }
 .change { font-size: 18px; font-weight: 700; }
-.up { color: #ef4444; }
-.down { color: #10b981; }
 
 .stats {
   display: grid;
@@ -2429,9 +2392,9 @@ function exportReport() {
 .news-item .meta { font-size: 12px; color: var(--el-text-color-secondary); margin-top: 4px; }
 
 .sentiment { font-size: 12px; }
-.sentiment.pos { color: #ef4444; }
+.sentiment.pos { color: var(--app-up); }
 .sentiment.neu { color: #64748b; }
-.sentiment.neg { color: #10b981; }
+.sentiment.neg { color: var(--app-down); }
 
 .facts {
   display: grid;

@@ -200,6 +200,7 @@ import { ref, computed, onMounted } from 'vue'
 import { Refresh, DataAnalysis, TrendCharts, Odometer, Grid, Histogram } from '@element-plus/icons-vue'
 import { vibeApi } from '@/api/vibe'
 import type { ConceptAnalysis, ConceptRotation } from '@/api/vibe'
+import { fmtNum } from '@/utils/format'
 
 const today = new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' })
 const loading = ref(false)
@@ -214,11 +215,6 @@ function sign(v: number | null | undefined): string {
 }
 
 function formatPct(v: number | null | undefined): string {
-  if (v == null) return '—'
-  return v.toFixed(2)
-}
-
-function fmtNum(v: number | null | undefined): string {
   if (v == null) return '—'
   return v.toFixed(2)
 }

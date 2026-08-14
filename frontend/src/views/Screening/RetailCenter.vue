@@ -119,7 +119,7 @@
               <el-descriptions :column="5" border size="small" style="margin-bottom: 12px;">
                 <el-descriptions-item label="总交易次数">{{ perfData.overall.total_trades }}</el-descriptions-item>
                 <el-descriptions-item label="总体胜率">
-                  <span :style="{color: perfData.overall.win_rate >= 0.5 ? '#e6232a' : '#19a519', fontWeight:'bold'}">
+                  <span :style="{color: perfData.overall.win_rate >= 0.5 ? 'var(--app-up)' : 'var(--app-down)', fontWeight:'bold'}">
                     {{ (perfData.overall.win_rate * 100).toFixed(1) }}%
                   </span>
                 </el-descriptions-item>
@@ -135,7 +135,7 @@
                 <el-table-column label="交易次数" prop="total_trades" width="100" sortable />
                 <el-table-column label="胜率" width="100" sortable :sort-by="'win_rate'">
                   <template #default="{ row }">
-                    <span :style="{color: row.win_rate >= 0.5 ? '#e6232a' : '#19a519', fontWeight:'bold'}">
+                    <span :style="{color: row.win_rate >= 0.5 ? 'var(--app-up)' : 'var(--app-down)', fontWeight:'bold'}">
                       {{ (row.win_rate * 100).toFixed(1) }}%
                     </span>
                   </template>
@@ -145,7 +145,7 @@
                 </el-table-column>
                 <el-table-column label="平均收益" width="120" sortable :sort-by="'avg_return'">
                   <template #default="{ row }">
-                    <span :style="{color: row.avg_return >= 0 ? '#e6232a' : '#19a519'}">
+                    <span :style="{color: row.avg_return >= 0 ? 'var(--app-up)' : 'var(--app-down)'}">
                       {{ (row.avg_return * 100).toFixed(2) }}%
                     </span>
                   </template>
@@ -421,7 +421,7 @@
             </el-table-column>
             <el-table-column label="当前盈亏" width="100">
               <template #default="{ row }">
-                <span :style="{color: row.current_pnl_pct >= 0 ? '#e6232a' : '#19a519', fontWeight:'bold'}">
+                <span :style="{color: row.current_pnl_pct >= 0 ? 'var(--app-up)' : 'var(--app-down)', fontWeight:'bold'}">
                   {{ (row.current_pnl_pct * 100).toFixed(2) }}%
                 </span>
               </template>
@@ -566,7 +566,7 @@
               <el-descriptions-item label="全市场换手率">{{ regimeRawData.turnover_ratio.toFixed(2) }}%</el-descriptions-item>
               <el-descriptions-item label="换手率MA20">{{ regimeRawData.turnover_ma20.toFixed(2) }}%</el-descriptions-item>
               <el-descriptions-item label="指数vs MA250">
-                <span :style="{color: regimeRawData.index_price >= regimeRawData.index_ma250 ? '#e6232a' : '#19a519', fontWeight:'bold'}">
+                <span :style="{color: regimeRawData.index_price >= regimeRawData.index_ma250 ? 'var(--app-up)' : 'var(--app-down)', fontWeight:'bold'}">
                   {{ regimeRawData.index_price >= regimeRawData.index_ma250 ? '在MA250上方（多头）' : '在MA250下方（空头）' }}
                 </span>
               </el-descriptions-item>

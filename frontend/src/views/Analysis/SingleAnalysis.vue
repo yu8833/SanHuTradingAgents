@@ -1360,7 +1360,7 @@ const goSimOrder = async () => {
 
     // 显示可编辑的确认对话框
     const actionText = recommendation.action === 'buy' ? '买入' : '卖出'
-    const actionColor = recommendation.action === 'buy' ? '#67C23A' : '#F56C6C'
+    const actionColor = recommendation.action === 'buy' ? 'var(--app-up)' : 'var(--app-down)'
 
     // 创建一个响应式的消息组件
     const MessageComponent = {
@@ -2473,7 +2473,7 @@ onMounted(async () => {
           letter-spacing: 1px;
 
           &.decision-chip--buy {
-            background: #10b981;
+            background: var(--app-up);
             color: white;
           }
           &.decision-chip--hold {
@@ -2481,7 +2481,7 @@ onMounted(async () => {
             color: #1a202c;
           }
           &.decision-chip--sell {
-            background: #ef4444;
+            background: var(--app-down);
             color: white;
           }
         }

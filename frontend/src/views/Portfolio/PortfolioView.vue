@@ -761,8 +761,6 @@ const getExitReasonTagType = (r?: string | null) => {
     &:last-child { border-bottom: none; }
   }
 }
-.up { color: #e6232a; }
-.down { color: #19a519; }
 .review-trade-summary {
   :deep(.el-descriptions) {
     .el-descriptions__label { width: 60px; }

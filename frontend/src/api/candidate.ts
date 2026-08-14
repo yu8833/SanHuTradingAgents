@@ -57,6 +57,11 @@ export interface CandidateStock {
   total_mv?: number | null
   momentum_20d?: number | null
   volume_ratio_5d?: number | null
+  // ΔG 五因子（来自 dg_prosperity，百分数口径）
+  or_yoy?: number | null   // 收入增速（营收YOY）
+  g?: number | null        // 盈利增速
+  d_or_yoy?: number | null
+  d_roe?: number | null
   date: string
   // 择时预览
   dg_quadrant?: string
@@ -88,12 +93,12 @@ export const candidateApi = {
     ApiClient.get<{ as_of: string; industry: string; sector_score: number | null; member_count: number; items: IndustryMember[] }>(
       '/api/candidate/members', { industry }),
 
-  /** Tab2：某行业候选个股（top30，ΔG过滤+择时预览，仅保留 B1/B2/B3 信号） */
+  /** Tab2：某行业候选个股（top30，ΔG过滤+择时预览，仅保留三买三卖信号） */
   stocks: (industry: string, limit = 30) =>
     ApiClient.get<CandidateStockList>(
       '/api/candidate/stocks', { industry, limit }),
 
-  /** Tab2 默认视图：未选行业时，前 top_n 行业每行业 top per_industry 只 B 信号个股 */
+  /** Tab2 默认视图：未选行业时，前 top_n 行业每行业 top per_industry 只三买三卖信号个股 */
   stocksOverview: (topN = 10, perIndustry = 3, industries: string[] = []) =>
     ApiClient.get<CandidateStockList>(
       '/api/candidate/stocks-overview',

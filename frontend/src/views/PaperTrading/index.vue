@@ -1,11 +1,17 @@
 <template>
-  <div class="paper-trading">
-    <div class="header">
-      <div class="title">
-        <el-icon style="margin-right:8px"><CreditCard /></el-icon>
-        <span>模拟交易</span>
+  <div class="paper-trading app-page">
+    <!-- 顶部横幅（全局统一） -->
+    <div class="page-hero">
+      <div class="page-hero-main">
+        <div class="page-hero-icon">
+          <el-icon :size="26"><CreditCard /></el-icon>
+        </div>
+        <div class="page-hero-text">
+          <h2 class="page-hero-title">模拟交易</h2>
+          <p class="page-hero-sub">虚拟资金 · 模拟交易 · 账户风控</p>
+        </div>
       </div>
-      <div class="actions">
+      <div class="page-hero-meta">
         <el-button :icon="Refresh" text size="small" @click="refreshAll">刷新</el-button>
         <el-button type="primary" :icon="Plus" @click="openOrderDialog">下市场单</el-button>
         <el-button type="danger" plain :icon="Delete" @click="confirmReset">重置账户</el-button>
@@ -86,7 +92,7 @@
                   <el-descriptions-item label="持仓市值">¥{{ fmtAmount(account.positions_value?.CNY || account.positions_value) }}</el-descriptions-item>
                   <el-descriptions-item label="总资产">¥{{ fmtAmount(account.equity?.CNY || account.equity) }}</el-descriptions-item>
                   <el-descriptions-item label="已实现盈亏">
-                    <span :style="{ color: (account.realized_pnl?.CNY !== undefined ? account.realized_pnl.CNY : (typeof account.realized_pnl === 'number' ? account.realized_pnl : 0)) >= 0 ? '#67C23A' : '#F56C6C' }">
+                    <span :style="{ color: (account.realized_pnl?.CNY !== undefined ? account.realized_pnl.CNY : (typeof account.realized_pnl === 'number' ? account.realized_pnl : 0)) >= 0 ? 'var(--app-up)' : 'var(--app-down)' }">
                       ¥{{ fmtAmount(account.realized_pnl?.CNY !== undefined ? account.realized_pnl.CNY : (typeof account.realized_pnl === 'number' ? account.realized_pnl : 0)) }}
                     </span>
                   </el-descriptions-item>
@@ -100,7 +106,7 @@
                   <el-descriptions-item label="持仓市值">HK${{ fmtAmount(account.positions_value?.HKD || 0) }}</el-descriptions-item>
                   <el-descriptions-item label="总资产">HK${{ fmtAmount(account.equity?.HKD || 0) }}</el-descriptions-item>
                   <el-descriptions-item label="已实现盈亏">
-                    <span :style="{ color: (account.realized_pnl?.HKD || 0) >= 0 ? '#67C23A' : '#F56C6C' }">
+                    <span :style="{ color: (account.realized_pnl?.HKD || 0) >= 0 ? 'var(--app-up)' : 'var(--app-down)' }">
                       HK${{ fmtAmount(account.realized_pnl?.HKD || 0) }}
                     </span>
                   </el-descriptions-item>
@@ -114,7 +120,7 @@
                   <el-descriptions-item label="持仓市值">${{ fmtAmount(account.positions_value?.USD || 0) }}</el-descriptions-item>
                   <el-descriptions-item label="总资产">${{ fmtAmount(account.equity?.USD || 0) }}</el-descriptions-item>
                   <el-descriptions-item label="已实现盈亏">
-                    <span :style="{ color: (account.realized_pnl?.USD || 0) >= 0 ? '#67C23A' : '#F56C6C' }">
+                    <span :style="{ color: (account.realized_pnl?.USD || 0) >= 0 ? 'var(--app-up)' : 'var(--app-down)' }">
                       ${{ fmtAmount(account.realized_pnl?.USD || 0) }}
                     </span>
                   </el-descriptions-item>
@@ -175,7 +181,7 @@
             </el-table-column>
             <el-table-column label="浮盈" width="120">
               <template #default="{ row }">
-                <span :style="{ color: (Number(row.last_price || 0) - Number(row.avg_cost || 0)) >= 0 ? '#67C23A' : '#F56C6C' }">
+                <span :style="{ color: (Number(row.last_price || 0) - Number(row.avg_cost || 0)) >= 0 ? 'var(--app-up)' : 'var(--app-down)' }">
                   {{ getCurrencySymbol(row.currency) }}{{ fmtAmount((Number(row.last_price || 0) - Number(row.avg_cost || 0)) * Number(row.quantity || 0)) }}
                 </span>
               </template>
@@ -305,6 +311,7 @@ import { analysisApi } from '@/api/analysis'
 import { stocksApi } from '@/api/stocks'
 import { formatDateTime } from '@/utils/datetime'
 import { subscribeQuotesUpdate } from '@/utils/quotesSSE'
+import { fmtPrice, fmtAmount } from '@/utils/format'
 
 // 路由与初始化
 const route = useRoute()
@@ -343,16 +350,6 @@ const filteredOrders = computed(() => {
 // 分析上下文
 const analysisContext = ref<any | null>(null)
 const analysisLoading = ref(false)
-
-// 方法
-function fmtPrice(n: number | null | undefined) {
-  if (n == null || Number.isNaN(n as any)) return '-'
-  return Number(n).toFixed(2)
-}
-function fmtAmount(n: number | null | undefined) {
-  if (n == null || Number.isNaN(n as any)) return '-'
-  return Number(n).toFixed(2)
-}
 
 // 获取货币符号
 function getCurrencySymbol(currency: string | undefined) {
@@ -674,7 +671,5 @@ onUnmounted(() => {
 
 <style scoped>
 .paper-trading { padding: 16px; }
-.header { display:flex; align-items:center; justify-content:space-between; margin-bottom: 12px; }
-.title { display:flex; align-items:center; font-weight: 600; font-size: 16px; }
 .card-hd { font-weight: 600; }
 </style>

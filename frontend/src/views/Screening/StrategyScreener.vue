@@ -1,21 +1,20 @@
 <template>
-  <div class="strategy-screener">
-    <!-- 顶部横幅 -->
-    <div class="hero-banner">
-      <div class="hero-main">
-        <div class="hero-meta">
-          <span class="hero-icon"><el-icon><TrendCharts /></el-icon></span>
-          <div class="hero-text">
-            <h1 class="page-title">常用策略</h1>
-            <p class="page-description">基于本地行情数据 · 策略筛选与评分排序</p>
-          </div>
+  <div class="strategy-screener app-page">
+    <!-- 顶部横幅（全局统一） -->
+    <div class="page-hero">
+      <div class="page-hero-main">
+        <div class="page-hero-icon">
+          <el-icon :size="26"><TrendCharts /></el-icon>
         </div>
-        <p v-if="computedAt" class="computed-at">
-          <el-icon><Clock /></el-icon>
-          数据更新于 {{ computedAt }}
-        </p>
+        <div class="page-hero-text">
+          <h2 class="page-hero-title">常用策略</h2>
+          <p class="page-hero-sub">
+            基于本地行情数据 · 策略筛选与评分排序
+            <template v-if="computedAt"> · <el-icon :size="13"><Clock /></el-icon> 数据更新于 {{ computedAt }}</template>
+          </p>
+        </div>
       </div>
-      <div class="header-actions">
+      <div class="page-hero-meta">
         <el-select v-model="asOf" placeholder="选择交易日" size="default" class="date-select" filterable @change="onAsOfChange">
           <el-option v-for="d in tradeDates" :key="d" :label="d" :value="d" />
         </el-select>
@@ -370,77 +369,9 @@ onMounted(() => {
   max-width: 1680px;
   margin: 0 auto;
 
-  /* ===== 顶部横幅 ===== */
-  .hero-banner {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    flex-wrap: wrap;
-    padding: 22px 26px;
-    margin-bottom: 22px;
-    border-radius: 14px;
-    background:
-      radial-gradient(120% 160% at 0% 0%, var(--el-color-primary-light-9) 0%, transparent 55%),
-      linear-gradient(135deg, var(--el-fill-color-lighter) 0%, var(--el-bg-color) 100%);
-    border: 1px solid var(--el-border-color-lighter);
-
-    .hero-main {
-      .hero-meta {
-        display: flex;
-        align-items: center;
-        gap: 14px;
-
-        .hero-icon {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          width: 46px;
-          height: 46px;
-          border-radius: 12px;
-          color: #fff;
-          font-size: 24px;
-          background: linear-gradient(135deg, var(--el-color-primary) 0%, var(--el-color-primary-light-3) 100%);
-          box-shadow: 0 6px 14px color-mix(in srgb, var(--el-color-primary) 35%, transparent);
-        }
-
-        .hero-text {
-          .page-title {
-            font-size: 24px;
-            font-weight: 700;
-            margin: 0;
-            color: var(--el-text-color-primary);
-            letter-spacing: 0.5px;
-          }
-
-          .page-description {
-            margin: 4px 0 0;
-            font-size: 13px;
-            color: var(--el-text-color-secondary);
-          }
-        }
-      }
-
-      .computed-at {
-        display: flex;
-        align-items: center;
-        gap: 5px;
-        margin: 12px 0 0 60px;
-        font-size: 12px;
-        color: var(--el-color-success);
-        .el-icon { font-size: 13px; }
-      }
-    }
-
-    .header-actions {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-
-      .date-select {
-        width: 160px;
-      }
-    }
+  /* ===== 顶部横幅（由全局 .page-hero 提供，此处仅保留选择器宽度） ===== */
+  .date-select {
+    width: 160px;
   }
 
   /* ===== 卡片通用 ===== */
@@ -712,10 +643,6 @@ onMounted(() => {
 
 @media (max-width: 900px) {
   .strategy-screener {
-    .hero-banner {
-      flex-direction: column;
-      align-items: flex-start;
-    }
     .strategy-grid {
       grid-template-columns: 1fr;
     }
@@ -724,12 +651,6 @@ onMounted(() => {
 
 html.dark {
   .strategy-screener {
-    .hero-banner {
-      background:
-        radial-gradient(120% 160% at 0% 0%, var(--el-fill-color-dark) 0%, transparent 55%),
-        linear-gradient(135deg, var(--el-bg-color-overlay) 0%, var(--el-bg-color) 100%);
-    }
-
     .strategy-panel,
     .result-panel {
       :deep(.el-card__header) {
