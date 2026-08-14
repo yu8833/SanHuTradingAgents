@@ -186,6 +186,38 @@
         </div>
       </template>
 
+      <!-- 账户级回撤风控 / 持仓全红率（教材5.2账户级止损 + 5.3维护持仓全红） -->
+      <el-alert
+        v-if="risk"
+        :type="risk.level === 0 ? 'success' : (risk.level === 3 ? 'error' : 'warning')"
+        :closable="false"
+        show-icon
+        style="margin-bottom: 12px;"
+      >
+        <template #title>
+          <div style="font-weight: 600; font-size: 13px;">
+            {{ risk.account_paused ? '🔒 账户已暂停交易（月回撤>8%）' : `账户回撤风控：${risk.level_label}` }}
+          </div>
+        </template>
+        <div style="font-size: 12px; line-height: 1.8;">
+          <template v-if="risk.account_paused">
+            <span>{{ risk.account_paused_reason }}。暂停期间禁止新建买入指令。</span>
+          </template>
+          <template v-else>
+            <span>
+              周回撤 <strong>{{ risk.weekly_dd_pct }}%</strong>｜
+              月回撤 <strong>{{ risk.monthly_dd_pct }}%</strong>｜
+              总仓位上限 <strong>{{ Math.round(risk.max_position_pct * 100) }}%</strong>
+            </span>
+            <span v-if="risk.holding_health" style="margin-left: 12px;">
+              持仓全红率 <strong :style="{ color: risk.holding_health.all_red_rate >= 80 ? '#67C23A' : '#E6A23C' }">{{ risk.holding_health.all_red_rate }}%</strong>
+              （{{ risk.holding_health.red }} 红 / {{ risk.holding_health.green }} 绿）
+            </span>
+            <span style="margin-left: 12px; color: #909399;">连续止损 ≥ {{ risk.consecutive_stop_loss_limit }} 次暂停该标的</span>
+          </template>
+        </div>
+      </el-alert>
+
       <div v-loading="loadingOrders" class="tbs-body">
         <el-empty
           v-if="!loadingOrders && tbsOrders.length === 0"
@@ -361,8 +393,9 @@ import {
 } from '@element-plus/icons-vue'
 import {
   monitorApi, genRuleId,
-  type MonitorRule, type MonitorAlert, type MonitorCondition, type MonitorOptions,
+  type MonitorRule, type MonitorAlert, type MonitorCondition, type MonitorOptions, type TbsOrder,
 } from '@/api/monitor'
+import { paperApi } from '@/api/paper'
 
 const checking = ref(false)
 const loading = ref(false)
@@ -389,6 +422,85 @@ const draft = reactive<{
 })
 
 let pollTimer: number | null = null
+
+// ── 三买三卖待确认指令 ──────────────────────────────────
+const tbsOrders = ref<TbsOrder[]>([])
+const loadingOrders = ref(false)
+const tbsStatusFilter = ref<'pending' | 'executed' | 'all'>('pending')
+const executingId = ref<string | null>(null)
+
+const loadTbsOrders = async () => {
+  loadingOrders.value = true
+  try {
+    const res = await monitorApi.listTbsOrders({
+      status: tbsStatusFilter.value === 'all' ? undefined : tbsStatusFilter.value,
+    })
+    tbsOrders.value = (res as any)?.data?.orders ?? []
+  } catch (e: any) {
+    console.warn('加载三买三卖指令失败', e)
+    tbsOrders.value = []
+  } finally {
+    loadingOrders.value = false
+  }
+}
+
+const pendingOrders = computed(() => tbsOrders.value.filter((o) => o.status === 'pending'))
+
+const statusLabel = (status: string): string =>
+  ({ pending: '待确认', executed: '已执行', cancelled: '已取消', dismissed: '已忽略' })[status] || status
+
+const pctLabel = (pct?: number): string => {
+  if (pct == null) return '—'
+  const v = Math.round((pct || 0) * 100)
+  return pct >= 1 ? '清仓' : `${v}%`
+}
+
+const executeOrder = async (o: TbsOrder) => {
+  executingId.value = o.id
+  try {
+    await monitorApi.executeTbsOrder(o.id)
+    ElMessage.success(`已执行 ${o.symbol} 指令`)
+    await loadTbsOrders()
+  } catch (e: any) {
+    ElMessage.error('执行失败：' + (e?.message || '未知错误'))
+  } finally {
+    executingId.value = null
+  }
+}
+
+const cancelOrder = async (o: TbsOrder) => {
+  try {
+    await monitorApi.cancelTbsOrder(o.id)
+    ElMessage.success('指令已取消')
+    await loadTbsOrders()
+  } catch (e: any) {
+    ElMessage.error('取消失败：' + (e?.message || '未知错误'))
+  }
+}
+
+const dismissOrder = async (o: TbsOrder) => {
+  try {
+    await monitorApi.dismissTbsOrder(o.id)
+    await loadTbsOrders()
+  } catch (e: any) {
+    ElMessage.error('操作失败：' + (e?.message || '未知错误'))
+  }
+}
+
+// ── 账户级回撤风控 / 持仓全红率（教材5.2/5.3） ──────────
+const risk = ref<any | null>(null)
+
+const loadRisk = async () => {
+  try {
+    const res = await paperApi.getRisk()
+    if ((res as any)?.success) {
+      risk.value = (res as any)?.data?.risk ?? null
+    }
+  } catch (e) {
+    console.warn('加载风控状态失败', e)
+    risk.value = null
+  }
+}
 
 // 选择「三买三卖」类型时，默认作用域切到「自选股」（买1建仓），避免停留在不合适的 symbols
 watch(() => draft.type, (t) => {
@@ -458,7 +570,7 @@ const loadRules = async () => {
 
 const loadAll = async () => {
   loading.value = true
-  await Promise.all([loadOptions(), loadAlerts(), loadRules()])
+  await Promise.all([loadOptions(), loadAlerts(), loadRules(), loadTbsOrders(), loadRisk()])
   loading.value = false
 }
 
@@ -682,6 +794,8 @@ const startPolling = () => {
   pollTimer = window.setInterval(() => {
     loadAlerts()
     loadRules()
+    loadTbsOrders()
+    loadRisk()
   }, 30000)
 }
 const stopPolling = () => {
