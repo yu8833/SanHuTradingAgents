@@ -30,6 +30,14 @@ def _finite(v):
         return False
     return math.isfinite(f)
 
+
+def _delta(curr, prev):
+    """计算两个有限数值之差（百分点）。任一非有限或缺失返回 None。"""
+    if not _finite(curr) or not _finite(prev):
+        return None
+    return float(curr) - float(prev)
+
+
 QUADRANT_LABELS = {
     "double_click": "戴维斯双击",
     "peaking": "景气见顶",
@@ -145,11 +153,23 @@ class DgProsperityService:
                 doc = latest[code]
                 g = doc.get("g")
                 dg = doc.get("dg")
+                or_yoy = doc.get("or_yoy")
+                d_or_yoy = doc.get("d_or_yoy")
+                roe = doc.get("roe")
+                d_roe = doc.get("d_roe")
                 # 过滤非有限值：NaN/±inf 无法 JSON 序列化，且会污染聚合/象限判定
                 if not _finite(g):
                     g = None
                 if not _finite(dg):
                     dg = None
+                if not _finite(or_yoy):
+                    or_yoy = None
+                if not _finite(d_or_yoy):
+                    d_or_yoy = None
+                if not _finite(roe):
+                    roe = None
+                if not _finite(d_roe):
+                    d_roe = None
                 q = classify_quadrant(g, dg)
                 result[code] = {
                     "quadrant": q,
@@ -157,6 +177,10 @@ class DgProsperityService:
                     "quadrant_color": QUADRANT_COLORS.get(q, "info"),
                     "g": g,
                     "dg": dg,
+                    "or_yoy": or_yoy,
+                    "d_or_yoy": d_or_yoy,
+                    "roe": roe,
+                    "d_roe": d_roe,
                     "report_period": doc.get("report_period", ""),
                     "available": True
                 }
@@ -172,6 +196,10 @@ class DgProsperityService:
             "quadrant_color": "info",
             "g": None,
             "dg": None,
+            "or_yoy": None,
+            "d_or_yoy": None,
+            "roe": None,
+            "d_roe": None,
             "report_period": "",
             "available": False
         }
@@ -263,7 +291,7 @@ class DgProsperityService:
                     # 拉取该股票最近8个季度的财务指标
                     df = pro.fina_indicator(
                         ts_code=ts_code,
-                        fields='ts_code,end_date,q_profit_yoy'
+                        fields='ts_code,end_date,q_profit_yoy,or_yoy,roe'
                     )
                     if df is None or len(df) == 0:
                         return
@@ -280,15 +308,25 @@ class DgProsperityService:
                         q_map = {"0331": "Q1", "0630": "Q2", "0930": "Q3", "1231": "Q4"}
                         period = f"{y}{q_map.get(md, 'Q4')}"
 
+                        set_fields = {
+                            "code": code,
+                            "report_period": period,
+                            "ts_code": ts_code,
+                            "updated_at": datetime.now().isoformat()
+                        }
+                        # 仅写入有限数值，避免 NaN/±inf 污染 Δ 计算
+                        if _finite(g):
+                            set_fields["g"] = float(g)
+                        or_yoy = row.get("or_yoy")
+                        if _finite(or_yoy):
+                            set_fields["or_yoy"] = float(or_yoy)
+                        roe = row.get("roe")
+                        if _finite(roe):
+                            set_fields["roe"] = float(roe)
+
                         await collection.update_one(
                             {"code": code, "report_period": period},
-                            {"$set": {
-                                "code": code,
-                                "report_period": period,
-                                "g": float(g),
-                                "ts_code": ts_code,
-                                "updated_at": datetime.now().isoformat()
-                            }},
+                            {"$set": set_fields},
                             upsert=True
                         )
                         updated += 1
@@ -315,7 +353,7 @@ class DgProsperityService:
         }
 
     async def _compute_dg_for_all(self):
-        """计算所有股票的 ΔG（当季 G - 上季 G）"""
+        """计算所有股票的 ΔG、Δ收入增速、ΔROE（当季 - 上季）"""
         db = await self._get_db()
         collection = db["dg_prosperity"]
 
@@ -336,20 +374,25 @@ class DgProsperityService:
             if len(docs) < 2:
                 continue
 
-            # 按报告期升序排列后计算环比 ΔG
+            # 按报告期升序排列后计算环比 Δ（百分点）
             docs_sorted = sorted(docs, key=lambda d: d.get("report_period", ""))
             for i in range(1, len(docs_sorted)):
-                prev_g = docs_sorted[i - 1].get("g")
-                curr_g = docs_sorted[i].get("g")
-                if prev_g is not None and curr_g is not None:
-                    dg = curr_g - prev_g
-                    # 避免写入 NaN/±inf（上季或当季数据缺失导致）
-                    if not _finite(dg):
-                        continue
+                prev, curr = docs_sorted[i - 1], docs_sorted[i]
+                set_fields = {}
+                dg = _delta(curr.get("g"), prev.get("g"))
+                if dg is not None:
+                    set_fields["dg"] = dg
+                d_or_yoy = _delta(curr.get("or_yoy"), prev.get("or_yoy"))
+                if d_or_yoy is not None:
+                    set_fields["d_or_yoy"] = d_or_yoy
+                d_roe = _delta(curr.get("roe"), prev.get("roe"))
+                if d_roe is not None:
+                    set_fields["d_roe"] = d_roe
+                if set_fields:
                     with contextlib.suppress(Exception):
                         await collection.update_one(
-                            {"_id": docs_sorted[i]["_id"]},
-                            {"$set": {"dg": float(dg)}}
+                            {"_id": curr["_id"]},
+                            {"$set": set_fields}
                         )
 
     async def get_sector_dg(self, industry: str) -> dict:

@@ -275,7 +275,7 @@
             <div class="card-hd">
               <div>
                 三买三卖买卖点检查
-                <el-tooltip content="基于三买三卖交易系统，检测当前股价是否触发买点（B1/B2/B3）或卖点（S1/S2/S3），判断当前所处买卖阶段。" placement="top">
+                <el-tooltip content="基于三买三卖交易系统，检测当前股价是否触发买点（左侧买点/突破买点/回踩买点）或卖点（加速卖点/跌破卖点/清仓卖点），判断当前所处买卖阶段。" placement="top">
                   <el-icon class="help-icon-inline"><QuestionFilled /></el-icon>
                 </el-tooltip>
               </div>
@@ -309,8 +309,7 @@
               <template v-if="buySellCheckData.signals && buySellCheckData.signals.length">
                 <div class="tbs-stage-title">当前触发信号</div>
                 <div v-for="sig in buySellCheckData.signals" :key="sig.type" class="tbs-signal" :class="tbsSignalClass(sig.type)">
-                  <span class="tbs-signal-type">{{ sig.type }}</span>
-                  <span class="tbs-signal-label">{{ sig.type_label }}</span>
+                  <span class="tbs-signal-type">{{ sig.type_label || sig.type }}</span>
                   <span class="tbs-signal-desc">{{ tbsSignalDesc(sig.type) }}</span>
                 </div>
               </template>

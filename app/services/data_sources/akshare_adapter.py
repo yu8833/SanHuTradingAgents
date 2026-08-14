@@ -28,6 +28,32 @@ def _news_time_key(time_str: str) -> str:
     return s or "0000-00-00 00:00:00"
 
 
+def _parse_cn_amount(v) -> float | None:
+    """解析「X.XX亿/万」金额字符串为数值（单位：元）。'--'/NaN/空 → None。"""
+    try:
+        s = str(v).strip()
+        if not s or s in ("--", "-", "None", "nan", "NaN"):
+            return None
+        if s.endswith("亿"):
+            return float(s[:-1]) * 1e8
+        if s.endswith("万"):
+            return float(s[:-1]) * 1e4
+        return float(s)
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_pct_str(v) -> float | None:
+    """解析「21.43%」百分比字符串为数值（%）。'--'/NaN/空 → None。"""
+    try:
+        s = str(v).strip().replace("%", "")
+        if not s or s in ("--", "-", "None", "nan", "NaN"):
+            return None
+        return float(s)
+    except (TypeError, ValueError):
+        return None
+
+
 class AKShareAdapter(DataSourceAdapter):
     """AKShare数据源适配器"""
 
@@ -523,6 +549,132 @@ class AKShareAdapter(DataSourceAdapter):
             
         except Exception as e:
             logger.error(f"AKShare 单只股票查询失败: {e}")
+            return None
+
+    def get_etf_spot_fund_flow(self, timeout: int = 45) -> pd.DataFrame | None:
+        """获取全市场 ETF 资金流快照（东财 fund_etf_spot_em）。
+
+        ETF Radar 核心数据源：单次全量返回全部 ETF，含主力净流入、超大单/大单/中单/小单
+        净流入、量比、换手率、最新份额、流通/总市值等字段（约 1500+ 只，实测 ~19s）。
+        使用 ThreadPoolExecutor 添加超时保护，避免网络问题长时间阻塞事件循环。
+
+        Returns:
+            原始 DataFrame（含中文列名），失败返回 None。
+        """
+        if not self.is_available():
+            return None
+        try:
+            from concurrent.futures import ThreadPoolExecutor
+            from concurrent.futures import TimeoutError as FuturesTimeoutError
+
+            import akshare as ak
+
+            def _fetch():
+                return ak.fund_etf_spot_em()
+
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_fetch)
+                try:
+                    df = future.result(timeout=timeout)
+                except FuturesTimeoutError:
+                    logger.warning(f"AKShare ETF 资金流获取超时（{timeout}秒）")
+                    return None
+
+            if df is None or getattr(df, "empty", True):
+                logger.warning("AKShare ETF 资金流返回空数据")
+                return None
+            logger.info(f"✅ AKShare ETF 资金流获取成功: {len(df)} 只")
+            return df
+        except Exception as e:
+            logger.error(f"AKShare ETF 资金流获取失败: {e}")
+            return None
+
+    def get_industry_fund_flow(self, symbol: str = "即时", timeout: int = 15) -> pd.DataFrame | None:
+        """获取行业资金流（同花顺 stock_fund_flow_industry）。
+
+        ETF Radar 行业维度交叉校验：返回约 90 个行业的流入/流出/净额/涨跌幅/领涨股
+        （实测 symbol='即时' 约 0.8s）。东财 stock_sector_fund_flow_rank 连接被拒，
+        不可用，故统一走同花顺。
+
+        Args:
+            symbol: '即时'（盘中实时）| '3日排行' | '5日排行' | '10日排行' | '20日排行'
+        """
+        if not self.is_available():
+            return None
+        try:
+            from concurrent.futures import ThreadPoolExecutor
+            from concurrent.futures import TimeoutError as FuturesTimeoutError
+
+            import akshare as ak
+
+            def _fetch():
+                return ak.stock_fund_flow_industry(symbol=symbol)
+
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_fetch)
+                try:
+                    df = future.result(timeout=timeout)
+                except FuturesTimeoutError:
+                    logger.warning(f"AKShare 行业资金流获取超时（{timeout}秒）")
+                    return None
+
+            if df is None or getattr(df, "empty", True):
+                logger.warning("AKShare 行业资金流返回空数据")
+                return None
+            logger.info(f"✅ AKShare 行业资金流获取成功: {len(df)} 个行业")
+            return df
+        except Exception as e:
+            logger.error(f"AKShare 行业资金流获取失败: {e}")
+            return None
+
+    def get_individual_fund_flow(self, symbol: str = "即时", timeout: int = 25) -> pd.DataFrame | None:
+        """获取全市场个股资金流（同花顺 stock_fund_flow_individual）。
+
+        Stock Radar 个股「资金流」维度：一次返回全市场 5000+ 只股票的净额/流入/流出/换手率/成交额
+        （实测 symbol='即时' 返回 5205 只）。东财 stock_individual_fund_flow_rank 连接被拒，
+        不可用，故统一走同花顺。
+
+        净额/流入/流出/成交额原始为「X.XX亿/万」字符串，本方法已规范化为数值（单位：元）。
+
+        Args:
+            symbol: '即时'（盘中实时）| '3日排行' | '5日排行' | '10日排行' | '20日排行'
+        """
+        if not self.is_available():
+            return None
+        try:
+            from concurrent.futures import ThreadPoolExecutor
+            from concurrent.futures import TimeoutError as FuturesTimeoutError
+
+            import akshare as ak
+
+            def _fetch():
+                return ak.stock_fund_flow_individual(symbol=symbol)
+
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_fetch)
+                try:
+                    df = future.result(timeout=timeout)
+                except FuturesTimeoutError:
+                    logger.warning(f"AKShare 个股资金流获取超时（{timeout}秒）")
+                    return None
+
+            if df is None or getattr(df, "empty", True):
+                logger.warning("AKShare 个股资金流返回空数据")
+                return None
+
+            # 规范化「亿/万」字符串金额为数值（单位：元）
+            for col in ("净额", "流入资金", "流出资金", "成交额"):
+                if col in df.columns:
+                    df[col] = df[col].map(_parse_cn_amount)
+            # 换手率/涨跌幅为「21.43%」字符串 → 数值（%）
+            for col in ("换手率", "涨跌幅"):
+                if col in df.columns:
+                    df[col] = df[col].map(_parse_pct_str)
+
+            logger.info(f"✅ AKShare 个股资金流获取成功: {len(df)} 只")
+            return df
+        except Exception as e:
+            logger.error(f"AKShare 个股资金流获取失败: {e}")
             return None
 
     def get_kline(self, code: str, period: str = "day", limit: int = 120, adj: str | None = None):

@@ -2,10 +2,12 @@
 
 对指定行业/代码池内的成分股做多因子打分，输出 quality_score（0-100）。
 因子（行业中性化 + 绝对项）：
-  - 盈利：roe（中高优）
-  - 成长：revenue_yoy / net_profit_yoy（高优）
+  - 景气趋势（Δ因子，预测力最强，对齐教材 ΔG 五指标）：dg(Δ盈利增速)、
+    d_or_yoy(Δ收入增速)、d_roe(ΔROE)（高优，来自 dg_prosperity）
+  - 盈利：roe（中高优）、盈利增速 g
+  - 成长：绝对收入增速 or_yoy / 盈利（高优）
   - 估值：pe_ttm / pb（低优，行业中位数中性化）
-  - 动量：momentum_5d/20d、量能 volume_ratio_5d
+  - 动量：momentum_20d
   - 规模：total_mv（中小盘略加分，避免单一大盘股主导）
 硬过滤：ΔG double_kill（戴维斯双杀）直接剔除；ST/退市剔除。
 
@@ -26,16 +28,18 @@ from app.strategy_system.screener import _resolve_as_of
 
 logger = logging.getLogger(__name__)
 
-# 因子权重（总和归一化）
+# 因子权重（总和归一化）。Δ 因子预测力最强（教材 ΔG 五指标：ΔG>Δ收入增速>ΔROE>收入增速>盈利增速）。
 _FACTOR_WEIGHTS = {
-    "roe": 0.18,
-    "revenue_yoy": 0.14,
-    "net_profit_yoy": 0.14,
-    "pe_ttm": 0.12,   # 低优
-    "pb": 0.10,        # 低优
-    "momentum_20d": 0.16,
-    "vol_ratio_5d": 0.08,
-    "total_mv": 0.08,  # 中小盘略优
+    "dg": 0.20,          # Δ盈利增速（ΔG）
+    "d_or_yoy": 0.14,    # Δ收入增速
+    "d_roe": 0.12,       # ΔROE
+    "or_yoy": 0.08,      # 收入增速（绝对值）
+    "g": 0.08,           # 盈利增速（绝对值）
+    "roe": 0.08,         # 盈利质量
+    "pe_ttm": 0.10,      # 低优
+    "pb": 0.08,          # 低优
+    "momentum_20d": 0.08,
+    "total_mv": 0.04,    # 中小盘略优
 }
 
 
@@ -47,6 +51,35 @@ def _load_enriched_target(db, as_of_date: str) -> pd.DataFrame:
     if panel.empty:
         return panel
     return _get_enriched_target(db, panel, None, as_of_date)
+
+
+def _load_dg_factors(db, codes: list[str]) -> dict:
+    """从 dg_prosperity 批量取每股最新一期的 Δ 因子（ΔG/Δ收入增速/ΔROE 及绝对增速）。
+
+    Returns:
+        {code_zfill6: {dg, or_yoy, roe, g, d_or_yoy, d_roe, report_period}, ...}
+    """
+    if not codes:
+        return {}
+    syms = {str(c).zfill(6) for c in codes}
+    try:
+        cursor = db["dg_prosperity"].aggregate([
+            {"$match": {"code": {"$in": list(syms)}}},
+            {"$sort": {"report_period": -1}},
+            {"$group": {
+                "_id": "$code",
+                "dg": {"$first": "$dg"},
+                "or_yoy": {"$first": "$or_yoy"},
+                "roe": {"$first": "$roe"},
+                "g": {"$first": "$g"},
+                "d_or_yoy": {"$first": "$d_or_yoy"},
+                "d_roe": {"$first": "$d_roe"},
+            }},
+        ])
+        return {d.pop("_id"): d for d in cursor}
+    except Exception as e:  # 缺失时静默降级，不影响打分主流程
+        logger.warning(f"[CandidatePool] 读取 ΔG 因子失败: {e}")
+        return {}
 
 
 def _normalize_series(s: pd.Series, *, lower_better: bool = False) -> pd.Series:
@@ -65,27 +98,43 @@ def _normalize_series(s: pd.Series, *, lower_better: bool = False) -> pd.Series:
     return norm.where(v.notna())
 
 
-def _quality_score(row: pd.Series, industry_stats: dict) -> float:
-    """对单只股票计算质量分（0-100）。行业中性化：估值类因子与行业中位数比较。"""
+def _quality_score(row: pd.Series, industry_stats: dict, dg: dict | None = None) -> float:
+    """对单只股票计算质量分（0-100）。行业中性化：估值类因子与行业中位数比较。
+
+    dg: 来自 dg_prosperity 的 Δ 因子（百分数口径，如 25.3 表示增幅 25.3%）。
+    """
     score = 0.0
     wsum = 0.0
 
     def _num(key):
         return row.get(key)
 
+    def _pct_score(val, lo, hi):
+        """百分数因子归一化到 0-1：lo 对应 0 分，hi 对应 1 分，越界 clamp。"""
+        if val is None or pd.isna(val):
+            return None
+        return min(max((float(val) - lo) / (hi - lo), 0), 1)
+
+    def _add(v, w):
+        if v is None:
+            return
+        nonlocal score, wsum
+        score += v * w
+        wsum += w
+
+    dg = dg or {}
+    # Δ因子（预测力最强，高优）：ΔG、Δ收入增速、ΔROE、绝对收入/盈利增速
+    _add(_pct_score(dg.get("dg"), -30, 30), _FACTOR_WEIGHTS["dg"])
+    _add(_pct_score(dg.get("d_or_yoy"), -50, 50), _FACTOR_WEIGHTS["d_or_yoy"])
+    _add(_pct_score(dg.get("d_roe"), -10, 10), _FACTOR_WEIGHTS["d_roe"])
+    _add(_pct_score(dg.get("or_yoy"), -20, 80), _FACTOR_WEIGHTS["or_yoy"])
+    _add(_pct_score(dg.get("g"), -30, 60), _FACTOR_WEIGHTS["g"])
+
     # ROE：绝对高优
     roe = _num("roe")
     if roe is not None and pd.notna(roe):
         score += min(max((roe - 0) / 15, 0), 1) * _FACTOR_WEIGHTS["roe"]
         wsum += _FACTOR_WEIGHTS["roe"]
-
-    # 成长
-    for key, w in (("revenue_yoy", _FACTOR_WEIGHTS["revenue_yoy"]),
-                   ("net_profit_yoy", _FACTOR_WEIGHTS["net_profit_yoy"])):
-        val = _num(key)
-        if val is not None and pd.notna(val):
-            score += min(max((val - 0) / 0.5, 0), 1) * w
-            wsum += w
 
     # 估值：行业中性化（低于行业中位数更优）
     for key, w in (("pe_ttm", _FACTOR_WEIGHTS["pe_ttm"]),
@@ -103,12 +152,6 @@ def _quality_score(row: pd.Series, industry_stats: dict) -> float:
     if m20 is not None and pd.notna(m20):
         score += min(max((m20 - 0) / 0.2, 0), 1) * _FACTOR_WEIGHTS["momentum_20d"]
         wsum += _FACTOR_WEIGHTS["momentum_20d"]
-
-    # 量能
-    vr = _num("vol_ratio_5d")
-    if vr is not None and pd.notna(vr):
-        score += min(max((vr - 0.5) / 2.0, 0), 1) * _FACTOR_WEIGHTS["vol_ratio_5d"]
-        wsum += _FACTOR_WEIGHTS["vol_ratio_5d"]
 
     # 规模：中小盘（<100亿）略加分
     mv = _num("total_mv")
@@ -163,6 +206,9 @@ def score_stocks(codes: list[str] | None = None, industry: str | None = None,
         if len(v):
             ind_med[k] = float(v.median())
 
+    # 批量取 ΔG 五因子（高优，缺失时静默降级）
+    dg_factors = _load_dg_factors(db, g["symbol"].tolist())
+
     items = []
     for _, r in g.iterrows():
         sym = str(r.get("symbol") or "")
@@ -172,7 +218,8 @@ def score_stocks(codes: list[str] | None = None, industry: str | None = None,
             continue
         # 硬过滤：ΔG 双杀（经 enrichment 的 dg 字段不可用，这里用行业过滤外层承担，
         # 个股双杀过滤依赖 dg_prosperity 批量查询，见 candidate_pool_service）
-        q = _quality_score(r, ind_med)
+        dg = dg_factors.get(sym)
+        q = _quality_score(r, ind_med, dg)
         items.append({
             "code": sym,
             "name": name,
@@ -181,13 +228,16 @@ def score_stocks(codes: list[str] | None = None, industry: str | None = None,
             "pct_chg": _round(r.get("pct_chg")),
             "quality_score": q,
             "roe": _round(r.get("roe")),
-            "revenue_yoy": _round(r.get("revenue_yoy")),
-            "net_profit_yoy": _round(r.get("net_profit_yoy")),
             "pe_ttm": _round(r.get("pe_ttm")),
             "pb": _round(r.get("pb")),
             "total_mv": _round(r.get("total_mv")),
             "momentum_20d": _round(r.get("momentum_20d")),
-            "vol_ratio_5d": _round(r.get("vol_ratio_5d")),
+            # ΔG 五因子（来自 dg_prosperity，百分数口径）
+            "dg": _round(dg.get("dg") if dg else None),
+            "or_yoy": _round(dg.get("or_yoy") if dg else None),
+            "g": _round(dg.get("g") if dg else None),
+            "d_or_yoy": _round(dg.get("d_or_yoy") if dg else None),
+            "d_roe": _round(dg.get("d_roe") if dg else None),
             "date": as_of_date,
         })
 

@@ -459,11 +459,11 @@ class ThreeBuysThreeSellsService:
     def _check_b1(self, ind: dict[str, Any], idx: int, params: dict[str, Any]) -> dict[str, Any] | None:
         """B1 左侧买点: BIAS(60) ∈ [-30%, -20%]
 
-        教材定义（严格模式 enable_strict_b1=True，默认开启）：
-        - 三重确认（三买三卖教材 2.1 节 B1买点定义）：
-          1) W底形态（双底确认：左底→反弹→右底不创新低+放量突破颈线）
-          2) 放量确认：右底当日或突破日量比 > 1.3（资金进场）
-          3) MACD金叉：DIF 在零轴下方向上穿越 DEA
+        教材定义（模块顶部策略说明）：B1 只看 BIAS(60) 是否处于深度超卖区间，
+        属于纯左侧买点，BIAS 达标即触发。
+
+        可选严格模式（enable_strict_b1=True 时叠加，非教材要求，默认关闭）：
+        - 三重确认（W底 + 放量 + MACD金叉），仅作为更强确认的选项
         - 大盘下降趋势中额外要求：短期均线粘合向上（过滤假突破）
         """
         if idx < 63:
@@ -474,7 +474,7 @@ class ThreeBuysThreeSellsService:
         if bias < bias_min or bias > bias_max:
             return None
 
-        enable_strict_b1 = params.get("enable_strict_b1", True)
+        enable_strict_b1 = params.get("enable_strict_b1", False)
         market_trend = params.get("_market_trend", "neutral")
 
         if enable_strict_b1:
@@ -1754,12 +1754,14 @@ class ThreeBuysThreeSellsService:
                     if b1:
                         b1["position_pct"] = round(b1["position_pct"] * b1_multiplier, 4)
                         signals.append(b1)
-                    # B2/B3/B2G 在启用GMMA过滤时需要强多状态，且不能过热
-                    if (not enable_gmma or gmma_strong_bull) and not overheated:
+                    # B2 突破买点独立触发（突破本身即确认，不依赖 GMMA 强多），仅需不过热
+                    if not overheated:
                         b2 = self._check_b2(ind, last_idx, local_params)
                         if b2:
                             b2["position_pct"] = round(b2["position_pct"] * b2_multiplier, 4)
                             signals.append(b2)
+                    # B3/B2G 是强多头中的回踩/加仓信号，仍需要 GMMA 强多确认，且不能过热
+                    if (not enable_gmma or gmma_strong_bull) and not overheated:
                         b3 = self._check_b3(ind, last_idx, local_params)
                         if b3:
                             b3["position_pct"] = round(b3["position_pct"] * b3_multiplier, 4)
@@ -1964,10 +1966,11 @@ class ThreeBuysThreeSellsService:
         b1 = self._check_b1(ind, last_idx, local_params)
         if b1:
             signals.append(b1)
-        if gmma_strong_bull and not overheated:
+        if not overheated:
             b2 = self._check_b2(ind, last_idx, local_params)
             if b2:
                 signals.append(b2)
+        if gmma_strong_bull and not overheated:
             b3 = self._check_b3(ind, last_idx, local_params)
             if b3:
                 signals.append(b3)
@@ -2107,7 +2110,7 @@ class ThreeBuysThreeSellsService:
             "enable_overheat_filter": True,
             "enable_market_matrix": True,   # 开启大盘×个股四象限仓位矩阵(教材3.2节风控)
             "enable_adaptive_volume": True,
-            "enable_strict_b1": True,       # 开启B1严格模式: W底+放量+MACD金叉三重确认
+            "enable_strict_b1": False,      # 默认关闭B1严格三重确认，严格对齐教材: BIAS(60)∈[-30%,-20%]即触发
             "gmma_s1_min_duration": 10,
             "gmma_b2_min_duration": 5,
             "gmma_b2_max_duration": 25,
@@ -2346,8 +2349,10 @@ class ThreeBuysThreeSellsService:
 
                 # 按B1→B2→B3→B2G优先级检查，命中第一个就break（避免lambda循环变量绑定问题B023）
                 sig = self._check_b1(ind, idx, local_params)
-                if not sig and (not enable_gmma or gmma_strong_bull) and not overheated:
+                # B2 突破买点独立触发（突破本身即确认），仅需不过热
+                if not sig and not overheated:
                     sig = self._check_b2(ind, idx, local_params)
+                # B3/B2G 是强多头中的回踩/加仓信号，仍需 GMMA 强多确认
                 if not sig and (not enable_gmma or gmma_strong_bull) and not overheated:
                     sig = self._check_b3(ind, idx, local_params)
                 if not sig and (not enable_gmma or gmma_strong_bull) and not overheated:

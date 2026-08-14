@@ -736,6 +736,32 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"🚨 散户策略定时任务注册失败，退出信号扫描/预警检查等功能将不可用: {e}", exc_info=True)
 
+        # ==================== ETF Radar 盘中采集（行业ETF资金流雷达） ====================
+        # 工作日盘中每10分钟采集一次全量ETF资金流快照（~19s），写入 etf_radar_snapshot，
+        # 前端 /api/etf-radar/summary 读最新快照秒回。任务内部自判交易日/时段。
+        try:
+            from app.services.etf_radar.etf_radar_service import get_etf_radar_service
+
+            async def run_etf_radar_collect():
+                svc = get_etf_radar_service()
+                result = await svc.collect_and_save()
+                logger.info(
+                    f"📡 [APScheduler] ETF Radar 采集完成: as_of={result.get('as_of')}, "
+                    f"行业数={result.get('industry_count')}, 成功={result.get('success')}"
+                )
+                return result
+
+            scheduler.add_job(
+                run_etf_radar_collect,
+                CronTrigger.from_crontab("*/10 9-15 * * 1-5", timezone=settings.TIMEZONE),
+                id="etf_radar_collect",
+                name="ETF雷达盘中采集（每10分钟）",
+                replace_existing=True,
+            )
+            logger.info("✅ ETF Radar 盘中采集任务已注册: 工作日 9:00-15:00 每10分钟")
+        except Exception as e:
+            logger.error(f"🚨 ETF Radar 盘中采集任务注册失败: {e}", exc_info=True)
+
         # ==================== ΔG 景气度数据季度刷新 ====================
         # 每月1日凌晨5:00从 Tushare fina_indicator 拉取全 A 股最近 8 个季度的财务指标，
         # 计算 ΔG（环比差值）用于戴维斯双杀象限判断。

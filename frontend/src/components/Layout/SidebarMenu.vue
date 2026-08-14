@@ -8,7 +8,7 @@
   >
     <el-menu-item index="/dashboard">
       <el-icon><Odometer /></el-icon>
-      <template #title>监控</template>
+      <template #title>速览</template>
     </el-menu-item>
 
     <el-menu-item index="/learning" v-show="false">
