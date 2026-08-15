@@ -153,40 +153,42 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" min-width="200" fixed="right">
+        <el-table-column label="操作" min-width="240" fixed="right">
           <template #default="{ row }">
-            <el-button
-              type="text"
-              size="small"
-              @click="editFavorite(row)"
-            >
-              编辑
-            </el-button>
-            <!-- 只有A股显示同步按钮（兼容中小板/创业板等历史值，也用股票代码判断） -->
-            <el-button
-              v-if="isAStock(row)"
-              type="text"
-              size="small"
-              @click="showSingleSyncDialog(row)"
-              style="color: #2b6cb0;"
-            >
-              同步
-            </el-button>
-            <el-button
-              type="text"
-              size="small"
-              @click="analyzeFavorite(row)"
-            >
-              分析
-            </el-button>
-            <el-button
-              type="text"
-              size="small"
-              @click="removeFavorite(row)"
-              style="color: #f56c6c;"
-            >
-              移除
-            </el-button>
+            <div class="op-btns">
+              <el-button
+                type="text"
+                size="small"
+                @click="editFavorite(row)"
+              >
+                编辑
+              </el-button>
+              <!-- 只有A股显示同步按钮（兼容中小板/创业板等历史值，也用股票代码判断） -->
+              <el-button
+                v-if="isAStock(row)"
+                type="text"
+                size="small"
+                @click="showSingleSyncDialog(row)"
+                style="color: #2b6cb0;"
+              >
+                同步
+              </el-button>
+              <el-button
+                type="text"
+                size="small"
+                @click="analyzeFavorite(row)"
+              >
+                分析
+              </el-button>
+              <el-button
+                type="text"
+                size="small"
+                @click="removeFavorite(row)"
+                style="color: #f56c6c;"
+              >
+                移除
+              </el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -1225,6 +1227,20 @@ onMounted(() => {
 
     .text-green {
       color: #67c23a;
+    }
+
+    /* 所有单元格不换行，保持单行显示 */
+    :deep(.el-table__cell .cell) {
+      white-space: nowrap;
+    }
+
+    /* 操作按钮保持单行 */
+    .op-btns {
+      display: flex;
+      align-items: center;
+      flex-wrap: nowrap;
+      gap: 4px;
+      white-space: nowrap;
     }
   }
 }

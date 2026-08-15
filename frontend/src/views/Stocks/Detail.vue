@@ -714,20 +714,20 @@
             </el-descriptions>
             <!-- 同板块股票 -->
             <el-table :data="sectorData.sector_stocks" size="small" border style="width: 100%" max-height="240">
-              <el-table-column label="代码" prop="code" width="80">
+              <el-table-column label="代码" prop="code" min-width="120">
                 <template #default="{ row }">
                   <router-link :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
                 </template>
               </el-table-column>
-              <el-table-column label="名称" prop="name" width="100">
+              <el-table-column label="名称" prop="name" min-width="160">
                 <template #default="{ row }">
                   <router-link :to="`/stocks/${row.code}`" class="stock-name">{{ row.name }}</router-link>
                 </template>
               </el-table-column>
-              <el-table-column label="最新价" prop="price" width="80">
+              <el-table-column label="最新价" prop="price" min-width="120" align="right">
                 <template #default="{ row }">{{ row.price?.toFixed(2) || '-' }}</template>
               </el-table-column>
-              <el-table-column label="涨跌幅" prop="change_pct" width="100">
+              <el-table-column label="涨跌幅" prop="change_pct" min-width="130" align="right">
                 <template #default="{ row }">
                   <span :style="{color: row.change_pct >= 0 ? 'var(--app-up)' : 'var(--app-down)', fontWeight: 'bold'}">
                     {{ row.change_pct >= 0 ? '+' : '' }}{{ row.change_pct?.toFixed(2) || '0.00' }}%
@@ -774,7 +774,7 @@
           <el-empty v-else-if="!moneyFlowData || !moneyFlowData.realtime || Object.keys(moneyFlowData.realtime).length === 0" description="暂无资金流向数据" :image-size="60" />
           <div v-else>
             <!-- 实时资金流向 -->
-            <el-descriptions :column="2" border size="small" style="margin-bottom: 12px;">
+            <el-descriptions :column="3" border size="small" style="margin-bottom: 12px;">
               <el-descriptions-item label="主力净流入">
                 <span :style="{color: moneyFlowData.realtime.main_net_inflow >= 0 ? 'var(--app-up)' : 'var(--app-down)', fontWeight: 'bold'}">
                   {{ fmtAmount(moneyFlowData.realtime.main_net_inflow) }} 元
@@ -809,15 +809,23 @@
             <!-- 近期资金流向趋势 -->
             <div v-if="moneyFlowData.history && moneyFlowData.history.length > 0">
               <div style="font-size: 12px; color: var(--el-text-color-secondary); margin-bottom: 8px;">近{{ moneyFlowData.days }}日资金流向</div>
-              <div v-for="(h, i) in moneyFlowData.history" :key="i" class="flow-history-item">
-                <span class="flow-date">{{ h.date }}</span>
-                <span class="flow-change" :style="{color: h.main_net_inflow_pct >= 0 ? 'var(--app-up)' : 'var(--app-down)'}">
-                  {{ h.main_net_inflow_pct >= 0 ? '+' : '' }}{{ h.main_net_inflow_pct?.toFixed(2) || '0.00' }}%
-                </span>
-                <span class="flow-inflow" :style="{color: h.main_net_inflow >= 0 ? 'var(--app-up)' : 'var(--app-down)'}">
-                  {{ h.main_net_inflow >= 0 ? '+' : '' }}{{ fmtAmount(h.main_net_inflow) }}
-                </span>
-              </div>
+              <el-table :data="moneyFlowData.history" size="small" border style="width: 100%">
+                <el-table-column label="日期" prop="date" min-width="140"></el-table-column>
+                <el-table-column label="主力净占比" min-width="140" align="right">
+                  <template #default="{ row: h }">
+                    <span :style="{color: h.main_net_inflow_pct >= 0 ? 'var(--app-up)' : 'var(--app-down)', fontWeight: 'bold'}">
+                      {{ h.main_net_inflow_pct >= 0 ? '+' : '' }}{{ h.main_net_inflow_pct?.toFixed(2) || '0.00' }}%
+                    </span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="主力净流入" min-width="160" align="right">
+                  <template #default="{ row: h }">
+                    <span :style="{color: h.main_net_inflow >= 0 ? 'var(--app-up)' : 'var(--app-down)'}">
+                      {{ h.main_net_inflow >= 0 ? '+' : '' }}{{ fmtAmount(h.main_net_inflow) }}
+                    </span>
+                  </template>
+                </el-table-column>
+              </el-table>
             </div>
           </div>
         </el-card>
@@ -2352,20 +2360,6 @@ function exportReport() {
 }
 
 .news-card .news-list { display: flex; flex-direction: column; }
-
-.flow-history-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--el-border-color-lighter);
-  font-size: 12px;
-}
-
-.flow-history-item:last-child { border-bottom: none; }
-.flow-date { color: var(--el-text-color-secondary); width: 100px; }
-.flow-change { font-weight: bold; width: 80px; text-align: right; }
-.flow-inflow { width: 120px; text-align: right; }
 
 .news-item {
   padding: 12px 16px;
