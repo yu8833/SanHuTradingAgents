@@ -22,7 +22,7 @@
         <!-- 步骤 0: 欢迎 -->
         <div v-if="currentStep === 0" class="step-content welcome-step">
           <div class="welcome-icon">
-            <el-icon :size="80" color="#409EFF"><Setting /></el-icon>
+            <el-icon :size="80" color="#2b6cb0"><Setting /></el-icon>
           </div>
           <h2>欢迎使用 股票分析系统</h2>
           <p class="welcome-text">

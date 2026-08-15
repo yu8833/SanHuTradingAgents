@@ -1,14 +1,18 @@
 <template>
   <div class="queue-management">
     <!-- 页面标题 -->
-    <div class="page-header">
-      <h1 class="page-title">
-        <el-icon><List /></el-icon>
-        任务中心
-      </h1>
-      <p class="page-description">
-        实时监控和管理分析任务状态
-      </p>
+    <div class="page-hero">
+      <div class="page-hero-main">
+        <div class="page-hero-icon">
+          <el-icon :size="26"><List /></el-icon>
+        </div>
+        <div class="page-hero-text">
+          <h2 class="page-hero-title">任务中心</h2>
+          <p class="page-hero-sub">
+            实时监控和管理分析任务状态
+          </p>
+        </div>
+      </div>
     </div>
 
     <!-- 队列任务列表 -->
@@ -460,25 +464,6 @@ onUnmounted(() => {
 
 <style lang="scss" scoped>
 .queue-management {
-  .page-header {
-    margin-bottom: 24px;
-
-    .page-title {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 24px;
-      font-weight: 600;
-      color: var(--el-text-color-primary);
-      margin: 0 0 8px 0;
-    }
-
-    .page-description {
-      color: var(--el-text-color-regular);
-      margin: 0;
-    }
-  }
-
   .stats-row {
     margin-bottom: 24px;
 

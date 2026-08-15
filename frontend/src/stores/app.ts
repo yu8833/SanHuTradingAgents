@@ -144,7 +144,7 @@ export const useAppStore = defineStore('app', {
       // 更新meta标签
       const themeColorMeta = document.querySelector('meta[name="theme-color"]')
       if (themeColorMeta) {
-        themeColorMeta.setAttribute('content', isDark ? '#1f2937' : '#409EFF')
+        themeColorMeta.setAttribute('content', isDark ? '#1a1a2e' : '#2b6cb0')
       }
     },
     

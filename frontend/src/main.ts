@@ -76,15 +76,13 @@ app.config.warnHandler = (msg, _vm, trace) => {
   console.warn('全局警告:', msg, trace)
 }
 
-// 初始化认证状态
+// 初始化认证状态（非阻塞：先挂载 UI，再异步检查后端状态）
 const initApp = async () => {
   try {
     const authStore = useAuthStore()
     const appStore = useAppStore()
 
-    console.log('🔄 初始化应用状态...')
-
-    // 应用主题
+    // 应用主题（同步操作，速度快）
     appStore.applyTheme()
     console.log('🎨 主题已应用:', appStore.theme)
 
@@ -101,43 +99,31 @@ const initApp = async () => {
       appStore.setApiConnected(false)
     })
 
-    // 检查API连接状态
-    console.log('🔍 检查API连接状态...')
-    const apiConnected = await appStore.checkApiConnection()
-
-    if (apiConnected) {
-      console.log('✅ API连接正常，检查认证状态...')
-      // 检查本地存储的认证信息（设置较短的超时时间）
-      const checkPromise = authStore.checkAuthStatus()
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('认证检查超时')), 5000) // 5秒超时
-      })
-
-      await Promise.race([checkPromise, timeoutPromise])
-      console.log('✅ 认证状态初始化完成')
-
-      // 如果用户已登录，启动 token 自动刷新定时器（由 store 内部去重管理）
-      if (authStore.isAuthenticated) {
-        authStore.ensureTokenRefreshTimer()
+    // 异步检查 API 连接（不阻塞挂载，NetworkStatus 组件会处理断连状态）
+    appStore.checkApiConnection().then(apiConnected => {
+      if (apiConnected) {
+        console.log('✅ API连接正常，检查认证状态...')
+        authStore.checkAuthStatus().then(() => {
+          if (authStore.isAuthenticated) {
+            authStore.ensureTokenRefreshTimer()
+          }
+        }).catch(err => {
+          console.warn('⚠️ 认证检查失败，应用将继续运行:', err)
+        })
+      } else {
+        console.log('⚠️ API连接失败，跳过认证检查')
       }
-    } else {
-      console.log('⚠️ API连接失败，跳过认证检查')
-    }
+    }).catch(err => {
+      console.warn('⚠️ API连接检查失败，应用将继续运行:', err)
+    })
   } catch (error) {
-    const err = error as { code?: string; message?: string }
-    console.warn('⚠️ 应用初始化失败，但应用将继续启动:', err)
-    // 如果是网络错误，不影响应用启动
-    if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
-      console.log('📱 离线模式：应用将在没有后端连接的情况下启动')
-    }
-  } finally {
-    // 无论认证状态如何，都挂载应用
-    app.mount('#app')
-    console.log('🚀 应用已挂载')
+    console.warn('⚠️ 应用初始化失败，但应用将继续启动:', error)
   }
 }
 
-// 启动应用
+// 先挂载应用让用户看到 UI，再异步初始化后端状态
+app.mount('#app')
+console.log('🚀 应用已挂载')
 initApp()
 
 // 开发环境下的调试信息

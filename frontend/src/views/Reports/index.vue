@@ -1,14 +1,18 @@
 <template>
   <div class="reports">
     <!-- 页面标题 -->
-    <div class="page-header">
-      <h1 class="page-title">
-        <el-icon><Document /></el-icon>
-        历史报告
-      </h1>
-      <p class="page-description">
-        查看和管理股票分析报告，支持多种格式导出
-      </p>
+    <div class="page-hero">
+      <div class="page-hero-main">
+        <div class="page-hero-icon">
+          <el-icon :size="26"><Document /></el-icon>
+        </div>
+        <div class="page-hero-text">
+          <h2 class="page-hero-title">历史报告</h2>
+          <p class="page-hero-sub">
+            查看和管理股票分析报告，支持多种格式导出
+          </p>
+        </div>
+      </div>
     </div>
 
     <!-- 筛选和操作栏 -->
@@ -78,7 +82,7 @@
             <div class="report-title">
               <router-link :to="`/reports/view/${row.id}`" class="report-title-link">{{ row.title }}</router-link>
               <div class="report-subtitle">
-                <router-link :to="`/stocks/${row.stock_code}`" target="_blank">{{ row.stock_code }}</router-link> - <router-link :to="`/stocks/${row.stock_code}`" target="_blank" class="stock-name">{{ row.stock_name }}</router-link>
+                <router-link :to="`/stocks/${row.stock_code}`" class="stock-code">{{ row.stock_code }}</router-link> - <router-link :to="`/stocks/${row.stock_code}`" class="stock-name">{{ row.stock_name }}</router-link>
               </div>
             </div>
           </template>
@@ -450,25 +454,6 @@ onMounted(() => {
 
 <style lang="scss" scoped>
 .reports {
-  .page-header {
-    margin-bottom: 24px;
-
-    .page-title {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 24px;
-      font-weight: 600;
-      color: var(--el-text-color-primary);
-      margin: 0 0 8px 0;
-    }
-
-    .page-description {
-      color: var(--el-text-color-regular);
-      margin: 0;
-    }
-  }
-
   .filter-card {
     margin-bottom: 24px;
 

@@ -1,14 +1,18 @@
 <template>
   <div class="stock-screening">
     <!-- 页面标题 -->
-    <div class="page-header">
-      <h1 class="page-title">
-            <el-icon><Search /></el-icon>
-            选股
-          </h1>
-      <p class="page-description">
-        通过多维度筛选条件，快速找到符合投资策略的优质股票
-      </p>
+    <div class="page-hero">
+      <div class="page-hero-main">
+        <div class="page-hero-icon">
+          <el-icon :size="26"><Search /></el-icon>
+        </div>
+        <div class="page-hero-text">
+          <h2 class="page-hero-title">选股</h2>
+          <p class="page-hero-sub">
+            通过多维度筛选条件，快速找到符合投资策略的优质股票
+          </p>
+        </div>
+      </div>
     </div>
 
     <!-- 智能策略模板 -->
@@ -901,13 +905,13 @@
 
         <el-table-column prop="code" label="股票代码" width="110">
           <template #default="{ row }">
-            <router-link :to="`/stocks/${row.code}`" target="_blank">{{ row.code }}</router-link>
+            <router-link :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
           </template>
         </el-table-column>
 
         <el-table-column prop="name" label="股票名称" width="120">
           <template #default="{ row }">
-            <router-link :to="`/stocks/${row.code}`" target="_blank">{{ row.name || row.code }}</router-link>
+            <router-link :to="`/stocks/${row.code}`" class="stock-name">{{ row.name || row.code }}</router-link>
           </template>
         </el-table-column>
 
@@ -2109,33 +2113,6 @@ onMounted(() => {
   max-width: 1600px;
   margin: 0 auto;
 
-  .page-header {
-    margin-bottom: 24px;
-    padding-bottom: 16px;
-    border-bottom: 2px solid var(--el-border-color-lighter);
-
-    .page-title {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      font-size: 28px;
-      font-weight: 700;
-      color: var(--el-text-color-primary);
-      margin: 0 0 8px 0;
-
-      .el-icon {
-        color: var(--el-color-primary);
-        font-size: 28px;
-      }
-    }
-
-    .page-description {
-      color: var(--el-text-color-regular);
-      margin: 0;
-      font-size: 14px;
-    }
-  }
-
   /* 通用卡片头部样式 */
   .templates-panel {
     margin-bottom: 24px;
@@ -2688,21 +2665,6 @@ html.dark {
         .el-table__row:hover {
           background-color: var(--el-fill-color-dark);
         }
-      }
-    }
-
-    /* 页面标题 */
-    .page-header {
-      border-bottom-color: var(--el-border-color-darker);
-
-      .page-title {
-        .el-icon {
-          color: var(--el-text-color-regular);
-        }
-      }
-
-      .page-description {
-        color: var(--el-text-color-regular);
       }
     }
 

@@ -1,14 +1,14 @@
 <template>
   <div class="batch-analysis">
     <!-- 页面头部 -->
-    <div class="page-header">
-      <div class="header-content">
-        <div class="title-section">
-          <h1 class="page-title">
-            <el-icon class="title-icon"><Files /></el-icon>
-            批量分析
-          </h1>
-          <p class="page-description">
+    <div class="page-hero">
+      <div class="page-hero-main">
+        <div class="page-hero-icon">
+          <el-icon :size="26"><Files /></el-icon>
+        </div>
+        <div class="page-hero-text">
+          <h2 class="page-hero-title">批量分析</h2>
+          <p class="page-hero-sub">
             AI驱动的批量股票分析，高效处理多只股票
           </p>
         </div>
@@ -507,39 +507,6 @@ const submitBatchAnalysis = async () => {
   background: var(--el-bg-color-page);
   padding: 24px;
 
-  .page-header {
-    margin-bottom: 32px;
-
-    .header-content {
-      background: var(--el-bg-color);
-      padding: 32px;
-      border-radius: 16px;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-    }
-
-    .title-section {
-      .page-title {
-        display: flex;
-        align-items: center;
-        font-size: 32px;
-        font-weight: 700;
-        color: #1a202c;
-        margin: 0 0 8px 0;
-
-        .title-icon {
-          margin-right: 12px;
-          color: #3b82f6;
-        }
-      }
-
-      .page-description {
-        font-size: 16px;
-        color: #64748b;
-        margin: 0;
-      }
-    }
-  }
-
   .analysis-container {
     .stock-list-card, .config-card {
       border-radius: 16px;
@@ -547,7 +514,7 @@ const submitBatchAnalysis = async () => {
       box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
 
       :deep(.el-card__header) {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        background: linear-gradient(135deg, #2c5282 0%, #1e3a5f 100%);
         color: white;
         border-radius: 16px 16px 0 0;
         padding: 20px 24px;
@@ -649,13 +616,13 @@ const submitBatchAnalysis = async () => {
           :deep(.el-textarea__inner) {
             border-radius: 12px;
             border: 2px solid #e2e8f0;
-            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-family: var(--app-font-mono);
             font-size: 14px;
             line-height: 1.6;
 
             &:focus {
-              border-color: #3b82f6;
-              box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+              border-color: #2b6cb0;
+              box-shadow: 0 0 0 3px rgba(43, 108, 176, 0.1);
             }
           }
         }
@@ -681,7 +648,7 @@ const submitBatchAnalysis = async () => {
           gap: 8px;
 
           .stock-tag {
-            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-family: var(--app-font-mono);
             font-weight: 600;
           }
         }
@@ -728,12 +695,12 @@ const submitBatchAnalysis = async () => {
               }
 
               :deep(.el-checkbox__input.is-checked .el-checkbox__inner) {
-                background-color: #3b82f6;
-                border-color: #3b82f6;
+                background-color: #2b6cb0;
+                border-color: #2b6cb0;
               }
 
               :deep(.el-checkbox__input.is-checked + .el-checkbox__label) {
-                color: #3b82f6;
+                color: #2b6cb0;
               }
 
               .analyst-info {
@@ -770,24 +737,24 @@ const submitBatchAnalysis = async () => {
         height: 56px !important;
         font-size: 18px !important;
         font-weight: 700 !important;
-        background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%) !important;
+        background: linear-gradient(135deg, #2b6cb0 0%, #22568d 100%) !important;
         border: none !important;
         border-radius: 16px !important;
         transition: all 0.3s ease !important;
-        box-shadow: 0 4px 15px rgba(59, 130, 246, 0.2) !important;
+        box-shadow: 0 4px 15px rgba(43, 108, 176, 0.2) !important;
         min-width: 320px !important;
         max-width: 320px !important;
 
         &:hover {
           transform: translateY(-3px) !important;
-          box-shadow: 0 12px 30px rgba(59, 130, 246, 0.4) !important;
-          background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%) !important;
+          box-shadow: 0 12px 30px rgba(43, 108, 176, 0.4) !important;
+          background: linear-gradient(135deg, #2b6cb0 0%, #22568d 100%) !important;
         }
 
         &:disabled {
           opacity: 0.6 !important;
           transform: none !important;
-          box-shadow: 0 4px 15px rgba(59, 130, 246, 0.1) !important;
+          box-shadow: 0 4px 15px rgba(43, 108, 176, 0.1) !important;
         }
 
         .el-icon {
@@ -820,25 +787,25 @@ const submitBatchAnalysis = async () => {
   height: 56px !important;
   font-size: 18px !important;
   font-weight: 700 !important;
-  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%) !important;
+  background: linear-gradient(135deg, #2b6cb0 0%, #22568d 100%) !important;
   border: none !important;
   border-radius: 16px !important;
   transition: all 0.3s ease !important;
-  box-shadow: 0 4px 15px rgba(59, 130, 246, 0.2) !important;
+  box-shadow: 0 4px 15px rgba(43, 108, 176, 0.2) !important;
   min-width: 320px !important;
   max-width: 320px !important;
 }
 
 .large-batch-btn.el-button:hover {
   transform: translateY(-3px) !important;
-  box-shadow: 0 12px 30px rgba(59, 130, 246, 0.4) !important;
-  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%) !important;
+  box-shadow: 0 12px 30px rgba(43, 108, 176, 0.4) !important;
+  background: linear-gradient(135deg, #2b6cb0 0%, #22568d 100%) !important;
 }
 
 .large-batch-btn.el-button:disabled {
   opacity: 0.6 !important;
   transform: none !important;
-  box-shadow: 0 4px 15px rgba(59, 130, 246, 0.1) !important;
+  box-shadow: 0 4px 15px rgba(43, 108, 176, 0.1) !important;
 }
 
 .large-batch-btn.el-button .el-icon {

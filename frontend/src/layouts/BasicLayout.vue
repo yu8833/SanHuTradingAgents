@@ -247,7 +247,7 @@ watch(() => route.fullPath, () => {
   min-height: calc(100vh - 60px - 60px); // 减去header和footer高度
 
   .content-wrapper {
-    max-width: 1400px;
+    max-width: min(1680px, 96vw);
     margin: 0 auto;
   }
 }

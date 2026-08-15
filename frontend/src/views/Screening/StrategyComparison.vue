@@ -1,13 +1,17 @@
 <template>
   <div class="strategy-comparison">
-    <div class="page-header">
-      <h1 class="page-title">
-        <el-icon><DataAnalysis /></el-icon>
-        策略对比
-      </h1>
-      <p class="page-description">
-        选择多个策略进行回测对比，直观了解各策略的收益风险特征
-      </p>
+    <div class="page-hero">
+      <div class="page-hero-main">
+        <div class="page-hero-icon">
+          <el-icon :size="26"><DataAnalysis /></el-icon>
+        </div>
+        <div class="page-hero-text">
+          <h2 class="page-hero-title">策略对比</h2>
+          <p class="page-hero-sub">
+            选择多个策略进行回测对比，直观了解各策略的收益风险特征
+          </p>
+        </div>
+      </div>
     </div>
 
     <el-card class="strategy-select-panel" shadow="never">
@@ -284,7 +288,7 @@ const strategyColors: Record<StrategyKey, string> = {
   small_cap_value: '#67C23A',
   turnaround: '#E6A23C',
   convertible_arbitrage: '#909399',
-  limit_up_pullback: '#409EFF',
+  limit_up_pullback: '#2b6cb0',
   three_buys_three_sells: '#8E44AD',
   ma_crossover: '#00CED1',
   macd_divergence: '#FF69B4',
@@ -333,7 +337,7 @@ function getStrategyName(key: string): string {
 }
 
 function getStrategyColor(key: string): string {
-  return strategyColors[key as StrategyKey] || '#409EFF'
+  return strategyColors[key as StrategyKey] || '#2b6cb0'
 }
 
 const metricDefinitions = [
@@ -614,26 +618,6 @@ async function runBacktest(key: StrategyKey): Promise<BacktestResult | null> {
   padding: 20px;
 }
 
-.page-header {
-  margin-bottom: 20px;
-
-  .page-title {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 24px;
-    font-weight: 600;
-    margin: 0 0 8px 0;
-    color: var(--el-text-color-primary);
-  }
-
-  .page-description {
-    margin: 0;
-    color: var(--el-text-color-secondary);
-    font-size: 14px;
-  }
-}
-
 .card-header {
   display: flex;
   justify-content: space-between;
@@ -698,7 +682,7 @@ async function runBacktest(key: StrategyKey): Promise<BacktestResult | null> {
     &.value { background: linear-gradient(135deg, #67C23A, #27AE60); }
     &.turnaround { background: linear-gradient(135deg, #E6A23C, #F39C12); }
     &.convertible { background: linear-gradient(135deg, #909399, #7F8C8D); }
-    &.limitup { background: linear-gradient(135deg, #409EFF, #3498DB); }
+    &.limitup { background: linear-gradient(135deg, #2b6cb0, #22568d); }
     &.threebuys { background: linear-gradient(135deg, #8E44AD, #9B59B6); }
 
     .el-icon {

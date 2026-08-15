@@ -1,14 +1,18 @@
 <template>
   <div class="cache-management">
     <!-- 页面标题 -->
-    <div class="page-header">
-      <h1 class="page-title">
-        <el-icon><Coin /></el-icon>
-        缓存管理
-      </h1>
-      <p class="page-description">
-        管理股票数据缓存，优化系统性能
-      </p>
+    <div class="page-hero">
+      <div class="page-hero-main">
+        <div class="page-hero-icon">
+          <el-icon :size="26"><Coin /></el-icon>
+        </div>
+        <div class="page-hero-text">
+          <h2 class="page-hero-title">缓存管理</h2>
+          <p class="page-hero-sub">
+            管理股票数据缓存，优化系统性能
+          </p>
+        </div>
+      </div>
     </div>
 
     <el-row :gutter="24">
@@ -402,25 +406,6 @@ onMounted(() => {
 
 <style lang="scss" scoped>
 .cache-management {
-  .page-header {
-    margin-bottom: 24px;
-
-    .page-title {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 24px;
-      font-weight: 600;
-      color: var(--el-text-color-primary);
-      margin: 0 0 8px 0;
-    }
-
-    .page-description {
-      color: var(--el-text-color-regular);
-      margin: 0;
-    }
-  }
-
   .stats-card {
     .stats-content {
       .stat-item {

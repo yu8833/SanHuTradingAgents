@@ -1,28 +1,28 @@
 <template>
   <div class="multi-source-sync">
     <!-- 页面头部 -->
-    <div class="page-header">
-      <div class="header-content">
-        <div class="header-info">
-          <h1 class="page-title">
-            <el-icon class="title-icon"><Connection /></el-icon>
-            多数据源同步
-          </h1>
-          <p class="page-description">
+    <div class="page-hero">
+      <div class="page-hero-main">
+        <div class="page-hero-icon">
+          <el-icon :size="26"><Connection /></el-icon>
+        </div>
+        <div class="page-hero-text">
+          <h2 class="page-hero-title">多数据源同步</h2>
+          <p class="page-hero-sub">
             管理和监控多个数据源的股票基础信息同步，支持自动fallback和优先级配置
           </p>
         </div>
-        <div class="header-actions">
-          <el-button
-            type="primary"
-            size="large"
-            :loading="testing"
-            @click="runFullTest"
-          >
-            <el-icon><Operation /></el-icon>
-            全面测试
-          </el-button>
-        </div>
+      </div>
+      <div class="page-hero-meta">
+        <el-button
+          type="primary"
+          size="large"
+          :loading="testing"
+          @click="runFullTest"
+        >
+          <el-icon><Operation /></el-icon>
+          全面测试
+        </el-button>
       </div>
     </div>
 
@@ -211,46 +211,6 @@ const handleSyncCompleted = (status: string) => {
 
 <style scoped lang="scss">
 .multi-source-sync {
-  .page-header {
-    margin-bottom: 24px;
-    padding: 24px;
-    background: linear-gradient(135deg, var(--el-color-primary-light-9) 0%, var(--el-color-primary-light-8) 100%);
-    border-radius: 12px;
-    
-    .header-content {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      
-      .header-info {
-        .page-title {
-          display: flex;
-          align-items: center;
-          margin: 0 0 8px 0;
-          font-size: 28px;
-          font-weight: 600;
-          color: var(--el-text-color-primary);
-          
-          .title-icon {
-            margin-right: 12px;
-            color: var(--el-color-primary);
-          }
-        }
-        
-        .page-description {
-          margin: 0;
-          font-size: 16px;
-          color: var(--el-text-color-regular);
-          line-height: 1.5;
-        }
-      }
-      
-      .header-actions {
-        flex-shrink: 0;
-      }
-    }
-  }
-
   .page-content {
     .content-section {
       margin-bottom: 24px;
@@ -337,22 +297,6 @@ const handleSyncCompleted = (status: string) => {
 
 @media (max-width: 768px) {
   .multi-source-sync {
-    .page-header {
-      .header-content {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 16px;
-        
-        .header-actions {
-          width: 100%;
-          
-          .el-button {
-            width: 100%;
-          }
-        }
-      }
-    }
-    
     .test-results-dialog {
       .test-details {
         .test-result-item {

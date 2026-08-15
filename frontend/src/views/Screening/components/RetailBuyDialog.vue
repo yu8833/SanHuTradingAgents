@@ -7,13 +7,13 @@
   >
     <el-form :model="form" label-width="110px" size="default">
       <el-form-item label="股票代码">
-        <el-input :model-value="form.code" disabled />
+        <router-link :to="`/stocks/${form.code}`" class="stock-code">{{ form.code }}</router-link>
       </el-form-item>
       <el-form-item label="股票名称">
-        <el-input :model-value="form.stock_name" disabled />
+        <router-link :to="`/stocks/${form.code}`" class="stock-name">{{ form.stock_name }}</router-link>
       </el-form-item>
       <el-form-item label="当前价">
-        <span style="font-weight:600;color:#409EFF;">¥{{ form.price?.toFixed(2) }}</span>
+        <span style="font-weight:600;color:#2b6cb0;">¥{{ form.price?.toFixed(2) }}</span>
         <el-tag v-if="form.strategy" size="small" style="margin-left:12px;">{{ strategyLabel(form.strategy) }}</el-tag>
       </el-form-item>
       <el-form-item label="建议仓位">

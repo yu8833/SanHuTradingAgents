@@ -80,6 +80,14 @@ def _qty_verification(ind: dict[str, Any], idx: int) -> tuple[dict[str, Any], li
     elif q == "价涨量涨":
         sig = {"triggered": True, "level": CONFIRM, "label": "量价齐升",
                "detail": "价涨量涨，上涨健康，确认主买入信号"}
+    elif q == "价涨量跌":
+        sig = {"triggered": True, "level": WARN, "label": "量价背离",
+               "detail": "价涨量跌，上涨动能不足，主信号降权"}
+        warnings.append("量价背离（价涨量跌），上涨动能不足")
+    elif q == "价跌量涨":
+        sig = {"triggered": True, "level": WARN, "label": "放量下跌",
+               "detail": "价跌量涨，放量下杀，警惕主力出货"}
+        warnings.append("放量下跌（价跌量涨），警惕主力出货")
     elif q == "价跌量跌":
         sig = {"triggered": True, "level": NEUTRAL, "label": "缩量回调",
                "detail": "价跌量跌，缩量回调，趋势未破坏"}
@@ -289,6 +297,7 @@ def _regime_quadrant(market_trend: str, ind: dict[str, Any], idx: int) -> tuple[
         level, label, detail = CONFIRM, "大盘平·个股↑", "个股独立走强，可正常参与"
     elif m == "neutral" and stock_trend == "down":
         level, label, detail = WARN, "大盘平·个股↓", "个股弱势，主信号降权"
+        warnings.append("大盘走平而个股走弱，主信号降权")
     else:
         level, label, detail = NEUTRAL, "震荡观望", "大盘与个股均无明确方向"
     return {"triggered": level != NEUTRAL, "level": level, "label": label,

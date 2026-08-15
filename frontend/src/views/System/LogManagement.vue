@@ -422,7 +422,7 @@ onMounted(() => {
       color: #d4d4d4;
       padding: 15px;
       border-radius: 4px;
-      font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+      font-family: var(--app-font-mono);
       font-size: 12px;
       line-height: 1.5;
 

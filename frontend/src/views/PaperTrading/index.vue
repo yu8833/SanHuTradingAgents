@@ -154,7 +154,7 @@
             </el-table-column>
             <el-table-column label="名称" width="100">
               <template #default="{ row }">
-                <router-link :to="`/stocks/${row.code}`" target="_blank" class="stock-name">{{ row.name || '-' }}</router-link>
+                <router-link :to="`/stocks/${row.code}`" class="stock-name">{{ row.name || '-' }}</router-link>
               </template>
             </el-table-column>
             <el-table-column label="市场" width="70">
@@ -223,7 +223,7 @@
             </el-table-column>
             <el-table-column label="名称" width="100">
               <template #default="{ row }">
-                <router-link :to="`/stocks/${row.code}`" target="_blank" class="stock-name">{{ row.name || '-' }}</router-link>
+                <router-link :to="`/stocks/${row.code}`" class="stock-name">{{ row.name || '-' }}</router-link>
               </template>
             </el-table-column>
             <el-table-column prop="price" label="成交价" width="100">
@@ -670,6 +670,6 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.paper-trading { padding: 16px; }
+.paper-trading { padding: 24px; }
 .card-hd { font-weight: 600; }
 </style>

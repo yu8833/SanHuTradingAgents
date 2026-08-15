@@ -1,8 +1,15 @@
 <template>
   <div class="data-view">
-    <div class="page-header">
-      <h2 class="page-title"><el-icon><DataAnalysis /></el-icon> 数据中心</h2>
-      <p class="page-description">数据状态一览与快捷操作</p>
+    <div class="page-hero">
+      <div class="page-hero-main">
+        <div class="page-hero-icon">
+          <el-icon :size="26"><DataAnalysis /></el-icon>
+        </div>
+        <div class="page-hero-text">
+          <h2 class="page-hero-title">数据中心</h2>
+          <p class="page-hero-sub">数据状态一览与快捷操作</p>
+        </div>
+      </div>
     </div>
 
     <!-- 状态卡片 -->
@@ -495,10 +502,6 @@ onUnmounted(() => {
 
 <style scoped lang="scss">
 .data-view {
-  .page-header { margin-bottom: 24px; }
-  .page-title { display: flex; align-items: center; gap: 8px; font-size: 24px; font-weight: 600; margin: 0 0 8px 0; }
-  .page-description { color: var(--el-text-color-regular); margin: 0; }
-
   .stat-row { margin-bottom: 16px; }
   .stat-card {
     .stat-content { text-align: center; padding: 8px 0; }
@@ -533,7 +536,7 @@ onUnmounted(() => {
       &.integrity { background: var(--el-color-warning); }
       &.news { background: #909399; }
       &.financial { background: #9c27b0; }
-      &.task { background: #00bcd4; }
+      &.task { background: #22568d; }
     }
     .action-info { flex: 1; min-width: 0; }
     .action-title { font-weight: 500; font-size: 14px; }

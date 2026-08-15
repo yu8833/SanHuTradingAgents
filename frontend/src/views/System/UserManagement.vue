@@ -1,14 +1,18 @@
 <template>
   <div class="user-management">
     <!-- 页面标题 -->
-    <div class="page-header">
-      <h1 class="page-title">
-        <el-icon><UserFilled /></el-icon>
-        用户管理
-      </h1>
-      <p class="page-description">
-        管理系统用户、权限和配额
-      </p>
+    <div class="page-hero">
+      <div class="page-hero-main">
+        <div class="page-hero-icon">
+          <el-icon :size="26"><UserFilled /></el-icon>
+        </div>
+        <div class="page-hero-text">
+          <h2 class="page-hero-title">用户管理</h2>
+          <p class="page-hero-sub">
+            管理系统用户、权限和配额
+          </p>
+        </div>
+      </div>
     </div>
 
     <!-- 统计概览 -->
@@ -605,30 +609,6 @@ onMounted(() => {
 <style lang="scss" scoped>
 .user-management {
   padding: 20px;
-
-  .page-header {
-    margin-bottom: 20px;
-
-    .page-title {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 24px;
-      font-weight: 600;
-      margin: 0 0 8px 0;
-
-      .el-icon {
-        font-size: 28px;
-        color: var(--el-color-primary);
-      }
-    }
-
-    .page-description {
-      color: var(--el-text-color-secondary);
-      font-size: 14px;
-      margin: 0;
-    }
-  }
 
   .stats-row {
     margin-bottom: 16px;

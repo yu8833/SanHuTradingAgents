@@ -324,7 +324,7 @@ const renderModelChart = () => {
         data: data.map(item => item.value),
         type: 'bar',
         itemStyle: {
-          color: '#409EFF'
+          color: '#2b6cb0'
         }
       }
     ]
@@ -478,4 +478,3 @@ onMounted(() => {
   align-items: center;
 }
 </style>
-

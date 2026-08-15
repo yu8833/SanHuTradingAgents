@@ -16,7 +16,7 @@
     <!-- 操作栏 -->
     <el-card class="action-card" shadow="never">
       <el-row :gutter="16" align="middle" style="margin-bottom: 16px;">
-        <el-col :span="8">
+        <el-col :span="12">
           <el-input
             v-model="searchKeyword"
             placeholder="搜索股票代码或名称"
@@ -28,15 +28,7 @@
           </el-input>
         </el-col>
 
-        <el-col :span="4">
-          <el-select v-model="selectedMarket" placeholder="市场" clearable>
-            <el-option label="A股" value="A股" />
-            <el-option label="港股" value="港股" />
-            <el-option label="美股" value="美股" />
-          </el-select>
-        </el-col>
-
-        <el-col :span="4">
+        <el-col :span="6">
           <el-select v-model="selectedBoard" placeholder="板块" clearable>
             <el-option label="主板" value="主板" />
             <el-option label="创业板" value="创业板" />
@@ -45,15 +37,7 @@
           </el-select>
         </el-col>
 
-        <el-col :span="4">
-          <el-select v-model="selectedExchange" placeholder="交易所" clearable>
-            <el-option label="上海证券交易所" value="上海证券交易所" />
-            <el-option label="深圳证券交易所" value="深圳证券交易所" />
-            <el-option label="北京证券交易所" value="北京证券交易所" />
-          </el-select>
-        </el-col>
-
-        <el-col :span="4">
+        <el-col :span="6">
           <el-select v-model="selectedTag" placeholder="标签" clearable>
             <el-option
               v-for="tag in userTags"
@@ -112,41 +96,31 @@
         @selection-change="handleSelectionChange"
       >
         <el-table-column type="selection" width="55" />
-        <el-table-column prop="stock_code" label="股票代码" width="120">
+        <el-table-column prop="stock_code" label="股票代码" min-width="120">
           <template #default="{ row }">
-            <router-link :to="`/stocks/${row.stock_code}`" target="_blank">{{ row.stock_code }}</router-link>
+            <router-link :to="`/stocks/${row.stock_code}`" class="stock-code">{{ row.stock_code }}</router-link>
           </template>
         </el-table-column>
 
-        <el-table-column prop="stock_name" label="股票名称" width="150">
+        <el-table-column prop="stock_name" label="股票名称" min-width="150">
           <template #default="{ row }">
-            <router-link :to="`/stocks/${row.stock_code}`" target="_blank" class="stock-name">{{ row.stock_name }}</router-link>
+            <router-link :to="`/stocks/${row.stock_code}`" class="stock-name">{{ row.stock_name }}</router-link>
           </template>
         </el-table-column>
-        <el-table-column prop="market" label="市场" width="80">
-          <template #default="{ row }">
-            {{ row.market || 'A股' }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="board" label="板块" width="100">
+        <el-table-column prop="board" label="板块" min-width="100">
           <template #default="{ row }">
             {{ row.board || '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="exchange" label="交易所" width="140">
-          <template #default="{ row }">
-            {{ row.exchange || '-' }}
-          </template>
-        </el-table-column>
 
-        <el-table-column prop="current_price" label="当前价格" width="100">
+        <el-table-column prop="current_price" label="当前价格" min-width="100">
           <template #default="{ row }">
             <span v-if="row.current_price !== null && row.current_price !== undefined">¥{{ formatPrice(row.current_price) }}</span>
             <span v-else>-</span>
           </template>
         </el-table-column>
 
-        <el-table-column prop="change_percent" label="涨跌幅" width="100">
+        <el-table-column prop="change_percent" label="涨跌幅" min-width="100">
           <template #default="{ row }">
             <span
               v-if="row.change_percent !== null && row.change_percent !== undefined"
@@ -158,7 +132,7 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="tags" label="标签" width="150">
+        <el-table-column prop="tags" label="标签" min-width="150">
           <template #default="{ row }">
             <el-tag
               v-for="tag in row.tags"
@@ -173,13 +147,13 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="added_at" label="添加时间" width="120">
+        <el-table-column prop="added_at" label="添加时间" min-width="120">
           <template #default="{ row }">
             {{ formatDate(row.added_at) }}
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="260" fixed="right">
+        <el-table-column label="操作" min-width="200" fixed="right">
           <template #default="{ row }">
             <el-button
               type="text"
@@ -194,7 +168,7 @@
               type="text"
               size="small"
               @click="showSingleSyncDialog(row)"
-              style="color: #409EFF;"
+              style="color: #2b6cb0;"
             >
               同步
             </el-button>
@@ -528,7 +502,7 @@ import { useAuthStore } from '@/stores/auth'
 
 // 颜色可选项（20种预设颜色）
 const COLOR_PALETTE = [
-  '#409EFF', '#1677FF', '#2F88FF', '#52C41A', '#67C23A',
+  '#2b6cb0', '#2c5282', '#5c90c2', '#52C41A', '#67C23A',
   '#13C2C2', '#FA8C16', '#E6A23C', '#F56C6C', '#EB2F96',
   '#722ED1', '#8E44AD', '#00BFBF', '#1F2D3D', '#606266',
   '#909399', '#C0C4CC', '#FF7F50', '#A0CFFF', '#2C3E50'
@@ -545,9 +519,7 @@ const getTagColor = (name: string) => tagColorMap.value[name] || ''
 
 const searchKeyword = ref('')
 const selectedTag = ref('')
-const selectedMarket = ref('')
 const selectedBoard = ref('')
-const selectedExchange = ref('')
 
 // 批量选择
 const selectedStocks = ref<FavoriteItem[]>([])
@@ -658,24 +630,10 @@ const filteredFavorites = computed<FavoriteItem[]>(() => {
     )
   }
 
-  // 市场筛选
-  if (selectedMarket.value) {
-    result = result.filter((item: FavoriteItem) =>
-      item.market === selectedMarket.value
-    )
-  }
-
   // 板块筛选
   if (selectedBoard.value) {
     result = result.filter((item: FavoriteItem) =>
       item.board === selectedBoard.value
-    )
-  }
-
-  // 交易所筛选
-  if (selectedExchange.value) {
-    result = result.filter((item: FavoriteItem) =>
-      item.exchange === selectedExchange.value
     )
   }
 
@@ -781,7 +739,7 @@ const loadUserTags = async () => {
 const tagDialogVisible = ref(false)
 const tagLoading = ref(false)
 const tagList = ref<any[]>([])
-const newTag = ref({ name: '', color: '#409EFF', sort_order: 0 })
+const newTag = ref({ name: '', color: '#2b6cb0', sort_order: 0 })
 
 const loadTagList = async () => {
   tagLoading.value = true
@@ -809,7 +767,7 @@ const createTag = async () => {
   try {
     await tagsApi.create({ ...newTag.value })
     ElMessage.success('创建成功')
-    newTag.value = { name: '', color: '#409EFF', sort_order: 0 }
+    newTag.value = { name: '', color: '#2b6cb0', sort_order: 0 }
     await loadTagList()
     await loadUserTags()
   } catch (e: any) {

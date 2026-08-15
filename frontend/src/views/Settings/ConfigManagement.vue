@@ -1,17 +1,19 @@
 <template>
   <div class="config-management">
     <!-- 页面标题 -->
-    <div class="page-header">
-      <div class="header-left">
-        <h1 class="page-title">
-          <el-icon><Setting /></el-icon>
-          配置管理
-        </h1>
-        <p class="page-description">
-          管理系统配置、大模型、数据源等设置
-        </p>
+    <div class="page-hero">
+      <div class="page-hero-main">
+        <div class="page-hero-icon">
+          <el-icon :size="26"><Setting /></el-icon>
+        </div>
+        <div class="page-hero-text">
+          <h2 class="page-hero-title">配置管理</h2>
+          <p class="page-hero-sub">
+            管理系统配置、大模型、数据源等设置
+          </p>
+        </div>
       </div>
-      <div class="header-right">
+      <div class="page-hero-meta">
         <el-button type="success" @click="handleReloadConfig" :loading="reloadLoading">
           <el-icon><Refresh /></el-icon>
           重载配置
@@ -2232,38 +2234,6 @@ onMounted(async () => {
 
 <style lang="scss" scoped>
 .config-management {
-  .page-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 24px;
-
-    .header-left {
-      flex: 1;
-
-      .page-title {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 24px;
-        font-weight: 600;
-        color: var(--el-text-color-primary);
-        margin: 0 0 8px 0;
-      }
-
-      .page-description {
-        margin: 0;
-        color: var(--el-text-color-secondary);
-        font-size: 14px;
-      }
-    }
-
-    .header-right {
-      display: flex;
-      gap: 12px;
-    }
-  }
-
   .config-menu {
     .config-nav {
       border: none;
@@ -2523,7 +2493,7 @@ onMounted(async () => {
       font-size: 11px;
       color: var(--el-text-color-placeholder);
       margin-top: 2px;
-      font-family: monospace;
+      font-family: var(--app-font-mono);
     }
   }
 
@@ -2597,7 +2567,7 @@ onMounted(async () => {
     .model-code-text {
       font-size: 12px;
       color: var(--el-text-color-placeholder);
-      font-family: 'Courier New', monospace;
+      font-family: var(--app-font-mono);
       margin-top: 4px;
     }
   }
@@ -2666,7 +2636,7 @@ onMounted(async () => {
         .model-code {
           font-size: 12px;
           color: #909399;
-          font-family: 'Courier New', monospace;
+          font-family: var(--app-font-mono);
         }
       }
 

@@ -476,7 +476,7 @@ watch(articleId, (id) => {
           background: var(--el-fill-color-light);
           padding: 2px 6px;
           border-radius: 4px;
-          font-family: 'Consolas', 'Monaco', monospace;
+          font-family: var(--app-font-mono);
           font-size: 14px;
           color: var(--el-text-color-primary);
         }

@@ -431,7 +431,7 @@ const viewDocumentation = () => {
 
   // Hero Section
   .hero-section {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(135deg, #2c5282 0%, #1e3a5f 100%);
     border-radius: 16px;
     padding: 60px 40px;
     margin-bottom: 48px;
@@ -537,7 +537,7 @@ const viewDocumentation = () => {
 
           &.el-button--primary {
             background: white;
-            color: #667eea;
+            color: #2c5282;
             border: none;
 
             &:hover {
@@ -665,7 +665,7 @@ const viewDocumentation = () => {
             color: white;
 
             &.primary {
-              background: linear-gradient(135deg, var(--el-color-primary), #667eea);
+              background: linear-gradient(135deg, var(--el-color-primary), #2c5282);
             }
 
             &.success {
@@ -677,7 +677,7 @@ const viewDocumentation = () => {
             }
 
             &.info {
-              background: linear-gradient(135deg, var(--el-color-info), #1890ff);
+              background: linear-gradient(135deg, var(--el-color-info), #22568d);
             }
 
             &.danger {
@@ -738,7 +738,7 @@ const viewDocumentation = () => {
           left: 0;
           right: 0;
           height: 4px;
-          background: linear-gradient(90deg, #667eea, #764ba2);
+          background: linear-gradient(90deg, #2c5282, #1e3a5f);
         }
 
         .origin-header {
@@ -753,7 +753,7 @@ const viewDocumentation = () => {
             width: 64px;
             height: 64px;
             border-radius: 16px;
-            background: linear-gradient(135deg, #667eea, #764ba2);
+            background: linear-gradient(135deg, #2c5282, #1e3a5f);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -787,7 +787,7 @@ const viewDocumentation = () => {
               }
 
               &:hover {
-                color: #667eea;
+                color: #2c5282;
                 text-decoration: underline;
               }
             }
@@ -843,7 +843,7 @@ const viewDocumentation = () => {
             padding: 20px;
             background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1));
             border-radius: 12px;
-            border-left: 4px solid #667eea;
+            border-left: 4px solid #2c5282;
             font-size: 15px;
             color: var(--el-text-color-regular);
 
@@ -959,7 +959,7 @@ const viewDocumentation = () => {
       gap: 32px;
 
       .version-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        background: linear-gradient(135deg, #2c5282 0%, #1e3a5f 100%);
         border-radius: 16px;
         padding: 32px;
         color: white;
@@ -1115,7 +1115,7 @@ const viewDocumentation = () => {
           }
 
           &.docs {
-            background: linear-gradient(135deg, #667eea, #764ba2);
+            background: linear-gradient(135deg, #2c5282, #1e3a5f);
           }
         }
 

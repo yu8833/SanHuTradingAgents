@@ -1,14 +1,18 @@
 <template>
   <div class="database-management">
     <!-- 页面标题 -->
-    <div class="page-header">
-      <h1 class="page-title">
-        <el-icon><DataBoard /></el-icon>
-        数据库管理
-      </h1>
-      <p class="page-description">
-        MongoDB + Redis 数据库管理和监控
-      </p>
+    <div class="page-hero">
+      <div class="page-hero-main">
+        <div class="page-hero-icon">
+          <el-icon :size="26"><DataBoard /></el-icon>
+        </div>
+        <div class="page-hero-text">
+          <h2 class="page-hero-title">数据库管理</h2>
+          <p class="page-hero-sub">
+            MongoDB + Redis 数据库管理和监控
+          </p>
+        </div>
+      </div>
     </div>
 
     <!-- 连接状态 -->
@@ -212,11 +216,11 @@
                   <p style="margin: 8px 0;">由于数据量较大，Web 界面备份体验较差，建议使用 MongoDB 原生工具：</p>
                   <div style="background: #f5f7fa; padding: 12px; border-radius: 4px; margin: 8px 0;">
                     <p style="margin: 4px 0; font-weight: bold;">📦 备份命令：</p>
-                    <code style="display: block; margin: 4px 0; color: #409eff;">
+                    <code style="display: block; margin: 4px 0; color: #2b6cb0;">
                       mongodump --uri="mongodb://localhost:27017" --db=tradingagents --out=./backup --gzip
                     </code>
                     <p style="margin: 12px 0 4px 0; font-weight: bold;">🔄 还原命令：</p>
-                    <code style="display: block; margin: 4px 0; color: #409eff;">
+                    <code style="display: block; margin: 4px 0; color: #2b6cb0;">
                       mongorestore --uri="mongodb://localhost:27017" --db=tradingagents --gzip ./backup/tradingagents
                     </code>
                   </div>
@@ -628,25 +632,6 @@ onMounted(async () => {
 
 <style lang="scss" scoped>
 .database-management {
-  .page-header {
-    margin-bottom: 24px;
-
-    .page-title {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 24px;
-      font-weight: 600;
-      color: var(--el-text-color-primary);
-      margin: 0 0 8px 0;
-    }
-
-    .page-description {
-      color: var(--el-text-color-regular);
-      margin: 0;
-    }
-  }
-
   .connection-card {
     .connection-status {
       .status-indicator {

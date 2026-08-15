@@ -1,17 +1,21 @@
 <template>
   <div class="vibe-emotion" v-loading="loading">
     <!-- 页面标题 -->
-    <div class="page-header">
-      <div class="title-block">
-        <h1 class="page-title">
-          <el-icon class="title-icon"><TrendCharts /></el-icon>
-          短线情绪
-        </h1>
-        <p class="page-subtitle">连板梯队 / 打板情绪 · 客观公开榜单</p>
+    <div class="page-hero">
+      <div class="page-hero-main">
+        <div class="page-hero-icon">
+          <el-icon :size="26"><TrendCharts /></el-icon>
+        </div>
+        <div class="page-hero-text">
+          <h2 class="page-hero-title">短线情绪</h2>
+          <p class="page-hero-sub">连板梯队 / 打板情绪 · 客观公开榜单</p>
+        </div>
       </div>
-      <el-button type="primary" plain :icon="Refresh" :loading="loading" @click="load">
-        刷新
-      </el-button>
+      <div class="page-hero-meta">
+        <el-button type="primary" plain :icon="Refresh" :loading="loading" @click="load">
+          刷新
+        </el-button>
+      </div>
     </div>
 
     <template v-if="emotion">
@@ -209,33 +213,6 @@ onMounted(() => {
   min-height: 200px;
 }
 
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 20px;
-}
-
-.page-title {
-  font-size: 22px;
-  font-weight: 600;
-  margin: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--el-text-color-primary);
-}
-
-.title-icon {
-  color: var(--el-color-primary);
-}
-
-.page-subtitle {
-  margin: 6px 0 0;
-  font-size: 13px;
-  color: var(--el-text-color-secondary);
-}
-
 .block {
   margin-bottom: 24px;
 }
@@ -297,7 +274,7 @@ onMounted(() => {
 }
 
 .cnt-num {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--app-font-mono);
   font-size: 32px;
   font-weight: 700;
   margin: 6px 0 2px;
@@ -330,7 +307,7 @@ onMounted(() => {
 }
 
 .rt-num {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--app-font-mono);
   font-size: 28px;
   font-weight: 700;
   margin: 6px 0 12px;
@@ -355,7 +332,7 @@ onMounted(() => {
 }
 
 .ladder-text {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--app-font-mono);
   font-size: 15px;
   line-height: 1.8;
   color: var(--el-text-color-primary);
@@ -370,29 +347,6 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   line-height: 1.3;
-}
-
-.stock-name {
-  font-size: 14px;
-  color: var(--el-color-primary);
-  font-weight: 500;
-  text-decoration: none;
-}
-
-.stock-name:hover {
-  text-decoration: underline;
-}
-
-.stock-code {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-  font-family: 'JetBrains Mono', monospace;
-  text-decoration: none;
-}
-
-.stock-code:hover {
-  color: var(--el-color-primary);
-  text-decoration: underline;
 }
 
 .empty {

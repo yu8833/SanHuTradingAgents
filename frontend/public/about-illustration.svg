@@ -8,7 +8,7 @@
       <stop offset="100%" stop-color="#EEF5FF"/>
     </linearGradient>
     <linearGradient id="primary" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#409EFF"/>
+      <stop offset="0%" stop-color="#2b6cb0"/>
       <stop offset="100%" stop-color="#66B1FF"/>
     </linearGradient>
     <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
@@ -47,11 +47,11 @@
     <!-- polyline trend -->
     <polyline points="80,260 140,240 200,260 260,220 320,200 380,230 440,180" fill="none" stroke="url(#primary)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
     <!-- nodes -->
-    <circle cx="140" cy="240" r="5" fill="#409EFF"/>
-    <circle cx="200" cy="260" r="5" fill="#409EFF"/>
-    <circle cx="260" cy="220" r="5" fill="#409EFF"/>
-    <circle cx="320" cy="200" r="5" fill="#409EFF"/>
-    <circle cx="380" cy="230" r="5" fill="#409EFF"/>
+    <circle cx="140" cy="240" r="5" fill="#2b6cb0"/>
+    <circle cx="200" cy="260" r="5" fill="#2b6cb0"/>
+    <circle cx="260" cy="220" r="5" fill="#2b6cb0"/>
+    <circle cx="320" cy="200" r="5" fill="#2b6cb0"/>
+    <circle cx="380" cy="230" r="5" fill="#2b6cb0"/>
     <circle cx="440" cy="180" r="6" fill="#67C23A" stroke="#ffffff" stroke-width="2"/>
     <!-- annotation badge -->
     <rect x="410" y="150" width="60" height="24" rx="6" fill="url(#accent)"/>
@@ -66,7 +66,7 @@
       <rect x="520" y="130" width="200" height="40" rx="10" fill="#f7fbff" stroke="#e9eff8"/>
       <circle cx="540" cy="150" r="12" fill="url(#primary)"/>
       <text x="560" y="154" font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto" font-size="13" fill="#48627a">基本面分析</text>
-      <rect x="700" y="140" width="20" height="8" rx="4" fill="#409EFF"/>
+      <rect x="700" y="140" width="20" height="8" rx="4" fill="#2b6cb0"/>
     </g>
     <g>
       <rect x="520" y="180" width="200" height="40" rx="10" fill="#f7fbff" stroke="#e9eff8"/>

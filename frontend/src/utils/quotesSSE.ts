@@ -10,8 +10,16 @@
  * - 30 秒轮询作为兜底，防止 SSE 断连
  */
 
-const SSE_RECONNECT_DELAY = 5000 // 断连后 5 秒重连
+const SSE_RECONNECT_BASE_DELAY = 1000 // 首次重连 1 秒
+const SSE_RECONNECT_MAX_DELAY = 5000  // 最大重连间隔 5 秒
 const MAX_RECONNECT_ATTEMPTS = 10 // 最大重连次数
+
+// 重连延迟：指数退避，前几次快速重连以应对瞬时网络抖动，
+// 之后逐步拉长间隔，避免频繁无效请求；加入随机抖动防止多客户端同时重连。
+const getReconnectDelay = (attempt: number): number => {
+  const exp = Math.min(SSE_RECONNECT_BASE_DELAY * Math.pow(2, attempt - 1), SSE_RECONNECT_MAX_DELAY)
+  return exp + Math.random() * 300
+}
 
 export interface QuotesUpdateSignal {
   type: string
@@ -93,10 +101,11 @@ export function subscribeQuotesUpdate(onUpdate: (signal: QuotesUpdateSignal) => 
 
       if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
         reconnectAttempts++
+        const delay = getReconnectDelay(reconnectAttempts)
         reconnectTimer = setTimeout(() => {
           console.log(`[QuotesSSE] 第 ${reconnectAttempts} 次重连...`)
           connect()
-        }, SSE_RECONNECT_DELAY)
+        }, delay)
       } else {
         console.warn('[QuotesSSE] 达到最大重连次数，停止重连（依赖轮询兜底）')
       }

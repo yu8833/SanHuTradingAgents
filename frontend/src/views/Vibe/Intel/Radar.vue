@@ -1,11 +1,15 @@
 <template>
   <div class="radar-page">
-    <div class="page-header">
-      <h1 class="page-title">
-        <el-icon class="title-icon"><DataLine /></el-icon>
-        资讯
-        <span class="page-subtitle">12赛道全球公开RSS资讯</span>
-      </h1>
+    <div class="page-hero">
+      <div class="page-hero-main">
+        <div class="page-hero-icon">
+          <el-icon :size="26"><DataLine /></el-icon>
+        </div>
+        <div class="page-hero-text">
+          <h2 class="page-hero-title">资讯</h2>
+          <p class="page-hero-sub">12赛道全球公开RSS资讯</p>
+        </div>
+      </div>
     </div>
 
     <div class="status-bar">
@@ -620,17 +624,6 @@ onMounted(() => {
   margin: 0;
 }
 
-.title-icon {
-  color: var(--el-color-primary);
-}
-
-.page-subtitle {
-  font-size: 13px;
-  font-weight: 400;
-  color: var(--el-text-color-secondary);
-  margin-left: 2px;
-}
-
 .status-bar {
   display: flex;
   align-items: center;
@@ -656,7 +649,7 @@ onMounted(() => {
 }
 
 .status-time {
-  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-family: var(--app-font-mono);
   font-size: 12px;
 }
 
@@ -943,7 +936,7 @@ onMounted(() => {
 }
 
 .news-time {
-  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-family: var(--app-font-mono);
   font-size: 12px;
   color: var(--el-text-color-secondary);
   white-space: nowrap;
@@ -1087,7 +1080,7 @@ onMounted(() => {
       width: 26px;
       height: 26px;
       border-radius: 50%;
-      background: #2f54eb;
+      background: #2b6cb0;
       color: #fff;
       font-size: 13px;
       font-weight: 600;
@@ -1168,7 +1161,7 @@ onMounted(() => {
 
       .focus-label {
         font-weight: 600;
-        color: #2f54eb;
+        color: #2b6cb0;
         margin-right: 4px;
       }
 
@@ -1296,7 +1289,7 @@ onMounted(() => {
         font-size: 20px;
         margin: 16px 0 10px;
         padding-bottom: 6px;
-        border-bottom: 2px solid #2f54eb;
+        border-bottom: 2px solid #2b6cb0;
       }
 
       :deep(h2) {
@@ -1304,15 +1297,15 @@ onMounted(() => {
         margin: 18px 0 10px;
         padding: 6px 12px;
         background: linear-gradient(90deg, #e6f0ff 0%, transparent 100%);
-        border-left: 4px solid #2f54eb;
-        color: #1d39c4;
+        border-left: 4px solid #2b6cb0;
+        color: #2c5282;
         font-weight: 600;
       }
 
       :deep(h3) {
         font-size: 15px;
         margin: 12px 0 6px;
-        color: #2f54eb;
+        color: #2b6cb0;
         font-weight: 600;
       }
 
@@ -1338,7 +1331,7 @@ onMounted(() => {
       }
 
       :deep(strong) {
-        color: #1d39c4;
+        color: #2c5282;
       }
 
       :deep(blockquote) {

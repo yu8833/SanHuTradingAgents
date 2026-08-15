@@ -513,7 +513,7 @@ onUnmounted(() => {
     .job-id {
       font-size: 12px;
       color: var(--el-text-color-secondary);
-      font-family: monospace;
+      font-family: var(--app-font-mono);
     }
   }
 

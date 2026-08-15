@@ -1558,7 +1558,7 @@ const applyToTrading = async () => {
           ]),
           h('p', [
             h('strong', '预计金额：'),
-            h('span', { style: 'color: #409EFF; font-weight: bold;' }, `${estimatedAmount.value}元`)
+            h('span', { style: 'color: #2b6cb0; font-weight: bold;' }, `${estimatedAmount.value}元`)
           ]),
           h('p', [
             h('strong', '模型置信度：'),
@@ -2064,7 +2064,7 @@ const normalizeConfidenceScore = (score: number) => {
 
 const getConfidenceColor = (score: number) => {
   if (score >= 80) return '#67C23A' // 较高 - 绿色
-  if (score >= 60) return '#409EFF' // 中上 - 蓝色
+  if (score >= 60) return '#2b6cb0' // 中上 - 蓝色
   if (score >= 40) return '#E6A23C' // 中等 - 橙色
   return '#F56C6C' // 较低 - 红色
 }
@@ -2078,7 +2078,7 @@ const getConfidenceLabel = (score: number) => {
 
 const getConfidenceGradient = (score: number): string => {
   if (score >= 80) return 'linear-gradient(90deg, #52c41a, #67C23A)'
-  if (score >= 60) return 'linear-gradient(90deg, #1890ff, #409EFF)'
+  if (score >= 60) return 'linear-gradient(90deg, #2b6cb0, #2b6cb0)'
   if (score >= 40) return 'linear-gradient(90deg, #fa8c16, #E6A23C)'
   return 'linear-gradient(90deg, #ff4d4f, #F56C6C)'
 }
@@ -2438,7 +2438,7 @@ onBeforeUnmount(() => {
 
             .el-icon {
               font-size: 28px;
-              color: #3b82f6;
+              color: #2b6cb0;
             }
           }
 
@@ -2913,7 +2913,7 @@ onBeforeUnmount(() => {
           padding: 2px 8px;
           border-radius: 4px;
           font-size: 13.5px;
-          font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+          font-family: var(--app-font-mono);
         }
 
         /* 代码块 */
@@ -2966,12 +2966,12 @@ onBeforeUnmount(() => {
 
         /* 链接 */
         :deep(a) {
-          color: #2563eb;
+          color: #2b6cb0;
           text-decoration: none;
           border-bottom: 1px dotted #bfdbfe;
 
           &:hover {
-            color: #1d4ed8;
+            color: #22568d;
             border-bottom-color: #93c5fd;
           }
         }
@@ -3558,9 +3558,9 @@ onBeforeUnmount(() => {
       align-items: center;
       gap: 16px;
       padding: 28px 24px;
-      background: linear-gradient(135deg, rgba(14, 165, 233, 0.1) 0%, rgba(6, 182, 212, 0.05) 100%);
+      background: linear-gradient(135deg, rgba(43, 108, 176, 0.1) 0%, rgba(43, 108, 176, 0.05) 100%);
       border-radius: 16px;
-      border: 1px solid rgba(14, 165, 233, 0.15);
+      border: 1px solid rgba(43, 108, 176, 0.15);
       position: relative;
 
       .confidence-total-score {
@@ -3571,7 +3571,7 @@ onBeforeUnmount(() => {
         .total-score-value {
           font-size: 56px;
           font-weight: 800;
-          background: linear-gradient(135deg, #0ea5e9, #06b6d4, #0891b2);
+          background: linear-gradient(135deg, #2b6cb0, #60a5fa);
           -webkit-background-clip: text;
           -webkit-text-fill-color: transparent;
           background-clip: text;
@@ -3581,7 +3581,7 @@ onBeforeUnmount(() => {
         .total-score-unit {
           font-size: 24px;
           font-weight: 700;
-          color: #0891b2;
+          color: #22568d;
           margin-left: 4px;
         }
       }
@@ -3589,7 +3589,7 @@ onBeforeUnmount(() => {
       .confidence-total-label {
         font-size: 16px;
         font-weight: 700;
-        color: #0ea5e9;
+        color: #2c5282;
       }
     }
 
@@ -3607,8 +3607,8 @@ onBeforeUnmount(() => {
 
         &:hover {
           transform: translateY(-2px);
-          box-shadow: 0 8px 24px rgba(14, 165, 233, 0.1);
-          border-color: #7dd3fc;
+          box-shadow: 0 8px 24px rgba(43, 108, 176, 0.1);
+          border-color: #bfdbfe;
         }
 
         .detail-item-header {
@@ -3626,15 +3626,15 @@ onBeforeUnmount(() => {
           .detail-item-score {
             font-size: 13px;
             font-weight: 700;
-            color: #0891b2;
-            font-family: ui-monospace, SFMono-Regular, "SF Mono", monospace;
+            color: #22568d;
+            font-family: var(--app-font-mono);
           }
         }
 
         .detail-item-bar {
           height: 6px;
           border-radius: 3px;
-          background: rgba(14, 165, 233, 0.08);
+          background: rgba(43, 108, 176, 0.08);
           overflow: hidden;
           margin-bottom: 8px;
 
@@ -3758,7 +3758,7 @@ onBeforeUnmount(() => {
 
           &:hover {
             border-color: var(--el-color-primary-light-5);
-            box-shadow: 0 4px 16px rgba(64, 158, 255, 0.15);
+            box-shadow: 0 4px 16px rgba(43, 108, 176, 0.15);
           }
         }
 
@@ -3787,8 +3787,8 @@ onBeforeUnmount(() => {
         &--social {
           background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
           border-color: #60a5fa;
-          .chip-name { color: #1e40af; }
-          .chip-desc { color: #2563eb; }
+          .chip-name { color: #2c5282; }
+          .chip-desc { color: #2b6cb0; }
         }
         &--fund {
           background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
@@ -3832,8 +3832,8 @@ onBeforeUnmount(() => {
           .chip-desc { color: #fde68a; }
         }
         &--social {
-          background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
-          border-color: #3b82f6;
+          background: linear-gradient(135deg, #1e3a5f 0%, #2c5282 100%);
+          border-color: #2b6cb0;
           .chip-name { color: #dbeafe; }
           .chip-desc { color: #bfdbfe; }
         }
@@ -3992,12 +3992,12 @@ onBeforeUnmount(() => {
             gap: 2px;
             font-size: 12px;
             font-weight: 700;
-            color: #1d4ed8;
+            color: #22568d;
             background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
             padding: 10px 20px;
             border-radius: 16px;
             border: 2px solid #bfdbfe;
-            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.12);
+            box-shadow: 0 4px 12px rgba(43, 108, 176, 0.12);
             white-space: nowrap;
 
             .arrow-badge-text {
@@ -4150,10 +4150,10 @@ onBeforeUnmount(() => {
         &.node--manager {
           background: linear-gradient(145deg, #eff6ff 0%, #dbeafe 50%, #ffffff 100%);
           border-color: #bfdbfe;
-          .node-name { color: #1e40af; }
+          .node-name { color: #2c5282; }
           .node-icon { background: linear-gradient(145deg, #dbeafe, #bfdbfe); }
-          .keypoint .kp-dot { background: #3b82f6; }
-          &::before { background: linear-gradient(135deg, #3b82f6, #60a5fa); }
+          .keypoint .kp-dot { background: #2b6cb0; }
+          &::before { background: linear-gradient(135deg, #2b6cb0, #60a5fa); }
         }
       }
 
@@ -4408,13 +4408,13 @@ onBeforeUnmount(() => {
         &.risk-constraint {
           background: linear-gradient(145deg, #eff6ff 0%, #dbeafe 50%, #ffffff 100%);
           border-color: #bfdbfe;
-          .node-name { color: #1e40af; }
-          .node-desc { color: #2563eb; }
+          .node-name { color: #2c5282; }
+          .node-desc { color: #2b6cb0; }
           .node-icon { background: linear-gradient(145deg, #dbeafe, #bfdbfe); }
-          &::before { background: linear-gradient(135deg, #3b82f6, #60a5fa); }
+          &::before { background: linear-gradient(135deg, #2b6cb0, #60a5fa); }
 
           &.is-clickable:hover {
-            box-shadow: 0 20px 40px rgba(59, 130, 246, 0.15), 0 4px 12px rgba(59, 130, 246, 0.08);
+            box-shadow: 0 20px 40px rgba(43, 108, 176, 0.15), 0 4px 12px rgba(43, 108, 176, 0.08);
           }
         }
       }
@@ -4627,17 +4627,17 @@ onBeforeUnmount(() => {
           border-color: #0369a1;
 
           .confidence-total {
-            background: linear-gradient(135deg, rgba(14, 165, 233, 0.15) 0%, rgba(6, 182, 212, 0.08) 100%);
+            background: linear-gradient(135deg, rgba(43, 108, 176, 0.15) 0%, rgba(43, 108, 176, 0.08) 100%);
 
             .confidence-total-score {
               .total-score-value {
-                background: linear-gradient(135deg, #38bdf8, #22d3ee);
+                background: linear-gradient(135deg, #4d84c8, #2b6cb0);
                 -webkit-background-clip: text;
                 -webkit-text-fill-color: transparent;
                 background-clip: text;
               }
               .total-score-unit {
-                color: #22d3ee;
+                color: #2b6cb0;
               }
             }
           }
@@ -4692,12 +4692,12 @@ onBeforeUnmount(() => {
             &::before { background: linear-gradient(135deg, #8b5cf6, #a78bfa); }
           }
           &.node--manager {
-            background: linear-gradient(135deg, #1e3a8a 0%, #1c1917 100%);
-            border-color: #1d4ed8;
+            background: linear-gradient(135deg, #1e3a5f 0%, #1c1917 100%);
+            border-color: #22568d;
             .node-name { color: #dbeafe; }
             .node-desc { color: #93c5fd; }
-            .node-icon { background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(96, 165, 250, 0.1)); }
-            &::before { background: linear-gradient(135deg, #3b82f6, #60a5fa); }
+            .node-icon { background: linear-gradient(135deg, rgba(43, 108, 176, 0.2), rgba(96, 165, 250, 0.1)); }
+            &::before { background: linear-gradient(135deg, #2b6cb0, #60a5fa); }
           }
         }
 
@@ -4760,12 +4760,12 @@ onBeforeUnmount(() => {
         }
 
         .risk-constraint {
-          background: linear-gradient(135deg, #1e3a8a 0%, #1c1917 100%) !important;
-          border-color: #1d4ed8 !important;
+          background: linear-gradient(135deg, #1e3a5f 0%, #1c1917 100%) !important;
+          border-color: #22568d !important;
           .node-name { color: #dbeafe; }
           .node-desc { color: #93c5fd; }
-          .node-icon { background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(96, 165, 250, 0.1)) !important; }
-          &::before { background: linear-gradient(135deg, #3b82f6, #60a5fa) !important; }
+          .node-icon { background: linear-gradient(135deg, rgba(43, 108, 176, 0.2), rgba(96, 165, 250, 0.1)) !important; }
+          &::before { background: linear-gradient(135deg, #2b6cb0, #60a5fa) !important; }
         }
 
         // 最终决策卡片
@@ -4833,7 +4833,7 @@ onBeforeUnmount(() => {
     left: 0;
     right: 0;
     height: 4px;
-    background: linear-gradient(90deg, #3b82f6, #8b5cf6, #ec4899, #f97316, #22c55e);
+    background: linear-gradient(90deg, #2b6cb0, #8b5cf6, #ec4899, #f97316, #22c55e);
   }
 
   .decision-label {
@@ -5136,18 +5136,18 @@ html.dark {
     }
 
     .confidence-total {
-      background: linear-gradient(135deg, rgba(14, 165, 233, 0.15) 0%, rgba(6, 182, 212, 0.08) 100%);
-      border-color: rgba(14, 165, 233, 0.2);
+      background: linear-gradient(135deg, rgba(43, 108, 176, 0.15) 0%, rgba(43, 108, 176, 0.08) 100%);
+      border-color: rgba(43, 108, 176, 0.2);
 
       .confidence-total-score {
         .total-score-value {
-          background: linear-gradient(135deg, #38bdf8, #22d3ee);
+          background: linear-gradient(135deg, #4d84c8, #2b6cb0);
           -webkit-background-clip: text;
           -webkit-text-fill-color: transparent;
           background-clip: text;
         }
         .total-score-unit {
-          color: #22d3ee;
+          color: #2b6cb0;
         }
       }
     }
@@ -5161,7 +5161,7 @@ html.dark {
       }
 
       .detail-item-bar {
-        background: rgba(14, 165, 233, 0.1);
+        background: rgba(43, 108, 176, 0.1);
       }
 
       .detail-item-desc { color: #94a3b8; }
@@ -5301,7 +5301,7 @@ html.dark {
       background: var(--el-fill-color);
       padding: 2px 6px;
       border-radius: 4px;
-      font-family: monospace;
+      font-family: var(--app-font-mono);
       font-size: 13px;
     }
 

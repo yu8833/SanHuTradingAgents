@@ -1,13 +1,17 @@
 <template>
   <div class="analysis-history">
-    <div class="page-header">
-      <h1 class="page-title">
-        <el-icon><Clock /></el-icon>
-        分析历史
-      </h1>
-      <p class="page-description">
-        查看历史分析记录和结果
-      </p>
+    <div class="page-hero">
+      <div class="page-hero-main">
+        <div class="page-hero-icon">
+          <el-icon :size="26"><Clock /></el-icon>
+        </div>
+        <div class="page-hero-text">
+          <h2 class="page-hero-title">分析历史</h2>
+          <p class="page-hero-sub">
+            查看历史分析记录和结果
+          </p>
+        </div>
+      </div>
     </div>
 
     <!-- 筛选条件 -->
@@ -496,25 +500,6 @@ const compareAnalyses = () => {
 
 <style lang="scss" scoped>
 .analysis-history {
-  .page-header {
-    margin-bottom: 24px;
-
-    .page-title {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 24px;
-      font-weight: 600;
-      color: var(--el-text-color-primary);
-      margin: 0 0 8px 0;
-    }
-
-    .page-description {
-      color: var(--el-text-color-regular);
-      margin: 0;
-    }
-  }
-
   .filter-card {
     margin-bottom: 24px;
 

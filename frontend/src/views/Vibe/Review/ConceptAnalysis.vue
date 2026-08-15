@@ -1,17 +1,21 @@
 <template>
   <div class="concept-page">
     <!-- 页面标题 -->
-    <div class="page-header">
-      <div class="title-block">
-        <h1 class="page-title">
-          <el-icon class="title-icon"><DataAnalysis /></el-icon>
-          {{ today }} · 概念分析
-        </h1>
-        <p class="page-subtitle">概念实时行情 / 轮动 RPS / 领涨领跌一屏看全</p>
+    <div class="page-hero">
+      <div class="page-hero-main">
+        <div class="page-hero-icon">
+          <el-icon :size="26"><DataAnalysis /></el-icon>
+        </div>
+        <div class="page-hero-text">
+          <h2 class="page-hero-title">{{ today }} · 概念分析</h2>
+          <p class="page-hero-sub">概念实时行情 / 轮动 RPS / 领涨领跌一屏看全</p>
+        </div>
       </div>
-      <el-button type="primary" plain :icon="Refresh" :loading="loading" @click="loadAll">
-        刷新
-      </el-button>
+      <div class="page-hero-meta">
+        <el-button type="primary" plain :icon="Refresh" :loading="loading" @click="loadAll">
+          刷新
+        </el-button>
+      </div>
     </div>
 
     <!-- 概念宽度 KPI -->
@@ -53,7 +57,7 @@
             <span class="rank-idx">{{ i + 1 }}</span>
             <span class="rank-name">{{ c.name }}</span>
             <span class="rank-lead">
-              <router-link v-if="c.lead_code" :to="`/stocks/${c.lead_code}`" class="stock-link">{{ c.lead_name }}</router-link>
+              <router-link v-if="c.lead_code" :to="`/stocks/${c.lead_code}`" class="stock-name">{{ c.lead_name }}</router-link>
               <template v-else>{{ c.lead_name }}</template>
             </span>
             <span class="rank-pct up">{{ sign(c.pct_chg) }}{{ formatPct(c.pct_chg) }}%</span>
@@ -67,7 +71,7 @@
             <span class="rank-idx">{{ i + 1 }}</span>
             <span class="rank-name">{{ c.name }}</span>
             <span class="rank-lead">
-              <router-link v-if="c.lead_code" :to="`/stocks/${c.lead_code}`" class="stock-link">{{ c.lead_name }}</router-link>
+              <router-link v-if="c.lead_code" :to="`/stocks/${c.lead_code}`" class="stock-name">{{ c.lead_name }}</router-link>
               <template v-else>{{ c.lead_name }}</template>
             </span>
             <span class="rank-pct down">{{ sign(c.pct_chg) }}{{ formatPct(c.pct_chg) }}%</span>
@@ -81,7 +85,7 @@
             <span class="rank-idx">{{ i + 1 }}</span>
             <span class="rank-name">{{ c.name }}</span>
             <span class="rank-lead">
-              <router-link v-if="c.lead_code" :to="`/stocks/${c.lead_code}`" class="stock-link">{{ c.lead_name }}</router-link>
+              <router-link v-if="c.lead_code" :to="`/stocks/${c.lead_code}`" class="stock-name">{{ c.lead_name }}</router-link>
               <template v-else>{{ c.lead_name }}</template>
             </span>
             <span class="rank-pct up">{{ sign(c.money_flow) }}{{ fmtNum(c.money_flow) }}亿</span>
@@ -123,7 +127,7 @@
         </el-table-column>
         <el-table-column label="领涨股" min-width="120">
           <template #default="{ row }">
-            <router-link v-if="row.lead_code" :to="`/stocks/${row.lead_code}`" class="col-lead stock-link">{{ row.lead_name || '—' }}</router-link>
+            <router-link v-if="row.lead_code" :to="`/stocks/${row.lead_code}`" class="col-lead stock-name">{{ row.lead_name || '—' }}</router-link>
             <span v-else class="col-lead">{{ row.lead_name || '—' }}</span>
           </template>
         </el-table-column>
@@ -277,38 +281,6 @@ onMounted(() => {
 
 <style lang="scss" scoped>
 .concept-page {
-  .page-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 16px;
-
-    .title-block {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-
-    .page-title {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin: 0;
-      font-size: 22px;
-      font-weight: 600;
-
-      .title-icon {
-        color: var(--el-color-primary);
-      }
-    }
-
-    .page-subtitle {
-      margin: 0;
-      color: var(--el-text-color-secondary);
-      font-size: 13px;
-    }
-  }
-
   .block {
     margin-bottom: 16px;
     padding: 16px;
@@ -442,16 +414,6 @@ onMounted(() => {
     .col-lead {
       color: var(--el-text-color-secondary);
       font-size: 12px;
-    }
-
-    .stock-link {
-      color: var(--el-color-primary);
-      text-decoration: none;
-      cursor: pointer;
-    }
-
-    .stock-link:hover {
-      text-decoration: underline;
     }
 
     .muted {

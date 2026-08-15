@@ -181,7 +181,7 @@ const openArticle = (articleId: string) => {
     text-align: center;
     margin-bottom: 48px;
     padding: 40px 20px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(135deg, #2c5282 0%, #1e3a5f 100%);
     border-radius: 16px;
     color: white;
 
@@ -342,4 +342,3 @@ const openArticle = (articleId: string) => {
   }
 }
 </style>
-

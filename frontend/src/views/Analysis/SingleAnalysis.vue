@@ -1,14 +1,14 @@
 <template>
   <div class="single-analysis">
     <!-- 页面头部 -->
-    <div class="page-header">
-      <div class="header-content">
-        <div class="title-section">
-          <h1 class="page-title">
-            <el-icon class="title-icon"><Document /></el-icon>
-            单股分析
-          </h1>
-          <p class="page-description">
+    <div class="page-hero">
+      <div class="page-hero-main">
+        <div class="page-hero-icon">
+          <el-icon :size="26"><Document /></el-icon>
+        </div>
+        <div class="page-hero-text">
+          <h2 class="page-hero-title">单股分析</h2>
+          <p class="page-hero-sub">
             AI驱动的智能股票分析，多维度评估投资价值与风险
           </p>
         </div>
@@ -1416,7 +1416,7 @@ const goSimOrder = async () => {
           ]),
           h('p', [
             h('strong', '预计金额：'),
-            h('span', { style: 'color: #409EFF; font-weight: bold;' }, `${estimatedAmount.value}元`)
+            h('span', { style: 'color: #2b6cb0; font-weight: bold;' }, `${estimatedAmount.value}元`)
           ]),
           h('p', [
             h('strong', '置信度：'),
@@ -1914,39 +1914,6 @@ onMounted(async () => {
   background: var(--el-bg-color-page);
   padding: 24px;
 
-  .page-header {
-    margin-bottom: 32px;
-
-    .header-content {
-      background: var(--el-bg-color);
-      padding: 32px;
-      border-radius: 16px;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-    }
-
-    .title-section {
-      .page-title {
-        display: flex;
-        align-items: center;
-        font-size: 32px;
-        font-weight: 700;
-        color: var(--el-text-color-primary);
-        margin: 0 0 8px 0;
-
-        .title-icon {
-          margin-right: 12px;
-          color: #3b82f6;
-        }
-      }
-
-      .page-description {
-        font-size: 16px;
-        color: var(--el-text-color-secondary);
-        margin: 0;
-      }
-    }
-  }
-
   // 功能介绍区域
   .intro-section {
     margin-top: 40px;
@@ -2111,8 +2078,8 @@ onMounted(async () => {
           &--social {
             background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
             border-color: #60a5fa;
-            .chip-name { color: #1e40af; }
-            .chip-desc { color: #2563eb; }
+            .chip-name { color: #2c5282; }
+            .chip-desc { color: #2b6cb0; }
           }
           &--fund {
             background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
@@ -2158,8 +2125,8 @@ onMounted(async () => {
             .chip-desc { color: #fde68a; }
           }
           &--social {
-            background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
-            border-color: #3b82f6;
+            background: linear-gradient(135deg, #1e3a5f 0%, #2c5282 100%);
+            border-color: #2b6cb0;
             .chip-name { color: #dbeafe; }
             .chip-desc { color: #bfdbfe; }
           }
@@ -2283,8 +2250,8 @@ onMounted(async () => {
           &.node--manager {
             background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
             border: 1px solid #60a5fa;
-            .node-name { color: #1e40af; }
-            .node-desc { color: #2563eb; }
+            .node-name { color: #2c5282; }
+            .node-desc { color: #2b6cb0; }
           }
         }
 
@@ -2403,8 +2370,8 @@ onMounted(async () => {
               .node-desc { color: #ddd6fe; }
             }
             &.node--manager {
-              background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
-              border-color: #3b82f6;
+              background: linear-gradient(135deg, #1e3a5f 0%, #2c5282 100%);
+              border-color: #2b6cb0;
               .node-name { color: #dbeafe; }
               .node-desc { color: #bfdbfe; }
             }
@@ -2446,7 +2413,7 @@ onMounted(async () => {
 
       // 最终决策样式
       .final-decision {
-        background: linear-gradient(135deg, #1e3a8a 0%, #312e81 100%);
+        background: linear-gradient(135deg, #1e3a5f 0%, #312e81 100%);
         border-radius: 12px;
         padding: 20px;
         text-align: center;
@@ -2668,8 +2635,8 @@ onMounted(async () => {
               border: 1px solid #d1d5db;
 
               &:focus {
-                border-color: #3b82f6;
-                box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+                border-color: #2b6cb0;
+                box-shadow: 0 0 0 3px rgba(43, 108, 176, 0.1);
               }
             }
           }
@@ -2693,24 +2660,24 @@ onMounted(async () => {
               height: 56px !important;
               font-size: 18px !important;
               font-weight: 700 !important;
-              background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%) !important;
+              background: linear-gradient(135deg, #2b6cb0 0%, #22568d 100%) !important;
               border: none !important;
               border-radius: 16px !important;
               transition: all 0.3s ease !important;
-              box-shadow: 0 4px 15px rgba(59, 130, 246, 0.2) !important;
+              box-shadow: 0 4px 15px rgba(43, 108, 176, 0.2) !important;
               min-width: 280px !important;
               max-width: 280px !important;
 
               &:hover {
                 transform: translateY(-3px) !important;
-                box-shadow: 0 12px 30px rgba(59, 130, 246, 0.4) !important;
-                background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%) !important;
+                box-shadow: 0 12px 30px rgba(43, 108, 176, 0.4) !important;
+                background: linear-gradient(135deg, #2b6cb0 0%, #22568d 100%) !important;
               }
 
               &:disabled {
                 opacity: 0.6 !important;
                 transform: none !important;
-                box-shadow: 0 4px 15px rgba(59, 130, 246, 0.1) !important;
+                box-shadow: 0 4px 15px rgba(43, 108, 176, 0.1) !important;
               }
 
               .el-icon {
@@ -2738,14 +2705,14 @@ onMounted(async () => {
         height: 48px;
         font-size: 16px;
         font-weight: 600;
-        background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+        background: linear-gradient(135deg, #2b6cb0 0%, #22568d 100%);
         border: none;
         border-radius: 12px;
         transition: all 0.3s ease;
 
         &:hover {
           transform: translateY(-2px);
-          box-shadow: 0 8px 25px rgba(59, 130, 246, 0.3);
+          box-shadow: 0 8px 25px rgba(43, 108, 176, 0.3);
         }
 
         &:disabled {
@@ -2803,22 +2770,22 @@ onMounted(async () => {
   }
 
   &.step-current {
-    border-left-color: #3b82f6;
-    background: linear-gradient(90deg, rgba(59, 130, 246, 0.05) 0%, transparent 100%);
+    border-left-color: #2b6cb0;
+    background: linear-gradient(90deg, rgba(43, 108, 176, 0.05) 0%, transparent 100%);
 
     .step-icon {
-      background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+      background: linear-gradient(135deg, #2b6cb0 0%, #22568d 100%);
       color: white;
-      box-shadow: 0 2px 12px rgba(59, 130, 246, 0.4);
+      box-shadow: 0 2px 12px rgba(43, 108, 176, 0.4);
     }
 
     .step-title {
-      color: #3b82f6;
+      color: #2b6cb0;
       font-weight: 700;
     }
 
     .step-description {
-      color: #1d4ed8;
+      color: #22568d;
       font-weight: 500;
     }
   }
@@ -2919,25 +2886,25 @@ onMounted(async () => {
   height: 56px !important;
   font-size: 18px !important;
   font-weight: 700 !important;
-  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%) !important;
+  background: linear-gradient(135deg, #2b6cb0 0%, #22568d 100%) !important;
   border: none !important;
   border-radius: 16px !important;
   transition: all 0.3s ease !important;
-  box-shadow: 0 4px 15px rgba(59, 130, 246, 0.2) !important;
+  box-shadow: 0 4px 15px rgba(43, 108, 176, 0.2) !important;
   min-width: 280px !important;
   max-width: 280px !important;
 }
 
 .large-analysis-btn.el-button:hover {
   transform: translateY(-3px) !important;
-  box-shadow: 0 12px 30px rgba(59, 130, 246, 0.4) !important;
-  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%) !important;
+  box-shadow: 0 12px 30px rgba(43, 108, 176, 0.4) !important;
+  background: linear-gradient(135deg, #2b6cb0 0%, #22568d 100%) !important;
 }
 
 .large-analysis-btn.el-button:disabled {
   opacity: 0.6 !important;
   transform: none !important;
-  box-shadow: 0 4px 15px rgba(59, 130, 246, 0.1) !important;
+  box-shadow: 0 4px 15px rgba(43, 108, 176, 0.1) !important;
 }
 
 .large-analysis-btn.el-button .el-icon {
@@ -3028,7 +2995,7 @@ onMounted(async () => {
   }
 
   :deep(.el-progress-bar__inner) {
-    background: linear-gradient(90deg, #3b82f6 0%, #1d4ed8 100%);
+    background: linear-gradient(90deg, #2b6cb0 0%, #22568d 100%);
     border-radius: 8px;
     transition: width 0.6s ease;
   }
@@ -3042,7 +3009,7 @@ onMounted(async () => {
 /* 当前任务信息 */
 .current-task-info {
   background: var(--el-fill-color-light);
-  border: 1px solid #3b82f6;
+  border: 1px solid #2b6cb0;
   border-radius: 12px;
   padding: 16px;
   margin-bottom: 24px;
@@ -3059,7 +3026,7 @@ onMounted(async () => {
 }
 
 .task-icon {
-  color: #3b82f6;
+  color: #2b6cb0;
 }
 
 .task-description {
@@ -3457,14 +3424,14 @@ onMounted(async () => {
     background: var(--el-fill-color-light) !important;
     padding: 2px 6px !important;
     border-radius: 4px !important;
-    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace !important;
+    font-family: var(--app-font-mono) !important;
     font-size: 14px !important;
     color: #e11d48 !important;
   }
 
   /* 引用样式 */
   blockquote {
-    border-left: 4px solid #3b82f6 !important;
+    border-left: 4px solid #2b6cb0 !important;
     padding-left: 16px !important;
     margin: 16px 0 !important;
     background: var(--el-fill-color-light) !important;

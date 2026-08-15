@@ -186,7 +186,7 @@ const goLogin = () => {
 <style lang="scss" scoped>
 .register-page {
   min-height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #2c5282 0%, #1e3a5f 100%);
   display: flex;
   align-items: center;
   justify-content: center;

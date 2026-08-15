@@ -1,11 +1,15 @@
 <template>
   <div class="task-center">
-    <div class="page-header">
-      <h1 class="page-title">
-        <el-icon><List /></el-icon>
-        任务中心
-      </h1>
-      <p class="page-description">统一查看并管理分析任务与定时任务</p>
+    <div class="page-hero">
+      <div class="page-hero-main">
+        <div class="page-hero-icon">
+          <el-icon :size="26"><List /></el-icon>
+        </div>
+        <div class="page-hero-text">
+          <h2 class="page-hero-title">任务中心</h2>
+          <p class="page-hero-sub">统一查看并管理分析任务与定时任务</p>
+        </div>
+      </div>
     </div>
 
     <el-tabs v-model="topTab" class="top-level-tabs">
@@ -91,12 +95,12 @@
         <el-table-column prop="task_id" label="任务ID" width="220" />
         <el-table-column prop="stock_code" label="股票代码" width="120">
           <template #default="{ row }">
-            <router-link :to="`/stocks/${row.stock_code}`" target="_blank">{{ row.stock_code }}</router-link>
+            <router-link :to="`/stocks/${row.stock_code}`" class="stock-code">{{ row.stock_code }}</router-link>
           </template>
         </el-table-column>
         <el-table-column prop="stock_name" label="股票名称" width="150">
           <template #default="{ row }">
-            <router-link :to="`/stocks/${row.stock_code}`" target="_blank" class="stock-name">{{ row.stock_name }}</router-link>
+            <router-link :to="`/stocks/${row.stock_code}`" class="stock-name">{{ row.stock_name }}</router-link>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="110">
@@ -577,9 +581,6 @@ const formatTime = (t:string) => t ? formatDateTime(t) : '-'
 
 <style scoped lang="scss">
 .task-center {
-  .page-header { margin-bottom: 24px; }
-  .page-title { display:flex; align-items:center; gap:8px; font-size:24px; font-weight:600; margin:0 0 8px 0; }
-  .page-description { color: var(--el-text-color-regular); margin:0; }
   .top-level-tabs { margin-bottom: 16px; }
   .tabs-card { margin-bottom: 16px; }
   .list-header { display:flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap:8px; }

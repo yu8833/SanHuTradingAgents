@@ -96,12 +96,12 @@
       <el-table :data="displayRows" stripe border size="default" style="width: 100%" class="hit-table">
         <el-table-column prop="code" label="代码" min-width="110">
           <template #default="{ row }">
-            <router-link class="link-code" :to="`/stocks/${row.code}`" target="_blank">{{ row.code }}</router-link>
+            <router-link class="stock-code" :to="`/stocks/${row.code}`">{{ row.code }}</router-link>
           </template>
         </el-table-column>
         <el-table-column prop="name" label="名称" min-width="130">
           <template #default="{ row }">
-            <router-link class="link-name" :to="`/stocks/${row.code}`" target="_blank">{{ row.name || row.code }}</router-link>
+            <router-link class="stock-name" :to="`/stocks/${row.code}`">{{ row.name || row.code }}</router-link>
           </template>
         </el-table-column>
         <el-table-column prop="close" label="收盘价" min-width="110" align="right">
@@ -158,8 +158,8 @@ defineOptions({ name: 'StrategyScreener' })
 
 // 策略卡片配色画板（通过 --sc 变量注入，保证深浅色主题下都清晰）
 const palette = [
-  '#1890ff', '#722ed1', '#13c2c2', '#fa8c16', '#f5222d', '#52c41a',
-  '#eb2f96', '#2f54eb', '#a0d911', '#fadb14', '#fa541c', '#36cfc9',
+  '#22568d', '#722ed1', '#13c2c2', '#fa8c16', '#f5222d', '#52c41a',
+  '#eb2f96', '#2b6cb0', '#a0d911', '#fadb14', '#fa541c', '#36cfc9',
 ]
 
 // 策略卡片图标画板（轮流使用，避免千篇一律）
@@ -173,7 +173,7 @@ const scoreColor = (score: number) => {
   if (s >= 60) return '#fa8c16'
   if (s >= 40) return '#faad14'
   if (s >= 20) return '#13c2c2'
-  return '#1890ff'
+  return '#22568d'
 }
 
 const strategies = ref<StrategyMeta[]>([])
@@ -602,19 +602,6 @@ onMounted(() => {
       :deep(.el-table__row) {
         transition: background 0.2s ease;
       }
-    }
-
-    .link-code {
-      color: var(--el-color-primary);
-      font-weight: 600;
-      text-decoration: none;
-      &:hover { text-decoration: underline; }
-    }
-
-    .link-name {
-      color: var(--el-text-color-primary);
-      text-decoration: none;
-      &:hover { color: var(--el-color-primary); }
     }
 
     .pct-tag {

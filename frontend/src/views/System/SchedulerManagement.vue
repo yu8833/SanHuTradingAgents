@@ -1173,7 +1173,7 @@ onMounted(() => {
     padding: 8px;
     border-radius: 4px;
     font-size: 12px;
-    font-family: 'Courier New', monospace;
+    font-family: var(--app-font-mono);
     overflow-x: auto;
   }
 

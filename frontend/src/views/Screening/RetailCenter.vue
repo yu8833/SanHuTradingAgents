@@ -1,14 +1,18 @@
 <template>
   <div class="retail-center">
     <!-- 页面标题 -->
-    <div class="page-header">
-      <h1 class="page-title">
-        <el-icon><Aim /></el-icon>
-        散户策略中心
-      </h1>
-      <p class="page-description">
-        仓位管理 · 持仓监控 · 市场环境 · 策略说明 —— 散户交易四大核心能力一站式平台
-      </p>
+    <div class="page-hero">
+      <div class="page-hero-main">
+        <div class="page-hero-icon">
+          <el-icon :size="26"><Aim /></el-icon>
+        </div>
+        <div class="page-hero-text">
+          <h2 class="page-hero-title">散户策略中心</h2>
+          <p class="page-hero-sub">
+            仓位管理 · 持仓监控 · 市场环境 · 策略说明 —— 散户交易四大核心能力一站式平台
+          </p>
+        </div>
+      </div>
     </div>
 
     <!-- 标签页 -->
@@ -634,7 +638,7 @@ const strategyQuickEntries = [
     description: '可转债下修博弈，低风险套利策略',
     marketTag: '全市场',
     tagType: 'primary',
-    borderColor: '#409eff',
+    borderColor: '#2b6cb0',
     route: '/screening/convertible-arbitrage'
   },
   {
@@ -885,10 +889,7 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.retail-center { padding: 16px; }
-.page-header { margin-bottom: 16px; }
-.page-title { font-size: 22px; font-weight: 700; margin: 0 0 6px 0; display: flex; align-items: center; gap: 8px; }
-.page-description { color: #909399; font-size: 13px; margin: 0; }
+.retail-center { padding: 24px; }
 .retail-tabs { margin-top: 8px; }
 .card-header { display: flex; align-items: center; gap: 8px; }
 .panel-title { font-weight: 600; font-size: 15px; }
@@ -946,7 +947,7 @@ onMounted(() => {
   border-radius: 6px;
   font-size: 13px;
   line-height: 1.6;
-  color: #409eff;
+  color: #2b6cb0;
   display: flex;
   align-items: flex-start;
   gap: 8px;

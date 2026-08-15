@@ -19,6 +19,7 @@
 
 import asyncio
 import logging
+import threading
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -47,6 +48,26 @@ from app.utils.technical_indicators import (
 )
 
 logger = logging.getLogger(__name__)
+
+# 进程内元数据缓存：股票基础信息列表与大盘趋势在盘中基本不变。
+# 候选池概览/行业扫描会并发触发多次 scan，避免每次重复跑全市场聚合与指数加载。
+_META_CACHE_TTL = 600  # 秒
+_meta_lock = threading.Lock()
+_stock_codes_cache: dict = {"ts": 0.0, "data": []}
+_market_trend_cache: dict = {"ts": 0.0, "trend": "neutral"}
+
+
+def _meta_cache_get(cache: dict) -> Any:
+    with _meta_lock:
+        if cache["ts"] and (time.monotonic() - cache["ts"]) < _META_CACHE_TTL:
+            return cache["data"]
+    return None
+
+
+def _meta_cache_put(cache: dict, data: Any) -> None:
+    with _meta_lock:
+        cache["ts"] = time.monotonic()
+        cache["data"] = data
 
 
 def _validate_score_dimensions(dimensions: dict[str, int], actual_score: int,
@@ -125,6 +146,10 @@ class ThreeBuysThreeSellsService:
         db = await self._get_db()
         collection = db["stock_basic_info"]
 
+        cached = _meta_cache_get(_stock_codes_cache)
+        if cached is not None:
+            return cached
+
         # 使用聚合管道按 code 分组，挑选每个 code 最优的一条记录
         pipeline = [
             {
@@ -192,6 +217,7 @@ class ThreeBuysThreeSellsService:
                 "industry": industry,
                 "market_cap": market_cap
             })
+        _meta_cache_put(_stock_codes_cache, result)
         return result
 
     async def _batch_get_quotes(
@@ -286,6 +312,29 @@ class ThreeBuysThreeSellsService:
             seen.add(td)
             result.append(k)
         return result
+
+    async def _get_market_trend(self, start_str: str, end_str: str) -> str:
+        """获取当前大盘趋势（缓存 10 分钟）。
+
+        大盘趋势由上证指数 150 日 K 线计算，盘中基本不变，多次扫描共享结果，
+        避免候选池概览并发触发扫描时重复加载指数并重复计算。
+        """
+        cached = _meta_cache_get(_market_trend_cache)
+        if cached is not None:
+            return cached
+        trend = "neutral"
+        try:
+            idx_quotes = await self._get_market_index_klines(start_str, end_str)
+            if len(idx_quotes) > 60:
+                idx_ind = self._precompute_indicators(idx_quotes, "000001", "上证指数", "", 0)
+                if idx_ind:
+                    trend = calc_market_trend(
+                        idx_ind["closes"], idx_ind["ma60"], idx_ind["ma20"]
+                    )
+        except Exception as e:
+            logger.warning(f"📊 大盘趋势计算失败: {e}")
+        _meta_cache_put(_market_trend_cache, trend)
+        return trend
 
     def _precompute_indicators(
         self,
@@ -1698,15 +1747,7 @@ class ThreeBuysThreeSellsService:
                 logger.warning(f"📊 ΔG 查询失败: {e}")
 
         # 大盘趋势（上证指数，须用带交易所后缀的指数代码，避免命中平安银行 000001.SZ）
-        market_trend = "neutral"
-        idx_quotes = await self._get_market_index_klines(start_str, end_str)
-        if len(idx_quotes) > 60:
-            idx_ind = self._precompute_indicators(idx_quotes, "000001", "上证指数", "", 0)
-            if idx_ind:
-                idx_ind["n"] - 1
-                market_trend = calc_market_trend(
-                    idx_ind["closes"], idx_ind["ma60"], idx_ind["ma20"]
-                )
+        market_trend = await self._get_market_trend(start_str, end_str)
 
         results = []
         semaphore = asyncio.Semaphore(200)
@@ -1987,17 +2028,7 @@ class ThreeBuysThreeSellsService:
             return {"success": False, "message": f"{code} 数据不足，无法分析"}
 
         # 大盘趋势（上证指数）
-        market_trend = "neutral"
-        try:
-            idx_quotes = await self._get_market_index_klines(start_str, end_str)
-            if len(idx_quotes) > 60:
-                idx_ind = self._precompute_indicators(idx_quotes, "000001", "上证指数", "", 0)
-                if idx_ind:
-                    market_trend = calc_market_trend(
-                        idx_ind["closes"], idx_ind["ma60"], idx_ind["ma20"]
-                    )
-        except Exception as e:
-            logger.warning(f"📊 单股大盘趋势计算失败 {code}: {e}")
+        market_trend = await self._get_market_trend(start_str, end_str)
 
         # 检测所有三买三卖信号
         signals: list[dict[str, Any]] = []

@@ -22,13 +22,14 @@ html.dark {
   --el-fill-color-lighter: #32324a;
   --el-fill-color-extra-light: #3a3a55;
   --el-fill-color-dark: #1a1a2e;
-  --el-color-primary: #6366f1;
-  --el-color-primary-light-3: #818cf8;
-  --el-color-primary-light-5: #a5b4fc;
-  --el-color-primary-light-7: #c7d2fe;
-  --el-color-primary-light-8: #ddd6fe;
-  --el-color-primary-light-9: #ede9fe;
-  --el-color-primary-dark-2: #4f46e5;
+  // 暗色主题主色与亮色主题同属深蓝系（更亮的蓝保证深底可读性）
+  --el-color-primary: #60a5fa;
+  --el-color-primary-light-3: #90c0fc;
+  --el-color-primary-light-5: #b0d2fd;
+  --el-color-primary-light-7: #cfe4fe;
+  --el-color-primary-light-8: #dfedfe;
+  --el-color-primary-light-9: #eff6ff;
+  --el-color-primary-dark-2: #4d84c8;
 
   // 优化标题文字
   h1, h2, h3, h4, h5, h6 {
@@ -622,7 +623,7 @@ html.dark {
         .el-button {
           &.el-button--primary {
             background: white !important;
-            color: #667eea !important;
+            color: #2c5282 !important;
             border: none !important;
 
             &:hover {
@@ -630,7 +631,7 @@ html.dark {
             }
 
             .el-icon {
-              color: #667eea !important;
+              color: #2c5282 !important;
             }
           }
 

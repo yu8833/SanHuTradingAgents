@@ -13,6 +13,9 @@
       </div>
     </div>
 
+    <!-- 监控中心（简要触发记录，查看详情跳转监控中心） -->
+    <MonitorSummary style="margin-bottom: 24px;" />
+
     <!-- 顶部核心监控：数据健康 + 模拟账户 + 自选股行情 -->
     <el-row :gutter="24" class="monitor-top">
       <el-col :xs="24" :md="8">
@@ -111,9 +114,6 @@
       </el-col>
     </el-row>
 
-    <!-- 监控中心（简要触发记录，查看详情跳转监控中心） -->
-    <MonitorSummary style="margin-top: 24px;" />
-
     <!-- 全量同步对话框 -->
     <el-dialog
       v-model="syncConfirmVisible"
@@ -129,10 +129,10 @@
           show-icon
         />
         <div class="confirm-tip" style="margin-top: 16px;">
-          <div>📋 同步顺序：股票基础信息 → 历史K线 → 财务数据 → 新闻数据</div>
-          <div>⏱️ 预估耗时：10 ~ 30 分钟</div>
-          <div>🔄 同步完成后会自动刷新数据新鲜度</div>
-          <div>⚠️ 历史K线同步耗时较长，请耐心等待</div>
+          <div class="tip-line"><el-icon><List /></el-icon><span>同步顺序：股票基础信息 → 历史K线 → 财务数据 → 新闻数据</span></div>
+          <div class="tip-line"><el-icon><Timer /></el-icon><span>预估耗时：10 ~ 30 分钟</span></div>
+          <div class="tip-line"><el-icon><Refresh /></el-icon><span>同步完成后会自动刷新数据新鲜度</span></div>
+          <div class="tip-line"><el-icon><Warning /></el-icon><span>历史K线同步耗时较长，请耐心等待</span></div>
         </div>
       </div>
       <div v-else class="progress-body">
@@ -149,10 +149,10 @@
         <div class="sync-phases">
           <div v-for="(p, i) in syncPhases" :key="i" :class="['sync-phase-item', syncPhase === p.id ? 'active' : '', syncPhase > p.id ? 'done' : '', skippedPhases.has(p.id) ? 'skipped' : '']">
             <span class="sync-phase-icon">
-              <span v-if="skippedPhases.has(p.id)">⏭️</span>
-              <span v-else-if="syncPhase > p.id">✅</span>
-              <span v-else-if="syncPhase === p.id">⏳</span>
-              <span v-else>⬜</span>
+              <el-icon v-if="skippedPhases.has(p.id)"><DArrowRight /></el-icon>
+              <el-icon v-else-if="syncPhase > p.id" class="phase-done"><CircleCheckFilled /></el-icon>
+              <el-icon v-else-if="syncPhase === p.id" class="phase-running"><Loading /></el-icon>
+              <el-icon v-else><Remove /></el-icon>
             </span>
             <span class="sync-phase-name">{{ p.label }}</span>
           </div>
@@ -184,9 +184,16 @@ import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   ArrowRight,
+  CircleCheckFilled,
+  DArrowRight,
   InfoFilled,
+  List,
   Loading,
   Odometer,
+  Refresh,
+  Remove,
+  Timer,
+  Warning,
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import DataHealthCard from '@/components/Dashboard/DataHealthCard.vue'
@@ -402,7 +409,7 @@ const doSync = async () => {
     if (firstPhase === 0) {
       // 所有数据都最新
       syncProgress.value = 100
-      syncStatusMessage.value = '所有数据均为最新，无需同步 ✅'
+      syncStatusMessage.value = '所有数据均为最新，无需同步'
       syncFinished.value = true
       ElMessage.success('所有数据均为最新')
       syncStarting.value = false
@@ -492,7 +499,7 @@ const doSync = async () => {
             if (!advanced) {
               stopSyncPoll()
               syncProgress.value = 100
-              syncStatusMessage.value = '数据同步完成 ✅'
+              syncStatusMessage.value = '数据同步完成'
               syncFinished.value = true
               ElMessage.success('数据同步完成')
               await loadFreshness(true)
@@ -532,7 +539,7 @@ const doSync = async () => {
               if (!advanced) {
                 stopSyncPoll()
                 syncProgress.value = 100
-                syncStatusMessage.value = '全部数据同步完成 ✅'
+                syncStatusMessage.value = '全部数据同步完成'
                 syncFinished.value = true
                 ElMessage.success('全部数据同步完成')
                 await loadFreshness(true)
@@ -869,6 +876,17 @@ onMounted(async () => {
       color: var(--el-text-color-regular);
       font-size: 13px;
       line-height: 1.6;
+
+      .tip-line {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+
+        .el-icon {
+          color: var(--el-color-primary);
+          flex-shrink: 0;
+        }
+      }
     }
   }
 
@@ -919,6 +937,17 @@ onMounted(async () => {
 
         .sync-phase-icon {
           font-size: 14px;
+          display: inline-flex;
+          align-items: center;
+
+          .phase-done {
+            color: var(--el-color-success);
+          }
+
+          .phase-running {
+            animation: spin 1s linear infinite;
+            color: var(--el-color-primary);
+          }
         }
       }
     }

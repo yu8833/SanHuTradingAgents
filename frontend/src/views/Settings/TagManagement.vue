@@ -66,7 +66,7 @@ const tags = ref<TagItem[]>([])
 const loading = ref(false)
 const dialogVisible = ref(false)
 const editingId = ref('')
-const form = ref({ name: '', color: '#409eff', sort_order: 0 })
+const form = ref({ name: '', color: '#2b6cb0', sort_order: 0 })
 
 async function loadData() {
   loading.value = true
@@ -82,7 +82,7 @@ async function loadData() {
 
 function openCreate() {
   editingId.value = ''
-  form.value = { name: '', color: '#409eff', sort_order: 0 }
+  form.value = { name: '', color: '#2b6cb0', sort_order: 0 }
   dialogVisible.value = true
 }
 

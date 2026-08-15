@@ -79,7 +79,16 @@ export default defineConfig(({ mode }) => {
       output: {
         chunkFileNames: 'js/[name]-[hash].js',
         entryFileNames: 'js/[name]-[hash].js',
-        assetFileNames: '[ext]/[name]-[hash].[ext]'
+        assetFileNames: '[ext]/[name]-[hash].[ext]',
+        // 性能优化：将体积庞大的第三方库拆分为独立 chunk，便于浏览器长期缓存，
+        // 避免 echarts / element-plus / vue 全家桶全部打进主入口导致首屏加载过重。
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return
+          if (id.includes('echarts') || id.includes('zrender')) return 'echarts'
+          if (id.includes('element-plus') || id.includes('@element-plus')) return 'element-plus'
+          if (id.includes('vue') || id.includes('pinia') || id.includes('vue-router')) return 'vue-vendor'
+          return 'vendor'
+        }
       }
     }
   },

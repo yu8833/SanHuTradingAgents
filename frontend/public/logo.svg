@@ -1,5 +1,31 @@
 <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect width="64" height="64" rx="12" fill="#409EFF"/>
-  <path d="M16 24L32 16L48 24V40L32 48L16 40V24Z" fill="white"/>
-  <path d="M24 28L32 24L40 28V36L32 40L24 36V28Z" fill="#409EFF"/>
+  <defs>
+    <linearGradient id="lg-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1E3A5F"/>
+      <stop offset="0.55" stop-color="#2C5282"/>
+      <stop offset="1" stop-color="#2B6CB0"/>
+    </linearGradient>
+    <linearGradient id="lg-w" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#C3D8EF"/>
+    </linearGradient>
+  </defs>
+  <!-- 主题蓝渐变底 + 顶部高光描边 -->
+  <rect width="64" height="64" rx="14" fill="url(#lg-bg)"/>
+  <rect x="1" y="1" width="62" height="62" rx="13" fill="none" stroke="#FFFFFF" stroke-opacity="0.14" stroke-width="1.5"/>
+
+  <!-- 上升趋势线：掠过三根阳线顶部，直抵红色上涨阳线 -->
+  <path d="M13 43 C24 38 30 22 45 14" stroke="#FFFFFF" stroke-width="2.4" fill="none" stroke-linecap="round" opacity="0.9"/>
+
+  <!-- 阳线 1（低位·白） -->
+  <path d="M19 40 V50" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" opacity="0.7"/>
+  <rect x="14.5" y="42" width="9" height="8" rx="1.6" fill="url(#lg-w)" opacity="0.85"/>
+
+  <!-- 阳线 2（中位·白） -->
+  <path d="M32 29 V42" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" opacity="0.85"/>
+  <rect x="27.5" y="31" width="9" height="11" rx="1.6" fill="url(#lg-w)"/>
+
+  <!-- 阳线 3（高位·A股上涨红 #f56c6c） -->
+  <path d="M45 15 V32" stroke="#F56C6C" stroke-width="2.2" stroke-linecap="round"/>
+  <rect x="40.5" y="19" width="9" height="13" rx="1.6" fill="#F56C6C"/>
 </svg>

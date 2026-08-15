@@ -1,14 +1,18 @@
 <template>
   <div class="portfolio-view">
     <!-- 页面标题 -->
-    <div class="page-header">
-      <h1 class="page-title">
-        <el-icon><Wallet /></el-icon>
-        持仓追踪
-      </h1>
-      <p class="page-description">
-        统一管理所有策略持仓，支持止损止盈设置、平仓记录、策略表现统计
-      </p>
+    <div class="page-hero">
+      <div class="page-hero-main">
+        <div class="page-hero-icon">
+          <el-icon :size="26"><Wallet /></el-icon>
+        </div>
+        <div class="page-hero-text">
+          <h2 class="page-hero-title">持仓追踪</h2>
+          <p class="page-hero-sub">
+            统一管理所有策略持仓，支持止损止盈设置、平仓记录、策略表现统计
+          </p>
+        </div>
+      </div>
     </div>
 
     <!-- 汇总卡片 -->
@@ -737,13 +741,7 @@ const getExitReasonTagType = (r?: string | null) => {
 </script>
 
 <style lang="scss" scoped>
-.portfolio-view { padding: 16px; }
-.page-header { margin-bottom: 16px; }
-.page-title {
-  font-size: 24px; font-weight: 600; margin: 0 0 8px 0;
-  display: flex; align-items: center; gap: 10px;
-}
-.page-description { margin: 0; color: var(--el-text-color-secondary); font-size: 14px; }
+.portfolio-view { padding: 24px; }
 .stat-card {
   .stat-label { color: var(--el-text-color-secondary); font-size: 13px; margin-bottom: 8px; }
   .stat-value { font-size: 22px; font-weight: 600; }

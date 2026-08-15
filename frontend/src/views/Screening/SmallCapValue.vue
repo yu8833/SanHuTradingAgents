@@ -1,14 +1,18 @@
 <template>
   <div class="small-cap-value-page">
     <!-- 页面标题 -->
-    <div class="page-header">
-      <h1 class="page-title">
-        <el-icon><TrendCharts /></el-icon>
-        小盘价值
-      </h1>
-      <p class="page-description">
-        瞄准市值10-30亿的优质小公司，机构因容量限制参与少，存在价值发现机会
-      </p>
+    <div class="page-hero">
+      <div class="page-hero-main">
+        <div class="page-hero-icon">
+          <el-icon :size="26"><TrendCharts /></el-icon>
+        </div>
+        <div class="page-hero-text">
+          <h2 class="page-hero-title">小盘价值</h2>
+          <p class="page-hero-sub">
+            瞄准市值10-30亿的优质小公司，机构因容量限制参与少，存在价值发现机会
+          </p>
+        </div>
+      </div>
     </div>
 
     <!-- 策略原理卡片 -->
@@ -591,17 +595,17 @@ const equityCurveOption = computed(() => {
       type: 'line',
       data: values,
       smooth: true,
-      lineStyle: { color: '#409eff', width: 2 },
+      lineStyle: { color: '#2b6cb0', width: 2 },
       areaStyle: {
         color: {
           type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
           colorStops: [
-            { offset: 0, color: 'rgba(64, 158, 255, 0.3)' },
-            { offset: 1, color: 'rgba(64, 158, 255, 0.02)' }
+            { offset: 0, color: 'rgba(43, 108, 176, 0.3)' },
+            { offset: 1, color: 'rgba(43, 108, 176, 0.02)' }
           ]
         }
       },
-      itemStyle: { color: '#409eff' },
+      itemStyle: { color: '#2b6cb0' },
       symbol: 'none'
     }]
   }
@@ -754,7 +758,7 @@ function getScoreRadarOption(row: any) {
       axisName: { fontSize: 11, color: '#606266' },
       splitArea: {
         areaStyle: {
-          color: ['rgba(64, 158, 255, 0.02)', 'rgba(64, 158, 255, 0.05)', 'rgba(64, 158, 255, 0.08)', 'rgba(64, 158, 255, 0.12)']
+          color: ['rgba(43, 108, 176, 0.02)', 'rgba(43, 108, 176, 0.05)', 'rgba(43, 108, 176, 0.08)', 'rgba(43, 108, 176, 0.12)']
         }
       }
     },
@@ -762,9 +766,9 @@ function getScoreRadarOption(row: any) {
       type: 'radar',
       data: [{
         value: dims.map(d => d.value),
-        areaStyle: { color: 'rgba(64, 158, 255, 0.2)' },
-        lineStyle: { color: '#409eff', width: 2 },
-        itemStyle: { color: '#409eff' }
+        areaStyle: { color: 'rgba(43, 108, 176, 0.2)' },
+        lineStyle: { color: '#2b6cb0', width: 2 },
+        itemStyle: { color: '#2b6cb0' }
       }]
     }]
   }
@@ -792,17 +796,7 @@ onUnmounted(() => { window.removeEventListener('resize', handleResize) })
 </script>
 
 <style lang="scss" scoped>
-.small-cap-value-page { padding: 16px; }
-
-.page-header {
-  margin-bottom: 20px;
-  .page-title {
-    font-size: 24px; font-weight: 600; margin: 0 0 8px 0;
-    display: flex; align-items: center; gap: 10px;
-    color: var(--el-text-color-primary);
-  }
-  .page-description { margin: 0; color: var(--el-text-color-secondary); font-size: 14px; }
-}
+.small-cap-value-page { padding: 24px; }
 
 .panel-title { font-size: 15px; font-weight: 600; color: var(--el-text-color-primary); }
 
@@ -839,14 +833,9 @@ onUnmounted(() => { window.removeEventListener('resize', handleResize) })
 
 .result-panel {
   .empty-state { padding: 40px 0; }
-  .stock-code, .stock-name {
-    cursor: pointer; color: var(--el-color-primary);
-    text-decoration: none; font-size: 13px;
-    &:hover { text-decoration: underline; }
-  }
-  .price { font-family: 'Monaco', 'Consolas', monospace; font-weight: 500; }
+  .price { font-family: var(--app-font-mono); font-weight: 500; }
   .pct {
-    font-family: 'Monaco', 'Consolas', monospace; font-weight: 500;
+    font-family: var(--app-font-mono); font-weight: 500;
     &.up { color: var(--el-color-danger); }
     &.down { color: var(--el-color-success); }
   }
@@ -864,7 +853,7 @@ onUnmounted(() => { window.removeEventListener('resize', handleResize) })
   .metric-label { font-size: 13px; color: var(--el-text-color-secondary); margin-bottom: 10px; }
   .metric-value {
     font-size: 24px; font-weight: 700;
-    font-family: 'Monaco', 'Consolas', monospace;
+    font-family: var(--app-font-mono);
     color: var(--el-text-color-primary); line-height: 1.2;
     &.up { color: var(--el-color-danger); }
     &.down { color: var(--el-color-success); }

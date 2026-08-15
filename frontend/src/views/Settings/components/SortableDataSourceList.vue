@@ -306,7 +306,7 @@ onUnmounted(() => {
 
   .datasource-container {
     &.drag-active {
-      background: #f0f9ff;
+      background: #eff6ff;
     }
 
     .datasource-item {
@@ -331,7 +331,7 @@ onUnmounted(() => {
         padding: 4px;
 
         &:hover {
-          color: #409eff;
+          color: #2b6cb0;
         }
       }
 
@@ -391,7 +391,7 @@ onUnmounted(() => {
 }
 
 :global(.sortable-chosen) {
-  background: #f0f9ff;
+  background: #eff6ff;
 }
 
 :global(.sortable-drag) {

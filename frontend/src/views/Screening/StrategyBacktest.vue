@@ -1,12 +1,16 @@
 <template>
   <div class="strategy-backtest">
-    <div class="page-header">
-      <h1 class="page-title">
-        <el-icon><Histogram /></el-icon>
-        回测工作台
-      </h1>
-      <p class="page-description">{{ activeMode.hint }}</p>
-      <div class="header-actions">
+    <div class="page-hero">
+      <div class="page-hero-main">
+        <div class="page-hero-icon">
+          <el-icon :size="26"><Histogram /></el-icon>
+        </div>
+        <div class="page-hero-text">
+          <h2 class="page-hero-title">回测工作台</h2>
+          <p class="page-hero-sub">{{ activeMode.hint }}</p>
+        </div>
+      </div>
+      <div class="page-hero-meta">
         <el-radio-group v-model="activeTab" size="small">
           <el-radio-button v-for="m in MODES" :key="m.key" :value="m.key">
             {{ m.title }}
@@ -650,7 +654,7 @@ async function removeFromCompare(strategyId: string) {
   compareResults.value = compareResults.value.filter(item => item.strategy_id !== strategyId)
 }
 
-const RETURN_COLORS = ['#409eff', '#fa541c', '#52c41a', '#faad14', '#722ed1', '#eb2f96', '#13c2c2', '#f5222d']
+const RETURN_COLORS = ['#2b6cb0', '#fa541c', '#52c41a', '#faad14', '#722ed1', '#eb2f96', '#13c2c2', '#f5222d']
 
 const returnBarOption = computed(() => ({
   tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
@@ -989,7 +993,7 @@ const equityOption = computed(() => {
     showSymbol: false,
     data: curve.map(p => [p.date, initial > 0 ? p.value / initial : p.value]),
     lineStyle: { width: 2 },
-    itemStyle: { color: '#409eff' },
+    itemStyle: { color: '#2b6cb0' },
   }]
   const bench = strategyResult.value?.benchmark_curve ?? []
   if (bench.length) {
@@ -1027,7 +1031,7 @@ const icOption = computed(() => {
       showSymbol: false,
       data: series.map(p => p.value),
       lineStyle: { width: 1.5 },
-      itemStyle: { color: '#409eff' },
+      itemStyle: { color: '#2b6cb0' },
     }],
   }
 })
@@ -1085,30 +1089,6 @@ onBeforeUnmount(() => {
   padding: 20px;
   max-width: 1600px;
   margin: 0 auto;
-
-  .page-header {
-    margin-bottom: 24px;
-    padding-bottom: 16px;
-    border-bottom: 2px solid var(--el-border-color-lighter);
-
-    .page-title {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      font-size: 28px;
-      font-weight: 700;
-      color: var(--el-text-color-primary);
-      margin: 0 0 8px 0;
-
-      .el-icon { color: var(--el-color-primary); font-size: 28px; }
-    }
-
-    .page-description {
-      color: var(--el-text-color-regular);
-      margin: 0 0 16px 0;
-      font-size: 14px;
-    }
-  }
 
   .form-panel {
     margin-bottom: 20px;

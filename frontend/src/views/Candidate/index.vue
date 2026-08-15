@@ -64,23 +64,23 @@
               <span class="muted etf-code">{{ row.etf_code }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="资金流分" width="90" align="center" sortable :sort-method="(a, b) => (a.fund_flow_score||0) - (b.fund_flow_score||0)">
+          <el-table-column label="资金流分" prop="fund_flow_score" width="90" align="center" sortable :sort-method="(a, b) => (a.fund_flow_score||0) - (b.fund_flow_score||0)">
             <template #default="{ row }">
               <span class="score-num" :class="scoreTone(row.fund_flow_score)">{{ row.fund_flow_score }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="主力净流入" min-width="130" align="right" sortable :sort-method="(a, b) => (a.fund_net_inflow||0) - (b.fund_net_inflow||0)">
+          <el-table-column label="主力净流入" prop="fund_net_inflow" min-width="130" align="right" sortable :sort-method="(a, b) => (a.fund_net_inflow||0) - (b.fund_net_inflow||0)">
             <template #default="{ row }">
               <span :class="(row.fund_net_inflow || 0) >= 0 ? 'up' : 'down'">{{ fmtYi(row.fund_net_inflow) }}亿</span>
               <span class="muted">({{ fmtSign(row.fund_net_inflow_pct) }}%)</span>
             </template>
           </el-table-column>
-          <el-table-column label="涨跌幅" width="90" align="right" sortable>
+          <el-table-column label="涨跌幅" prop="pct_chg" width="90" align="right" sortable>
             <template #default="{ row }">
               <span :class="(row.pct_chg || 0) >= 0 ? 'up' : 'down'">{{ fmtSign(row.pct_chg) }}%</span>
             </template>
           </el-table-column>
-          <el-table-column label="行业净流入(亿)" min-width="120" align="right" sortable>
+          <el-table-column label="行业净流入(亿)" prop="sector_net_inflow" min-width="120" align="right" sortable>
             <template #default="{ row }">
               <span :class="(row.sector_net_inflow || 0) >= 0 ? 'up' : 'down'">{{ fmtNum(row.sector_net_inflow) }}</span>
             </template>
@@ -131,10 +131,14 @@
           empty-text="请选择行业后计算候选个股"
           class="candidate-table"
         >
-          <el-table-column prop="code" label="代码" width="90" />
+          <el-table-column prop="code" label="代码" width="90">
+            <template #default="{ row }">
+              <router-link :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
+            </template>
+          </el-table-column>
           <el-table-column prop="name" label="名称" min-width="100">
             <template #default="{ row }">
-              <router-link :to="`/stocks/${row.code}`" class="stock-link">{{ row.name }}</router-link>
+              <router-link :to="`/stocks/${row.code}`" class="stock-name">{{ row.name }}</router-link>
             </template>
           </el-table-column>
           <el-table-column label="行业" min-width="90">
@@ -142,7 +146,7 @@
               <span class="muted">{{ row.industry || '-' }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="涨跌幅" width="90" align="right">
+          <el-table-column label="涨跌幅" prop="pct_chg" width="90" align="right" sortable>
             <template #default="{ row }">
               <span :class="(row.pct_chg || 0) >= 0 ? 'up' : 'down'">{{ fmtPct(row.pct_chg) }}</span>
             </template>
@@ -166,7 +170,7 @@
           <el-table-column label="预警" min-width="150">
             <template #default="{ row }">
               <template v-if="row.aux_warnings && row.aux_warnings.length">
-                <el-tooltip :content="row.aux_warnings.join('；')" placement="top" :disabled="row.aux_warnings.length <= 2">
+                <el-tooltip :content="row.aux_warnings.join('；')" placement="top">
                   <div class="warn-cell">
                     <el-tag v-for="w in row.aux_warnings.slice(0, 2)" :key="w" size="small" type="warning" effect="light" class="warn-tag">
                       {{ w }}
@@ -180,21 +184,21 @@
               <span v-else class="muted">-</span>
             </template>
           </el-table-column>
-          <el-table-column label="20日动量" width="100" align="right">
+          <el-table-column label="20日动量" prop="momentum_20d" width="100" align="right" sortable>
             <template #default="{ row }">
               <span :class="(row.momentum_20d || 0) >= 0 ? 'up' : 'down'">{{ fmtPct(row.momentum_20d) }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="ROE" width="80" align="right">
+          <el-table-column label="ROE" prop="roe" width="80" align="right" sortable>
             <template #default="{ row }">{{ fmtNum(row.roe) }}%</template>
           </el-table-column>
-          <el-table-column label="营收YOY" width="90" align="right">
-            <template #default="{ row }">{{ fmtPct(row.or_yoy) }}</template>
+          <el-table-column label="营收YOY" prop="or_yoy" width="90" align="right" sortable>
+            <template #default="{ row }">{{ fmtPct(row.or_yoy, 0) }}</template>
           </el-table-column>
-          <el-table-column label="PE(TTM)" width="90" align="right">
+          <el-table-column label="PE(TTM)" prop="pe_ttm" width="90" align="right" sortable>
             <template #default="{ row }">{{ fmtNum(row.pe_ttm) }}</template>
           </el-table-column>
-          <el-table-column label="市值(亿)" width="100" align="right">
+          <el-table-column label="市值(亿)" prop="total_mv" width="100" align="right" sortable>
             <template #default="{ row }">{{ fmtNum(row.total_mv) }}</template>
           </el-table-column>
           <el-table-column label="操作" width="110" fixed="right" align="center">
@@ -270,7 +274,7 @@ function scoreColor(v: number | null | undefined) {
   const s = Number(v || 0)
   if (s >= 70) return '#f56c6c'
   if (s >= 50) return '#e6a23c'
-  return '#409eff'
+  return '#2b6cb0'
 }
 
 function scoreTone(v: number | null | undefined) {
@@ -297,7 +301,7 @@ function signalTagType(s: string) {
 function auxColor(v: number | null | undefined) {
   const s = Number(v || 0)
   if (s >= 70) return '#67c23a'
-  if (s >= 55) return '#409eff'
+  if (s >= 55) return '#2b6cb0'
   return '#909399'
 }
 
@@ -605,7 +609,7 @@ onMounted(() => {
 }
 .tone-strong { color: #f56c6c; }
 .tone-mid { color: #e6a23c; }
-.tone-weak { color: #409eff; }
+.tone-weak { color: #2b6cb0; }
 .rank {
   display: inline-block;
   width: 24px;
@@ -637,14 +641,6 @@ onMounted(() => {
   color: var(--el-text-color-secondary);
   font-size: 12px;
 }
-.stock-link {
-  color: var(--el-color-primary);
-  text-decoration: none;
-  font-weight: 500;
-}
-.stock-link:hover {
-  text-decoration: underline;
-}
 .sector-dg-banner {
   display: flex;
   align-items: center;
@@ -667,14 +663,23 @@ onMounted(() => {
   color: var(--el-text-color-secondary);
   font-size: 13px;
 }
+.rank-table :deep(.el-table__cell),
+.candidate-table :deep(.el-table__cell),
+.rank-table :deep(.el-table__cell .cell),
+.candidate-table :deep(.el-table__cell .cell) {
+  white-space: nowrap;
+}
 .warn-tag {
   margin-right: 4px;
   margin-bottom: 2px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .warn-cell {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
+  overflow: hidden;
 }
 .rank-table {
   cursor: pointer;

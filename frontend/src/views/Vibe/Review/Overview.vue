@@ -206,7 +206,7 @@
           <div v-for="(r, idx) in col.rows" :key="key + '-' + r.code" class="list-item">
             <span class="list-no">{{ idx + 1 }}</span>
             <div class="list-main">
-              <router-link :to="`/stocks/${r.code}`" class="list-name stock-link" :title="r.name">{{ r.name }}</router-link>
+              <router-link :to="`/stocks/${r.code}`" class="list-name stock-name" :title="r.name">{{ r.name }}</router-link>
               <div class="list-code">{{ r.code }}</div>
             </div>
             <div class="list-right">
@@ -664,7 +664,7 @@ onMounted(() => {
 }
 
 .idx-price {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--app-font-mono);
   font-size: 26px;
   font-weight: 600;
   color: var(--el-text-color-primary);
@@ -673,7 +673,7 @@ onMounted(() => {
 }
 
 .idx-change {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--app-font-mono);
   font-size: 14px;
   display: flex;
   align-items: baseline;
@@ -716,7 +716,7 @@ onMounted(() => {
 }
 
 .mood-value {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--app-font-mono);
   font-size: 30px;
   font-weight: 700;
   margin: 6px 0 12px;
@@ -757,7 +757,7 @@ onMounted(() => {
 }
 
 .stat-num {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--app-font-mono);
   font-size: 22px;
   font-weight: 600;
 }
@@ -819,7 +819,7 @@ onMounted(() => {
 }
 
 .kpi-value {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--app-font-mono);
   font-size: 20px;
   font-weight: 600;
   color: var(--el-text-color-primary);
@@ -875,7 +875,7 @@ onMounted(() => {
 }
 
 .radar-score {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--app-font-mono);
   font-size: 26px;
   font-weight: 700;
   fill: var(--el-text-color-primary);
@@ -1026,7 +1026,7 @@ onMounted(() => {
 }
 
 .rank-pct {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--app-font-mono);
   font-size: 13px;
   font-weight: 600;
   flex-shrink: 0;
@@ -1102,16 +1102,6 @@ onMounted(() => {
   text-overflow: ellipsis;
 }
 
-.stock-link {
-  color: var(--el-color-primary);
-  cursor: pointer;
-  text-decoration: none;
-}
-
-.stock-link:hover {
-  text-decoration: underline;
-}
-
 .list-code {
   font-size: 11px;
   color: var(--el-text-color-placeholder);
@@ -1123,7 +1113,7 @@ onMounted(() => {
 }
 
 .list-amt {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--app-font-mono);
   font-size: 12px;
   color: var(--el-text-color-regular);
 }

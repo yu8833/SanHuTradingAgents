@@ -1831,7 +1831,7 @@ function buildVpOption() {
       },
       { name: 'MA5', type: 'line', data: ma5, smooth: true, showSymbol: false, lineStyle: { width: 1, color: '#f97316' } },
       { name: 'MA20', type: 'line', data: ma20, smooth: true, showSymbol: false, lineStyle: { width: 1, color: '#f59e0b' } },
-      { name: 'MA60', type: 'line', data: ma60, smooth: true, showSymbol: false, lineStyle: { width: 1, color: '#3b82f6' } },
+      { name: 'MA60', type: 'line', data: ma60, smooth: true, showSymbol: false, lineStyle: { width: 1, color: '#2b6cb0' } },
       { name: '成交量', type: 'bar', xAxisIndex: 1, yAxisIndex: 1, data: volData }
     ]
   }
@@ -2948,7 +2948,7 @@ function exportReport() {
   font-size: 12px;
   font-weight: 700;
   flex-shrink: 0;
-  box-shadow: 0 2px 6px rgba(64, 158, 255, 0.3);
+  box-shadow: 0 2px 6px rgba(43, 108, 176, 0.3);
 }
 .vp-step-title {
   font-size: 14px;
@@ -3256,7 +3256,7 @@ function exportReport() {
   background: var(--el-fill-color-light);
   padding: 2px 6px;
   border-radius: 4px;
-  font-family: 'Courier New', monospace;
+  font-family: var(--app-font-mono);
 }
 
 .markdown-body pre {
@@ -3371,7 +3371,7 @@ function exportReport() {
   padding: 18px 20px;
   background: #f8fafc;
   border-radius: 8px;
-  border-left: 4px solid #3b82f6;
+  border-left: 4px solid #2b6cb0;
   margin-top: 16px;
 }
 
@@ -3381,13 +3381,13 @@ function exportReport() {
   gap: 8px;
   font-size: 15px;
   font-weight: 600;
-  color: #1e40af;
+  color: #2c5282;
   margin-bottom: 12px;
 }
 
 .summary-title .el-icon {
   font-size: 18px;
-  color: #3b82f6;
+  color: #2b6cb0;
 }
 
 .summary-text {
@@ -3406,16 +3406,16 @@ function exportReport() {
   gap: 6px;
   margin-top: 12px;
   padding: 8px 12px;
-  background: #f0f9ff;
+  background: #eff6ff;
   border-radius: 6px;
-  border: 1px solid #bae6fd;
+  border: 1px solid #bfdbfe;
   font-size: 13px;
-  color: #0369a1;
+  color: #2c5282;
 }
 
 .sync-status .el-icon {
   font-size: 14px;
-  color: #0284c7;
+  color: #2b6cb0;
 }
 
 .sync-info {

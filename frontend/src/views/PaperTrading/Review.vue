@@ -1,8 +1,12 @@
 <template>
   <div class="review-page">
-    <div class="page-header">
-      <h2>交易复盘</h2>
-      <p class="sub">记录与梳理交易中的各种得失，沉淀经验，反哺策略与规则。</p>
+    <div class="page-hero">
+      <div class="page-hero-main">
+        <div class="page-hero-text">
+          <h2 class="page-hero-title">交易复盘</h2>
+          <p class="page-hero-sub">记录与梳理交易中的各种得失，沉淀经验，反哺策略与规则。</p>
+        </div>
+      </div>
     </div>
 
     <!-- 复盘统计 -->
@@ -273,14 +277,6 @@ onMounted(loadAll)
   padding: 24px;
   max-width: 1280px;
   margin: 0 auto;
-}
-.page-header h2 {
-  margin: 0 0 4px;
-  font-size: 22px;
-}
-.page-header .sub {
-  margin: 0 0 16px;
-  color: var(--el-text-color-secondary);
 }
 .stats-row {
   margin-bottom: 16px;
