@@ -13,6 +13,7 @@
 import contextlib
 import logging
 import math
+import time
 from datetime import datetime
 
 from app.core.database import get_mongo_db
@@ -85,6 +86,28 @@ class DgProsperityService:
         self.db = None
         self._tushare_pro = None
         self._cache: dict[str, dict] = {}
+        self._cache_ts: dict[str, float] = {}
+        # 行业 ΔG 基于季度财务数据，短期内不变；10 分钟 TTL 足以避免候选池/行业筛选重复计算
+        self._cache_ttl = 600
+
+    def _sector_dg_cache_get(self, industry: str) -> dict | None:
+        ts = self._cache_ts.get(industry)
+        if ts is None:
+            return None
+        if time.monotonic() - ts > self._cache_ttl:
+            self._cache.pop(industry, None)
+            self._cache_ts.pop(industry, None)
+            return None
+        return self._cache.get(industry)
+
+    def _sector_dg_cache_set(self, industry: str, value: dict) -> None:
+        # 行业数有限（~190 细类），超过阈值时清掉最旧一半防止无限增长
+        if len(self._cache) >= 500 and industry not in self._cache:
+            for k in list(self._cache)[: len(self._cache) // 2]:
+                self._cache.pop(k, None)
+                self._cache_ts.pop(k, None)
+        self._cache[industry] = value
+        self._cache_ts[industry] = time.monotonic()
 
     async def _get_db(self):
         if self.db is None:
@@ -414,6 +437,11 @@ class DgProsperityService:
         """
         from collections import Counter
 
+        # TTL 缓存：行业 ΔG 基于季度财务数据，聚合结果在刷新前不变，直接复用
+        cached = self._sector_dg_cache_get(industry)
+        if cached is not None:
+            return cached
+
         db = await self._get_db()
         # 1. 该行业全部成分股代码
         cursor = db["stock_basic_info"].find(
@@ -424,8 +452,10 @@ class DgProsperityService:
         codes = [c for c in codes if c]
         member_count = len(codes)
         if not codes:
-            return {**self._empty_quadrant(), "industry": industry, "member_count": 0,
-                    "data_count": 0, "distribution": {}}
+            result = {**self._empty_quadrant(), "industry": industry, "member_count": 0,
+                      "data_count": 0, "distribution": {}}
+            self._sector_dg_cache_set(industry, result)
+            return result
 
         # 2. 批量取每只股票最新一期象限（过滤非有限 g，避免 NaN/±inf 污染聚合）
         batch = await self.get_quadrant_batch(codes)
@@ -433,8 +463,10 @@ class DgProsperityService:
                  if d.get("available") and _finite(d.get("g"))]
         data_count = len(valid)
         if not valid:
-            return {**self._empty_quadrant(), "industry": industry, "member_count": member_count,
-                    "data_count": 0, "distribution": {}}
+            result = {**self._empty_quadrant(), "industry": industry, "member_count": member_count,
+                      "data_count": 0, "distribution": {}}
+            self._sector_dg_cache_set(industry, result)
+            return result
 
         # 3. 聚合：平均 G / 平均 ΔG（均过滤非有限值）
         gs = [float(d["g"]) for d in valid if _finite(d.get("g"))]
@@ -453,7 +485,7 @@ class DgProsperityService:
         periods = [str(d.get("report_period") or "") for d in valid if d.get("report_period")]
         report_period = max(periods) if periods else ""
 
-        return {
+        result = {
             "industry": industry,
             "quadrant": dominant,
             "quadrant_label": QUADRANT_LABELS.get(dominant, "数据不足"),
@@ -466,6 +498,8 @@ class DgProsperityService:
             "report_period": report_period,
             "available": True,
         }
+        self._sector_dg_cache_set(industry, result)
+        return result
 
 
 _dg_service_instance: DgProsperityService | None = None

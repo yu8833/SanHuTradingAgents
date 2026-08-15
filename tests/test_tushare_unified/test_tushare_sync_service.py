@@ -239,6 +239,8 @@ class TestTushareSyncService:
             {"code": "000002"}
         ]
         sync_service.db.stock_basic_info.find.return_value = mock_cursor
+        # 断点续传：默认无近期已同步记录，全部待同步
+        sync_service.db.stock_financial_data.distinct = AsyncMock(return_value=[])
         
         # 模拟获取财务数据
         mock_financial_data = {
@@ -255,6 +257,37 @@ class TestTushareSyncService:
         assert result["total_processed"] == 2
         assert result["success_count"] == 2
         assert result["error_count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_sync_financial_data_resume_skip_fresh(self, sync_service):
+        """测试断点续传：近期已同步的股票被跳过，不重复全量扫描"""
+        mock_cursor = AsyncMock()
+        mock_cursor.__aiter__.return_value = [
+            {"code": "000001"},
+            {"code": "000002"},
+            {"code": "000003"}
+        ]
+        sync_service.db.stock_basic_info.find.return_value = mock_cursor
+        # 000001 在窗口内已同步（tushare），应被跳过
+        sync_service.db.stock_financial_data.distinct = AsyncMock(
+            return_value=["000001"]
+        )
+        sync_service.provider.get_financial_data = AsyncMock(
+            return_value={"symbol": "000001", "data_source": "tushare"}
+        )
+        sync_service._save_financial_data = AsyncMock(return_value=True)
+
+        result = await sync_service.sync_financial_data()
+
+        assert result["total_processed"] == 2  # 仅 000002/000003
+        assert result["success_count"] == 2
+        assert result["error_count"] == 0
+        # 被跳过的 000001 不应再触发财务数据拉取（仅 000002/000003 会被拉取）
+        called_codes = [
+            str(call.args[0]) for call in sync_service.provider.get_financial_data.call_args_list
+        ]
+        assert "000001" not in called_codes
+        assert sorted(called_codes) == ["000002", "000003"]
     
     def test_is_data_fresh(self, sync_service):
         """测试数据新鲜度检查"""

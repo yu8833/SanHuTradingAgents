@@ -46,10 +46,28 @@ SCREEN_CACHE_COLLECTION = "strategy_screen_cache"
 # ──────────────────────────────────────────────────────────────
 _PANEL_CACHE_MAX = 2
 _TARGET_CACHE_MAX = 2
-_CACHE_TTL_SECONDS = 600  # 10 分钟；同时受 as_of 变化兜底
+# TTL 6 小时：日线为收盘后 EOD 数据（18:30 后才写入新交易日），同一交易日内
+# stock_daily_quotes 冻结，且缓存键含 as_of（交易日）→ 新交易日落地后键变化自动失效。
+# 10 分钟 TTL 会让用户间隔稍久再打开页面就触发全量重算（~20s），故延长至 6 小时。
+_CACHE_TTL_SECONDS = 21600
 _panel_cache: OrderedDict[tuple, tuple[float, pd.DataFrame]] = OrderedDict()
 _target_cache: OrderedDict[tuple, tuple[float, pd.DataFrame]] = OrderedDict()
 _cache_lock = threading.Lock()
+
+# single-flight：同一 (as_of, pool) 面板/目标日被并发请求时只允许一个线程真正加载，
+# 其余线程在锁上等待后命中缓存。避免候选池并行打分流式时对全市场面板重复加载（~10×DB）。
+_panel_load_locks: dict[tuple, threading.Lock] = {}
+_target_load_locks: dict[tuple, threading.Lock] = {}
+_locks_guard = threading.Lock()
+
+
+def _get_load_lock(lock_map: dict[tuple, threading.Lock], key: tuple) -> threading.Lock:
+    with _locks_guard:
+        lk = lock_map.get(key)
+        if lk is None:
+            lk = threading.Lock()
+            lock_map[key] = lk
+        return lk
 
 
 def _panel_cache_key(as_of: str, pool: list[str] | None) -> tuple:
@@ -89,16 +107,21 @@ def _load_computed_panel(db, pool: list[str] | None, as_of_date: str) -> pd.Data
     if cached is not None:
         return cached
 
-    as_of_dt = pd.to_datetime(as_of_date)
-    start_dt = as_of_dt - timedelta(days=WARMUP_DAYS)
-    raw = data_adapter.load_daily_panel(db, pool, start_dt, as_of_date)
-    if raw.empty:
-        return raw
-    # 仅保留最近 SCREEN_MAX_WINDOW_DAYS 个交易日（足以为最长60日窗口提供warmup）
-    raw = _trim_to_last_days(raw, SCREEN_MAX_WINDOW_DAYS)
-    df = compute_all(raw)
-    _cache_put(_panel_cache, key, df, _PANEL_CACHE_MAX)
-    return df
+    # single-flight：并发首次请求时只加载一次，其余线程等待后命中缓存
+    with _get_load_lock(_panel_load_locks, key):
+        cached = _cache_get(_panel_cache, key)
+        if cached is not None:
+            return cached
+        as_of_dt = pd.to_datetime(as_of_date)
+        start_dt = as_of_dt - timedelta(days=WARMUP_DAYS)
+        raw = data_adapter.load_daily_panel(db, pool, start_dt, as_of_date)
+        if raw.empty:
+            return raw
+        # 仅保留最近 SCREEN_MAX_WINDOW_DAYS 个交易日（足以为最长60日窗口提供warmup）
+        raw = _trim_to_last_days(raw, SCREEN_MAX_WINDOW_DAYS)
+        df = compute_all(raw)
+        _cache_put(_panel_cache, key, df, _PANEL_CACHE_MAX)
+        return df
 
 
 def _get_enriched_target(db, panel: pd.DataFrame, pool: list[str] | None, as_of_date: str) -> pd.DataFrame:
@@ -108,12 +131,17 @@ def _get_enriched_target(db, panel: pd.DataFrame, pool: list[str] | None, as_of_
     if cached is not None:
         return cached
 
-    target = panel[panel["date"] == as_of_date].copy()
-    if target.empty:
+    # single-flight：并发首次请求时只 enrich 一次，其余线程等待后命中缓存
+    with _get_load_lock(_target_load_locks, key):
+        cached = _cache_get(_target_cache, key)
+        if cached is not None:
+            return cached
+        target = panel[panel["date"] == as_of_date].copy()
+        if target.empty:
+            return target
+        target = _enrich_target(db, target, as_of_date)
+        _cache_put(_target_cache, key, target, _TARGET_CACHE_MAX)
         return target
-    target = _enrich_target(db, target, as_of_date)
-    _cache_put(_target_cache, key, target, _TARGET_CACHE_MAX)
-    return target
 
 
 def _latest_trade_date(db) -> str:

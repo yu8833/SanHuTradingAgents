@@ -281,12 +281,13 @@ def register_retail_jobs(scheduler, settings):
 
     tz = settings.TIMEZONE
 
-    # 1. 持仓退出信号扫描：工作日 9:30-15:00 每30分钟（含收盘前最后一次，不再单独注册收盘任务）
+    # 1. 盘中统一扫描（合并个股预警 + 持仓退出信号）：工作日 9:30-15:00 每15分钟
+    #    原为两个独立任务（预警每10分钟、退出每30分钟），合并后减少调度条目与重复行情拉取。
     scheduler.add_job(
-        check_all_users_exit_signals,
-        CronTrigger.from_crontab("*/30 9-15 * * 1-5", timezone=tz),
-        id="retail_exit_check",
-        name="散户持仓退出信号扫描（盘中每30分钟+收盘）",
+        run_unified_intraday_scan,
+        CronTrigger.from_crontab("*/15 9-15 * * 1-5", timezone=tz),
+        id="retail_intraday_scan",
+        name="盘中统一扫描（个股预警+持仓退出，每15分钟）",
         replace_existing=True,
     )
 
@@ -299,16 +300,23 @@ def register_retail_jobs(scheduler, settings):
         replace_existing=True,
     )
 
-    # 3. 个股预警检查：工作日 9:30-15:00 每10分钟（含收盘前最后一次，不再单独注册收盘任务）
-    scheduler.add_job(
-        _check_stock_alerts_wrapper,
-        CronTrigger.from_crontab("*/10 9-15 * * 1-5", timezone=tz),
-        id="stock_alert_check",
-        name="个股预警检查（盘中每10分钟+收盘）",
-        replace_existing=True,
-    )
+    logger.info("📊 散户策略定时任务已注册: 统一盘中扫描(个股预警+退出,每15分钟) + 环境检测(每日9:30)")
 
-    logger.info("📊 散户策略定时任务已注册: 退出扫描(盘中每30分钟+收盘) + 环境检测(每日9:30) + 个股预警(每10分钟+收盘)")
+
+async def run_unified_intraday_scan():
+    """盘中统一扫描：先检查个股预警，再扫描持仓退出信号。
+
+    合并自原"个股预警检查(每10分钟)"与"持仓退出信号扫描(每30分钟)"两个独立任务，
+    统一在盘中每15分钟执行一次，减少调度条目与重复行情拉取。
+    """
+    # 1. 个股预警检查
+    try:
+        from app.services.stock_alert_service import stock_alert_service
+        await stock_alert_service.check_and_trigger()
+    except Exception as e:
+        logger.error(f"❌ 个股预警检查失败: {e}", exc_info=True)
+    # 2. 持仓退出信号扫描
+    await check_all_users_exit_signals()
 
 
 async def _check_stock_alerts_wrapper():

@@ -955,8 +955,39 @@ class TushareSyncService:
                 symbols = [doc["code"] async for doc in cursor]
                 logger.info(f"📋 从 stock_basic_info 获取到 {len(symbols)} 只股票")
 
+            # 断点续传：跳过近期已成功同步的股票（data_source=tushare 且 updated_at 在窗口内），
+            # 避免任务中断/服务重启后从零全量重扫财务数据。
+            symbols = sorted({str(s) for s in symbols})
+            try:
+                from datetime import timedelta as _td
+                _resume_window_hours = getattr(
+                    settings, "FINANCIAL_SYNC_RESUME_WINDOW_HOURS", 24
+                )
+                _cutoff = datetime.now() - _td(hours=_resume_window_hours)
+                _recent = await self.db.stock_financial_data.distinct(
+                    "symbol",
+                    {"data_source": "tushare", "updated_at": {"$gte": _cutoff}}
+                )
+                _recent_set = {str(s) for s in _recent}
+                _skip = [s for s in symbols if s in _recent_set]
+                if _skip:
+                    symbols = [s for s in symbols if s not in _recent_set]
+                    logger.info(
+                        f"⏭️ 断点续传: 跳过近 {_resume_window_hours}h 内已同步 {len(_skip)} 只，"
+                        f"待同步 {len(symbols)} 只（示例: {_skip[:10]}）"
+                    )
+            except Exception as _e:
+                logger.warning(f"⚠️ 断点续传跳过检查失败，继续全量同步: {_e}")
+
             stats["total_processed"] = len(symbols)
             logger.info(f"📊 需要同步 {len(symbols)} 只股票财务数据")
+
+            if not symbols:
+                logger.info("✅ 断点续传: 全部股票近期已同步，无需执行")
+                stats["end_time"] = datetime.now()
+                stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
+                stats["skipped_all"] = True
+                return stats
 
             # 并发控制：信号量限制同时进行的请求数（实际调用频率仍受速率限制器约束）
             semaphore = asyncio.Semaphore(20)
@@ -1857,6 +1888,18 @@ async def run_tushare_historical_sync(incremental: bool = True):
         logger.info("✅ [APScheduler] Tushare 同步服务已初始化")
         result = await service.sync_historical_data(incremental=incremental, job_id="tushare_historical_sync")
         logger.info(f"✅ [APScheduler] Tushare历史数据同步完成: {result}")
+
+        # 历史日K同步完成后，串行执行每日估值同步（daily_basic，供回测按日对齐 PE/PB/市值）
+        # 原独立任务 tushare_daily_basic_sync(23:30) 已合并至此，减少调度条目。
+        try:
+            if settings.TUSHARE_DAILY_BASIC_SYNC_ENABLED:
+                days_back = getattr(settings, "TUSHARE_DAILY_BASIC_SYNC_DAYS_BACK", 730)
+                db_result = await service.sync_daily_basic_data(
+                    days_back=days_back, job_id="tushare_historical_sync"
+                )
+                logger.info(f"✅ [APScheduler] 每日估值数据同步完成(随历史同步): {db_result}")
+        except Exception as e:
+            logger.warning(f"⚠️ 历史同步尾部每日估值同步失败（不影响历史同步结果）: {e}")
 
         # 同步完成后自动执行完整性检查和补数
         try:

@@ -8,7 +8,7 @@
         </div>
         <div class="page-hero-text">
           <h2 class="page-hero-title">{{ today }} · 大盘看板</h2>
-          <p class="page-hero-sub">大盘指数 / 全球市场 / 市场情绪一屏看全</p>
+          <p class="page-hero-sub">大盘指数 / 全球市场一屏看全</p>
         </div>
       </div>
       <div class="page-hero-meta">
@@ -219,76 +219,6 @@
         </div>
       </div>
     </section>
-
-    <!-- 市场情绪 -->
-    <section class="block">
-      <div class="block-head">
-        <span class="block-title"><el-icon><Odometer /></el-icon> 市场情绪</span>
-        <span v-if="sentiment?.date" class="block-hint">数据日期：{{ sentiment.date }}</span>
-      </div>
-      <div class="sentiment-wrap">
-        <div class="mood-row">
-          <el-card shadow="never" class="mood-card">
-            <div class="mood-label">大盘宽度</div>
-            <div class="mood-value" :class="breadthClass">{{ sentiment?.breadth || '—' }}</div>
-            <div class="mood-tags">
-              <span
-                v-for="l in ['冰点','偏弱','中性','偏强','普涨']"
-                :key="l"
-                class="tag"
-                :class="{ active: sentiment?.breadth === l }"
-              >{{ l }}</span>
-            </div>
-          </el-card>
-          <el-card shadow="never" class="mood-card">
-            <div class="mood-label">题材投机</div>
-            <div class="mood-value" :class="specClass">{{ sentiment?.speculation || '—' }}</div>
-            <div class="mood-tags">
-              <span
-                v-for="l in ['冰点','普通','活跃','亢奋']"
-                :key="l"
-                class="tag"
-                :class="{ active: sentiment?.speculation === l }"
-              >{{ l }}</span>
-            </div>
-          </el-card>
-        </div>
-        <div class="stat-grid">
-          <div class="stat-cell">
-            <div class="stat-num up">{{ sentiment?.up ?? '—' }}</div>
-            <div class="stat-name">上涨家数</div>
-          </div>
-          <div class="stat-cell">
-            <div class="stat-num down">{{ sentiment?.down ?? '—' }}</div>
-            <div class="stat-name">下跌家数</div>
-          </div>
-          <div class="stat-cell">
-            <div class="stat-num flat">{{ sentiment?.flat ?? '—' }}</div>
-            <div class="stat-name">平盘</div>
-          </div>
-          <div class="stat-cell">
-            <div class="stat-num up">{{ sentiment?.zt ?? '—' }}</div>
-            <div class="stat-name">涨停</div>
-          </div>
-          <div class="stat-cell">
-            <div class="stat-num up">{{ sentiment?.zt_real ?? '—' }}</div>
-            <div class="stat-name">真实涨停</div>
-          </div>
-          <div class="stat-cell">
-            <div class="stat-num down">{{ sentiment?.dt ?? '—' }}</div>
-            <div class="stat-name">跌停</div>
-          </div>
-          <div class="stat-cell">
-            <div class="stat-num down">{{ sentiment?.dt_real ?? '—' }}</div>
-            <div class="stat-name">真实跌停</div>
-          </div>
-          <div class="stat-cell">
-            <div class="stat-num flat">{{ sentiment?.active || '—' }}</div>
-            <div class="stat-name">活跃度</div>
-          </div>
-        </div>
-      </div>
-    </section>
       </el-tab-pane>
 
       <!-- ============ 全球市场 ============ -->
@@ -320,26 +250,50 @@
 
         <section class="block">
           <div class="block-head">
-            <span class="block-title"><el-icon><DataAnalysis /></el-icon> 全球著名股票</span>
-            <span class="block-hint">美股 / 港股大盘蓝筹涨跌</span>
+            <span class="block-title"><el-icon><DataLine /></el-icon> 美股</span>
           </div>
           <div class="grid grid-5">
             <el-card
-              v-for="item in globalStocks"
+              v-for="item in usStocks"
               :key="item.secid"
               shadow="never"
               class="idx-card"
             >
               <div class="idx-name">
-                {{ item.name }}<span class="region">{{ item.region }}</span>
+                {{ item.name }}<span class="region">美股</span>
               </div>
               <div class="idx-price">{{ item.price == null ? '—' : formatPrice(item.price) }}</div>
               <div class="idx-change" :class="colorClass(item.change_pct)">
                 {{ item.change_pct == null ? '—' : sign(item.change_pct) + formatPct(item.change_pct) + '%' }}
               </div>
             </el-card>
-            <el-card v-if="!globalStocks.length && !loading" shadow="never" class="idx-card empty-card">
-              <el-empty :image-size="48" description="暂无著名股票数据" />
+            <el-card v-if="!usStocks.length && !loading" shadow="never" class="idx-card empty-card">
+              <el-empty :image-size="48" description="暂无美股数据" />
+            </el-card>
+          </div>
+        </section>
+
+        <section class="block">
+          <div class="block-head">
+            <span class="block-title"><el-icon><DataLine /></el-icon> 港股</span>
+          </div>
+          <div class="grid grid-5">
+            <el-card
+              v-for="item in hkStocks"
+              :key="item.secid"
+              shadow="never"
+              class="idx-card"
+            >
+              <div class="idx-name">
+                {{ item.name }}<span class="region">港股</span>
+              </div>
+              <div class="idx-price">{{ item.price == null ? '—' : formatPrice(item.price) }}</div>
+              <div class="idx-change" :class="colorClass(item.change_pct)">
+                {{ item.change_pct == null ? '—' : sign(item.change_pct) + formatPct(item.change_pct) + '%' }}
+              </div>
+            </el-card>
+            <el-card v-if="!hkStocks.length && !loading" shadow="never" class="idx-card empty-card">
+              <el-empty :image-size="48" description="暂无港股数据" />
             </el-card>
           </div>
         </section>
@@ -368,7 +322,6 @@ import {
   type IndexQuote,
   type GlobalIndex,
   type GlobalStock,
-  type MarketSentiment,
   type MarketDashboard,
 } from '@/api/vibe'
 
@@ -377,8 +330,11 @@ const activeTab = ref('ashare')
 const indices = ref<IndexQuote[]>([])
 const globalIndices = ref<GlobalIndex[]>([])
 const globalStocks = ref<GlobalStock[]>([])
-const sentiment = ref<MarketSentiment | null>(null)
 const dashboard = ref<MarketDashboard | null>(null)
+
+// 全球著名股票按 美股 / 港股 分组
+const usStocks = computed(() => globalStocks.value.filter(s => s.region === '美股'))
+const hkStocks = computed(() => globalStocks.value.filter(s => s.region === '港股'))
 
 const today = computed(() => {
   const d = new Date()
@@ -400,13 +356,6 @@ const colorClass = (v: number | null | undefined) => {
   if (v < 0) return 'down'
   return 'flat'
 }
-
-const breadthClass = computed(() => {
-  const b = sentiment.value?.breadth || ''
-  if (['普涨', '偏强'].includes(b)) return 'up'
-  if (['冰点', '偏弱'].includes(b)) return 'down'
-  return 'flat'
-})
 
 // ---- 看板辅助函数 ----
 const scoreColor = (v: number) => {
@@ -518,12 +467,6 @@ const listCols = computed(() => {
     { title: '活跃换手', mode: 'active', rows: d.active_leaders },
   ]
 })
-const specClass = computed(() => {
-  const s = sentiment.value?.speculation || ''
-  if (['亢奋', '活跃'].includes(s)) return 'up'
-  if (['冰点'].includes(s)) return 'down'
-  return 'flat'
-})
 
 // 带超时的请求包装
 const withTimeout = <T>(promise: Promise<T>, timeoutMs: number = 15000): Promise<T> => {
@@ -544,12 +487,11 @@ const loadAll = async () => {
       withTimeout(vibeApi.getIndices(), 15000),
       withTimeout(vibeApi.getGlobalIndices(), 15000),
       withTimeout(vibeApi.getGlobalStocks(), 15000),
-      withTimeout(vibeApi.getMarketOverview(), 15000),
       withTimeout(vibeApi.getDashboard(), 20000),
     ])
 
     // 逐个处理结果，失败不影响其他数据显示
-    const [idxRes, gRes, gsRes, ovRes, dashRes] = results
+    const [idxRes, gRes, gsRes, dashRes] = results
     if (idxRes.status === 'fulfilled') {
       indices.value = idxRes.value.data || []
     }
@@ -558,9 +500,6 @@ const loadAll = async () => {
     }
     if (gsRes.status === 'fulfilled') {
       globalStocks.value = gsRes.value.data || []
-    }
-    if (ovRes.status === 'fulfilled') {
-      sentiment.value = ovRes.value.data?.sentiment || null
     }
     if (dashRes.status === 'fulfilled') {
       dashboard.value = dashRes.value.data || null
@@ -690,84 +629,6 @@ onMounted(() => {
   margin: 0;
 }
 
-.sentiment-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.mood-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
-
-.mood-card {
-  border-radius: 8px;
-}
-
-.mood-card :deep(.el-card__body) {
-  padding: 18px 20px;
-}
-
-.mood-label {
-  font-size: 13px;
-  color: var(--el-text-color-regular);
-}
-
-.mood-value {
-  font-family: var(--app-font-mono);
-  font-size: 30px;
-  font-weight: 700;
-  margin: 6px 0 12px;
-}
-
-.mood-tags {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.tag {
-  font-size: 12px;
-  padding: 2px 10px;
-  border-radius: 10px;
-  background: var(--el-fill-color-light);
-  color: var(--el-text-color-secondary);
-}
-
-.tag.active {
-  background: var(--el-color-primary-light-8);
-  color: var(--el-color-primary);
-  font-weight: 600;
-}
-
-.stat-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
-}
-
-.stat-cell {
-  background: var(--el-fill-color-blank);
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
-  padding: 14px;
-  text-align: center;
-}
-
-.stat-num {
-  font-family: var(--app-font-mono);
-  font-size: 22px;
-  font-weight: 600;
-}
-
-.stat-name {
-  font-size: 12px;
-  color: var(--el-text-color-regular);
-  margin-top: 4px;
-}
-
 .up { color: #f56c6c; }
 .down { color: #67c23a; }
 .flat { color: #909399; }
@@ -785,8 +646,6 @@ onMounted(() => {
 
 @media (max-width: 768px) {
   .grid-4, .grid-5 { grid-template-columns: repeat(2, 1fr); }
-  .mood-row { grid-template-columns: 1fr; }
-  .stat-grid { grid-template-columns: repeat(2, 1fr); }
 }
 
 /* ===== 市场看板（借鉴 tickflow Dashboard）===== */

@@ -207,8 +207,8 @@ class Settings(BaseSettings):
     # 监控中心规则评估任务
     MONITOR_ENABLED: bool = Field(default=True, description="启用监控中心规则评估")
     MONITOR_INTERVAL_SECONDS: int = Field(
-        default=60,
-        description="监控中心规则评估间隔（秒）"
+        default=300,
+        description="监控中心规则评估间隔（秒）。行情每60s一更，评估5分钟一次即可（60s→180s→300s降频），每次评估内部会调用三买三卖池扫描，频率过高会造成无效资源消耗"
     )
 
     # 实时行情入库任务
@@ -248,13 +248,16 @@ class Settings(BaseSettings):
     TUSHARE_QUOTES_SYNC_ENABLED: bool = Field(default=True)
     TUSHARE_QUOTES_SYNC_CRON: str = Field(default="*/5 9-15 * * 1-5")  # 交易时间每5分钟
     TUSHARE_HISTORICAL_SYNC_ENABLED: bool = Field(default=True)
-    TUSHARE_HISTORICAL_SYNC_CRON: str = Field(default="30 18 * * 1-5")  # 工作日18:30（Tushare当日日K发布通常16:00-18:00完成）
+    # 工作日 23:00：Tushare 当日日K 18:30 后才发布完整，挪到深夜避开用户活跃时段；
+    # 且历史同步末尾已串行执行每日估值同步（daily_basic）与完整性检查。
+    TUSHARE_HISTORICAL_SYNC_CRON: str = Field(default="0 23 * * 1-5")
     TUSHARE_FINANCIAL_SYNC_ENABLED: bool = Field(default=True)
     TUSHARE_FINANCIAL_SYNC_CRON: str = Field(default="0 2 * * 6")  # 周六凌晨2点（错峰：避开交易时段与其它长任务重叠）
     TUSHARE_DIVIDEND_SYNC_ENABLED: bool = Field(default=True)
     TUSHARE_DIVIDEND_SYNC_CRON: str = Field(default="0 3 * * 6")  # 周六凌晨3点（错峰，与财务同步错开1小时；分红公告频率低，周更即可）
     TUSHARE_DAILY_BASIC_SYNC_ENABLED: bool = Field(default=True)
-    TUSHARE_DAILY_BASIC_SYNC_CRON: str = Field(default="0 19 * * 1-5")  # 工作日19点（紧接历史日K同步后，补当日估值/市值）
+    # daily_basic 已并入历史同步任务末尾串行执行（先K线后估值），此 cron 不再作为独立任务调度。
+    TUSHARE_DAILY_BASIC_SYNC_CRON: str = Field(default="30 23 * * 1-5")
     TUSHARE_DAILY_BASIC_SYNC_DAYS_BACK: int = Field(default=730)  # 每次回溯天数（默认约2年，增量跳过已同步交易日）
     TUSHARE_STATUS_CHECK_ENABLED: bool = Field(default=True)
     TUSHARE_STATUS_CHECK_CRON: str = Field(default="30 8 * * *")  # 每天8:30（原每小时，降频减少无意义轮询）
@@ -267,7 +270,8 @@ class Settings(BaseSettings):
 
     # 数据完整性检查配置
     DATA_INTEGRITY_CHECK_ENABLED: bool = Field(default=True, description="启用数据完整性检查")
-    DATA_INTEGRITY_CHECK_CRON: str = Field(default="0 19 * * 1-5", description="数据完整性检查CRON（工作日19点）")
+    # 工作日 00:30：历史同步（23:00）+估值同步（23:30）之后，凌晨执行完整检查与 AKShare 补数，避开用户活跃时段。
+    DATA_INTEGRITY_CHECK_CRON: str = Field(default="30 0 * * 1-5", description="数据完整性检查CRON（工作日00:30）")
     DATA_INTEGRITY_AUTO_REMEDIATE: bool = Field(default=True, description="自动补数")
     DATA_INTEGRITY_REMEDIATE_SOURCE: str = Field(default="akshare", description="补数数据源")
 

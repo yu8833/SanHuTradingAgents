@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 from typing import Any
@@ -80,7 +81,8 @@ async def validate_config():
     try:
         # 🔧 步骤1: 重载配置 - 从 MongoDB 读取配置并桥接到环境变量
         try:
-            bridge_config_to_env()
+            # 同步阻塞调用放到线程池，避免阻塞事件循环导致并发请求排队
+            await asyncio.to_thread(bridge_config_to_env)
             logger.info("✅ 配置已从 MongoDB 重载到环境变量")
         except Exception as e:
             logger.warning(f"⚠️  配置重载失败: {e}，将验证 .env 文件中的配置")

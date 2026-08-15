@@ -17,12 +17,92 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
+import time
+from collections import OrderedDict
 
 from app.core.database import get_mongo_db_sync
 from app.services.candidate_pool import industry_layer, stock_score_layer
 from app.services.favorites_service import favorites_service
+from app.strategy_system.screener import _resolve_as_of
 
 logger = logging.getLogger(__name__)
+
+# ──────────────────────────────────────────────────────────────
+# 候选池默认视图（stocks-overview）结果级缓存：同一交易日 + 同一行业集合的
+# 结果幂等（底层面板/指标已有 screener 进程内缓存），缓存后重复打开页面毫秒级返回。
+# 内存：仅保存 JSON 可序列化 dict，保留最近 4 个结果。
+# ──────────────────────────────────────────────────────────────
+_OVERVIEW_CACHE_MAX = 4
+# TTL 6 小时：结果只随 as_of（最新交易日）变化，EOD 日线 18:30 后才更新 → 键变化自动失效。
+# 10 分钟 TTL 会导致用户间隔稍久再打开页面就触发全量重算（~20s），故延长至 6 小时。
+_OVERVIEW_CACHE_TTL = 21600
+_overview_cache: OrderedDict[tuple, tuple[float, dict]] = OrderedDict()
+_overview_cache_lock = threading.Lock()
+
+
+def _overview_cache_key(as_of: str, top_n: int, per_industry: int,
+                        industries: list[str] | None) -> tuple:
+    return (as_of, top_n, per_industry, tuple(industries) if industries else None)
+
+
+def _overview_cache_get(key: tuple) -> dict | None:
+    now = time.monotonic()
+    with _overview_cache_lock:
+        hit = _overview_cache.get(key)
+        if hit is None:
+            return None
+        ts, val = hit
+        if now - ts > _OVERVIEW_CACHE_TTL:
+            del _overview_cache[key]
+            return None
+        _overview_cache.move_to_end(key)
+        return val
+
+
+def _overview_cache_put(key: tuple, value: dict) -> None:
+    with _overview_cache_lock:
+        if key in _overview_cache:
+            _overview_cache.move_to_end(key)
+        _overview_cache[key] = (time.monotonic(), value)
+        while len(_overview_cache) > _OVERVIEW_CACHE_MAX:
+            _overview_cache.popitem(last=False)
+
+
+def _build_industry_pool(etf_industries: list[str]) -> list[str]:
+    """返回多个 ETF 主题行业映射的本地行业细类成分股并集（用于缩小面板加载范围）。
+
+    候选池默认视图只需前 top_n 个行业成分股，无需加载全市场 5000+ 只股票，
+    按并集代码池加载可显著缩短冷启动。无映射时返回空列表（回退全市场）。
+    """
+    local_inds: set[str] = set()
+    for etf in etf_industries:
+        local_inds.update(local_industries_for(etf))
+    return _codes_by_local_industries(local_inds)
+
+
+def _industry_pool_codes(industry: str) -> list[str]:
+    """返回单行业（ETF 主题或本地细类）的成分股代码，用于缩小面板加载范围。
+
+    未选中行业（前端默认视图）由 _build_industry_pool 构建并集池；点击单个行业时
+    按该行业成分股缩池，避免触发全市场面板加载（~20s）。无法解析时返回空列表。
+    """
+    local_inds = local_industries_for(industry)
+    if not local_inds:
+        local_inds = {industry}
+    return _codes_by_local_industries(local_inds)
+
+
+def _codes_by_local_industries(local_inds: set[str]) -> list[str]:
+    """按本地行业细类查 stock_basic_info 返回成分股代码（去重排序）。"""
+    if not local_inds:
+        return []
+    db = get_mongo_db_sync()
+    cursor = db["stock_basic_info"].find(
+        {"industry": {"$in": list(local_inds)}},
+        {"_id": 0, "code": 1},
+    )
+    return sorted({str(d.get("code") or "") for d in cursor if d.get("code")})
 
 # ETF 主题行业 → 本地行业（stock_basic_info.industry，190 细类）映射，用于行业 ΔG 景气聚合
 # 与个股筛选的成分股定位。未覆盖的 ETF 行业不做 ΔG 融合（sector_dg=None）。
@@ -225,24 +305,36 @@ def _aggregate_sector_dg(dgs: list[dict]) -> dict | None:
 
 
 async def get_candidate_stocks(industry: str, limit: int = 30, as_of=None,
-                               with_timing: bool = True) -> dict:
+                               with_timing: bool = True,
+                               pool: list[str] | None = None) -> dict:
     """第2层 + 第3层：对某行业成分股多因子打分 → ΔG 过滤 → 择时预览。
 
     编排顺序：打分截断 top(limit*2) → ΔG 过滤 → 择时预览 → 按 quality_score 排序。
     industry 可能是 ETF 主题行业名（来自行业筛选），也可能是本地细类行业名：
       - ETF 主题行业 → 映射到多个本地细类分别打分后合并。
       - 本地细类行业 → 直接打分。
+    pool: 限定底层面板加载的代码池（缩小加载范围，冷启动提速；默认按行业成分股缩池）。
     同时返回行业级 ΔG 景气（宏观层面判断）。
     """
+    # 未显式传 pool 时按该行业成分股缩池（前端点击单个行业），避免触发全市场面板加载
+    if pool is None:
+        pool = _industry_pool_codes(industry) or None
+
     dg_svc = None
     local_inds = local_industries_for(industry)
+
+    # score_stocks 为同步 CPU+DB 重活，放入线程池执行，避免阻塞事件循环
+    async def _score(ind: str) -> dict:
+        return await asyncio.to_thread(
+            stock_score_layer.score_stocks, industry=ind, as_of=as_of,
+            limit=limit * 2, pool=pool,
+        )
 
     if local_inds:
         # ETF 主题行业：对每个本地细类打分后合并
         scored_list = []
         for ind in local_inds:
-            scored = stock_score_layer.score_stocks(industry=ind, as_of=as_of,
-                                                    limit=limit * 2)
+            scored = await _score(ind)
             scored_list.append(scored)
         items = []
         for scored in scored_list:
@@ -273,8 +365,7 @@ async def get_candidate_stocks(industry: str, limit: int = 30, as_of=None,
             sector_dg = {}
     else:
         # 本地细类行业：直接打分
-        scored = stock_score_layer.score_stocks(industry=industry, as_of=as_of,
-                                                limit=limit * 2)
+        scored = await _score(industry)
         items = scored.get("items", [])
         as_of_date = scored.get("as_of")
         sector_dg = {}
@@ -315,18 +406,30 @@ async def get_candidate_stocks_overview(top_n: int = 10, per_industry: int = 3,
     去重后共约 limit 只，供前端默认展示。
 
     industries 可显式传入（默认取行业资金流排名的前 top_n 个行业名），否则回退到强势行业列表。
+
+    性能：结果级 TTL 缓存 + 并集代码池缩小底层面板加载，冷启动/重复打开均显著提速。
     """
+    # 先解析交易日，保证缓存键稳定（as_of 变化 → 键变化 → 自动失效）
+    as_of_date = _resolve_as_of(get_mongo_db_sync(), as_of) or ""
+    cache_key = _overview_cache_key(as_of_date, top_n, per_industry, industries)
+    cached = _overview_cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     if industries:
         ind_names = [n for n in (industries or []) if n][:top_n]
     else:
-        inds = await get_candidate_industries(top_n=top_n, as_of=as_of)
+        inds = await get_candidate_industries(top_n=top_n, as_of=as_of_date)
         ind_names = [ind.get("industry", "") for ind in (inds.get("industries", []) or [])
                      if ind.get("industry")]
     if not ind_names:
-        return {"as_of": as_of or "", "industry": "", "items": [], "total": 0}
+        return {"as_of": as_of_date, "industry": "", "items": [], "total": 0}
+
+    # 构建并集代码池（top_n 行业成分股），缩小面板加载范围、缩短冷启动
+    pool_codes = _build_industry_pool(ind_names) or None
 
     results = await asyncio.gather(
-        *[get_candidate_stocks(ind, limit=per_industry, as_of=as_of)
+        *[get_candidate_stocks(ind, limit=per_industry, as_of=as_of_date, pool=pool_codes)
           for ind in ind_names],
         return_exceptions=True,
     )
@@ -345,8 +448,10 @@ async def get_candidate_stocks_overview(top_n: int = 10, per_industry: int = 3,
         uniq.append(it)
         if len(uniq) >= limit:
             break
-    return {"as_of": as_of or "", "industry": "",
-            "items": uniq, "total": len(uniq)}
+    result = {"as_of": as_of_date, "industry": "",
+              "items": uniq, "total": len(uniq)}
+    _overview_cache_put(cache_key, result)
+    return result
 
 
 async def batch_add_favorites(user_id: str, items: list[dict]) -> dict:

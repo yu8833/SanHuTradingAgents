@@ -22,6 +22,7 @@ import logging
 import threading
 import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -51,7 +52,9 @@ logger = logging.getLogger(__name__)
 
 # 进程内元数据缓存：股票基础信息列表与大盘趋势在盘中基本不变。
 # 候选池概览/行业扫描会并发触发多次 scan，避免每次重复跑全市场聚合与指数加载。
-_META_CACHE_TTL = 600  # 秒
+# TTL 6 小时：股票列表/大盘趋势均为 EOD 数据（18:30 后新交易日落地），长缓存安全且
+# 避免 10 分钟 TTL 导致候选池每次刷新都重复聚合全市场股票列表。
+_META_CACHE_TTL = 21600  # 秒
 _meta_lock = threading.Lock()
 _stock_codes_cache: dict = {"ts": 0.0, "data": []}
 _market_trend_cache: dict = {"ts": 0.0, "trend": "neutral"}
@@ -122,6 +125,7 @@ class ThreeBuysThreeSellsService:
     def __init__(self):
         self.db = None
         self._dg_service = None
+        self._cpu_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="tbs_cpu")
 
     async def _get_db(self):
         if self.db is None:
@@ -1763,7 +1767,11 @@ class ThreeBuysThreeSellsService:
                 if len(kline) < 70:
                     return None
 
-                ind = self._precompute_indicators(kline, code, name, industry, market_cap)
+                ind = await asyncio.get_running_loop().run_in_executor(
+                    self._cpu_executor,
+                    self._precompute_indicators,
+                    kline, code, name, industry, market_cap,
+                )
                 if ind is None:
                     return None
 
@@ -1874,7 +1882,9 @@ class ThreeBuysThreeSellsService:
 
                 # 辅助信号系统（教材第三章）：复用同一套 ind，对主信号做确认/降权/预警
                 try:
-                    aux = compute_auxiliary(ind, market_trend, last_idx)
+                    aux = await asyncio.get_running_loop().run_in_executor(
+                        self._cpu_executor, compute_auxiliary, ind, market_trend, last_idx
+                    )
                 except Exception as e:
                     logger.warning(f"📊 辅助信号计算失败 {code}: {e}")
                     aux = {"details": {}, "warnings": [], "score": 50.0}

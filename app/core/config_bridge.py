@@ -654,17 +654,27 @@ def _handle_sync_task_result(task):
 async def _sync_pricing_config_from_db():
     """
     从数据库同步定价配置（异步版本）
+
+    注意：内部使用同步 pymongo 客户端读取数据（与 bridge_config_to_env 其余部分一致），
+    因此既可在事件循环中以线程池方式执行，也可在任意线程内直接执行，
+    避免共享的 Motor 客户端绑定主事件循环导致 "Future attached to a different loop"。
     """
     try:
-        from app.core.database import get_mongo_db
+        from pymongo import MongoClient
 
-        db = get_mongo_db()
+        from app.core.config import settings
 
-        # 获取最新的激活配置
-        config = await db['system_configs'].find_one(
-            {'is_active': True},
-            sort=[('version', -1)]
-        )
+        client = MongoClient(settings.MONGO_URI)
+        try:
+            db = client[settings.MONGO_DB]
+
+            # 获取最新的激活配置
+            config = db['system_configs'].find_one(
+                {'is_active': True},
+                sort=[('version', -1)]
+            )
+        finally:
+            client.close()
 
         if not config:
             logger.warning("⚠️  未找到激活的配置")

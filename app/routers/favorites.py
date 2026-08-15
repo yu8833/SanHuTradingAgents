@@ -18,13 +18,19 @@ router = APIRouter(prefix="/favorites", tags=["自选股管理"])
 
 class AddFavoriteRequest(BaseModel):
     """添加自选股请求"""
-    stock_code: str
+    stock_code: str | None = None  # 兼容字段（部分旧调用）
+    symbol: str | None = None      # 主字段（前端 favorites API 约定）
     stock_name: str
     market: str = "A股"
     tags: list[str] = []
     notes: str = ""
     alert_price_high: float | None = None
     alert_price_low: float | None = None
+
+    @property
+    def resolved_stock_code(self) -> str:
+        """解析后的股票代码：优先 stock_code，其次 symbol。"""
+        return (self.stock_code or self.symbol or "").strip()
 
 
 class UpdateFavoriteRequest(BaseModel):
@@ -76,14 +82,20 @@ async def add_favorite(
     logger = logging.getLogger("webapi")
 
     try:
-        logger.info(f"📝 添加自选股请求: user_id={current_user['id']}, stock_code={request.stock_code}, stock_name={request.stock_name}")
+        stock_code = request.resolved_stock_code
+        if not stock_code:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="缺少股票代码"
+            )
+        logger.info(f"📝 添加自选股请求: user_id={current_user['id']}, stock_code={stock_code}, stock_name={request.stock_name}")
 
         # 检查是否已存在
-        is_fav = await favorites_service.is_favorite(current_user["id"], request.stock_code)
+        is_fav = await favorites_service.is_favorite(current_user["id"], stock_code)
         logger.info(f"🔍 检查是否已存在: {is_fav}")
 
         if is_fav:
-            logger.warning(f"⚠️ 股票已在自选股中: {request.stock_code}")
+            logger.warning(f"⚠️ 股票已在自选股中: {stock_code}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="该股票已在自选股中"
@@ -93,7 +105,7 @@ async def add_favorite(
         logger.info("➕ 开始添加自选股...")
         success = await favorites_service.add_favorite(
             user_id=current_user["id"],
-            stock_code=request.stock_code,
+            stock_code=stock_code,
             stock_name=request.stock_name,
             market=request.market,
             tags=request.tags,
@@ -105,7 +117,7 @@ async def add_favorite(
         logger.info(f"✅ 添加结果: success={success}")
 
         if success:
-            return ok({"stock_code": request.stock_code}, "添加成功")
+            return ok({"stock_code": stock_code}, "添加成功")
         else:
             logger.error("❌ 添加失败: success=False")
             raise HTTPException(

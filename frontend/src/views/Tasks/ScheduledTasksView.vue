@@ -204,6 +204,7 @@ const JOB_NAME_MAP: Record<string, string> = {
   retail_regime_detect: '散户市场环境检测',
   stock_alert_check: '个股预警检查',
   stock_alert_check_close: '个股预警收盘检查',
+  retail_intraday_scan: '盘中统一扫描（预警+退出）',
   check_zombie_tasks: '僵尸任务检测',
 }
 

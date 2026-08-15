@@ -383,8 +383,9 @@ async def lifespan(app: FastAPI):
                         ingest_interval = min(settings.QUOTES_INGEST_INTERVAL_SECONDS, 30)
                         logger.info(f"✅ 检测到 Tushare rt_k 权限（premium/vip），实时行情采集间隔调整为 {ingest_interval}s")
                     elif settings.TUSHARE_ENABLED and settings.TUSHARE_TIER.lower() not in ("free", ""):
-                        # standard/basic 付费用户：无 rt_k 权限，但走 AKShare 可用更短间隔（60秒）
-                        ingest_interval = min(settings.QUOTES_INGEST_INTERVAL_SECONDS, 60)
+                        # standard/basic 付费用户：无 rt_k 权限，但走 AKShare 可用更短间隔（120秒）
+                        # 120s 为降频后的折中：60s→120s 减半全市场采集 I/O，K线/预警延迟最多2分钟
+                        ingest_interval = min(settings.QUOTES_INGEST_INTERVAL_SECONDS, 120)
                         logger.info(f"✅ Tushare {settings.TUSHARE_TIER} 付费用户（无 rt_k），走 AKShare 采集间隔调整为 {ingest_interval}s")
                     else:
                         logger.info(f"ℹ️ Tushare 免费用户，保持配置的采集间隔 {ingest_interval}s")
@@ -426,15 +427,26 @@ async def lifespan(app: FastAPI):
             # 实际行情入库走的是 quotes_ingestion_service。
 
             # 历史数据同步任务（核心保留：日K同步的主来源）
+            # 尾部串行执行：每日估值（service 内部已串行）+ 数据完整性检查（run_data_integrity_check）。
+            # 原独立 data_integrity_check(00:30) cron 已合并至此，避免长任务撞车、保证执行顺序。
+            async def run_tushare_historical_sync_with_integrity():
+                """历史同步完成后串行执行数据完整性检查（每日估值已在 service 内部串行）"""
+                result = await run_tushare_historical_sync(incremental=True)
+                if settings.DATA_INTEGRITY_CHECK_ENABLED:
+                    try:
+                        await run_data_integrity_check()
+                    except Exception as e:
+                        logger.warning(f"⚠️ 历史同步尾部数据完整性检查失败（不影响历史同步结果）: {e}")
+                return result
+
             if settings.TUSHARE_HISTORICAL_SYNC_ENABLED:
                 scheduler.add_job(
-                    run_tushare_historical_sync,
+                    run_tushare_historical_sync_with_integrity,
                     CronTrigger.from_crontab(settings.TUSHARE_HISTORICAL_SYNC_CRON, timezone=settings.TIMEZONE),
                     id="tushare_historical_sync",
-                    name="历史数据同步（Tushare）",
-                    kwargs={"incremental": True}
+                    name="历史数据同步（Tushare，含估值+完整性检查）",
                 )
-                logger.info(f"📊 Tushare历史数据同步已配置: {settings.TUSHARE_HISTORICAL_SYNC_CRON}")
+                logger.info(f"📊 Tushare历史数据同步已配置（尾部串行估值+完整性检查）: {settings.TUSHARE_HISTORICAL_SYNC_CRON}")
             else:
                 logger.info(f"⏭️ Tushare历史数据同步跳过（未启用）: {settings.TUSHARE_HISTORICAL_SYNC_CRON}")
 
@@ -466,8 +478,9 @@ async def lifespan(app: FastAPI):
             else:
                 logger.info(f"⏭️ Tushare财务数据同步跳过（未启用）: {settings.TUSHARE_FINANCIAL_SYNC_CRON}")
 
-            # 每日估值/市值数据同步任务（为回测提供按日 PE/PB/市值）
-            if settings.TUSHARE_DAILY_BASIC_SYNC_ENABLED:
+            # 每日估值/市值数据同步（已合并进历史同步任务尾部串行执行，不再单独注册）
+            # 兜底：若历史同步被禁用，则保留独立任务以免估值数据缺失。
+            if settings.TUSHARE_DAILY_BASIC_SYNC_ENABLED and not settings.TUSHARE_HISTORICAL_SYNC_ENABLED:
                 scheduler.add_job(
                     run_tushare_daily_basic_sync,
                     CronTrigger.from_crontab(settings.TUSHARE_DAILY_BASIC_SYNC_CRON, timezone=settings.TIMEZONE),
@@ -475,9 +488,9 @@ async def lifespan(app: FastAPI):
                     name="每日估值数据同步（Tushare）",
                     kwargs={"days_back": settings.TUSHARE_DAILY_BASIC_SYNC_DAYS_BACK}
                 )
-                logger.info(f"📈 Tushare每日估值数据同步已配置: {settings.TUSHARE_DAILY_BASIC_SYNC_CRON}")
-            else:
-                logger.info(f"⏭️ Tushare每日估值数据同步跳过（未启用）: {settings.TUSHARE_DAILY_BASIC_SYNC_CRON}")
+                logger.info(f"📈 Tushare每日估值数据同步已配置（独立任务，历史同步禁用兜底）: {settings.TUSHARE_DAILY_BASIC_SYNC_CRON}")
+            elif settings.TUSHARE_DAILY_BASIC_SYNC_ENABLED:
+                logger.info(f"📈 Tushare每日估值数据同步已合并进历史同步任务（23:00串行）")
 
             # 状态检查任务（保留，频率在 config.py 已为每小时，后续可降频）
             if settings.TUSHARE_STATUS_CHECK_ENABLED:
@@ -642,17 +655,24 @@ async def lifespan(app: FastAPI):
                 logger.error(f"❌ [APScheduler] 数据完整性检查失败: {e}")
                 raise
 
-        scheduler.add_job(
-            run_data_integrity_check,
-            CronTrigger.from_crontab(settings.DATA_INTEGRITY_CHECK_CRON, timezone=settings.TIMEZONE),
-            id="data_integrity_check",
-            name="数据完整性检查与自动补数",
-        )
-        if not settings.DATA_INTEGRITY_CHECK_ENABLED:
-            scheduler.pause_job("data_integrity_check")
-            logger.info(f"⏸️ 数据完整性检查已添加但暂停: {settings.DATA_INTEGRITY_CHECK_CRON}")
+        # 数据完整性检查任务：已合并进历史同步任务（run_tushare_historical_sync_with_integrity）尾部串行执行。
+        # 兜底：若历史同步被禁用，则保留独立 cron，以免完整性检查缺失。
+        _integrity_merged = settings.TUSHARE_UNIFIED_ENABLED and settings.TUSHARE_HISTORICAL_SYNC_ENABLED
+        if _integrity_merged:
+            if settings.DATA_INTEGRITY_CHECK_ENABLED:
+                logger.info(f"🔍 数据完整性检查已合并进历史同步任务（{settings.TUSHARE_HISTORICAL_SYNC_CRON} 串行执行）")
+            else:
+                logger.info("⏭️ 数据完整性检查未启用")
+        elif settings.DATA_INTEGRITY_CHECK_ENABLED:
+            scheduler.add_job(
+                run_data_integrity_check,
+                CronTrigger.from_crontab(settings.DATA_INTEGRITY_CHECK_CRON, timezone=settings.TIMEZONE),
+                id="data_integrity_check",
+                name="数据完整性检查与自动补数",
+            )
+            logger.info(f"🔍 数据完整性检查已配置（独立任务，历史同步禁用兜底）: {settings.DATA_INTEGRITY_CHECK_CRON}")
         else:
-            logger.info(f"🔍 数据完整性检查已配置: {settings.DATA_INTEGRITY_CHECK_CRON}")
+            logger.info(f"⏭️ 数据完整性检查未启用（未注册）: {settings.DATA_INTEGRITY_CHECK_CRON}")
 
         # 新闻数据同步任务配置
         logger.info("🔄 配置新闻数据同步任务...")
@@ -662,6 +682,13 @@ async def lifespan(app: FastAPI):
         async def run_news_sync():
             """运行新闻同步任务 - 同步自选股新闻和市场新闻（统一使用NewsDataSyncService）"""
             try:
+                # 🔧 时段门控：仅 8:00-20:00 有效新闻时段执行，凌晨同步无新闻价值，
+                # 在不改 cron（.env 保持每2小时）的前提下减少约一半的无意义抓取 I/O。
+                from datetime import datetime as _dt
+                _hour = _dt.now().hour
+                if not (8 <= _hour < 20):
+                    logger.debug(f"⏭️ 非有效新闻时段（{_hour}时），跳过新闻同步")
+                    return
                 logger.info("📰 开始新闻数据同步（自选股 + 市场新闻）...")
                 
                 sync_service = await get_news_data_sync_service()
@@ -737,8 +764,9 @@ async def lifespan(app: FastAPI):
             logger.error(f"🚨 散户策略定时任务注册失败，退出信号扫描/预警检查等功能将不可用: {e}", exc_info=True)
 
         # ==================== ETF Radar 盘中采集（行业ETF资金流雷达） ====================
-        # 工作日盘中每10分钟采集一次全量ETF资金流快照（~19s），写入 etf_radar_snapshot，
+        # 工作日盘中每30分钟采集一次全量ETF资金流快照（~19s），写入 etf_radar_snapshot，
         # 前端 /api/etf-radar/summary 读最新快照秒回。任务内部自判交易日/时段。
+        # 频率 10min→15min→30min 降频：快照用于当日资金流趋势展示，30分钟粒度仍平滑。
         try:
             from app.services.etf_radar.etf_radar_service import get_etf_radar_service
 
@@ -753,12 +781,12 @@ async def lifespan(app: FastAPI):
 
             scheduler.add_job(
                 run_etf_radar_collect,
-                CronTrigger.from_crontab("*/10 9-15 * * 1-5", timezone=settings.TIMEZONE),
+                CronTrigger.from_crontab("*/30 9-15 * * 1-5", timezone=settings.TIMEZONE),
                 id="etf_radar_collect",
-                name="ETF雷达盘中采集（每10分钟）",
+                name="ETF雷达盘中采集（每30分钟）",
                 replace_existing=True,
             )
-            logger.info("✅ ETF Radar 盘中采集任务已注册: 工作日 9:00-15:00 每10分钟")
+            logger.info("✅ ETF Radar 盘中采集任务已注册: 工作日 9:00-15:00 每30分钟")
         except Exception as e:
             logger.error(f"🚨 ETF Radar 盘中采集任务注册失败: {e}", exc_info=True)
 

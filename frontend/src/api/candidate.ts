@@ -113,7 +113,7 @@ export const candidateApi = {
 
   /** 单只加入自选（复用 favorites api） */
   addFavorite(code: string, name: string) {
-    return favoritesApi.add({ symbol: code, stock_name: name, market: 'A股' })
+    return favoritesApi.add({ stock_code: code, stock_name: name, market: 'A股' })
   },
 
   /** 行业筛选：行业 ETF 主力净流入资金流排名（资金为王，动量/量能仅展示） */

@@ -436,16 +436,32 @@ class QuotesIngestionService:
                 "updated_at": updated_at,
             }
             # 补充字段：换手率/量比/名称（供情绪雷达量能维度、榜单与名称解析使用）。
-            # None 时用 $setOnInsert 兜底（仅新文档写入时生效），避免覆盖既有实时值。
-            if turnover_rate is not None or vol_ratio is not None or name is not None:
+            # 仅当本次数据源提供了有效值时才用 $set 写入；缺失时改用 $setOnInsert 兜底
+            # （仅新文档插入时写入 None），避免用 None 覆盖掉其他数据源已入库的实时值
+            # （修复：Tushare rt_k 不返回换手率，此前会把 AKShare 已写入的换手率覆盖成 None，
+            #   导致看板「活跃换手」为空、平均/高换手恒为 0）。
+            set_on_insert: dict[str, float | str | None] = {}
+            if turnover_rate is not None:
                 set_fields["turnover_rate"] = turnover_rate
+            else:
+                set_on_insert["turnover_rate"] = None
+            if vol_ratio is not None:
                 set_fields["vol_ratio"] = vol_ratio
+            else:
+                set_on_insert["vol_ratio"] = None
+            if name is not None:
                 set_fields["name"] = name
+            else:
+                set_on_insert["name"] = None
+
+            update_doc: dict = {"$set": set_fields}
+            if set_on_insert:
+                update_doc["$setOnInsert"] = set_on_insert
 
             ops.append(
                 UpdateOne(
                     {"code": code6},
-                    {"$set": set_fields},
+                    update_doc,
                     upsert=True,
                 )
             )

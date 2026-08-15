@@ -43,14 +43,17 @@ _FACTOR_WEIGHTS = {
 }
 
 
-def _load_enriched_target(db, as_of_date: str) -> pd.DataFrame:
-    """加载全市场日线面板 + 指标 + 基本面，返回目标日行（复用 screener 进程内缓存）。"""
+def _load_enriched_target(db, as_of_date: str, pool: list[str] | None = None) -> pd.DataFrame:
+    """加载日线面板 + 指标 + 基本面，返回目标日行（复用 screener 进程内缓存）。
+
+    pool 指定时只加载该代码池（默认全市场），供候选池默认视图缩小加载范围、缩短冷启动。
+    """
     from app.strategy_system.screener import _get_enriched_target, _load_computed_panel
 
-    panel = _load_computed_panel(db, None, as_of_date)
+    panel = _load_computed_panel(db, pool, as_of_date)
     if panel.empty:
         return panel
-    return _get_enriched_target(db, panel, None, as_of_date)
+    return _get_enriched_target(db, panel, pool, as_of_date)
 
 
 def _load_dg_factors(db, codes: list[str]) -> dict:
@@ -167,15 +170,16 @@ def _quality_score(row: pd.Series, industry_stats: dict, dg: dict | None = None)
 
 
 def score_stocks(codes: list[str] | None = None, industry: str | None = None,
-                 as_of=None, limit: int = 30) -> dict:
+                 as_of=None, limit: int = 30, pool: list[str] | None = None) -> dict:
     """对指定代码池（或某行业成分股）多因子打分，返回 top limit 候选。
 
     硬过滤：ST/退 标记、ΔG double_kill（若可用）。
+    pool: 限定底层面板加载的代码池（缩小加载范围，冷启动提速；默认全市场）。
     Returns: {as_of, industry, items:[{code,name,...factors,quality_score}], total}
     """
     db = get_mongo_db_sync()
     as_of_date = _resolve_as_of(db, as_of)
-    target = _load_enriched_target(db, as_of_date)
+    target = _load_enriched_target(db, as_of_date, pool=pool)
     if target.empty:
         return {"as_of": as_of_date, "industry": industry, "items": [], "total": 0}
 
