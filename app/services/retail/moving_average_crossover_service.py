@@ -19,6 +19,7 @@ import logging
 import time
 from datetime import datetime
 from typing import Any
+from app.utils.timezone import now_tz
 
 import numpy as np
 
@@ -59,7 +60,7 @@ class MovingAverageCrossoverService(RetailScreeningBase):
             f"均线交叉扫描: {len(candidates)} 个候选股, 开始获取历史数据"
         )
 
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = now_tz().strftime("%Y-%m-%d")
         quotes_map = await self._batch_get_quotes(
             candidates, today, days=lookback_days, concurrency=100
         )

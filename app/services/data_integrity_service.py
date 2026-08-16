@@ -17,6 +17,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Any
+from app.utils.timezone import now_tz
 
 from app.core.database import get_mongo_db
 
@@ -58,7 +59,7 @@ class DataIntegrityService:
         """
         db = await self._get_db()
         result = {
-            "check_time": datetime.now().isoformat(),
+            "check_time": now_tz().isoformat(),
             "trade_date": None,
             "expected_count": 0,
             "actual_count": 0,
@@ -250,7 +251,7 @@ class DataIntegrityService:
         try:
             end_dt = datetime.strptime(trade_date, "%Y-%m-%d")
         except Exception:
-            end_dt = datetime.now()
+            end_dt = now_tz()
         start_date = (end_dt - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
 
         # 构建降级链：先尝试配置的源，失败则依次降级

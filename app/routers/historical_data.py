@@ -6,6 +6,7 @@
 import logging
 from datetime import datetime
 from typing import Any
+from app.utils.timezone import now_tz
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -231,7 +232,7 @@ async def health_check():
                 "status": "healthy",
                 "total_records": stats.get("total_records", 0),
                 "total_symbols": stats.get("total_symbols", 0),
-                "last_check": datetime.now().isoformat()
+                "last_check": now_tz().isoformat()
             },
             "message": "服务正常"
         }
@@ -244,7 +245,7 @@ async def health_check():
                 "service": "历史数据服务",
                 "status": "unhealthy",
                 "error": str(e),
-                "last_check": datetime.now().isoformat()
+                "last_check": now_tz().isoformat()
             },
             "message": "服务异常"
         }

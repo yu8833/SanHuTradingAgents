@@ -246,7 +246,7 @@ class SchedulerService:
                 logger.info(f"📝 任务 {job_id} 收到手动触发参数（仅记录，不修改原任务配置）: {kwargs}")
 
             # 手动触发任务 - 使用北京时间
-            now = datetime.now()
+            now = now_tz()
             job.modify(next_run_time=now)
             logger.info(f"🚀 手动触发任务 {job_id} (next_run_time={now}, was_paused={was_paused}, kwargs={kwargs})")
 
@@ -874,7 +874,7 @@ class SchedulerService:
         - 为自动触发的任务创建 running 记录（手动触发的已在 trigger_job 中创建）
         """
         # 记录实际开始执行时间（用于计算 execution_time）
-        self._job_start_times[event.job_id] = datetime.now()
+        self._job_start_times[event.job_id] = now_tz()
 
         # 修复：JobSubmissionEvent 的属性是 scheduled_run_times（复数，列表），
         # 不是 scheduled_run_time（单数）。JobExecutionEvent 才有 scheduled_run_time。
@@ -895,7 +895,7 @@ class SchedulerService:
         # 计算实际执行时间（基于 SUBMITTED 事件记录的开始时间）
         start_time = self._job_start_times.pop(event.job_id, None)
         if start_time is not None:
-            execution_time = (datetime.now() - start_time).total_seconds()
+            execution_time = (now_tz() - start_time).total_seconds()
         else:
             # 兜底：使用 scheduled_run_time 估算（包含调度延迟，不精确）
             execution_time = None
@@ -920,7 +920,7 @@ class SchedulerService:
         # 计算实际执行时间（基于 SUBMITTED 事件记录的开始时间）
         start_time = self._job_start_times.pop(event.job_id, None)
         if start_time is not None:
-            execution_time = (datetime.now() - start_time).total_seconds()
+            execution_time = (now_tz() - start_time).total_seconds()
         else:
             # 兜底：使用 scheduled_run_time 估算（包含调度延迟，不精确）
             execution_time = None
@@ -1002,6 +1002,15 @@ class SchedulerService:
             job = self.scheduler.get_job(job_id)
             job_name = job.name if job else job_id
 
+            # 统一把 scheduled_time 转为 naive 本地时间（北京时间），
+            # 作为"同一次调度"的关联键，供 running / 终态记录互相匹配。
+            scheduled_naive = None
+            if scheduled_time:
+                if scheduled_time.tzinfo is not None:
+                    scheduled_naive = scheduled_time.astimezone(UTC_8).replace(tzinfo=None)
+                else:
+                    scheduled_naive = scheduled_time
+
             # 如果是 running 状态，检查是否已有近期的 running 记录（1 分钟内）
             # 避免手动触发的 trigger_job 和 SUBMITTED 事件重复创建 running 记录
             if status == "running":
@@ -1015,21 +1024,51 @@ class SchedulerService:
                     logger.debug(f"ℹ️ 任务 {job_id} 已有近期的 running 记录，跳过重复创建")
                     return
 
-            # 如果是完成状态（success/failed），先查找是否有对应的 running 记录
-            if status in ["success", "failed"]:
-                # 长期运行任务（历史同步/财务同步）使用 24h 窗口匹配，普通任务 5 分钟
-                window_minutes = 24 * 60 if job_id in self.LONG_RUNNING_JOBS else 5
-                window_start = get_utc8_now() - timedelta(minutes=window_minutes)
-                existing_record = await db.scheduler_executions.find_one(
-                    {
+                # 🔥 修复孤儿 running 记录：SUBMITTED 与 EXECUTED 事件分别异步落库，
+                # 若 success 先于 running 写入，会产生一条永不更新为终态的"孤儿 running"。
+                # 此处若同一调度时刻已存在终态记录（success/failed），则本次运行已正常结束，
+                # 直接跳过创建 running，避免僵尸记录。
+                if scheduled_naive is not None:
+                    existing_terminal = await db.scheduler_executions.find_one({
                         "job_id": job_id,
-                        "status": "running",
-                        "timestamp": {"$gte": window_start}
-                    },
-                    sort=[("timestamp", -1)]
-                )
+                        "scheduled_time": scheduled_naive,
+                        "status": {"$in": ["success", "failed"]}
+                    })
+                    if existing_terminal:
+                        logger.debug(
+                            f"ℹ️ 任务 {job_id} 调度时刻 {scheduled_naive} 已有终态记录，跳过创建 running"
+                        )
+                        return
 
-                if existing_record:
+            # 如果是完成状态（success/failed），优先把对应的 running 记录更新为终态
+            if status in ["success", "failed"]:
+                matched_running = None
+                # 1) 优先按 scheduled_time 精确关联，消除按时间窗口误配（窗口≈任务周期时
+                #    可能匹配到上一次运行）以及 success 先落库导致的窗口内无 running 的问题
+                if scheduled_naive is not None:
+                    matched_running = await db.scheduler_executions.find_one(
+                        {
+                            "job_id": job_id,
+                            "status": "running",
+                            "scheduled_time": scheduled_naive,
+                        },
+                        sort=[("timestamp", -1)]
+                    )
+                # 2) 兜底：scheduled_time 缺失（如手动触发时未携带）时退回时间窗口匹配。
+                #    长期运行任务（历史同步/财务同步）使用 24h 窗口，普通任务 5 分钟
+                if matched_running is None:
+                    window_minutes = 24 * 60 if job_id in self.LONG_RUNNING_JOBS else 5
+                    window_start = get_utc8_now() - timedelta(minutes=window_minutes)
+                    matched_running = await db.scheduler_executions.find_one(
+                        {
+                            "job_id": job_id,
+                            "status": "running",
+                            "timestamp": {"$gte": window_start}
+                        },
+                        sort=[("timestamp", -1)]
+                    )
+
+                if matched_running:
                     # 更新现有记录
                     update_data = {
                         "status": status,
@@ -1047,7 +1086,7 @@ class SchedulerService:
                         update_data["progress"] = progress
 
                     await db.scheduler_executions.update_one(
-                        {"_id": existing_record["_id"]},
+                        {"_id": matched_running["_id"]},
                         {"$set": update_data}
                     )
 
@@ -1063,20 +1102,11 @@ class SchedulerService:
                     return
 
             # 如果没有找到 running 记录，或者是 running/missed 状态，插入新记录
-            # scheduled_time 可能是 aware datetime（来自 APScheduler），需要转换为 naive datetime
-            scheduled_time_naive = None
-            if scheduled_time:
-                if scheduled_time.tzinfo is not None:
-                    # 转换为本地时区，然后移除时区信息
-                    scheduled_time_naive = scheduled_time.astimezone(UTC_8).replace(tzinfo=None)
-                else:
-                    scheduled_time_naive = scheduled_time
-
             execution_record = {
                 "job_id": job_id,
                 "job_name": job_name,
                 "status": status,
-                "scheduled_time": scheduled_time_naive,
+                "scheduled_time": scheduled_naive,
                 "execution_time": execution_time,
                 "timestamp": get_utc8_now(),
                 "is_manual": is_manual
@@ -1490,7 +1520,7 @@ class SchedulerService:
                         continue
 
                     # 生成任务ID
-                    job_id = f"fav_analysis_{stock_code}_{int(datetime.now().timestamp())}"
+                    job_id = f"fav_analysis_{stock_code}_{int(now_tz().timestamp())}"
 
                     # 构建任务参数
                     job_kwargs = {

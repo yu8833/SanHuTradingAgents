@@ -5,6 +5,7 @@
 - fetch_daily_basic_mv_map：根据交易日获取日度基础指标映射（市值/估值/交易）
 """
 from __future__ import annotations
+from app.utils.timezone import now_tz
 
 from datetime import datetime, timedelta
 
@@ -104,7 +105,7 @@ def find_latest_trade_date() -> str:
     if api is None:
         raise RuntimeError("Tushare API unavailable")
 
-    today = datetime.now()
+    today = now_tz()
     for delta in range(0, 6):
         d = (today - timedelta(days=delta)).strftime("%Y%m%d")
         try:
@@ -200,7 +201,7 @@ def fetch_latest_roe_map() -> dict[str, dict[str, float]]:
         # 近6期即可
         return q_dates_prev + q_dates
 
-    candidates = quarter_ends(datetime.now())
+    candidates = quarter_ends(now_tz())
     data_map: dict[str, dict[str, float]] = {}
 
     for end_date in candidates:

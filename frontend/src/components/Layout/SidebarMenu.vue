@@ -88,7 +88,6 @@
         <template #title>个人设置</template>
         <el-menu-item index="/settings">通用设置</el-menu-item>
         <el-menu-item index="/settings?tab=appearance">外观设置</el-menu-item>
-        <el-menu-item index="/settings?tab=analysis">分析偏好</el-menu-item>
         <el-menu-item index="/settings?tab=notifications">通知设置</el-menu-item>
         <el-menu-item index="/settings?tab=security">安全设置</el-menu-item>
         <el-menu-item index="/settings/tags">标签管理</el-menu-item>
@@ -98,8 +97,6 @@
       <el-sub-menu index="/settings-config">
         <template #title>系统配置</template>
         <el-menu-item index="/settings/config">配置管理</el-menu-item>
-        <el-menu-item index="/settings/usage">使用统计</el-menu-item>
-        <el-menu-item index="/settings/cache">缓存管理</el-menu-item>
       </el-sub-menu>
 
       <!-- 系统管理 -->
@@ -110,7 +107,6 @@
         <el-menu-item index="/settings/logs">操作日志</el-menu-item>
         <el-menu-item index="/settings/system-logs">系统日志</el-menu-item>
         <el-menu-item index="/settings/sync">多数据源同步</el-menu-item>
-        <el-menu-item index="/settings/scheduler">定时任务</el-menu-item>
       </el-sub-menu>
     </el-sub-menu>
 

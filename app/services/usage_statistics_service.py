@@ -6,6 +6,7 @@
 import logging
 from collections import defaultdict
 from datetime import datetime, timedelta
+from app.utils.timezone import now_tz
 
 from app.core.database import get_mongo_db
 from app.models.config import UsageRecord, UsageStatistics
@@ -91,7 +92,7 @@ class UsageStatisticsService:
             collection = db[self.collection_name]
             
             # 计算时间范围
-            end_date = datetime.now()
+            end_date = now_tz()
             start_date = end_date - timedelta(days=days)
             
             # 构建查询条件
@@ -220,7 +221,7 @@ class UsageStatisticsService:
             collection = db[self.collection_name]
             
             # 计算截止日期
-            cutoff_date = datetime.now() - timedelta(days=days)
+            cutoff_date = now_tz() - timedelta(days=days)
             
             # 删除旧记录
             result = await collection.delete_many({

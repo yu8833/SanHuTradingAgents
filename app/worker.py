@@ -12,6 +12,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from app.utils.timezone import now_tz
 
 # Add project root to path for importing analysis runner
 project_root = Path(__file__).parent.parent
@@ -36,7 +37,7 @@ async def publish_progress(task_id: str, message: str, step: int | None = None, 
     progress_data = {
         "task_id": task_id,
         "message": message,
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": now_tz().isoformat(),
     }
     if step is not None and total_steps is not None:
         progress_data["step"] = step
@@ -84,7 +85,7 @@ async def process_task(task_id: str) -> None:
         llm_provider = normalize_provider_key(params.get("llm_provider", "dashscope"))
         llm_model = params.get("llm_model", "qwen-plus")
         market_type = params.get("market_type", "美股")
-        analysis_date = params.get("analysis_date", datetime.now().strftime("%Y-%m-%d"))
+        analysis_date = params.get("analysis_date", now_tz().strftime("%Y-%m-%d"))
 
         # Progress callback function
         async def progress_callback(message: str, step: int | None = None, total_steps: int | None = None):
@@ -125,7 +126,7 @@ async def process_task(task_id: str) -> None:
                 result = {
                     "symbol": symbol,
                     "analysis_result": analysis_result,
-                    "completed_at": datetime.now().isoformat(),
+                    "completed_at": now_tz().isoformat(),
                     "success": True
                 }
                 status = "completed"
@@ -135,7 +136,7 @@ async def process_task(task_id: str) -> None:
                 result = {
                     "symbol": symbol,
                     "error": error_msg,
-                    "completed_at": datetime.now().isoformat(),
+                    "completed_at": now_tz().isoformat(),
                     "success": False
                 }
                 status = "failed"
@@ -146,7 +147,7 @@ async def process_task(task_id: str) -> None:
             result = {
                 "symbol": symbol,
                 "error": f"分析执行异常: {str(analysis_error)}",
-                "completed_at": datetime.now().isoformat(),
+                "completed_at": now_tz().isoformat(),
                 "success": False
             }
             status = "failed"

@@ -3,6 +3,7 @@
 """
 
 import logging
+from app.utils.timezone import now_tz
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
@@ -254,7 +255,7 @@ async def export_logs_csv(
         
         # 返回CSV文件
         from datetime import datetime
-        filename = f"operation_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        filename = f"operation_logs_{now_tz().strftime('%Y%m%d_%H%M%S')}.csv"
         
         return StreamingResponse(
             io.BytesIO(output.getvalue().encode('utf-8-sig')),

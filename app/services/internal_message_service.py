@@ -6,6 +6,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
+from app.utils.timezone import now_tz
 
 from pymongo import ReplaceOne
 from pymongo.errors import BulkWriteError
@@ -121,8 +122,8 @@ class InternalMessageService:
             operations = []
             for message in messages:
                 # 添加时间戳
-                message["created_at"] = datetime.now()
-                message["updated_at"] = datetime.now()
+                message["created_at"] = now_tz()
+                message["updated_at"] = now_tz()
                 
                 # 使用message_id作为唯一标识
                 filter_dict = {

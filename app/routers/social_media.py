@@ -4,6 +4,7 @@
 """
 from datetime import datetime, timedelta
 from typing import Any
+from app.utils.timezone import now_tz
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -189,7 +190,7 @@ async def get_statistics(
         service = await get_social_media_service()
         
         # 计算时间范围
-        end_time = datetime.now()
+        end_time = now_tz()
         start_time = end_time - timedelta(hours=hours_back)
         
         stats = await service.get_social_media_statistics(symbol, start_time, end_time)
@@ -270,7 +271,7 @@ async def get_sentiment_analysis(
         service = await get_social_media_service()
         
         # 计算时间范围
-        end_time = datetime.now()
+        end_time = now_tz()
         start_time = end_time - timedelta(hours=hours_back)
         
         # 查询消息

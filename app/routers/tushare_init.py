@@ -4,6 +4,7 @@ Tushare数据初始化API路由
 """
 import asyncio
 from datetime import datetime
+from app.utils.timezone import now_tz
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -229,7 +230,7 @@ async def _run_basic_initialization():
         "is_running": True,
         "current_step": "基础信息初始化",
         "progress": "0/1",
-        "started_at": datetime.now()
+        "started_at": now_tz()
     })
     
     try:
@@ -256,7 +257,7 @@ async def _run_full_initialization(historical_days: int, force_update: bool):
         "is_running": True,
         "current_step": "准备初始化",
         "progress": "0/6",
-        "started_at": datetime.now()
+        "started_at": now_tz()
     })
     
     try:

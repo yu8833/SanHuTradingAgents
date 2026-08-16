@@ -3,6 +3,7 @@
 """
 import json
 import logging
+from app.utils.timezone import now_tz
 
 import redis
 
@@ -72,7 +73,7 @@ class KlineCache:
     def _get_ttl(self) -> int:
         """根据当前时间判断TTL（交易日vs非交易日）"""
         import datetime
-        now = datetime.datetime.now()
+        now = datetime.now_tz()
         weekday = now.weekday()
         # 周六周日一定是非交易日
         if weekday >= 5:

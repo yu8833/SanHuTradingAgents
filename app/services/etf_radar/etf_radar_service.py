@@ -11,6 +11,7 @@
 """
 
 from __future__ import annotations
+from app.utils.timezone import now_tz
 
 import asyncio
 import logging
@@ -219,13 +220,13 @@ class EtfRadarService:
         self._attach_industry_flows(items, flows)
 
         # as_of：优先取 ETF 数据日期（YYYY-MM-DD → YYYYMMDD），否则取今天
-        as_of = datetime.now().strftime("%Y%m%d")
+        as_of = now_tz().strftime("%Y%m%d")
         if _COL_DATA_DATE in etf_df.columns:
             d = str(etf_df[_COL_DATA_DATE].iloc[0]).replace("-", "")[:8]
             if len(d) == 8 and d.isdigit():
                 as_of = d
 
-        now_iso = datetime.now().isoformat(timespec="seconds")
+        now_iso = now_tz().isoformat(timespec="seconds")
         doc = {
             "as_of": as_of,
             "updated_at": now_iso,

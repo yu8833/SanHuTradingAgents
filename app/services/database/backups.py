@@ -2,6 +2,7 @@
 Backup, import, and export routines extracted from DatabaseService.
 """
 from __future__ import annotations
+from app.utils.timezone import now_tz
 
 import asyncio
 import gzip
@@ -48,7 +49,7 @@ async def create_backup_native(name: str, backup_dir: str, collections: list[str
     db = get_mongo_db()
 
     backup_id = str(ObjectId())
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = now_tz().strftime("%Y%m%d_%H%M%S")
     backup_dirname = f"backup_{name}_{timestamp}"
     backup_path = os.path.join(backup_dir, backup_dirname)
 
@@ -116,7 +117,7 @@ async def create_backup_native(name: str, backup_dir: str, collections: list[str
         "file_path": backup_path,
         "size": file_size,
         "collections": collections,
-        "created_at": datetime.now(),
+        "created_at": now_tz(),
         "created_by": user_id,
         "backup_type": "mongodump",  # 标记备份类型
     }
@@ -144,7 +145,7 @@ async def create_backup(name: str, backup_dir: str, collections: list[str] | Non
     db = get_mongo_db()
 
     backup_id = str(ObjectId())
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = now_tz().strftime("%Y%m%d_%H%M%S")
     backup_filename = f"backup_{name}_{timestamp}.json.gz"
     backup_path = os.path.join(backup_dir, backup_filename)
 
@@ -154,7 +155,7 @@ async def create_backup(name: str, backup_dir: str, collections: list[str] | Non
     backup_data: dict[str, Any] = {
         "backup_id": backup_id,
         "name": name,
-        "created_at": datetime.now().isoformat(),
+        "created_at": now_tz().isoformat(),
         "created_by": user_id,
         "collections": collections,
         "data": {},
@@ -184,7 +185,7 @@ async def create_backup(name: str, backup_dir: str, collections: list[str] | Non
         "file_path": backup_path,
         "size": file_size,
         "collections": collections,
-        "created_at": datetime.now(),
+        "created_at": now_tz(),
         "created_by": user_id,
     }
 
@@ -451,7 +452,7 @@ async def export_data(collections: list[str] | None = None, *, export_dir: str, 
 
     # 🔥 使用异步数据库连接
     db = get_mongo_db()
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = now_tz().strftime("%Y%m%d_%H%M%S")
 
     if not collections:
         # 🔥 异步调用 list_collection_names()
@@ -484,7 +485,7 @@ async def export_data(collections: list[str] | None = None, *, export_dir: str, 
         file_path = os.path.join(export_dir, filename)
         export_data_dict = {
             "export_info": {
-                "created_at": datetime.now().isoformat(),
+                "created_at": now_tz().isoformat(),
                 "collections": collections,
                 "format": format,
             },

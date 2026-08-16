@@ -10,6 +10,7 @@ import logging
 import os
 import re
 from datetime import datetime, timedelta
+from app.utils.timezone import now_tz
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
@@ -215,7 +216,7 @@ async def _get_money_flow_cache(db, code6: str, days: int) -> dict | None:
             {"code": code6, "days": days},
             {"_id": 0, "data": 1, "expire_at": 1}
         )
-        if doc and doc.get("expire_at") and doc["expire_at"] > datetime.now():
+        if doc and doc.get("expire_at") and doc["expire_at"] > now_tz():
             return doc.get("data")
     except Exception as e:
         logger.warning(f"⚠️ 读取资金流向缓存失败: {e}")
@@ -225,14 +226,14 @@ async def _get_money_flow_cache(db, code6: str, days: int) -> dict | None:
 async def _set_money_flow_cache(db, code6: str, days: int, data: dict, ttl: int) -> None:
     """将资金流向数据写入MongoDB缓存（带过期时间，TTL索引自动清理）。"""
     try:
-        expire_at = datetime.now() + timedelta(seconds=ttl)
+        expire_at = now_tz() + timedelta(seconds=ttl)
         await db[MONEY_FLOW_COLLECTION].update_one(
             {"code": code6, "days": days},
             {"$set": {
                 "code": code6,
                 "days": days,
                 "data": data,
-                "fetched_at": datetime.now(),
+                "fetched_at": now_tz(),
                 "expire_at": expire_at,
             }},
             upsert=True
@@ -384,7 +385,7 @@ async def get_quote(
                 try:
                     update_data = {
                         "code": code6,
-                        "updated_at": datetime.now()
+                        "updated_at": now_tz()
                     }
                     # 只更新必要的实时数据字段
                     for key in ["close", "open", "volume", "amount", "pct_chg", "prev_close", "trade_date"]:
@@ -435,8 +436,8 @@ async def get_quote(
                     "high": uq.get("high"),
                     "low": uq.get("low"),
                     "pre_close": uq.get("last_close"),
-                    "trade_date": datetime.now().strftime("%Y-%m-%d"),
-                    "updated_at": datetime.now(),
+                    "trade_date": now_tz().strftime("%Y-%m-%d"),
+                    "updated_at": now_tz(),
                 }
         except Exception as e:
             logger.warning(f"⚠️ 统一行情服务回退失败: {e}")
@@ -1242,8 +1243,8 @@ async def get_news(code: str, days: int = 30, limit: int = 50, include_announcem
                                     "content": item.get("content", ""),
                                     "summary": item.get("summary", ""),
                                     "data_source": "akshare",
-                                    "created_at": datetime.now(),
-                                    "updated_at": datetime.now()
+                                    "created_at": now_tz(),
+                                    "updated_at": now_tz()
                                 })
 
                             # 异步保存到数据库（使用replace_one with upsert）

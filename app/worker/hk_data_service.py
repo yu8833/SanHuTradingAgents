@@ -15,6 +15,7 @@
 """
 
 import logging
+from app.utils.timezone import now_tz
 
 # 导入港股数据提供器
 import sys
@@ -103,7 +104,7 @@ class HKDataService:
             normalized_info = self._normalize_stock_info(stock_info, source)
             normalized_info["code"] = normalized_code
             normalized_info["source"] = source
-            normalized_info["updated_at"] = datetime.now()
+            normalized_info["updated_at"] = now_tz()
             
             await self._save_to_cache(normalized_info)
             
@@ -117,7 +118,7 @@ class HKDataService:
     async def _get_cached_info(self, code: str, source: str) -> dict[str, Any] | None:
         """从缓存获取股票信息"""
         try:
-            cache_expire_time = datetime.now() - timedelta(hours=self.cache_hours)
+            cache_expire_time = now_tz() - timedelta(hours=self.cache_hours)
             
             cached = await self.db.stock_basic_info_hk.find_one({
                 "code": code,

@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any
+from app.utils.timezone import now_tz
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ class AnalysisModeHandler(ABC):
         self.analysis_date = analysis_date
         self.request_params = request_params
         self.update_progress = update_progress
-        self.start_time = datetime.now()
+        self.start_time = now_tz()
 
     @abstractmethod
     async def execute(self) -> dict[str, Any]:
@@ -51,7 +52,7 @@ class AnalysisModeHandler(ABC):
 
     def get_execution_time(self) -> float:
         """获取执行时间"""
-        return (datetime.now() - self.start_time).total_seconds()
+        return (now_tz() - self.start_time).total_seconds()
 
 
 class QuickAnalysisHandler(AnalysisModeHandler):
@@ -117,8 +118,8 @@ class QuickAnalysisHandler(AnalysisModeHandler):
                 "mode": "quick",
                 "quick_result": result.get('quick_result'),
                 "analysis_date": self.analysis_date,
-                "created_at": datetime.now(),
-                "updated_at": datetime.now(),
+                "created_at": now_tz(),
+                "updated_at": now_tz(),
                 "status": "completed",
             }
             db.reports.insert_one(report_doc)
@@ -302,8 +303,8 @@ class DeepAnalysisHandler(AnalysisModeHandler):
                 "reports": result.get('reports'),
                 "decision": result.get('decision'),
                 "analysis_date": self.analysis_date,
-                "created_at": datetime.now(),
-                "updated_at": datetime.now(),
+                "created_at": now_tz(),
+                "updated_at": now_tz(),
                 "status": "completed",
             }
             db.reports.insert_one(report_doc)

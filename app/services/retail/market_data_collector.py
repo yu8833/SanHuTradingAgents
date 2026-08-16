@@ -13,6 +13,7 @@
 
 import logging
 from datetime import datetime, timedelta
+from app.utils.timezone import now_tz
 
 import numpy as np
 
@@ -100,8 +101,8 @@ def _fetch_margin_balance_change() -> float:
         # 上交所融资余额（支持日期过滤）
         try:
             df_sse = ak.stock_margin_sse(
-                start_date=(datetime.now() - timedelta(days=30)).strftime("%Y%m%d"),
-                end_date=datetime.now().strftime("%Y%m%d"),
+                start_date=(now_tz() - timedelta(days=30)).strftime("%Y%m%d"),
+                end_date=now_tz().strftime("%Y%m%d"),
             )
             if df_sse is not None and len(df_sse) > 0:
                 # 日期列名可能是"日期"或第一列

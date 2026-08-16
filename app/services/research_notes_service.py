@@ -6,6 +6,7 @@
 import logging
 from datetime import datetime
 from typing import Any
+from app.utils.timezone import now_tz
 
 from bson import ObjectId
 
@@ -81,7 +82,7 @@ class ResearchNotesService:
         try:
             db = await self._get_db()
 
-            now = datetime.now()
+            now = now_tz()
             note = {
                 "user_id": user_id,
                 "kind": kind,

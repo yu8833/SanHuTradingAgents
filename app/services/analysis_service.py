@@ -11,6 +11,7 @@ from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from app.utils.timezone import now_tz
 
 # 添加项目根目录到路径
 project_root = Path(__file__).parent.parent.parent
@@ -230,8 +231,8 @@ class AnalysisService:
             trading_graph = self._get_trading_graph(config)
 
             # 执行分析
-            start_time = datetime.now()
-            analysis_date = task.parameters.analysis_date or datetime.now().strftime("%Y-%m-%d")
+            start_time = now_tz()
+            analysis_date = task.parameters.analysis_date or now_tz().strftime("%Y-%m-%d")
 
             # 创建进度回调函数
             def progress_callback(message: str):
@@ -241,7 +242,7 @@ class AnalysisService:
             # 新接口 propagate(company_name, trade_date)，不再支持 progress_callback
             _, decision = trading_graph.propagate(task.symbol, analysis_date)
 
-            execution_time = (datetime.now() - start_time).total_seconds()
+            execution_time = (now_tz() - start_time).total_seconds()
 
             # 生成报告
             progress_tracker.update_progress("📊 生成分析报告")
@@ -323,13 +324,13 @@ class AnalysisService:
             trading_graph = self._get_trading_graph(config)
 
             # 执行分析
-            start_time = datetime.now()
-            analysis_date = task.parameters.analysis_date or datetime.now().strftime("%Y-%m-%d")
+            start_time = now_tz()
+            analysis_date = task.parameters.analysis_date or now_tz().strftime("%Y-%m-%d")
 
             # 调用现有的分析方法（同步调用）
             _, decision = trading_graph.propagate(task.symbol, analysis_date)
 
-            execution_time = (datetime.now() - start_time).total_seconds()
+            execution_time = (now_tz() - start_time).total_seconds()
 
             # 从决策中提取模型信息
             model_info = decision.get('model_info', 'Unknown') if isinstance(decision, dict) else 'Unknown'
@@ -708,13 +709,13 @@ class AnalysisService:
                 progress_callback(50, "执行股票分析...")
             
             # 执行分析
-            start_time = datetime.now()
-            analysis_date = task.parameters.analysis_date or datetime.now().strftime("%Y-%m-%d")
+            start_time = now_tz()
+            analysis_date = task.parameters.analysis_date or now_tz().strftime("%Y-%m-%d")
             
             # 调用现有的分析方法
             _, decision = trading_graph.propagate(task.symbol, analysis_date)
             
-            execution_time = (datetime.now() - start_time).total_seconds()
+            execution_time = (now_tz() - start_time).total_seconds()
             
             if progress_callback:
                 progress_callback(80, "处理分析结果...")
@@ -855,7 +856,7 @@ class AnalysisService:
                         remaining_time = 0
                     else:
                         # 任务进行中
-                        elapsed_time = (datetime.now() - start_time).total_seconds()
+                        elapsed_time = (now_tz() - start_time).total_seconds()
 
                         # 使用任务的预估时长，如果没有则使用默认值（5分钟）
                         estimated_total_time = task.get("estimated_duration", 300)
@@ -943,7 +944,7 @@ class AnalysisService:
 
             # 创建使用记录（统一使用北京时间，与项目时区规范一致）
             usage_record = UsageRecord(
-                timestamp=datetime.now().isoformat(),
+                timestamp=now_tz().isoformat(),
                 provider=provider,
                 model_name=model_name,
                 input_tokens=input_tokens,

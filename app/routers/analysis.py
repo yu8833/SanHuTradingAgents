@@ -4,11 +4,10 @@
 """
 
 import asyncio
-import contextlib
 import logging
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
@@ -68,7 +67,7 @@ async def submit_single_analysis(
             "symbol": stock_code,
             "stock_code": stock_code,
             "user_id": str(user_id),
-            "created_at": datetime.now().isoformat(),
+            "created_at": now_tz().isoformat(),
             **params_dict
         }
 
@@ -78,7 +77,8 @@ async def submit_single_analysis(
             await queue_svc.enqueue_task(
                 user_id=str(user_id),
                 symbol=stock_code,
-                params=queue_params
+                params=queue_params,
+                task_id=task_id
             )
             enqueued = True
             logger.info(f"✅ 任务已入队: {task_id}，将由Worker进程消费")
@@ -158,6 +158,7 @@ async def get_task_status_new(
             logger.info(f"📊 [STATUS] 内存中未找到，尝试从MongoDB查找: {task_id}")
 
             from app.core.database import get_mongo_db
+            from app.utils.timezone import now_tz, to_display_iso
             db = get_mongo_db()
 
             # 首先从analysis_tasks集合中查找（正在进行的任务）
@@ -172,10 +173,18 @@ async def get_task_status_new(
 
                 # 计算时间信息
                 start_time = task_result.get("started_at") or task_result.get("created_at")
-                current_time = datetime.now()
+                current_time = now_tz()
                 elapsed_time = 0
                 if start_time:
-                    elapsed_time = (current_time - start_time).total_seconds()
+                    # MongoDB 读回为 naive UTC，需补齐 UTC 时区后再计算耗时
+                    start_aware = start_time.replace(tzinfo=timezone.utc) if start_time.tzinfo is None else start_time
+                    end_time = task_result.get("completed_at")
+                    # 已完成/失败/取消的任务用 end-start 计算真实耗时；运行中才用 now-start
+                    if end_time and status in ("completed", "failed", "cancelled"):
+                        end_aware = end_time.replace(tzinfo=timezone.utc) if end_time.tzinfo is None else end_time
+                        elapsed_time = max(0, (end_aware - start_aware).total_seconds())
+                    else:
+                        elapsed_time = (current_time - start_aware).total_seconds()
 
                 status_data = {
                     "task_id": task_id,
@@ -183,8 +192,8 @@ async def get_task_status_new(
                     "progress": progress,
                     "message": f"任务{status}中...",
                     "current_step": status,
-                    "start_time": start_time,
-                    "end_time": task_result.get("completed_at"),
+                    "start_time": to_display_iso(start_time),
+                    "end_time": to_display_iso(task_result.get("completed_at")),
                     "elapsed_time": elapsed_time,
                     "remaining_time": 0,  # 无法准确估算
                     "estimated_total_time": 0,
@@ -212,7 +221,9 @@ async def get_task_status_new(
                 end_time = mongo_result.get("updated_at")
                 elapsed_time = 0
                 if start_time and end_time:
-                    elapsed_time = (end_time - start_time).total_seconds()
+                    def _aware(dt):
+                        return dt.replace(tzinfo=datetime.timezone.utc) if dt.tzinfo is None else dt
+                    elapsed_time = (_aware(end_time) - _aware(start_time)).total_seconds()
 
                 status_data = {
                     "task_id": task_id,
@@ -220,8 +231,8 @@ async def get_task_status_new(
                     "progress": 100,
                     "message": "分析完成（从历史记录恢复）",
                     "current_step": "completed",
-                    "start_time": start_time,
-                    "end_time": end_time,
+                    "start_time": to_display_iso(start_time),
+                    "end_time": to_display_iso(end_time),
                     "elapsed_time": elapsed_time,
                     "remaining_time": 0,
                     "estimated_total_time": elapsed_time,  # 已完成任务的总时长就是已用时间
@@ -749,6 +760,13 @@ async def get_task_result(
         if result_data.get('置信度详情'):
             final_result_data['置信度详情'] = safe_list(result_data.get('置信度详情'))
 
+        # 🔥 统一时间字段为北京时间（MongoDB 读回为 naive UTC，转 +08:00 输出）
+        from app.utils.timezone import to_display_iso
+        for _k in ("created_at", "updated_at", "timestamp", "start_time", "end_time"):
+            _v = final_result_data.get(_k)
+            if _v and hasattr(_v, "isoformat"):
+                final_result_data[_k] = to_display_iso(_v)
+
         logger.info(f"✅ [RESULT] 成功获取任务结果: {task_id}")
         logger.info(f"📊 [RESULT] 最终返回 {len(final_result_data.get('reports', {}))} 个报告")
 
@@ -1062,88 +1080,154 @@ async def get_user_analysis_history(
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页大小")
 ):
-    """获取用户分析历史（支持基础筛选与分页）"""
+    """获取用户分析历史（支持基础筛选与分页）
+
+    优化：筛选/分页/统计直接下推到 MongoDB（复用 user_id+created_at 索引），
+    仅返回当前页，避免全量加载后在 Python 中过滤、统计（原实现拉取全部任务并对
+    每条重算置信度，导致 /tasks 全部查询耗时过长）。
+    """
     try:
-        # 先获取用户所有任务（内存优先，MongoDB兜底），不做分页
-        all_result = await get_simple_analysis_service().list_user_tasks(
-            user_id=user["id"],
-            status=status,
-            limit=10000,
-            offset=0
-        )
-        raw_tasks = all_result.get("tasks", [])
+        from bson import ObjectId
+        from datetime import datetime as _dt, timedelta
+        from app.core.database import get_mongo_db
+        from app.utils.timezone import get_tz, to_display_iso
 
-        # 进行基础筛选
-        from datetime import datetime
-        def in_date_range(t: str | None) -> bool:
-            if not t:
-                return True
+        db = get_mongo_db()
+        service = get_simple_analysis_service()
+        uid = user["id"]
+
+        # 1) 构建 MongoDB 查询条件
+        uid_candidates: list[Any] = [uid]
+        if str(uid) == 'admin':
+            admin_oid_str = '507f1f77bcf86cd799439011'
+            uid_candidates += [ObjectId(admin_oid_str), admin_oid_str]
+        else:
             try:
-                dt = datetime.fromisoformat(t.replace('Z', '+00:00')) if 'Z' in t else datetime.fromisoformat(t)
+                uid_candidates.append(ObjectId(uid))
             except Exception:
-                return True
-            ok = True
-            if start_date:
-                with contextlib.suppress(Exception):
-                    ok = ok and (dt.date() >= datetime.fromisoformat(start_date).date())
-            if end_date:
-                with contextlib.suppress(Exception):
-                    ok = ok and (dt.date() <= datetime.fromisoformat(end_date).date())
-            return ok
+                pass
 
-        # 获取查询的股票代码 (兼容旧字段)
+        conditions: list[dict[str, Any]] = [{
+            "$or": [
+                {"user_id": {"$in": uid_candidates}},
+                {"user": {"$in": uid_candidates}},
+            ]
+        }]
+
+        # 状态过滤（前端 processing -> running）
+        if status:
+            status_mapping = {
+                "processing": "running", "pending": "pending",
+                "completed": "completed", "failed": "failed", "cancelled": "cancelled",
+            }
+            conditions.append({"status": status_mapping.get(status, status)})
+
+        # 股票代码过滤
         query_symbol = symbol or stock_code
+        if query_symbol:
+            conditions.append({"$or": [{"symbol": query_symbol}, {"stock_code": query_symbol}]})
 
-        filtered = []
-        for x in raw_tasks:
-            if query_symbol:
-                task_symbol = x.get("symbol") or x.get("stock_code") or x.get("stock_symbol")
-                if task_symbol not in [query_symbol]:
-                    continue
-            # 市场类型暂时从参数内判断（如有）
-            if market_type:
-                params = x.get("parameters") or {}
-                if params.get("market_type") != market_type:
-                    continue
-            # 时间范围（使用 start_time 或 created_at）
-            t = x.get("start_time") or x.get("created_at")
-            if not in_date_range(t):
-                continue
-            filtered.append(x)
+        # 日期范围过滤（北京时间日期 -> UTC 区间；MongoDB 内部按 UTC 存储）
+        if start_date or end_date:
+            tz_cn = get_tz()
+            range_q: dict[str, Any] = {}
+            if start_date:
+                try:
+                    range_q["$gte"] = _dt.strptime(start_date, "%Y-%m-%d").replace(tzinfo=tz_cn)
+                except Exception:
+                    pass
+            if end_date:
+                try:
+                    range_q["$lt"] = _dt.strptime(end_date, "%Y-%m-%d").replace(tzinfo=tz_cn) + timedelta(days=1)
+                except Exception:
+                    pass
+            if range_q:
+                conditions.append({"created_at": range_q})
 
-        # 计算筛选后的总数
-        total = len(filtered)
+        query = {"$and": conditions} if len(conditions) > 1 else conditions[0]
 
-        # 分页
+        # 2) 分页查询 MongoDB（仅返回当前页）
         offset = (page - 1) * page_size
-        paged_tasks = filtered[offset:offset + page_size]
+        cursor = db.analysis_tasks.find(query).sort("created_at", -1).skip(offset).limit(page_size)
 
-        # 计算统计数据（基于筛选后的数据）
-        completed_count = sum(1 for t in filtered if t.get('status') == 'completed')
-        failed_count = sum(1 for t in filtered if t.get('status') == 'failed')
-        unique_stocks = len(set(
-            t.get('stock_code') or t.get('symbol') or t.get('stock_symbol')
-            for t in filtered
-            if t.get('stock_code') or t.get('symbol') or t.get('stock_symbol')
-        ))
+        def _item(doc: dict[str, Any]) -> dict[str, Any]:
+            user_field_val = doc.get("user_id", doc.get("user"))
+            stock_code_value = doc.get("symbol") or doc.get("stock_code") or doc.get("stock_symbol")
+            item = {
+                "task_id": doc.get("task_id"),
+                "user_id": str(user_field_val) if user_field_val is not None else None,
+                "symbol": stock_code_value,
+                "stock_code": stock_code_value,
+                "stock_symbol": stock_code_value,
+                "stock_name": doc.get("stock_name"),
+                "status": str(doc.get("status", "pending")),
+                "progress": int(doc.get("progress", 0) or 0),
+                "message": doc.get("message", ""),
+                "current_step": doc.get("current_step", ""),
+                "start_time": doc.get("started_at") or doc.get("created_at"),
+                "end_time": doc.get("completed_at"),
+                "parameters": doc.get("parameters", {}),
+                "execution_time": doc.get("execution_time"),
+                "tokens_used": doc.get("tokens_used"),
+                "result_data": doc.get("result"),
+            }
+            # 统一时间字段为北京时间（MongoDB 读回为 naive UTC）
+            for k in ("start_time", "end_time"):
+                v = item.get(k)
+                if v and hasattr(v, "isoformat"):
+                    item[k] = to_display_iso(v)
+                elif isinstance(v, str) and v and not v.endswith(('Z', '+08:00', '+00:00')) and ('T' in v or ' ' in v):
+                    item[k] = v.replace(' ', 'T') + '+08:00'
+            return item
 
+        tasks = [_item(doc) async for doc in cursor]
+
+        # 3) 用内存任务覆盖本页的实时进度（running/pending 保持新鲜）
+        try:
+            mem_tasks = await service.memory_manager.list_user_tasks(user_id=uid, limit=1000, offset=0)
+            mem_by_id = {t.get("task_id"): t for t in mem_tasks if t.get("task_id")}
+            for t in tasks:
+                mem = mem_by_id.get(t.get("task_id"))
+                if not mem:
+                    continue
+                if mem.get("status") in ("processing", "running", "pending"):
+                    t["status"] = mem.get("status", t.get("status"))
+                    t["progress"] = mem.get("progress", t.get("progress", 0))
+                    t["message"] = mem.get("message", t.get("message", ""))
+                    t["current_step"] = mem.get("current_step", t.get("current_step", ""))
+        except Exception:
+            pass
+
+        # 4) 市场类型过滤（任务文档未存 market_type，仅按 parameters 尽力过滤）
+        if market_type:
+            tasks = [t for t in tasks if (t.get("parameters") or {}).get("market_type") == market_type]
+
+        # 5) 总数与统计（MongoDB 计数，避免全量加载）
+        total = await db.analysis_tasks.count_documents(query)
+        completed_count = await db.analysis_tasks.count_documents({**query, "status": "completed"})
+        failed_count = await db.analysis_tasks.count_documents({**query, "status": "failed"})
+        symbols: set[str] = set()
+        for f in ("symbol", "stock_code"):
+            for s in await db.analysis_tasks.distinct(f, query):
+                if s:
+                    symbols.add(s)
         stats = {
             "total": total,
             "completed": completed_count,
             "failed": failed_count,
-            "unique_stocks": unique_stocks
+            "unique_stocks": len(symbols),
         }
 
         return {
             "success": True,
             "data": {
-                "tasks": paged_tasks,
+                "tasks": tasks,
                 "total": total,
                 "stats": stats,
                 "page": page,
-                "page_size": page_size
+                "page_size": page_size,
             },
-            "message": "历史查询成功"
+            "message": "历史查询成功",
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1289,8 +1373,8 @@ async def mark_task_as_failed(
                 "$set": {
                     "status": "failed",
                     "last_error": "用户手动标记为失败",
-                    "completed_at": datetime.now(),
-                    "updated_at": datetime.now()
+                    "completed_at": now_tz(),
+                    "updated_at": now_tz()
                 }
             }
         )

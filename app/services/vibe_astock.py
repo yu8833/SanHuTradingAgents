@@ -10,6 +10,7 @@
 """
 
 from __future__ import annotations
+from app.utils.timezone import now_tz
 
 import contextlib
 import math
@@ -840,7 +841,7 @@ def stock_fund_flow_120d(code: str) -> list[dict]:
 
 def dragon_tiger_board(code: str, trade_date: str | None = None, look_back: int = 30) -> dict:
     """龙虎榜：该股近期上榜记录 + 最近一次买卖席位 TOP5 + 机构专用席位净买。"""
-    trade_date = trade_date or datetime.now().strftime("%Y-%m-%d")
+    trade_date = trade_date or now_tz().strftime("%Y-%m-%d")
     start = (datetime.strptime(trade_date, "%Y-%m-%d") - timedelta(days=look_back)).strftime("%Y-%m-%d")
     records = []
     data = eastmoney_datacenter(
@@ -890,7 +891,7 @@ def dragon_tiger_board(code: str, trade_date: str | None = None, look_back: int 
 
 def lockup_expiry(code: str, trade_date: str | None = None, forward_days: int = 90) -> dict:
     """限售解禁日历：历史解禁记录 + 未来 N 天待解禁事件。"""
-    trade_date = trade_date or datetime.now().strftime("%Y-%m-%d")
+    trade_date = trade_date or now_tz().strftime("%Y-%m-%d")
     history = [{
         "date": str(r.get("FREE_DATE", ""))[:10], "type": r.get("LIMITED_STOCK_TYPE", ""),
         "shares": r.get("FREE_SHARES_NUM", 0), "ratio": r.get("FREE_RATIO", 0),

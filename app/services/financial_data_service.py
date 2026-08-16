@@ -6,6 +6,7 @@
 import logging
 from datetime import datetime
 from typing import Any
+from app.utils.timezone import now_tz
 
 from pymongo import ReplaceOne
 
@@ -279,7 +280,7 @@ class FinancialDataService:
                 "total_records": total_records,
                 "total_symbols": len(total_symbols),
                 "by_source": stats,
-                "last_updated": datetime.now().isoformat()
+                "last_updated": now_tz().isoformat()
             }
             
         except Exception as e:
@@ -297,7 +298,7 @@ class FinancialDataService:
     ) -> dict[str, Any] | list[dict[str, Any]] | None:
         """标准化财务数据"""
         try:
-            now = datetime.now()
+            now = now_tz()
             
             # 如果是列表，遍历处理每个元素
             if isinstance(financial_data, list):
@@ -496,7 +497,7 @@ class FinancialDataService:
     
     def _generate_current_period(self) -> str:
         """生成当前报告期"""
-        now = datetime.now()
+        now = now_tz()
         year = now.year
         month = now.month
         

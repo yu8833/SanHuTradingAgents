@@ -6,6 +6,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
+from app.utils.timezone import now_tz
 
 from app.core.database import get_mongo_db
 from app.worker.tushare_sync_service import get_tushare_sync_service
@@ -101,7 +102,7 @@ class TushareInitService:
         total_steps = 1 + len(sync_items) + 1
 
         self.stats = InitializationStats(
-            started_at=datetime.now(),
+            started_at=now_tz(),
             total_steps=total_steps
         )
 
@@ -154,7 +155,7 @@ class TushareInitService:
             # 最后: 验证数据完整性
             await self._step_verify_data_integrity()
             
-            self.stats.finished_at = datetime.now()
+            self.stats.finished_at = now_tz()
             duration = (self.stats.finished_at - self.stats.started_at).total_seconds()
             
             logger.info(f"🎉 Tushare数据初始化完成！耗时: {duration:.2f}秒")
@@ -166,7 +167,7 @@ class TushareInitService:
             self.stats.errors.append({
                 "step": self.stats.current_step,
                 "error": str(e),
-                "timestamp": datetime.now()
+                "timestamp": now_tz()
             })
             return self._get_initialization_summary()
     
@@ -212,14 +213,14 @@ class TushareInitService:
         logger.info(f"📊 {self.stats.current_step}...")
 
         # 计算日期范围
-        end_date = datetime.now().strftime('%Y-%m-%d')
+        end_date = now_tz().strftime('%Y-%m-%d')
 
         # 如果 historical_days 大于等于10年（3650天），则同步全历史
         if historical_days >= 3650:
             start_date = "1990-01-01"  # 全历史同步
             logger.info(f"  历史数据范围: 全历史（从1990-01-01到{end_date}）")
         else:
-            start_date = (datetime.now() - timedelta(days=historical_days)).strftime('%Y-%m-%d')
+            start_date = (now_tz() - timedelta(days=historical_days)).strftime('%Y-%m-%d')
             logger.info(f"  历史数据范围: {start_date} 到 {end_date}")
 
         # 同步历史数据
@@ -243,14 +244,14 @@ class TushareInitService:
         logger.info(f"📊 {self.stats.current_step}...")
 
         # 计算日期范围
-        end_date = datetime.now().strftime('%Y-%m-%d')
+        end_date = now_tz().strftime('%Y-%m-%d')
 
         # 如果 historical_days 大于等于10年（3650天），则同步全历史
         if historical_days >= 3650:
             start_date = "1990-01-01"  # 全历史同步
             logger.info(f"  周线数据范围: 全历史（从1990-01-01到{end_date}）")
         else:
-            start_date = (datetime.now() - timedelta(days=historical_days)).strftime('%Y-%m-%d')
+            start_date = (now_tz() - timedelta(days=historical_days)).strftime('%Y-%m-%d')
             logger.info(f"  周线数据范围: {start_date} 到 {end_date}")
 
         try:
@@ -279,14 +280,14 @@ class TushareInitService:
         logger.info(f"📊 {self.stats.current_step}...")
 
         # 计算日期范围
-        end_date = datetime.now().strftime('%Y-%m-%d')
+        end_date = now_tz().strftime('%Y-%m-%d')
 
         # 如果 historical_days 大于等于10年（3650天），则同步全历史
         if historical_days >= 3650:
             start_date = "1990-01-01"  # 全历史同步
             logger.info(f"  月线数据范围: 全历史（从1990-01-01到{end_date}）")
         else:
-            start_date = (datetime.now() - timedelta(days=historical_days)).strftime('%Y-%m-%d')
+            start_date = (now_tz() - timedelta(days=historical_days)).strftime('%Y-%m-%d')
             logger.info(f"  月线数据范围: {start_date} 到 {end_date}")
 
         try:

@@ -10,6 +10,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
+from app.utils.timezone import now_tz
 
 logger = logging.getLogger(__name__)
 
@@ -19,18 +20,18 @@ class GraphInstance:
     """图实例包装类"""
     graph: Any
     config: dict[str, Any]
-    created_at: datetime = field(default_factory=datetime.now)
-    last_used: datetime = field(default_factory=datetime.now)
+    created_at: datetime = field(default_factory=now_tz)
+    last_used: datetime = field(default_factory=now_tz)
     use_count: int = 0
 
     def is_expired(self, max_age_seconds: int = 3600) -> bool:
         """检查实例是否过期"""
-        age = (datetime.now() - self.created_at).total_seconds()
+        age = (now_tz() - self.created_at).total_seconds()
         return age > max_age_seconds
 
     def refresh(self):
         """刷新最后使用时间"""
-        self.last_used = datetime.now()
+        self.last_used = now_tz()
         self.use_count += 1
 
 
@@ -195,7 +196,7 @@ class GraphCache:
                 "count": len(instances),
                 "total_uses": sum(i.use_count for i in instances),
                 "avg_age_seconds": sum(
-                    (datetime.now() - i.created_at).total_seconds()
+                    (now_tz() - i.created_at).total_seconds()
                     for i in instances
                 ) / len(instances),
                 "oldest_instance": min(

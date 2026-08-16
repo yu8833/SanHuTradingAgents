@@ -8,6 +8,7 @@ import csv
 import io
 import logging
 from datetime import datetime
+from app.utils.timezone import now_tz
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel
@@ -342,7 +343,7 @@ async def import_positions_csv(
                 continue
 
             # 日期格式归一化
-            buy_date = datetime.now().strftime("%Y-%m-%d")
+            buy_date = now_tz().strftime("%Y-%m-%d")
             if date_str:
                 try:
                     # 尝试 YYYY-MM-DD 或 YYYY/MM/DD
@@ -373,8 +374,8 @@ async def import_positions_csv(
                 stop_loss_price=stop_loss,
                 take_profit_price=take_profit,
                 thesis=None,
-                created_at=datetime.now(),
-                updated_at=datetime.now(),
+                created_at=now_tz(),
+                updated_at=now_tz(),
             ))
 
         if not positions:

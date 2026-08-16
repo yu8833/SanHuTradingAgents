@@ -3,6 +3,7 @@ Data source manager that orchestrates multiple adapters with priority and option
 """
 import logging
 from datetime import datetime, timedelta
+from app.utils.timezone import now_tz
 
 import pandas as pd
 
@@ -197,7 +198,7 @@ class DataSourceManager:
             except Exception as e:
                 logger.error(f"Failed to find trade date from {adapter.name}: {e}")
                 continue
-        return (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
+        return (now_tz() - timedelta(days=1)).strftime("%Y%m%d")
 
     def get_realtime_quotes_with_fallback(self) -> tuple[dict | None, str | None]:
         """

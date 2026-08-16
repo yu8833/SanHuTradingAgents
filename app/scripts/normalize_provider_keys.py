@@ -3,6 +3,7 @@ import contextlib
 from collections.abc import Iterable, Sequence
 from datetime import datetime
 from typing import Any
+from app.utils.timezone import now_tz
 
 from pymongo import MongoClient
 
@@ -11,7 +12,7 @@ from tradingagents.llm_clients.provider_keys import canonical_aliases, normalize
 
 
 def _now() -> str:
-    return datetime.now().isoformat()
+    return now_tz().isoformat()
 
 
 def _merge_aliases(*values: Iterable[str]) -> list[str]:

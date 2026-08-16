@@ -9,6 +9,7 @@
 
 import logging
 from datetime import datetime
+from app.utils.timezone import now_tz
 
 from app.core.database import get_mongo_db
 from app.models.notification import NotificationCreate
@@ -26,7 +27,7 @@ def _is_trading_day() -> bool:
     """交易日判断（排除周末和节假日，使用统一的 trading_time 模块）"""
     from app.utils.trading_time import is_trading_day
 
-    return is_trading_day(datetime.now())
+    return is_trading_day(now_tz())
 
 
 async def _get_all_user_ids_with_open_positions() -> list[str]:
@@ -119,7 +120,7 @@ async def check_all_users_exit_signals():
                         "symbol": symbol,
                         "strategy": p.get("strategy", "default"),
                         "buy_price": p.get("cost_price", 0),
-                        "buy_date": p.get("buy_date", datetime.now().strftime("%Y-%m-%d")),
+                        "buy_date": p.get("buy_date", now_tz().strftime("%Y-%m-%d")),
                         "current_price": current_price,
                     })
                     position_map[symbol] = p

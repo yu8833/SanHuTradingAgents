@@ -12,6 +12,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from app.utils.timezone import now_tz, to_display_iso
+
 # 添加项目根目录到路径
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
@@ -31,6 +33,7 @@ from app.services.config_service import ConfigService
 from app.services.memory_state_manager import TaskStatus, get_memory_state_manager
 from app.services.progress_log_handler import register_analysis_tracker, unregister_analysis_tracker
 from app.services.redis_progress_tracker import RedisProgressTracker, get_progress_by_id
+from app.routers.reports import recompute_confidence
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 
@@ -627,7 +630,7 @@ class SimpleAnalysisService:
                         "progress": progress,
                         "current_step": message,
                         "message": message,
-                        "updated_at": datetime.now()
+                        "updated_at": now_tz()
                     }
                 }
             )
@@ -796,7 +799,7 @@ class SimpleAnalysisService:
                         "stock_name": name,
                         "status": "pending",
                         "progress": 0,
-                        "created_at": datetime.now(),
+                        "created_at": now_tz(),
                     }},
                     upsert=True
                 )
@@ -869,7 +872,7 @@ class SimpleAnalysisService:
                         analysis_date = parsed_date.strftime('%Y-%m-%d')
                     except ValueError:
                         # 如果格式不对，使用今天
-                        analysis_date = datetime.now().strftime('%Y-%m-%d')
+                        analysis_date = now_tz().strftime('%Y-%m-%d')
                         logger.warning(f"⚠️ 分析日期格式不正确，使用今天: {analysis_date}")
 
             # 🔥 使用异步版本，直接 await，避免事件循环冲突
@@ -1045,7 +1048,7 @@ class SimpleAnalysisService:
                 currency = "CNY"
 
                 usage_record = UsageRecord(
-                    timestamp=datetime.now().isoformat(),
+                    timestamp=now_tz().isoformat(),
                     provider="dashscope",
                     model_name=model_info,
                     input_tokens=input_tokens,
@@ -1206,7 +1209,7 @@ class SimpleAnalysisService:
                                 "progress": progress,
                                 "current_step": step,
                                 "message": message,
-                                "updated_at": datetime.now()
+                                "updated_at": now_tz()
                             }
                         }
                     )
@@ -1416,7 +1419,7 @@ class SimpleAnalysisService:
                                                 "progress": int(progress_pct),
                                                 "current_step": message,
                                                 "message": message,
-                                                "updated_at": datetime.now()
+                                                "updated_at": now_tz()
                                             }
                                         }
                                     )
@@ -1466,7 +1469,7 @@ class SimpleAnalysisService:
             logger.info(f"🔍 [引擎验证] TradingGraph配置中的深度模型: {trading_graph.config.get('deep_think_llm')}")
 
             # 准备分析数据
-            start_time = datetime.now()
+            start_time = now_tz()
 
             # 🔧 使用前端传递的分析日期，如果没有则使用当前日期
             if request.parameters and hasattr(request.parameters, 'analysis_date') and request.parameters.analysis_date:
@@ -1476,10 +1479,10 @@ class SimpleAnalysisService:
                 elif isinstance(request.parameters.analysis_date, str):
                     analysis_date = request.parameters.analysis_date
                 else:
-                    analysis_date = datetime.now().strftime("%Y-%m-%d")
+                    analysis_date = now_tz().strftime("%Y-%m-%d")
                 logger.info(f"📅 使用前端指定的分析日期: {analysis_date}")
             else:
-                analysis_date = datetime.now().strftime("%Y-%m-%d")
+                analysis_date = now_tz().strftime("%Y-%m-%d")
                 logger.info(f"📅 使用当前日期作为分析日期: {analysis_date}")
 
             # 🔧 智能日期范围处理：获取最近10天的数据，自动处理周末/节假日
@@ -1577,7 +1580,7 @@ class SimpleAnalysisService:
                 progress_tracker.update_progress("📊 处理分析结果")
             update_progress_sync(90, "处理分析结果...", "result_processing")
 
-            execution_time = (datetime.now() - start_time).total_seconds()
+            execution_time = (now_tz() - start_time).total_seconds()
 
             # 从state中提取reports字段
             reports = {}
@@ -2126,13 +2129,23 @@ class SimpleAnalysisService:
 
             # 转换为列表并按时间排序
             merged_tasks = list(task_dict.values())
-            merged_tasks.sort(key=lambda x: x.get('start_time', ''), reverse=True)
+            merged_tasks.sort(key=lambda x: (x.get('start_time') or x.get('started_at') or x.get('created_at') or ''), reverse=True)
 
             # 计算总数
             total = len(merged_tasks)
 
             # 分页
             results = merged_tasks[offset:offset + limit]
+
+            # 🔥 统一时间字段为北京时间（MongoDB 读回为 naive UTC，需转 +08:00）
+            for task in results:
+                for time_field in ("start_time", "end_time", "created_at", "started_at", "completed_at"):
+                    value = task.get(time_field)
+                    if value and hasattr(value, "isoformat"):
+                        task[time_field] = to_display_iso(value)
+                    elif isinstance(value, str) and value and not value.endswith(('Z', '+08:00', '+00:00')):
+                        if 'T' in value or ' ' in value:
+                            task[time_field] = value.replace(' ', 'T') + '+08:00'
 
             # 为结果补齐股票名称
             results = await self._enrich_stock_names(results)
@@ -2282,22 +2295,12 @@ class SimpleAnalysisService:
                         # 为兼容前端，这里沿用 memory_manager 的字段名
                         "result_data": doc.get("result"),
                     }
-                    # 🔥 用当前算法重算置信度，修正历史入库的陈旧/错误值
-                    try:
-                        from app.routers.reports import recompute_confidence
-                        item["result_data"] = recompute_confidence(item.get("result_data"))
-                    except Exception:
-                        pass
-                    # 时间格式转为 ISO 字符串（添加时区信息）
+                    # 时间格式转为 ISO 字符串（统一为北京时间）
+                    # 注意：MongoDB 以 UTC 存储、读回为 naive UTC，
+                    # to_display_iso 会将其正确转换为北京时间（+08:00）
                     for k in ("start_time", "end_time"):
                         if item.get(k) and hasattr(item[k], "isoformat"):
-                            dt = item[k]
-                            # 如果是 naive datetime（没有时区信息），假定为 UTC+8
-                            if dt.tzinfo is None:
-                                from datetime import timedelta, timezone
-                                china_tz = timezone(timedelta(hours=8))
-                                dt = dt.replace(tzinfo=china_tz)
-                            item[k] = dt.isoformat()
+                            item[k] = to_display_iso(item[k])
                     mongo_tasks.append(item)
 
                 logger.info(f"📋 [Tasks] MongoDB 返回数量: {count}")
@@ -2342,7 +2345,7 @@ class SimpleAnalysisService:
 
             # 转换为列表并按时间排序
             merged_tasks = list(task_dict.values())
-            merged_tasks.sort(key=lambda x: x.get('start_time', ''), reverse=True)
+            merged_tasks.sort(key=lambda x: (x.get('start_time') or x.get('started_at') or x.get('created_at') or ''), reverse=True)
 
             # 计算总数
             total = len(merged_tasks)
@@ -2350,23 +2353,16 @@ class SimpleAnalysisService:
             # 分页
             results = merged_tasks[offset:offset + limit]
 
-            # 🔥 统一处理时区信息（确保所有时间字段都有时区标识）
-            from datetime import timedelta, timezone
-            china_tz = timezone(timedelta(hours=8))
-
+            # 🔥 统一处理时区信息（确保所有时间字段都带北京时间 +08:00 标识）
             for task in results:
                 for time_field in ("start_time", "end_time", "created_at", "started_at", "completed_at"):
                     value = task.get(time_field)
                     if value:
-                        # 如果是 datetime 对象
+                        # 如果是 datetime 对象，统一转为北京时间 ISO 字符串
                         if hasattr(value, "isoformat"):
-                            # 如果是 naive datetime，添加时区信息
-                            if value.tzinfo is None:
-                                value = value.replace(tzinfo=china_tz)
-                            task[time_field] = value.isoformat()
-                        # 如果是字符串且没有时区标识，添加时区标识
+                            task[time_field] = to_display_iso(value)
+                        # 如果是字符串且没有时区标识（内存任务为 naive 北京时间），补 +08:00
                         elif isinstance(value, str) and value and not value.endswith(('Z', '+08:00', '+00:00')):
-                            # 检查是否是 ISO 格式的时间字符串
                             if 'T' in value or ' ' in value:
                                 task[time_field] = value.replace(' ', 'T') + '+08:00'
 
@@ -2419,7 +2415,7 @@ class SimpleAnalysisService:
             # 2) 清理 MongoDB 中的僵尸任务
             db = get_mongo_db()
             from datetime import timedelta
-            cutoff_time = datetime.now() - timedelta(hours=max_running_hours)
+            cutoff_time = now_tz() - timedelta(hours=max_running_hours)
 
             # 查找长时间处于 processing 状态的任务
             zombie_filter = {
@@ -2437,8 +2433,8 @@ class SimpleAnalysisService:
                     "$set": {
                         "status": "failed",
                         "last_error": f"任务超时（运行时间超过 {max_running_hours} 小时）",
-                        "completed_at": datetime.now(),
-                        "updated_at": datetime.now()
+                        "completed_at": now_tz(),
+                        "updated_at": now_tz()
                     }
                 }
             )
@@ -2477,7 +2473,7 @@ class SimpleAnalysisService:
         try:
             db = get_mongo_db()
             from datetime import timedelta
-            cutoff_time = datetime.now() - timedelta(hours=max_running_hours)
+            cutoff_time = now_tz() - timedelta(hours=max_running_hours)
 
             # 查找长时间处于 processing 状态的任务
             zombie_filter = {
@@ -2506,7 +2502,7 @@ class SimpleAnalysisService:
                 # 计算运行时长
                 start_time = doc.get("started_at") or doc.get("created_at")
                 if start_time:
-                    running_seconds = (datetime.now() - start_time).total_seconds()
+                    running_seconds = (now_tz() - start_time).total_seconds()
                     task["running_hours"] = round(running_seconds / 3600, 2)
 
                 zombie_tasks.append(task)
@@ -2533,16 +2529,16 @@ class SimpleAnalysisService:
             update_data = {
                 "status": status,
                 "progress": progress,
-                "updated_at": datetime.now()
+                "updated_at": now_tz()
             }
 
             if status == AnalysisStatus.PROCESSING and progress == 10:
-                update_data["started_at"] = datetime.now()
+                update_data["started_at"] = now_tz()
             elif status == AnalysisStatus.COMPLETED:
-                update_data["completed_at"] = datetime.now()
+                update_data["completed_at"] = now_tz()
             elif status == AnalysisStatus.FAILED:
                 update_data["last_error"] = error_message
-                update_data["completed_at"] = datetime.now()
+                update_data["completed_at"] = now_tz()
 
             await db.analysis_tasks.update_one(
                 {"task_id": task_id},
@@ -2572,8 +2568,10 @@ class SimpleAnalysisService:
             db = get_mongo_db()
 
             # 生成分析ID（与web目录保持一致）
-            from datetime import datetime
-            timestamp = datetime.now()  # 北京时间（与项目时区规范一致）
+            # 统一规范：MongoDB 内部一律按 UTC 存储（now_tz 为 tz-aware 北京时间，
+            # 入库时由 pymongo 自动转为 UTC；strftime 仍取北京时间墙钟，analysis_id 不变）。
+            # 之前用 now_tz()（naive 北京时间）会被 pymongo 当作 UTC 原样入库，产生 +8h 偏差。
+            timestamp = now_tz()
             stock_symbol = result.get('stock_symbol') or result.get('stock_code', 'UNKNOWN')
             analysis_id = f"{stock_symbol}_{timestamp.strftime('%Y%m%d_%H%M%S')}"
 
@@ -2777,6 +2775,15 @@ class SimpleAnalysisService:
                 logger.warning(f"⚠️ 获取股票名称失败: {stock_symbol} - {e}")
                 stock_name = stock_symbol
 
+            # 🔥 补充维度评分详情（技术面/基本面/... 各面评分 + 维度评分详情）
+            # 在写入时用当前算法从 reports 现算并固化，前端详情页直接读取；
+            # 避免在历史查询时逐条重算（每条约890ms，会拖慢 /tasks 等接口）。
+            try:
+                result["reports"] = reports
+                result = recompute_confidence(result)
+            except Exception as e:
+                logger.warning(f"⚠️ 补充维度评分详情失败: {e}")
+
             # 构建文档（与web目录的MongoDBReportManager保持一致）
             document = {
                 "analysis_id": analysis_id,
@@ -2795,6 +2802,17 @@ class SimpleAnalysisService:
 
                 # 报告内容
                 "reports": reports,
+
+                # 🔥 维度评分详情（前端短线博弈/长线博弈各面分数）
+                "维度评分详情": result.get("维度评分详情", []),
+                "技术面评分": result.get("技术面评分"),
+                "基本面评分": result.get("基本面评分"),
+                "情绪面评分": result.get("情绪面评分"),
+                "消息面评分": result.get("消息面评分"),
+                "资金面评分": result.get("资金面评分"),
+                "政策面评分": result.get("政策面评分"),
+                "解禁面评分": result.get("解禁面评分"),
+                "置信度详情": result.get("置信度详情", []),
 
                 # 🔥 关键修复：添加格式化后的decision字段！
                 "decision": result.get("decision", {}),
@@ -2839,6 +2857,16 @@ class SimpleAnalysisService:
                         "execution_time": result.get("execution_time", 0),
                         "tokens_used": result.get("tokens_used", 0),
                         "reports": reports,
+                        # 🔥 维度评分详情（前端短线博弈/长线博弈各面分数）
+                        "维度评分详情": result.get("维度评分详情", []),
+                        "技术面评分": result.get("技术面评分"),
+                        "基本面评分": result.get("基本面评分"),
+                        "情绪面评分": result.get("情绪面评分"),
+                        "消息面评分": result.get("消息面评分"),
+                        "资金面评分": result.get("资金面评分"),
+                        "政策面评分": result.get("政策面评分"),
+                        "解禁面评分": result.get("解禁面评分"),
+                        "置信度详情": result.get("置信度详情", []),
                         "state": _sanitize_state_for_mongo(result.get("state", {})),
                         "decision": result.get("decision", {})
                     }}}
@@ -2855,7 +2883,7 @@ class SimpleAnalysisService:
                     'task_id': task_id,
                     'success': result.get('success', True),
                     'error': str(e),
-                    'completed_at': datetime.now().isoformat()
+                    'completed_at': now_tz().isoformat()
                 }
                 await db.analysis_tasks.update_one(
                     {"task_id": task_id},
@@ -2930,7 +2958,7 @@ class SimpleAnalysisService:
                 results_dir = project_root / "data" / "analysis_results"
 
             # 创建股票专用目录 - 完全按照web目录的结构
-            analysis_date_raw = result.get('analysis_date', datetime.now())
+            analysis_date_raw = result.get('analysis_date', now_tz())
 
             # 确保 analysis_date 是字符串格式
             if isinstance(analysis_date_raw, datetime):
@@ -2943,10 +2971,10 @@ class SimpleAnalysisService:
                     analysis_date_str = analysis_date_raw
                 except ValueError:
                     # 如果格式不正确，使用当前日期
-                    analysis_date_str = datetime.now().strftime('%Y-%m-%d')
+                    analysis_date_str = now_tz().strftime('%Y-%m-%d')
             else:
                 # 其他类型，使用当前日期
-                analysis_date_str = datetime.now().strftime('%Y-%m-%d')
+                analysis_date_str = now_tz().strftime('%Y-%m-%d')
 
             stock_dir = results_dir / stock_symbol / analysis_date_str
             reports_dir = stock_dir / "reports"
@@ -3079,7 +3107,7 @@ class SimpleAnalysisService:
             metadata = {
                 'stock_symbol': stock_symbol,
                 'analysis_date': analysis_date_str,
-                'timestamp': datetime.now().isoformat(),
+                'timestamp': now_tz().isoformat(),
                 'analysts': result.get('analysts', []),
                 'status': 'completed',
                 'reports_count': len(saved_files),

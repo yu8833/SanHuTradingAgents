@@ -24,6 +24,7 @@
   - 触发记录: monitor_alerts 集合（含 severity/message/price 等，按创建时间倒序）
 """
 from __future__ import annotations
+from app.utils.timezone import now_tz
 
 import logging
 import re
@@ -258,7 +259,7 @@ def normalize(rule: dict) -> dict:
     if r.get("type") != "tbs":
         r.pop("tbs_dir", None)
         r.pop("tbs_signals", None)
-    r.setdefault("created_at", datetime.now().isoformat())
+    r.setdefault("created_at", now_tz().isoformat())
     return r
 
 
@@ -339,7 +340,7 @@ class MonitorService:
                 "id": rule["id"], "user_id": user_id})
             if existing:
                 continue
-            rule.setdefault("created_at", datetime.now().isoformat())
+            rule.setdefault("created_at", now_tz().isoformat())
             await db[self.rules_coll].update_one(
                 {"id": rule["id"], "user_id": user_id},
                 {"$set": rule},
@@ -543,7 +544,7 @@ class MonitorService:
 
         # 3. 按规则生成指令
         now = time.time()
-        now_iso = datetime.now().isoformat()
+        now_iso = now_tz().isoformat()
         created = 0
         for r in rules:
             user_id = r.get("user_id")
@@ -702,7 +703,7 @@ class MonitorService:
             {"_id": order["_id"]},
             {"$set": {
                 "status": "executed",
-                "executed_at": datetime.now().isoformat(),
+                "executed_at": now_tz().isoformat(),
                 "executed_qty": qty,
                 "executed_price": order_result.get("price"),
             }},
@@ -737,7 +738,7 @@ class MonitorService:
         )
         from app.utils.technical_indicators import calc_market_trend
 
-        end = datetime.now()
+        end = now_tz()
         start = end - timedelta(days=150)
         start_str = start.strftime('%Y-%m-%d')
         end_str = end.strftime('%Y-%m-%d')

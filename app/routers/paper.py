@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime
 from typing import Any, Literal
+from app.utils.timezone import now_tz
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -34,7 +35,7 @@ async def _get_or_create_account(user_id: str) -> dict[str, Any]:
     db = get_mongo_db()
     acc = await db["paper_accounts"].find_one({"user_id": user_id})
     if not acc:
-        now = datetime.now().isoformat()
+        now = now_tz().isoformat()
         acc = {
             "user_id": user_id,
             # 多货币现金账户
@@ -73,7 +74,7 @@ async def _get_or_create_account(user_id: str) -> dict[str, Any]:
                 updates["realized_pnl"] = {"CNY": base_pnl, "HKD": 0.0, "USD": 0.0}
 
             if updates:
-                updates["updated_at"] = datetime.now().isoformat()
+                updates["updated_at"] = now_tz().isoformat()
                 await db["paper_accounts"].update_one({"user_id": user_id}, {"$set": updates})
                 # 重新读取迁移后的账户
                 acc = await db["paper_accounts"].find_one({"user_id": user_id})
@@ -140,7 +141,7 @@ async def _get_available_quantity(user_id: str, code: str, market: str) -> int:
         rules = await _get_market_rules(market)
         if rules and rules.get("t_plus", 0) > 0:
             # 查询今天的买入数量
-            today = datetime.now().date().isoformat()
+            today = now_tz().date().isoformat()
             pipeline = [
                 {"$match": {
                     "user_id": user_id,
@@ -508,7 +509,7 @@ async def list_review_notes(current_user: dict = Depends(get_current_user)):
 async def create_review_note(payload: ReviewNoteIn, current_user: dict = Depends(get_current_user)):
     """新增复盘笔记。"""
     db = get_mongo_db()
-    now = datetime.now().isoformat()
+    now = now_tz().isoformat()
     doc = {
         "user_id": current_user["id"],
         "trade_id": payload.trade_id,
@@ -533,7 +534,7 @@ async def update_review_note(note_id: str, payload: ReviewNoteIn,
     db = get_mongo_db()
     from bson import ObjectId
     upd = {k: v for k, v in payload.model_dump().items() if v is not None}
-    upd["updated_at"] = datetime.now().isoformat()
+    upd["updated_at"] = now_tz().isoformat()
     res = await db["trade_reviews"].update_one(
         {"_id": ObjectId(note_id), "user_id": current_user["id"]},
         {"$set": upd},

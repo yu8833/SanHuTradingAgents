@@ -2,6 +2,7 @@
 Cleanup routines extracted from DatabaseService.
 """
 from __future__ import annotations
+from app.utils.timezone import now_tz
 
 from datetime import datetime, timedelta
 from typing import Any
@@ -11,7 +12,7 @@ from app.core.database import get_mongo_db
 
 async def cleanup_old_data(days: int) -> dict[str, Any]:
     db = get_mongo_db()
-    cutoff_date = datetime.now() - timedelta(days=days)
+    cutoff_date = now_tz() - timedelta(days=days)
 
     deleted_count = 0
     cleaned_collections = []
@@ -43,7 +44,7 @@ async def cleanup_old_data(days: int) -> dict[str, Any]:
 
 async def cleanup_analysis_results(days: int) -> dict[str, Any]:
     db = get_mongo_db()
-    cutoff_date = datetime.now() - timedelta(days=days)
+    cutoff_date = now_tz() - timedelta(days=days)
 
     deleted_count = 0
     cleaned_collections = []
@@ -70,7 +71,7 @@ async def cleanup_analysis_results(days: int) -> dict[str, Any]:
 
 async def cleanup_operation_logs(days: int) -> dict[str, Any]:
     db = get_mongo_db()
-    cutoff_date = datetime.now() - timedelta(days=days)
+    cutoff_date = now_tz() - timedelta(days=days)
 
     deleted_count = 0
     cleaned_collections = []

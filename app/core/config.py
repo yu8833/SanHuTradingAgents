@@ -219,7 +219,9 @@ class Settings(BaseSettings):
     )
     # 休市期/启动兜底补数（填充上一笔快照）
     QUOTES_BACKFILL_ON_STARTUP: bool = Field(default=True)
-    QUOTES_BACKFILL_ON_OFFHOURS: bool = Field(default=True)
+    # 非交易时段（周末/节假日/收盘后）是否继续执行行情兜底补数。
+    # 默认关闭：非交易时段直接跳过，避免每轮定时触发反复调用外部数据源接口空转。
+    QUOTES_BACKFILL_ON_OFFHOURS: bool = Field(default=False)
 
     # 实时行情接口轮换配置
     QUOTES_ROTATION_ENABLED: bool = Field(

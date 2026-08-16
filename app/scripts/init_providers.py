@@ -7,6 +7,7 @@ import asyncio
 import os
 import sys
 from datetime import datetime
+from app.utils.timezone import now_tz
 
 # 添加项目根目录到Python路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -126,8 +127,8 @@ async def init_providers():
     
     # 插入新数据
     for provider_data in providers_data:
-        provider_data["created_at"] = datetime.now()
-        provider_data["updated_at"] = datetime.now()
+        provider_data["created_at"] = now_tz()
+        provider_data["updated_at"] = now_tz()
         
         result = await providers_collection.insert_one(provider_data)
         print(f"✅ 添加厂家: {provider_data['display_name']} (ID: {result.inserted_id})")

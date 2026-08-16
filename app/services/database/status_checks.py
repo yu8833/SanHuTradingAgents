@@ -2,6 +2,7 @@
 Database status and connection checks, extracted from DatabaseService.
 """
 from __future__ import annotations
+from app.utils.timezone import now_tz
 
 from datetime import datetime
 from typing import Any
@@ -26,7 +27,7 @@ async def get_mongodb_status() -> dict[str, Any]:
             "uptime": server_status.get("uptime", 0),
             "connections": server_status.get("connections", {}),
             "memory": server_status.get("mem", {}),
-            "connected_at": datetime.now().isoformat(),
+            "connected_at": now_tz().isoformat(),
         }
     except Exception as e:
         return {
@@ -75,9 +76,9 @@ async def get_database_status() -> dict[str, Any]:
 async def test_mongodb_connection() -> dict[str, Any]:
     try:
         db = get_mongo_db()
-        start = datetime.now()
+        start = now_tz()
         await db.command("ping")
-        took_ms = (datetime.now() - start).total_seconds() * 1000
+        took_ms = (now_tz() - start).total_seconds() * 1000
         return {"success": True, "response_time_ms": round(took_ms, 2), "message": "MongoDB连接正常"}
     except Exception as e:
         return {"success": False, "error": str(e), "message": "MongoDB连接失败"}
@@ -86,9 +87,9 @@ async def test_mongodb_connection() -> dict[str, Any]:
 async def test_redis_connection() -> dict[str, Any]:
     try:
         redis_client = get_redis_client()
-        start = datetime.now()
+        start = now_tz()
         await redis_client.ping()
-        took_ms = (datetime.now() - start).total_seconds() * 1000
+        took_ms = (now_tz() - start).total_seconds() * 1000
         return {"success": True, "response_time_ms": round(took_ms, 2), "message": "Redis连接正常"}
     except Exception as e:
         return {"success": False, "error": str(e), "message": "Redis连接失败"}

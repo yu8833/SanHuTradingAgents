@@ -8,6 +8,7 @@
 import logging
 from datetime import datetime
 from typing import Any
+from app.utils.timezone import now_tz
 
 from bson import ObjectId
 from pydantic import BaseModel, Field
@@ -87,7 +88,7 @@ class StockAlertService:
         """创建预警规则"""
         try:
             db = await self._get_db()
-            now_iso = datetime.now().isoformat()
+            now_iso = now_tz().isoformat()
             doc = {
                 "user_id": user_id,
                 "code": rule.code,
@@ -131,7 +132,7 @@ class StockAlertService:
             if not filtered:
                 doc = await db[self.collection_name].find_one({"_id": ObjectId(alert_id)})
                 return self._serialize(doc)
-            filtered["updated_at"] = datetime.now().isoformat()
+            filtered["updated_at"] = now_tz().isoformat()
             result = await db[self.collection_name].find_one_and_update(
                 {"_id": ObjectId(alert_id)},
                 {"$set": filtered},
@@ -278,8 +279,8 @@ class StockAlertService:
                     {"_id": rule["_id"]},
                     {"$set": {
                         "triggered": True,
-                        "triggered_at": datetime.now().isoformat(),
-                        "updated_at": datetime.now().isoformat(),
+                        "triggered_at": now_tz().isoformat(),
+                        "updated_at": now_tz().isoformat(),
                     }}
                 )
 

@@ -15,6 +15,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
+from app.utils.timezone import now_tz
 
 from app.services.retail.position_sizer import StrategyType
 
@@ -136,7 +137,7 @@ class ExitRuleEngine:
         rules = EXIT_RULES.get(
             ctx.strategy, EXIT_RULES[StrategyType.DEFAULT]
         )
-        now = datetime.now()
+        now = now_tz()
         holding_days = (now - ctx.buy_date).days
         pnl_pct = self._calc_pnl(ctx.buy_price, ctx.current_price)
 

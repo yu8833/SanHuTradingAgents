@@ -204,7 +204,7 @@ class OperationLogService:
             
             if days is not None:
                 # 只删除N天前的日志
-                cutoff_date = datetime.now() - timedelta(days=days)
+                cutoff_date = now_tz() - timedelta(days=days)
                 delete_filter["timestamp"] = {"$lt": cutoff_date}
             
             if action_type:

@@ -8,6 +8,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
+from app.utils.timezone import now_tz
 
 from app.services.historical_data_service import get_historical_data_service
 from app.worker.akshare_sync_service import AKShareSyncService
@@ -103,11 +104,11 @@ class MultiPeriodSyncService:
         else:
             from datetime import datetime, timedelta
             if end_date is None:
-                end_date = datetime.now().strftime('%Y-%m-%d')
+                end_date = now_tz().strftime('%Y-%m-%d')
             if start_date is None:
                 # 🔧 默认获取最近120天历史数据
                 default_days = 120
-                start_date = (datetime.now() - timedelta(days=default_days)).strftime('%Y-%m-%d')
+                start_date = (now_tz() - timedelta(days=default_days)).strftime('%Y-%m-%d')
             logger.info(f"🔄 使用默认日期范围: {start_date} 到 {end_date} ({default_days}天)")
 
         stats = MultiPeriodSyncStats()
@@ -217,10 +218,10 @@ class MultiPeriodSyncService:
         # 🔧 防御性检查: 确保日期不为空
         from datetime import datetime
         if end_date is None:
-            end_date = datetime.now().strftime('%Y-%m-%d')
+            end_date = now_tz().strftime('%Y-%m-%d')
         if start_date is None:
             # 默认获取最近120天
-            start_date = (datetime.now() - timedelta(days=120)).strftime('%Y-%m-%d')
+            start_date = (now_tz() - timedelta(days=120)).strftime('%Y-%m-%d')
         
         for symbol in symbols:
             try:
@@ -277,7 +278,7 @@ class MultiPeriodSyncService:
             from datetime import datetime, timedelta
 
             # 结束日期：今天
-            end_date = datetime.now().strftime('%Y-%m-%d')
+            end_date = now_tz().strftime('%Y-%m-%d')
 
             # 开始日期：根据数据源确定
             # Tushare: 1990年开始
@@ -292,8 +293,8 @@ class MultiPeriodSyncService:
         except Exception as e:
             logger.error(f"❌ 获取全历史日期范围失败: {e}")
             # 默认返回最近5年的数据
-            end_date = datetime.now().strftime('%Y-%m-%d')
-            start_date = (datetime.now() - timedelta(days=365*5)).strftime('%Y-%m-%d')
+            end_date = now_tz().strftime('%Y-%m-%d')
+            start_date = (now_tz() - timedelta(days=365*5)).strftime('%Y-%m-%d')
             return start_date, end_date
     
     async def get_sync_statistics(self) -> dict[str, Any]:
@@ -336,7 +337,7 @@ class MultiPeriodSyncService:
             
             return {
                 "period_statistics": stats,
-                "last_updated": datetime.now().isoformat()
+                "last_updated": now_tz().isoformat()
             }
             
         except Exception as e:

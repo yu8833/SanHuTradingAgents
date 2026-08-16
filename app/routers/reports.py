@@ -6,6 +6,7 @@ import logging
 import re
 from datetime import datetime
 from typing import Any
+from app.utils.timezone import now_tz
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -1602,7 +1603,7 @@ async def get_reports_list(
                 market_type = "A股"
 
             # 创建时间
-            created_at = doc.get("created_at", datetime.now())
+            created_at = doc.get("created_at", now_tz())
             created_at_tz = to_config_tz(created_at)
 
             # 决策建议：列表页简化提取，避免完整结构化解析以提升性能
@@ -1776,8 +1777,8 @@ async def get_report_detail(
                 stock_name = get_stock_name(stock_symbol)
 
             # 获取时间（数据库中是 UTC 时间，需要转换为 UTC+8）
-            created_at = doc.get("created_at", datetime.now())
-            updated_at = doc.get("updated_at", datetime.now())
+            created_at = doc.get("created_at", now_tz())
+            updated_at = doc.get("updated_at", now_tz())
 
             # 转换时区：数据库中是 UTC 时间，转换为 UTC+8
             created_at_tz = to_config_tz(created_at)
@@ -1952,7 +1953,7 @@ async def download_report(
             raise HTTPException(status_code=404, detail="报告不存在")
 
         stock_symbol = doc.get("stock_symbol", "未知")
-        analysis_date = doc.get("analysis_date", datetime.now().strftime("%Y-%m-%d"))
+        analysis_date = doc.get("analysis_date", now_tz().strftime("%Y-%m-%d"))
 
         # 统一的英文 -> 中文报告字段映射（同步 report_exporter.py 中的定义）
         FIELD_MAP = {

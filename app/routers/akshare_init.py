@@ -304,14 +304,14 @@ async def stop_initialization(current_user: dict = Depends(get_current_user)):
             "current_task": None,
             "start_time": None,
             "progress": None,
-            "result": {"stopped": True, "stop_time": datetime.now()}
+            "result": {"stopped": True, "stop_time": now_tz()}
         })
         
         return {
             "success": True,
             "data": {
                 "stopped": True,
-                "stop_time": datetime.now()
+                "stop_time": now_tz()
             },
             "message": "初始化任务已停止"
         }

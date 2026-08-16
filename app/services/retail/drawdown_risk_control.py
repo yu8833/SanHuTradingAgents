@@ -19,6 +19,7 @@
 """
 
 from __future__ import annotations
+from app.utils.timezone import now_tz
 
 import logging
 from datetime import date, datetime, timedelta
@@ -50,11 +51,11 @@ SYMBOL_RISK_COLL = "paper_symbol_risk"
 
 
 def _today_str() -> str:
-    return datetime.now().strftime("%Y-%m-%d")
+    return now_tz().strftime("%Y-%m-%d")
 
 
 def _now_iso() -> str:
-    return datetime.now().isoformat()
+    return now_tz().isoformat()
 
 
 async def _compute_equity_cny(db, user_id: str) -> float:
@@ -109,7 +110,7 @@ async def compute_drawdown(user_id: str) -> dict[str, Any]:
          monthly_dd_pct, level, max_position_pct, level_label, level_action}
     """
     db = get_mongo_db()
-    now = datetime.now()
+    now = now_tz()
     week_start = (now - timedelta(days=7)).strftime("%Y-%m-%d")
     month_start = (now - timedelta(days=30)).strftime("%Y-%m-%d")
 
@@ -319,7 +320,7 @@ async def record_exit(user_id: str, symbol: str, pnl: float, exit_reason: str = 
         consecutive = int((doc or {}).get("consecutive_stop_losses", 0)) + 1
         paused_until = ""
         if consecutive >= CONSECUTIVE_STOP_LOSS_LIMIT:
-            paused_until = (datetime.now() + timedelta(days=PAUSE_DAYS_ON_SYMBOL_LOSSES)).isoformat()
+            paused_until = (now_tz() + timedelta(days=PAUSE_DAYS_ON_SYMBOL_LOSSES)).isoformat()
             logger.warning(
                 f"❌ {symbol} 连续止损 {consecutive} 次，暂停交易至 {paused_until}"
             )

@@ -18,6 +18,7 @@ import logging
 import time
 from datetime import datetime
 from typing import Any
+from app.utils.timezone import now_tz
 
 import numpy as np
 
@@ -64,7 +65,7 @@ class TurnaroundService(RetailScreeningBase):
         logger.info(f"困境反转扫描: {len(candidates)} 个候选股 (从 {len(sorted_codes)} 只中筛选)")
 
         # 3. 批量获取60日K线（分片并发查询，默认每批500只）
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = now_tz().strftime("%Y-%m-%d")
         quotes_map = await self._batch_get_quotes(
             candidates, today, days=60, concurrency=5, batch_size=500
         )

@@ -15,6 +15,7 @@ import logging
 import math
 import time
 from datetime import datetime
+from app.utils.timezone import now_tz
 
 from app.core.database import get_mongo_db
 
@@ -268,7 +269,7 @@ class DgProsperityService:
             return {"updated_count": 0, "failed_count": 0, "total_count": 0, "error": "无股票代码"}
 
         # 计算最近 8 个季度的 period 列表（如 2026Q2, 2026Q1, 2025Q4, ...）
-        today = datetime.now()
+        today = now_tz()
         quarters = []
         q_date = today
         for _i in range(8):
@@ -335,7 +336,7 @@ class DgProsperityService:
                             "code": code,
                             "report_period": period,
                             "ts_code": ts_code,
-                            "updated_at": datetime.now().isoformat()
+                            "updated_at": now_tz().isoformat()
                         }
                         # 仅写入有限数值，避免 NaN/±inf 污染 Δ 计算
                         if _finite(g):

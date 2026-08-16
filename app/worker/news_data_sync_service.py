@@ -6,6 +6,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
+from app.utils.timezone import now_tz
 
 from app.services.news_data_service import get_news_data_service
 from tradingagents.dataflows.news.realtime_news import RealtimeNewsAggregator
@@ -22,7 +23,7 @@ class NewsSyncStats:
     failed_saves: int = 0
     duplicate_skipped: int = 0
     sources_used: list[str] = field(default_factory=list)
-    start_time: datetime = field(default_factory=datetime.now)
+    start_time: datetime = field(default_factory=now_tz)
     end_time: datetime | None = None
     
     @property
@@ -173,12 +174,12 @@ class NewsDataSyncService:
                 
                 self.logger.info(f"💾 {symbol} 新闻同步完成: {saved_count}条保存成功")
             
-            stats.end_time = datetime.now()
+            stats.end_time = now_tz()
             return stats
             
         except Exception as e:
             self.logger.error(f"❌ 同步股票新闻失败 {symbol}: {e}")
-            stats.end_time = datetime.now()
+            stats.end_time = now_tz()
             return stats
     
     async def _sync_tushare_news(
@@ -550,12 +551,12 @@ class NewsDataSyncService:
                 
                 self.logger.info(f"💾 市场新闻同步完成: {saved_count}条保存成功")
             
-            stats.end_time = datetime.now()
+            stats.end_time = now_tz()
             return stats
             
         except Exception as e:
             self.logger.error(f"❌ 同步市场新闻失败: {e}")
-            stats.end_time = datetime.now()
+            stats.end_time = now_tz()
             return stats
 
 

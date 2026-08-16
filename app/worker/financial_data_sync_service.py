@@ -8,6 +8,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
+from app.utils.timezone import now_tz
 
 from app.core.database import get_mongo_db
 from app.services.financial_data_service import get_financial_data_service
@@ -151,7 +152,7 @@ class FinancialDataSyncService:
         """同步单个数据源的财务数据"""
         stats = FinancialSyncStats()
         stats.total_symbols = len(symbols)
-        stats.start_time = datetime.now()
+        stats.start_time = now_tz()
         
         provider = self.providers[data_source]
         
@@ -159,7 +160,7 @@ class FinancialDataSyncService:
         if not provider.is_available():
             logger.warning(f"⚠️ {data_source} 数据源不可用")
             stats.skipped_count = len(symbols)
-            stats.end_time = datetime.now()
+            stats.end_time = now_tz()
             return stats
         
         # 批量处理股票
@@ -193,7 +194,7 @@ class FinancialDataSyncService:
                         "symbol": symbol,
                         "data_source": data_source,
                         "error": str(result),
-                        "timestamp": datetime.now().isoformat()
+                        "timestamp": now_tz().isoformat()
                     })
                     logger.error(f"❌ {symbol} 财务数据同步失败 ({data_source}): {result}")
                 elif result:
@@ -207,7 +208,7 @@ class FinancialDataSyncService:
             if i + batch_size < len(symbols):
                 await asyncio.sleep(delay_seconds)
         
-        stats.end_time = datetime.now()
+        stats.end_time = now_tz()
         stats.duration = (stats.end_time - stats.start_time).total_seconds()
         
         return stats

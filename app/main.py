@@ -18,6 +18,7 @@ import logging
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+from app.utils.timezone import now_tz
 
 import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -839,7 +840,7 @@ async def lifespan(app: FastAPI):
         try:
             from datetime import datetime, timedelta
 
-            _now = datetime.now()
+            _now = now_tz()
             _tz = settings.TIMEZONE
             # 需要补跑的 (job_id, cron_expr, run_func, kwargs)
             _catchup_candidates = []

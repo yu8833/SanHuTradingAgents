@@ -1,4 +1,5 @@
 from __future__ import annotations
+from app.utils.timezone import now_tz
 
 import json
 import threading
@@ -117,7 +118,7 @@ class KlineCache:
         return f"{self.PREFIX}:{code}:{period}:{limit}{adj_s}"
 
     def _ttl(self) -> int:
-        now = datetime.now()
+        now = now_tz()
         if now.weekday() >= 5:
             return self.ttl_holiday
         hm = now.hour * 100 + now.minute

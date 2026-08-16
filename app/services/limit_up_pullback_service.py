@@ -13,6 +13,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Any
+from app.utils.timezone import now_tz
 
 import numpy as np
 
@@ -99,7 +100,7 @@ class LimitUpPullbackService:
         db = await self._get_db()
         stock_code = stock_code.zfill(6)
 
-        end_date = datetime.now()
+        end_date = now_tz()
         start_date = end_date - timedelta(days=days * 2)
         start_date_str = start_date.strftime('%Y-%m-%d')
 
@@ -843,7 +844,7 @@ class LimitUpPullbackService:
         logger.info(f"📊 待扫描股票数量: {total_scanned}")
 
         # ========== 第2次查询：一次性获取所有股票最近60天日线数据 ==========
-        end_date = datetime.now()
+        end_date = now_tz()
         start_date = end_date - timedelta(days=120)
         start_date_str = start_date.strftime('%Y-%m-%d')
 
@@ -1621,7 +1622,7 @@ class LimitUpPullbackService:
         total_scanned = len(stock_codes)
         logger.info(f"📊 待回测股票数量: {total_scanned}")
 
-        end_date = datetime.strptime(params["end_date"], "%Y-%m-%d") if params.get("end_date") else datetime.now()
+        end_date = datetime.strptime(params["end_date"], "%Y-%m-%d") if params.get("end_date") else now_tz()
         start_date = datetime.strptime(params["start_date"], "%Y-%m-%d") if params.get("start_date") else end_date - timedelta(days=180)
         data_start = start_date - timedelta(days=120)
         data_end = end_date + timedelta(days=hold_days + 10)

@@ -12,6 +12,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from app.utils.timezone import now_tz
 
 # 添加项目根目录到路径
 project_root = Path(__file__).parent.parent.parent
@@ -205,7 +206,7 @@ class AnalysisWorker:
 
             heartbeat_data = {
                 "worker_id": self.worker_id,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": now_tz().isoformat(),
                 "current_task": self.current_task,
                 "status": "active" if self.running else "stopping"
             }

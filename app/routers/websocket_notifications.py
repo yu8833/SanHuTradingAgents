@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import logging
 from datetime import datetime
+from app.utils.timezone import now_tz
 
 from fastapi import APIRouter, Query, WebSocket
 
@@ -62,7 +63,7 @@ async def websocket_notifications_endpoint(
         "type": "connected",
         "data": {
             "user_id": user_id,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": now_tz().isoformat(),
             "message": "WebSocket 连接成功"
         }
     })
@@ -75,7 +76,7 @@ async def websocket_notifications_endpoint(
                     await websocket.send_json({
                         "type": "heartbeat",
                         "data": {
-                            "timestamp": datetime.now().isoformat()
+                            "timestamp": now_tz().isoformat()
                         }
                     })
                 except Exception as e:
@@ -144,7 +145,7 @@ async def websocket_task_progress_endpoint(
         "data": {
             "task_id": task_id,
             "user_id": user_id,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": now_tz().isoformat(),
             "message": "已连接任务进度流"
         }
     })

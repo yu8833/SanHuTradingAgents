@@ -14,6 +14,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
+from app.utils.timezone import now_tz
 
 from app.data_provider import get_kline, get_realtime_quote
 from app.services.stock_analyzer import (
@@ -222,7 +223,7 @@ class QuickAnalysisService:
         vol = realtime.get('volume') or 0
         amt = realtime.get('amount') or 0
         
-        today = datetime.now().date()
+        today = now_tz().date()
         
         df = df.copy()
         if last_date >= today:
@@ -325,7 +326,7 @@ class QuickAnalysisService:
         result.summary = self._generate_summary(trend)
         
         # 分析日期
-        result.analysis_date = datetime.now().strftime("%Y-%m-%d %H:%M")
+        result.analysis_date = now_tz().strftime("%Y-%m-%d %H:%M")
         
         return result
     

@@ -450,36 +450,6 @@ const routes: RouteRecordRaw[] = [
         }
       },
       {
-        path: 'cache',
-        name: 'CacheManagement',
-        component: () => import('@/views/Settings/CacheManagement.vue'),
-        meta: {
-          title: '缓存管理',
-          parentTitle: '设置',
-          requiresAuth: true
-        }
-      },
-      {
-        path: 'usage',
-        name: 'UsageStatistics',
-        component: () => import('@/views/Settings/UsageStatistics.vue'),
-        meta: {
-          title: '使用统计',
-          parentTitle: '设置',
-          requiresAuth: true
-        }
-      },
-      {
-        path: 'scheduler',
-        name: 'SchedulerManagement',
-        component: () => import('@/views/System/SchedulerManagement.vue'),
-        meta: {
-          title: '定时任务',
-          parentTitle: '设置',
-          requiresAuth: true
-        }
-      },
-      {
         path: 'users',
         name: 'UserManagement',
         component: () => import('@/views/System/UserManagement.vue'),

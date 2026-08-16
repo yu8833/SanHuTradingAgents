@@ -1,5 +1,6 @@
 import logging
 from typing import Any
+from app.utils.timezone import now_tz
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -924,7 +925,7 @@ async def check_data_freshness(user: dict = Depends(get_current_user)):
         from app.core.database import get_mongo_db
 
         db = get_mongo_db()
-        today = datetime.now()
+        today = now_tz()
 
         from app.utils.trading_time import (
             calc_stale_days,

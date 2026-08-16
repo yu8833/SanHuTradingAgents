@@ -54,3 +54,19 @@ def ensure_timezone(dt: datetime | None) -> datetime | None:
         return dt.replace(tzinfo=get_tz())
     return dt
 
+
+def to_display_iso(dt: datetime | None) -> str | None:
+    """将数据库读出的 datetime 统一转为北京时间（+08:00）的 ISO 字符串。
+
+    MongoDB 内部统一以 UTC 存储 datetime，且当前 motor 客户端未开启 tz_aware，
+    读回的值是"无时区"的 UTC 墙钟时间。因此：
+      - naive datetime：按 UTC 解释，再转换为北京时间
+      - 已带时区的 datetime：直接转换为北京时间
+    这样所有输出都给前端带 +08:00 时区标识，避免 8 小时偏差。
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+    return dt.astimezone(get_tz()).isoformat()
+

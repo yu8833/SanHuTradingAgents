@@ -13,6 +13,7 @@ import logging
 import time
 from datetime import datetime, timedelta
 from typing import Any
+from app.utils.timezone import now_tz
 
 import numpy as np
 
@@ -242,7 +243,7 @@ class RetailScreeningBase:
         """
         db = await self._get_db()
         if end_date is None:
-            end_date = datetime.now().strftime("%Y-%m-%d")
+            end_date = now_tz().strftime("%Y-%m-%d")
 
         cursor = db["stock_daily_quotes"].find(
             {
@@ -311,7 +312,7 @@ class RetailScreeningBase:
         try:
             end_dt = datetime.strptime(end_date, "%Y-%m-%d")
         except Exception:
-            end_dt = datetime.now()
+            end_dt = now_tz()
         start_lower = (end_dt - timedelta(days=days * 2 + 30)).strftime("%Y-%m-%d")
 
         # 分片
@@ -533,7 +534,7 @@ class RetailScreeningBase:
 
         if not start_date or not end_date:
             # 默认回测最近1年
-            end_dt = datetime.now()
+            end_dt = now_tz()
             start_dt = end_dt - timedelta(days=365)
             start_date = start_dt.strftime("%Y-%m-%d")
             end_date = end_dt.strftime("%Y-%m-%d")

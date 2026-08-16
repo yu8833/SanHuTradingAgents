@@ -25,6 +25,7 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Any
+from app.utils.timezone import now_tz
 
 import numpy as np
 
@@ -1731,7 +1732,7 @@ class ThreeBuysThreeSellsService:
         if total_scanned == 0:
             return {"total": 0, "items": [], "took_ms": 0, "scanned_count": 0, "params": params}
 
-        end_date = datetime.now()
+        end_date = now_tz()
         start_date = end_date - timedelta(days=150)
         start_str = start_date.strftime('%Y-%m-%d')
         end_str = end_date.strftime('%Y-%m-%d')
@@ -2019,7 +2020,7 @@ class ThreeBuysThreeSellsService:
         except (ValueError, TypeError):
             market_cap = 0.0
 
-        end_date = datetime.now()
+        end_date = now_tz()
         start_date = end_date - timedelta(days=150)
         start_str = start_date.strftime('%Y-%m-%d')
         end_str = end_date.strftime('%Y-%m-%d')
@@ -2233,7 +2234,7 @@ class ThreeBuysThreeSellsService:
         stock_codes = list(stock_info_map.keys())
         logger.info(f"📊 待回测股票数量: {total_scanned}")
 
-        end_date = datetime.strptime(params["end_date"], "%Y-%m-%d") if params.get("end_date") else datetime.now()
+        end_date = datetime.strptime(params["end_date"], "%Y-%m-%d") if params.get("end_date") else now_tz()
         start_date = datetime.strptime(params["start_date"], "%Y-%m-%d") if params.get("start_date") else end_date - timedelta(days=180)
         data_start = start_date - timedelta(days=150)
         data_end = end_date + timedelta(days=hold_days + 10)

@@ -7,6 +7,7 @@ import asyncio
 import logging
 from datetime import date, datetime
 from typing import Any
+from app.utils.timezone import now_tz
 
 import pandas as pd
 
@@ -107,12 +108,12 @@ class HistoricalDataService:
                 return 0
 
             from datetime import datetime
-            total_start = datetime.now()
+            total_start = now_tz()
 
             logger.info(f"💾 开始保存 {symbol} 历史数据: {len(data)}条记录 (数据源: {data_source})")
 
             # ⏱️ 性能监控：单位转换
-            convert_start = datetime.now()
+            convert_start = now_tz()
             # 🔥 单位转换说明（bug-012 修复）
             # 数据源 adapter 的 get_kline() 已经把 vol/amount 转换为标准单位（volume=股, amount=元）：
             #   - tushare_adapter.get_kline(): vol(手)×100→股, amount(千元)×1000→元
@@ -126,10 +127,10 @@ class HistoricalDataService:
                 data['pre_close'] = data['close'].shift(1)
                 logger.debug(f"✅ {symbol} 添加 pre_close 字段（从前一天的 close 获取）")
 
-            convert_duration = (datetime.now() - convert_start).total_seconds()
+            convert_duration = (now_tz() - convert_start).total_seconds()
 
             # ⏱️ 性能监控：构建操作列表
-            prepare_start = datetime.now()
+            prepare_start = now_tz()
             # 准备批量操作
             operations = []
             saved_count = 0
@@ -157,9 +158,9 @@ class HistoricalDataService:
 
                     # 批量执行（每200条）
                     if len(operations) >= batch_size:
-                        batch_write_start = datetime.now()
+                        batch_write_start = now_tz()
                         batch_saved = await self._execute_bulk_write_with_retry(symbol, operations)
-                        batch_write_duration = (datetime.now() - batch_write_start).total_seconds()
+                        batch_write_duration = (now_tz() - batch_write_start).total_seconds()
                         logger.debug(f"   批量写入 {len(operations)} 条，耗时 {batch_write_duration:.2f}秒")
                         saved_count += batch_saved
                         operations = []
@@ -170,18 +171,18 @@ class HistoricalDataService:
                     logger.error(f"❌ 处理记录失败 {symbol} {date_str}: {e}")
                     continue
 
-            prepare_duration = (datetime.now() - prepare_start).total_seconds()
+            prepare_duration = (now_tz() - prepare_start).total_seconds()
 
             # ⏱️ 性能监控：最后一批写入
-            final_write_start = datetime.now()
+            final_write_start = now_tz()
             # 执行剩余操作
             if operations:
                 saved_count += await self._execute_bulk_write_with_retry(
                     symbol, operations
                 )
-            final_write_duration = (datetime.now() - final_write_start).total_seconds()
+            final_write_duration = (now_tz() - final_write_start).total_seconds()
 
-            total_duration = (datetime.now() - total_start).total_seconds()
+            total_duration = (now_tz() - total_start).total_seconds()
             logger.info(
                 f"✅ {symbol} 历史数据保存完成: {saved_count}条记录，"
                 f"总耗时 {total_duration:.2f}秒 "
@@ -264,7 +265,7 @@ class HistoricalDataService:
         - 公理B（非负性）：open/high/low/close/volume/amount > 0
         不满足时自动修正并记录警告日志，避免脏数据流入下游回测引擎。
         """
-        now = datetime.now()
+        now = now_tz()
 
         # 获取日期 - 优先从列中获取，如果索引是日期类型才使用索引
         trade_date = None
@@ -395,7 +396,7 @@ class HistoricalDataService:
     def _format_date(self, date_value) -> str:
         """格式化日期"""
         if date_value is None:
-            return datetime.now().strftime('%Y-%m-%d')
+            return now_tz().strftime('%Y-%m-%d')
         
         if isinstance(date_value, str):
             # 处理不同的日期格式
@@ -534,7 +535,7 @@ class HistoricalDataService:
                     "latest_date": item.get("latest_date")
                 } for item in source_stats},
                 "by_market": {item["_id"]: item["count"] for item in market_stats},
-                "last_updated": datetime.now().isoformat()
+                "last_updated": now_tz().isoformat()
             }
             
         except Exception as e:

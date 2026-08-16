@@ -19,6 +19,7 @@ import asyncio
 import logging
 import time
 from typing import Any
+from app.utils.timezone import now_tz
 
 from app.services.retail.retail_screening_base import RetailScreeningBase
 
@@ -96,7 +97,7 @@ class SmallCapValueService(RetailScreeningBase):
 
         # 3. 批量获取30日K线（用于评分）
         from datetime import datetime
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = now_tz().strftime("%Y-%m-%d")
         quotes_map = await self._batch_get_quotes(
             candidates, today, days=30, concurrency=100
         )

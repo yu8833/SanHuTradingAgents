@@ -7,6 +7,7 @@
 
 import logging
 from datetime import datetime
+from app.utils.timezone import now_tz
 
 from app.services.retail.exit_rule_engine import (
     ExitRuleEngine,
@@ -121,7 +122,7 @@ class RetailStrategyService:
                 buy_date = datetime.fromisoformat(h["buy_date"])
             except (KeyError, ValueError, TypeError):
                 # 无效日期默认为今天
-                buy_date = datetime.now()
+                buy_date = now_tz()
             contexts.append(
                 HoldingContext(
                     symbol=h.get("symbol", ""),

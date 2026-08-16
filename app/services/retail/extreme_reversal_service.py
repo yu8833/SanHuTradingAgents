@@ -18,6 +18,7 @@ import logging
 import time
 from datetime import datetime
 from typing import Any
+from app.utils.timezone import now_tz
 
 import numpy as np
 
@@ -77,7 +78,7 @@ class ExtremeReversalService(RetailScreeningBase):
         )
 
         # 3. 批量获取历史K线（60天）
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = now_tz().strftime("%Y-%m-%d")
         quotes_map = await self._batch_get_quotes(
             candidates, today, days=60, concurrency=100
         )

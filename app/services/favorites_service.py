@@ -4,6 +4,7 @@
 
 from datetime import datetime
 from typing import Any
+from app.utils.timezone import now_tz
 
 from bson import ObjectId
 
@@ -209,7 +210,7 @@ class FavoritesService:
                 "stock_code": stock_code,
                 "stock_name": stock_name,
                 "market": market,
-                "added_at": datetime.now(),
+                "added_at": now_tz(),
                 "tags": tags or [],
                 "notes": notes,
                 "alert_price_high": alert_price_high,
@@ -253,9 +254,9 @@ class FavoritesService:
                 result = await db.user_favorites.update_one(
                     {"user_id": user_id},
                     {
-                        "$setOnInsert": {"user_id": user_id, "created_at": datetime.now()},
+                        "$setOnInsert": {"user_id": user_id, "created_at": now_tz()},
                         "$push": {"favorites": favorite_stock},
-                        "$set": {"updated_at": datetime.now()}
+                        "$set": {"updated_at": now_tz()}
                     },
                     upsert=True
                 )
@@ -288,7 +289,7 @@ class FavoritesService:
                 {"user_id": user_id},
                 {
                     "$pull": {"favorites": {"stock_code": stock_code}},
-                    "$set": {"updated_at": datetime.now()}
+                    "$set": {"updated_at": now_tz()}
                 }
             )
             return result.modified_count > 0
@@ -339,7 +340,7 @@ class FavoritesService:
                 {
                     "$set": {
                         **update_fields,
-                        "updated_at": datetime.now()
+                        "updated_at": now_tz()
                     }
                 }
             )

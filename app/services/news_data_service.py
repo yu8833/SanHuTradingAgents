@@ -6,6 +6,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
+from app.utils.timezone import now_tz
 
 from pymongo import ReplaceOne
 from pymongo.errors import BulkWriteError
@@ -165,7 +166,7 @@ class NewsDataService:
             await self._ensure_indexes()
 
             collection = self._get_collection()
-            now = datetime.now()
+            now = now_tz()
             
             # 标准化数据
             news_list = [news_data] if isinstance(news_data, dict) else news_data
@@ -262,7 +263,7 @@ class NewsDataService:
             # 获取同步数据库连接
             db = get_mongo_db_sync()
             collection = db.stock_news
-            now = datetime.now()
+            now = now_tz()
 
             # 标准化数据
             news_list = [news_data] if isinstance(news_data, dict) else news_data
@@ -430,12 +431,12 @@ class NewsDataService:
                 
                 # 如果都失败了，返回当前时间
                 self.logger.warning(f"⚠️ 无法解析日期时间: {dt_value}")
-                return datetime.now()
+                return now_tz()
                 
             except Exception:
-                return datetime.now()
+                return now_tz()
         
-        return datetime.now()
+        return now_tz()
     
     def _safe_float(self, value) -> float | None:
         """安全转换为浮点数"""
@@ -559,7 +560,7 @@ class NewsDataService:
         Returns:
             最新新闻列表
         """
-        start_time = datetime.now() - timedelta(hours=hours_back)
+        start_time = now_tz() - timedelta(hours=hours_back)
         
         params = NewsQueryParams(
             symbol=symbol,
@@ -686,7 +687,7 @@ class NewsDataService:
         try:
             collection = self._get_collection()
             
-            cutoff_date = datetime.now() - timedelta(days=days_to_keep)
+            cutoff_date = now_tz() - timedelta(days=days_to_keep)
             
             result = await collection.delete_many({
                 "publish_time": {"$lt": cutoff_date}

@@ -3,6 +3,7 @@
 流程：加载全市场日线(warmup历史) → 计算指标/信号 → 在某交易日过滤 → 评分排序。
 """
 from __future__ import annotations
+from app.utils.timezone import now_tz
 
 import logging
 import threading
@@ -645,7 +646,7 @@ def run_all_strategies(
         "strategies": strategies,
         "elapsed_ms": round((time.perf_counter() - t0) * 1000, 1),
     }
-    computed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    computed_at = now_tz().strftime("%Y-%m-%d %H:%M:%S")
     result["computed_at"] = computed_at
     result["cached"] = False
     db[SCREEN_CACHE_COLLECTION].update_one(

@@ -3,6 +3,7 @@ Tushare data source adapter
 """
 import logging
 from datetime import datetime, timedelta
+from app.utils.timezone import now_tz
 
 import pandas as pd
 
@@ -82,8 +83,8 @@ class TushareAdapter(DataSourceAdapter):
                     try:
                         # daily 接口：取最近 30 天数据（确保覆盖至少一个交易日）
                         from datetime import datetime, timedelta
-                        end_date = datetime.now().strftime('%Y%m%d')
-                        start_date = (datetime.now() - timedelta(days=30)).strftime('%Y%m%d')
+                        end_date = now_tz().strftime('%Y%m%d')
+                        start_date = (now_tz() - timedelta(days=30)).strftime('%Y%m%d')
                         df = pro.daily(ts_code='000001.SZ', start_date=start_date, end_date=end_date)
                         result = df is not None and len(df) > 0
                     except Exception as _e2:
@@ -459,7 +460,7 @@ class TushareAdapter(DataSourceAdapter):
         except Exception:
             ts_code = code
         try:
-            end = datetime.now()
+            end = now_tz()
             start = end - timedelta(days=max(1, days))
             start_str = start.strftime('%Y%m%d')
             end_str = end.strftime('%Y%m%d')
@@ -514,7 +515,7 @@ class TushareAdapter(DataSourceAdapter):
             ts.set_token(token)
             pro = ts.pro_api()
 
-            today = datetime.now()
+            today = now_tz()
             for delta in range(0, 10):  # up to 10 days back
                 d = (today - timedelta(days=delta)).strftime("%Y%m%d")
                 try:

@@ -10,6 +10,7 @@ import zipfile
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+from app.utils.timezone import get_tz, now_tz
 
 logger = logging.getLogger("webapi")
 
@@ -249,7 +250,7 @@ class LogExportService:
             export_dir.mkdir(parents=True, exist_ok=True)
             
             # 生成导出文件名
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            timestamp = now_tz().strftime("%Y%m%d_%H%M%S")
             
             if format == "zip":
                 export_path = export_dir / f"logs_export_{timestamp}.zip"
@@ -324,7 +325,7 @@ class LogExportService:
             日志统计信息
         """
         try:
-            cutoff_time = datetime.now() - timedelta(days=days)
+            cutoff_time = now_tz() - timedelta(days=days)
             
             stats = {
                 "total_files": 0,
@@ -339,7 +340,7 @@ class LogExportService:
                     continue
                 
                 stat = file_path.stat()
-                modified_time = datetime.fromtimestamp(stat.st_mtime)
+                modified_time = datetime.fromtimestamp(stat.st_mtime, tz=get_tz())
                 
                 if modified_time < cutoff_time:
                     continue

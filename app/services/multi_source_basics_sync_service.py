@@ -7,6 +7,7 @@ Multi-source stock basics synchronization service
 - Provides unified interface for different data sources
 """
 from __future__ import annotations
+from app.utils.timezone import now_tz
 
 import asyncio
 import logging
@@ -178,7 +179,7 @@ class MultiSourceBasicsSyncService:
             existing_status.errors = 0
             existing_status.data_sources_used = sources_present
             existing_status.message = f"已存在 {actual_total} 条股票基础信息（来自数据源: {', '.join(sources_present) if sources_present else 'unknown'}）"
-            existing_status.finished_at = datetime.now().isoformat()
+            existing_status.finished_at = now_tz().isoformat()
             existing_status.started_at = existing_status.finished_at
 
             status_dict = existing_status.__dict__
@@ -270,7 +271,7 @@ class MultiSourceBasicsSyncService:
 
         db = get_mongo_db()
         stats = SyncStats()
-        stats.started_at = datetime.now().isoformat()
+        stats.started_at = now_tz().isoformat()
         stats.status = "running"
         await self._persist_status(db, stats.__dict__.copy())
 
@@ -388,7 +389,7 @@ class MultiSourceBasicsSyncService:
                         "full_symbol": full_symbol,  # 添加 full_symbol 字段
                         "category": category,
                         "source": data_source,  # 🔥 使用实际数据源
-                        "updated_at": datetime.now(),
+                        "updated_at": now_tz(),
                     }
 
                     # 添加财务指标
@@ -425,7 +426,7 @@ class MultiSourceBasicsSyncService:
             stats.updated = updated
             stats.errors = errors
             stats.status = "success" if errors == 0 else "success_with_errors"
-            stats.finished_at = datetime.now().isoformat()
+            stats.finished_at = now_tz().isoformat()
 
             await self._persist_status(db, stats.__dict__.copy())
             logger.info(
@@ -437,7 +438,7 @@ class MultiSourceBasicsSyncService:
         except Exception as e:
             stats.status = "failed"
             stats.message = str(e)
-            stats.finished_at = datetime.now().isoformat()
+            stats.finished_at = now_tz().isoformat()
             await self._persist_status(db, stats.__dict__.copy())
             logger.exception(f"Multi-source sync failed: {e}")
             return stats.__dict__

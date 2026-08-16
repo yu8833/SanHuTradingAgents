@@ -4,6 +4,7 @@ AKShare data source adapter
 import logging
 from datetime import datetime, timedelta
 from typing import Any
+from app.utils.timezone import now_tz
 
 import pandas as pd
 
@@ -777,7 +778,7 @@ class AKShareAdapter(DataSourceAdapter):
             return None
 
     def find_latest_trade_date(self) -> str | None:
-        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
+        yesterday = (now_tz() - timedelta(days=1)).strftime("%Y%m%d")
         logger.info(f"AKShare: Using yesterday as trade date: {yesterday}")
         return yesterday
 

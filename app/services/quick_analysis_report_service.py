@@ -14,6 +14,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
+from app.utils.timezone import now_tz
 
 logger = logging.getLogger(__name__)
 
@@ -1045,7 +1046,7 @@ MM/DD 阶段低点 XX.XX ──→ MM/DD +X.XX% ──→ MM/DD 高点 XX.XX
         
         report = QuickAnalysisReport()
         report.stock_code = stock_code
-        report.analysis_date = datetime.now().strftime("%Y-%m-%d %H:%M")
+        report.analysis_date = now_tz().strftime("%Y-%m-%d %H:%M")
         
         try:
             # 1. 收集技术面数据

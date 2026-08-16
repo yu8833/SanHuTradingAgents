@@ -10,6 +10,7 @@
 计算量极小（单股 ~90 行），复用 indicators.compute_all 计算指标，不依赖全市场面板。
 """
 from __future__ import annotations
+from app.utils.timezone import now_tz
 
 import logging
 from datetime import datetime, timedelta
@@ -42,7 +43,7 @@ async def analyze_volume_price(db, symbol: str) -> dict[str, Any]:
 
 def _analyze_volume_price_sync(db, symbol: str) -> dict[str, Any]:
     """量价分析同步实现。"""
-    today = datetime.now()
+    today = now_tz()
     start_dt = (today - timedelta(days=_LOOKBACK_DAYS * 2)).strftime("%Y-%m-%d")
     end_dt = today.strftime("%Y-%m-%d")
 

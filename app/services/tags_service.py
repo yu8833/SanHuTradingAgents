@@ -2,6 +2,7 @@
 用户自定义标签服务
 """
 from __future__ import annotations
+from app.utils.timezone import now_tz
 
 from datetime import datetime
 from typing import Any
@@ -40,8 +41,8 @@ class TagsService:
             "name": doc.get("name"),
             "color": doc.get("color") or "#409EFF",
             "sort_order": doc.get("sort_order", 0),
-            "created_at": (doc.get("created_at") or datetime.now()).isoformat(),
-            "updated_at": (doc.get("updated_at") or datetime.now()).isoformat(),
+            "created_at": (doc.get("created_at") or now_tz()).isoformat(),
+            "updated_at": (doc.get("updated_at") or now_tz()).isoformat(),
         }
 
     async def list_tags(self, user_id: str) -> list[dict[str, Any]]:
@@ -56,7 +57,7 @@ class TagsService:
     async def create_tag(self, user_id: str, name: str, color: str | None = None, sort_order: int = 0) -> dict[str, Any]:
         db = await self._get_db()
         await self.ensure_indexes()
-        now = datetime.now()
+        now = now_tz()
         doc = {
             "user_id": self._normalize_user_id(user_id),
             "name": name.strip(),
@@ -72,7 +73,7 @@ class TagsService:
     async def update_tag(self, user_id: str, tag_id: str, *, name: str | None = None, color: str | None = None, sort_order: int | None = None) -> bool:
         db = await self._get_db()
         await self.ensure_indexes()
-        update: dict[str, Any] = {"updated_at": datetime.now()}
+        update: dict[str, Any] = {"updated_at": now_tz()}
         if name is not None:
             update["name"] = name.strip()
         if color is not None:

@@ -5,6 +5,7 @@
 import logging
 from datetime import datetime
 from typing import Any
+from app.utils.timezone import now_tz
 
 from app.core.database import get_mongo_db
 from app.models.stock_models import (
@@ -300,7 +301,7 @@ class StockDataService:
             symbol6 = str(symbol).zfill(6)
 
             # 添加更新时间
-            update_data["updated_at"] = datetime.now()
+            update_data["updated_at"] = now_tz()
 
             # 确保symbol字段存在
             if "symbol" not in update_data:
@@ -345,7 +346,7 @@ class StockDataService:
             symbol6 = str(symbol).zfill(6)
 
             # 添加更新时间
-            quote_data["updated_at"] = datetime.now()
+            quote_data["updated_at"] = now_tz()
 
             # 🔥 确保 symbol 和 code 字段都存在（兼容旧索引）
             if "symbol" not in quote_data:
