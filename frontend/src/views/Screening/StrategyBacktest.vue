@@ -367,6 +367,219 @@
       </template>
     </template>
 
+    <!-- 三买三卖回测 -->
+    <template v-else-if="activeTab === 'pipeline'">
+      <el-card class="form-panel" shadow="never">
+        <template #header><span class="panel-title">三买三卖回测参数</span></template>
+        <el-form :inline="true" label-width="110px" class="bt-form">
+          <el-form-item label="回测区间">
+            <el-date-picker v-model="pipelineRange" type="daterange" value-format="YYYY-MM-DD" range-separator="至" start-placeholder="开始" end-placeholder="结束" style="width: 260px" />
+          </el-form-item>
+          <el-form-item label="再平衡频率">
+            <el-select v-model="pipelineForm.rebalance_freq" style="width: 130px">
+              <el-option label="每周" value="weekly" />
+              <el-option label="双周" value="biweekly" />
+              <el-option label="每月" value="monthly" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="行业数量">
+            <el-input-number v-model="pipelineForm.top_industries" :min="3" :max="30" style="width: 120px" />
+          </el-form-item>
+          <el-form-item label="全局个股数">
+            <el-input-number v-model="pipelineForm.global_top_n" :min="5" :max="50" style="width: 120px" />
+          </el-form-item>
+          <el-form-item label="初始资金">
+            <el-input-number v-model="pipelineForm.initial_capital" :min="10000" :step="100000" style="width: 160px" />
+          </el-form-item>
+          <el-form-item label="最大持仓">
+            <el-input-number v-model="pipelineForm.max_positions" :min="1" :max="50" style="width: 120px" />
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" :loading="pipelineLoading" @click="runPipelineBacktest">
+              <el-icon><Search /></el-icon>
+              开始三买三卖回测
+            </el-button>
+          </el-form-item>
+        </el-form>
+        <el-divider content-position="left" class="pipe-divider">信号质量参数（tbts_overrides）</el-divider>
+        <el-form :inline="true" label-width="150px" class="bt-form pipe-quality-form">
+          <el-form-item label="最低入选分">
+            <el-tooltip content="分数低于该阈值的信号直接剔除，越高越精选" placement="top">
+              <el-input-number v-model="tbtsOverrides.min_score" :min="0" :max="10" :step="1" style="width: 110px" />
+            </el-tooltip>
+          </el-form-item>
+          <el-form-item label="B1 严格三重确认">
+            <el-tooltip content="开启后 B1 需更严格的多重确认，提升首买质量（可能减少信号）" placement="top">
+              <el-switch v-model="tbtsOverrides.enable_strict_b1" />
+            </el-tooltip>
+          </el-form-item>
+          <el-form-item label="移动止损最小盈利%">
+            <el-tooltip content="浮盈达到该比例后才启动移动止损" placement="top">
+              <el-input-number v-model="tbtsOverrides.trailing_stop_min_profit" :min="0" :max="50" :step="1" style="width: 110px" />
+            </el-tooltip>
+          </el-form-item>
+          <el-form-item label="移动止损 ATR 倍数">
+            <el-tooltip content="ATR 止损倍数，越小止损越紧（锁盈/控亏）" placement="top">
+              <el-input-number v-model="tbtsOverrides.trailing_stop_atr_mult" :min="0.5" :max="10" :step="0.5" style="width: 110px" />
+            </el-tooltip>
+          </el-form-item>
+          <el-form-item label="B2/B3 均线止损">
+            <el-tooltip content="开启后 B2/B3 触发均线止损快速离场控亏" placement="top">
+              <el-switch v-model="tbtsOverrides.enable_b2b3_stop_loss" />
+            </el-tooltip>
+          </el-form-item>
+          <el-form-item label="最大亏损硬止损%">
+            <el-tooltip content="持仓亏损达到该比例即无条件清仓（0=关闭）。截断 B2 深亏、降低波动以提升夏普" placement="top">
+              <el-input-number v-model="tbtsOverrides.max_loss_pct" :min="0" :max="50" :step="1" style="width: 110px" />
+            </el-tooltip>
+          </el-form-item>
+        </el-form>
+        <el-alert type="info" :closable="false" show-icon class="pipeline-tip"
+                  title="三级链路：行业筛选 → 个股筛选 → 三买三卖择时"
+                  description="按再平衡周期逐期重放。每周重选强势行业与全局 Top N 候选股；已持仓股票不受候选池刷新影响，继续跑完三买三卖直至离场。" />
+      </el-card>
+
+      <template v-if="pipelineResult">
+        <el-alert v-if="!pipelineResult.success" :title="pipelineResult.error || '回测失败'" type="error" show-icon :closable="false" />
+        <template v-else>
+          <!-- 装配线四阶段步进头 -->
+          <el-card class="pipeline-steps" shadow="never">
+            <div class="pipe-step" v-for="(st, i) in PIPELINE_STAGES" :key="st.key">
+              <div class="pipe-step-idx">{{ i + 1 }}</div>
+              <div class="pipe-step-body">
+                <div class="pipe-step-name">{{ st.name }}</div>
+                <div class="pipe-step-desc">{{ st.desc }}</div>
+              </div>
+              <el-icon v-if="i < PIPELINE_STAGES.length - 1" class="pipe-arrow"><Right /></el-icon>
+            </div>
+          </el-card>
+
+          <!-- 结果概览 -->
+          <el-card class="result-header" shadow="never">
+            <div class="result-header-inner">
+              <div class="result-title">
+                <span class="result-strategy-name">{{ pipelineResult.config?.strategy_name || '三买三卖回测' }}</span>
+                <el-tag size="small" type="success" effect="light" class="result-tag">回测完成</el-tag>
+              </div>
+              <div class="result-meta">
+                <div class="meta-item">
+                  <span class="meta-label">回测区间</span>
+                  <span class="meta-value">{{ pipelineResult.config?.start }} ~ {{ pipelineResult.config?.end }}</span>
+                </div>
+                <div class="meta-item">
+                  <span class="meta-label">再平衡</span>
+                  <span class="meta-value">{{ REBALANCE_FREQ_LABEL(pipelineResult.config?.rebalance_freq) }}</span>
+                </div>
+                <div class="meta-item">
+                  <span class="meta-label">行业 / 个股</span>
+                  <span class="meta-value">{{ pipelineResult.config?.top_industries }} / {{ pipelineResult.config?.global_top_n }}</span>
+                </div>
+                <div class="meta-item">
+                  <span class="meta-label">初始资金</span>
+                  <span class="meta-value">¥{{ formatMoney(pipelineResult.config?.initial_capital) }}</span>
+                </div>
+                <div class="meta-item">
+                  <span class="meta-label">期末资产</span>
+                  <span class="meta-value">¥{{ formatMoney(pipelineResult.final_capital) }}</span>
+                </div>
+                <div class="meta-item">
+                  <span class="meta-label">回测耗时</span>
+                  <span class="meta-value">{{ formatEta((pipelineResult.elapsed_ms ?? 0) / 1000) }}</span>
+                </div>
+              </div>
+            </div>
+          </el-card>
+
+          <el-card class="stats-panel" shadow="never">
+            <template #header><span class="panel-title">绩效指标</span></template>
+            <StatCards :stats="pipelineResult.stats" />
+          </el-card>
+
+          <!-- 漏斗 + 净值 -->
+          <el-row :gutter="16" class="pipeline-charts">
+            <el-col :span="10">
+              <el-card class="funnel-panel" shadow="never">
+                <template #header>
+                  <span class="panel-title">漏斗转化（全期累计）</span>
+                </template>
+                <v-chart class="chart chart--funnel" :option="pipelineFunnelOption" autoresize />
+                <div class="funnel-legend">
+                  <span>强势行业 → 候选个股 → 买入信号 → 实际成交</span>
+                </div>
+              </el-card>
+            </el-col>
+            <el-col :span="14">
+              <el-card class="chart-panel" shadow="never">
+                <template #header><span class="panel-title">净值曲线（起始=1，相对收益）</span></template>
+                <v-chart class="chart" :option="pipelineEquityOption" autoresize />
+              </el-card>
+            </el-col>
+          </el-row>
+
+          <!-- 再平衡各期候选变化 -->
+          <el-card class="chart-panel" shadow="never">
+            <template #header><span class="panel-title">再平衡候选变化 ({{ pipelineResult.rebalance_schedule?.length }})</span></template>
+            <el-table :data="pipelineResult.rebalance_schedule" size="small" stripe border max-height="360">
+              <el-table-column type="index" label="#" width="50" />
+              <el-table-column label="周期" min-width="190">
+                <template #default="{ row }">{{ row.start }} ~ {{ row.end }}</template>
+              </el-table-column>
+              <el-table-column prop="candidate_count" label="候选股数" align="right" sortable width="100" />
+              <el-table-column label="强势行业" min-width="260">
+                <template #default="{ row }">
+                  <el-tag v-for="ind in (row.industries || []).slice(0, 6)" :key="ind" size="small" class="ind-tag">{{ ind }}</el-tag>
+                  <span v-if="(row.industries || []).length > 6" class="text-muted">+{{ row.industries.length - 6 }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="pool" label="候选池" min-width="220">
+                <template #default="{ row }">
+                  <span class="pool-codes">{{ (row.pool || []).slice(0, 12).join(' · ') }}</span>
+                  <span v-if="(row.pool || []).length > 12" class="text-muted">…</span>
+                </template>
+              </el-table-column>
+            </el-table>
+          </el-card>
+
+          <!-- 交易明细 -->
+          <el-card class="chart-panel" shadow="never">
+            <template #header><span class="panel-title">交易明细 ({{ pipelineResult.trades?.length }})</span></template>
+            <el-table :data="pipelineResult.trades" size="small" stripe border max-height="480"
+                      :default-sort="{ prop: 'buy_date', order: 'ascending' }" class="trade-table">
+              <el-table-column prop="symbol" label="代码" width="90">
+                <template #default="{ row }">
+                  <router-link :to="`/stocks/${row.symbol || row.code}`" class="stock-code">{{ row.symbol || row.code }}</router-link>
+                </template>
+              </el-table-column>
+              <el-table-column prop="name" label="名称" min-width="110">
+                <template #default="{ row }">
+                  <router-link :to="`/stocks/${row.symbol || row.code}`" class="stock-name">{{ row.name }}</router-link>
+                </template>
+              </el-table-column>
+              <el-table-column prop="buy_date" label="买入日期" min-width="110" sortable />
+              <el-table-column prop="sell_date" label="卖出日期" min-width="110" sortable />
+              <el-table-column prop="buy_price" label="买入价" width="95" align="right" sortable />
+              <el-table-column prop="sell_price" label="卖出价" width="95" align="right" sortable />
+              <el-table-column prop="return_pct" label="收益率" width="95" align="right" sortable>
+                <template #default="{ row }">
+                  <span :class="row.return_pct >= 0 ? 'text-red' : 'text-green'">{{ (row.return_pct).toFixed(2) }}%</span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="signal_type" label="买点" width="80">
+                <template #default="{ row }">
+                  <el-tag size="small" effect="plain" type="warning">{{ row.signal_type }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="sell_reason" label="卖出原因" min-width="110">
+                <template #default="{ row }">
+                  <el-tag size="small" effect="plain" type="info">{{ row.sell_reason }}</el-tag>
+                </template>
+              </el-table-column>
+            </el-table>
+          </el-card>
+        </template>
+      </template>
+    </template>
+
     <!-- 结果对比 -->
     <template v-else-if="activeTab === 'compare'">
       <template v-if="compareResults.length === 0">
@@ -377,10 +590,10 @@
           <template #header>
             <span class="panel-title">
               <el-icon style="margin-right: 6px"><Histogram /></el-icon>
-              策略回测结果对比（{{ compareResults.length }} 个策略）
+              策略回测结果对比（{{ compareResults.length }} 条记录）
             </span>
           </template>
-          <el-table :data="compareResults" size="small" stripe border class="compare-table">
+          <el-table :data="compareResults" size="small" stripe border class="compare-table" :row-key="(row: any) => row.id">
             <el-table-column prop="strategy_name" label="策略名称" min-width="150">
               <template #default="{ row }">
                 <span class="compare-strategy">{{ row.strategy_name }}</span>
@@ -417,7 +630,7 @@
             <el-table-column prop="savedAtText" label="更新于" min-width="150" sortable />
             <el-table-column label="操作" width="90" fixed="right">
               <template #default="{ row }">
-                <el-button type="text" size="small" @click="removeFromCompare(row.strategy_id)">移除</el-button>
+                <el-button type="text" size="small" @click="removeFromCompare(row.id)">移除</el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -441,13 +654,13 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch, h, defineComponent, type PropType } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Histogram, Search, Loading, DataAnalysis } from '@element-plus/icons-vue'
+import { Histogram, Search, Loading, DataAnalysis, Right } from '@element-plus/icons-vue'
 import { use as echartsUse } from 'echarts/core'
 import { LineChart, BarChart } from 'echarts/charts'
 import { TitleComponent, TooltipComponent, LegendComponent, GridComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
-import { strategyApi, FACTOR_OPTIONS, type StrategyMeta, type BacktestResult, type BacktestStats, type CompareResultItem, type FactorBacktestResult, type OptimizeResult, type WalkForwardResult } from '@/api/strategy'
+import { strategyApi, FACTOR_OPTIONS, type StrategyMeta, type BacktestResult, type BacktestStats, type CompareResultItem, type FactorBacktestResult, type OptimizeResult, type WalkForwardResult, type PipelineBacktestResult } from '@/api/strategy'
 
 echartsUse([LineChart, BarChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent, CanvasRenderer])
 
@@ -492,11 +705,20 @@ const MODES = [
   { key: 'factor', title: '因子回测', hint: '验证单个因子是否有预测能力，看 IC / IR 和分层收益。' },
   { key: 'optimizer', title: '参数优化', hint: '网格搜索最优参数组合，按夏普/收益等目标排序。' },
   { key: 'walkforward', title: '步进优化', hint: '滚动窗口样本外验证，识别过拟合。' },
+  { key: 'pipeline', title: '三买三卖回测', hint: '复现行业→个股→三买三卖三级链路，评估组合绩效与漏斗转化。' },
 ] as const
 
 const COMPARE_HINT = '对比不同策略的回测结果，聚焦收益率等核心指标，快速判断哪个策略效果更好。每次策略回测完成后自动收录，再次回测会更新对应数据。'
 
-type TabKey = 'strategy' | 'factor' | 'optimizer' | 'walkforward' | 'compare'
+// 流水线装配线四阶段（工业流水线视觉语言）
+const PIPELINE_STAGES = [
+  { key: 'industry', name: '选强势行业', desc: '行业强度分排序精选' },
+  { key: 'stock', name: '筛候选个股', desc: '全局 Top N 多因子打分' },
+  { key: 'timing', name: '三买三卖择时', desc: 'B1/B2/B3 建仓加仓' },
+  { key: 'trade', name: '离场兑现', desc: 'S1/S2/S3 减仓清仓' },
+]
+
+type TabKey = 'strategy' | 'factor' | 'optimizer' | 'walkforward' | 'pipeline' | 'compare'
 const activeTab = ref<TabKey>('strategy')
 const activeMode = computed(() => {
   if (activeTab.value === 'compare') return { key: 'compare' as const, title: '结果对比' as const, hint: COMPARE_HINT }
@@ -537,6 +759,27 @@ const wfRange = ref<[string, string] | null>(null)
 const wfForm = ref({ strategy_id: '', train_days: 120, test_days: 30, paramGridText: '' })
 const wfLoading = ref(false)
 const wfResult = ref<WalkForwardResult | null>(null)
+
+// 三买三卖回测表单
+const pipelineRange = ref<[string, string] | null>(null)
+const pipelineForm = ref({
+  rebalance_freq: 'weekly',
+  top_industries: 10,
+  global_top_n: 20,
+  initial_capital: 1000000,
+  max_positions: 20,
+})
+const pipelineLoading = ref(false)
+const pipelineResult = ref<PipelineBacktestResult | null>(null)
+// 三买三卖信号质量参数，透传给后端 tbts_overrides
+const tbtsOverrides = ref({
+  min_score: 5,
+  enable_strict_b1: false,
+  trailing_stop_min_profit: 8.0,
+  trailing_stop_atr_mult: 2.5,
+  enable_b2b3_stop_loss: true,
+  max_loss_pct: 0,
+})
 
 // ---------------------------------------------------------------------------
 // 回测结果持久化：离开页面/刷新后再次进入仍能查看上次结果
@@ -602,13 +845,16 @@ watch(strategyResult, v => {
 watch(factorResult, v => saveResult('factor', v))
 watch(optResult, v => saveResult('optimizer', v))
 watch(wfResult, v => saveResult('walkforward', v))
+watch(pipelineResult, v => saveResult('pipeline', v))
 
 // ---------------------------------------------------------------------------
 // 结果对比：从 MongoDB 读取跨策略回测结果，横向对比核心指标
 // ---------------------------------------------------------------------------
 interface CompareItem {
+  id: string
   strategy_id: string
   strategy_name: string
+  label: string
   range: string
   savedAt: number
   savedAtText: string
@@ -627,8 +873,10 @@ async function loadStrategyResults() {
     for (const r of list) {
       if (!r.strategy_id || !r.stats) continue
       items.push({
+        id: r.id ?? `${r.strategy_id}-${r.saved_at}`,
         strategy_id: r.strategy_id,
         strategy_name: r.strategy_name || r.strategy_id,
+        label: r.strategy_name || r.strategy_id,
         range: `${r.config?.start ?? '-'} ~ ${r.config?.end ?? '-'}`,
         savedAt: r.saved_at,
         savedAtText: new Date(r.saved_at * 1000).toLocaleString('zh-CN', { hour12: false }),
@@ -638,6 +886,12 @@ async function loadStrategyResults() {
     }
     // 后端已按 saved_at 倒序返回，这里再兜底排序
     items.sort((a, b) => b.savedAt - a.savedAt)
+    // 同一策略可能有多条记录，图表标签需唯一：同名时追加更新时间
+    const nameCount: Record<string, number> = {}
+    for (const it of items) nameCount[it.strategy_name] = (nameCount[it.strategy_name] || 0) + 1
+    for (const it of items) {
+      if (nameCount[it.strategy_name] > 1) it.label = `${it.strategy_name}（${it.savedAtText}）`
+    }
     compareResults.value = items
   } catch (e) {
     console.warn('[结果对比] 加载失败:', e)
@@ -645,13 +899,13 @@ async function loadStrategyResults() {
   }
 }
 
-async function removeFromCompare(strategyId: string) {
+async function removeFromCompare(recordId: string) {
   try {
-    await strategyApi.deleteBacktestResult(strategyId)
+    await strategyApi.deleteBacktestResult(recordId)
   } catch (e) {
     console.warn('[结果对比] 删除失败:', e)
   }
-  compareResults.value = compareResults.value.filter(item => item.strategy_id !== strategyId)
+  compareResults.value = compareResults.value.filter(item => item.id !== recordId)
 }
 
 const RETURN_COLORS = ['#2b6cb0', '#fa541c', '#52c41a', '#faad14', '#722ed1', '#eb2f96', '#13c2c2', '#f5222d']
@@ -660,7 +914,7 @@ const returnBarOption = computed(() => ({
   tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
   legend: { show: false },
   grid: { left: 60, right: 20, top: 30, bottom: 40 },
-  xAxis: { type: 'category', data: compareResults.value.map(item => item.strategy_name), axisLabel: { interval: 0, rotate: 20 } },
+  xAxis: { type: 'category', data: compareResults.value.map(item => item.label), axisLabel: { interval: 0, rotate: 20 } },
   yAxis: { type: 'value', name: '总收益率(%)' },
   series: [{
     name: '总收益率',
@@ -681,7 +935,7 @@ const equityOverlayOption = computed(() => {
     const curve = item.equity_curve
     const initial = curve[0]?.value ?? 1
     return {
-      name: item.strategy_name,
+      name: item.label,
       type: 'line',
       showSymbol: false,
       data: curve.map(p => [p.date, initial > 0 ? p.value / initial : p.value]),
@@ -691,7 +945,7 @@ const equityOverlayOption = computed(() => {
   })
   return {
     tooltip: { trigger: 'axis' },
-    legend: { data: items.map(item => item.strategy_name), top: 0 },
+    legend: { data: items.map(item => item.label), top: 0 },
     grid: { left: 60, right: 20, top: 40, bottom: 40 },
     xAxis: { type: 'category', data: dates },
     yAxis: { type: 'value', scale: true, name: '净值(起始=1)' },
@@ -702,7 +956,7 @@ const equityOverlayOption = computed(() => {
 // ---------------------------------------------------------------------------
 // 异步回测任务：离开页面/刷新后仍可恢复进度，完成后自动展示结果
 // ---------------------------------------------------------------------------
-type TaskKind = 'strategy' | 'factor' | 'optimizer' | 'walkforward'
+type TaskKind = 'strategy' | 'factor' | 'optimizer' | 'walkforward' | 'pipeline'
 
 const BT_ACTIVE_KEY = 'strategy_backtest_active_task' // 记录当前进行中的任务
 
@@ -759,6 +1013,7 @@ const resultSetters: Record<TaskKind, (r: any) => void> = {
   factor: (r) => { factorResult.value = r; saveResult('factor', r) },
   optimizer: (r) => { optResult.value = r; saveResult('optimizer', r) },
   walkforward: (r) => { wfResult.value = r; saveResult('walkforward', r) },
+  pipeline: (r) => { pipelineResult.value = r; saveResult('pipeline', r) },
 }
 
 const loadingSetters: Record<TaskKind, (v: boolean) => void> = {
@@ -766,6 +1021,7 @@ const loadingSetters: Record<TaskKind, (v: boolean) => void> = {
   factor: (v) => { factorLoading.value = v },
   optimizer: (v) => { optLoading.value = v },
   walkforward: (v) => { wfLoading.value = v },
+  pipeline: (v) => { pipelineLoading.value = v },
 }
 
 function pollTask(taskId: string, kind: TaskKind) {
@@ -949,6 +1205,80 @@ const runWalkForward = async () => {
   }
 }
 
+const runPipelineBacktest = async () => {
+  if (!pipelineRange.value?.[0]) return ElMessage.warning('请选择回测区间')
+  try {
+    const res = await strategyApi.startPipelineBacktest({
+      start: pipelineRange.value[0],
+      end: pipelineRange.value[1],
+      rebalance_freq: pipelineForm.value.rebalance_freq,
+      top_industries: pipelineForm.value.top_industries,
+      global_top_n: pipelineForm.value.global_top_n,
+      initial_capital: pipelineForm.value.initial_capital,
+      max_positions: pipelineForm.value.max_positions,
+      tbts_overrides: { ...tbtsOverrides.value },
+    })
+    const data = (res as any)?.data ?? res
+    if (!data?.task_id) return ElMessage.error('提交三买三卖回测任务失败')
+    startTask('pipeline', data.task_id)
+  } catch (e) {
+    ElMessage.error('提交三买三卖回测失败')
+  }
+}
+
+// ===== 三买三卖回测图表/展示辅助 =====
+const REBALANCE_FREQ_LABEL = (v: string) =>
+  ({ weekly: '每周', biweekly: '双周', monthly: '每月' } as Record<string, string>)[v] || v || '-'
+
+const pipelineEquityOption = computed(() => {
+  const curve = pipelineResult.value?.equity_curve ?? []
+  const initial = pipelineResult.value?.config?.initial_capital ?? 1
+  return {
+    tooltip: { trigger: 'axis' },
+    legend: { data: ['流水线净值'], top: 0 },
+    grid: { left: 60, right: 20, top: 40, bottom: 40 },
+    xAxis: { type: 'category', data: curve.map(p => p.date) },
+    yAxis: { type: 'value', scale: true, name: '净值(起始=1)' },
+    series: [{
+      name: '流水线净值',
+      type: 'line',
+      showSymbol: false,
+      data: curve.map(p => [p.date, initial > 0 ? p.value / initial : p.value]),
+      lineStyle: { width: 2, color: '#d4a017' },
+      areaStyle: { opacity: 0.08, color: '#d4a017' },
+      itemStyle: { color: '#d4a017' },
+    }],
+  }
+})
+
+// 漏斗图：行业(去重) → 候选股(去重) → 买点(累计) → 成交(累计)
+const pipelineFunnelOption = computed(() => {
+  const f = pipelineResult.value?.funnel
+  const stages = [
+    { name: '强势行业', value: f?.industries ?? 0 },
+    { name: '候选个股', value: f?.candidates ?? 0 },
+    { name: '买入信号', value: f?.signals ?? 0 },
+    { name: '实际成交', value: f?.trades ?? 0 },
+  ]
+  const maxV = Math.max(1, ...stages.map(s => s.value))
+  const colors = ['#d4a017', '#e67e22', '#16a085', '#2b6cb0']
+  return {
+    tooltip: { trigger: 'item', formatter: (p: any) => `${p.name}: ${p.value}` },
+    grid: { left: 40, right: 40, top: 20, bottom: 20 },
+    xAxis: { type: 'value', show: false, max: maxV },
+    yAxis: { type: 'category', inverse: true, data: stages.map(s => s.name), axisLabel: { color: '#d4a017', fontWeight: 600 } },
+    series: [{
+      type: 'bar',
+      barWidth: 22,
+      data: stages.map((s, i) => ({
+        value: s.value,
+        itemStyle: { color: colors[i], borderRadius: [0, 4, 4, 0] },
+      })),
+      label: { show: true, position: 'right', formatter: (p: any) => `${p.value}` },
+    }],
+  }
+})
+
 // 结果概览辅助函数
 const formatMoney = (v: number | null | undefined) =>
   v != null ? Number(v).toLocaleString('zh-CN', { maximumFractionDigits: 0 }) : '-'
@@ -1045,6 +1375,7 @@ onMounted(async () => {
   factorResult.value = loadResult<FactorBacktestResult>('factor')
   optResult.value = loadResult<OptimizeResult>('optimizer')
   wfResult.value = loadResult<WalkForwardResult>('walkforward')
+  pipelineResult.value = loadResult<PipelineBacktestResult>('pipeline')
 
   // 迁移：将 localStorage 中的历史策略回测结果上报到后端落库，
   // 保证「结果对比」Tab 能收录落库功能上线前生成的旧结果。
@@ -1065,7 +1396,7 @@ onMounted(async () => {
       const res = await strategyApi.getTask(active.task_id)
       const data = (res as any)?.data ?? res
       if (data.status === 'running' && (data.kind === 'strategy' || data.kind === 'factor'
-          || data.kind === 'optimizer' || data.kind === 'walkforward')) {
+          || data.kind === 'optimizer' || data.kind === 'walkforward' || data.kind === 'pipeline')) {
         startTask(active.kind, active.task_id)
       } else if (data.status === 'success') {
         resultSetters[active.kind]?.(data.result)
@@ -1102,6 +1433,18 @@ onBeforeUnmount(() => {
     .panel-title { font-size: 15px; font-weight: 600; color: var(--el-text-color-primary); }
 
     .bt-form { padding: 16px; }
+
+    .pipe-divider {
+      margin: 4px 16px 0;
+      .el-divider__text { font-size: 13px; color: var(--el-text-color-secondary); }
+    }
+
+    .pipe-quality-form {
+      padding: 8px 16px 16px;
+      background: var(--el-fill-color-light);
+      border-radius: 8px;
+      margin: 0 16px 12px;
+    }
   }
 
   .result-header {

@@ -16,8 +16,8 @@ BACKTEST_RESULTS_COLLECTION = "strategy_backtest_results"
 def save_backtest_result(db, result: dict) -> None:
     """将策略回测结果精炼后持久化到 MongoDB，供「结果对比」跨策略对比使用。
 
-    以 strategy_id 为主键 upsert：同一策略再次回测时覆盖更新，不同策略各自保留。
-    仅保存对比所需字段（stats / equity_curve / config / strategy_info），避免落库过大。
+    每次回测都新增一条记录（不对同一策略做覆盖），以支持同一策略多次回测、
+    不同区间/参数的结果并存对比。仅保存对比所需字段（stats / equity_curve / config / strategy_info）。
     """
     try:
         info = result.get("strategy_info") or {}
@@ -32,10 +32,6 @@ def save_backtest_result(db, result: dict) -> None:
         }
         if not record["strategy_id"]:
             return
-        db[BACKTEST_RESULTS_COLLECTION].update_one(
-            {"strategy_id": record["strategy_id"]},
-            {"$set": record},
-            upsert=True,
-        )
+        db[BACKTEST_RESULTS_COLLECTION].insert_one(record)
     except Exception as e:  # noqa: BLE001
         logger.warning("保存回测结果到MongoDB失败: %s", e)

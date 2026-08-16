@@ -132,11 +132,11 @@
         <el-card shadow="never" class="dash-card">
           <div class="card-title">涨跌分布 / 广度</div>
           <div class="dist-bars">
-            <div v-for="(b, i) in dashboard.distribution" :key="b.label" class="dist-col">
+            <div v-for="b in distDisplay" :key="b.label" class="dist-col">
               <div class="dist-count">{{ b.count || '' }}</div>
               <div
                 class="dist-bar"
-                :class="i >= 4 ? 'dist-up' : 'dist-down'"
+                :class="distBarClass(b.dir)"
                 :style="{ height: distHeight(b.count) + '%' }"
                 :title="`${b.label}: ${b.count}只`"
               />
@@ -439,6 +439,17 @@ const distMax = computed(() =>
 )
 const distHeight = (count: number) =>
   Math.max(4, (count / distMax.value) * 86)
+
+// 反转后端分布（跌→涨）为 涨→平→跌，使红色(涨)在左、绿色(跌)在右，与广度条一致
+const distDisplay = computed(() => {
+  const dist = dashboard.value?.distribution || []
+  return dist.slice().reverse()
+})
+const distBarClass = (dir: -1 | 0 | 1 | undefined) => {
+  if (dir === 0) return 'dist-flat'
+  if (dir === 1) return 'dist-up'
+  return 'dist-down'
+}
 
 const breadthUpW = computed(() => {
   const b = dashboard.value?.breadth
@@ -784,6 +795,7 @@ onMounted(() => {
 }
 
 .dist-up { background: #f56c6c; }
+.dist-flat { background: #c0c4cc; }
 .dist-down { background: #67c23a; }
 
 .dist-label {

@@ -71,6 +71,15 @@ export interface MonitorRulePayload {
   message?: string
   tbs_dir?: string
   tbs_signals?: string[]
+  strategy_id?: string
+  tag?: string
+}
+
+export interface StrategyMonitorStatus {
+  strategy_id: string
+  rule_id: string
+  name: string
+  enabled: boolean
 }
 
 export interface TbsOrder {
@@ -133,13 +142,24 @@ export const monitorApi = {
   async listTbsOrders(params?: { status?: string; limit?: number }) {
     return ApiClient.get<{ orders: TbsOrder[] }>('/api/monitor/tbs/orders', params)
   },
-  async executeTbsOrder(orderId: string) {
-    return ApiClient.post<{ order: Record<string, unknown> }>(`/api/monitor/tbs/orders/${orderId}/execute`)
+  async executeTbsOrder(orderId: string, quantity?: number) {
+    return ApiClient.post<{ order: Record<string, unknown> }>(
+      `/api/monitor/tbs/orders/${orderId}/execute`,
+      quantity ? { quantity } : undefined
+    )
   },
   async cancelTbsOrder(orderId: string) {
     return ApiClient.post<{ order_id: string }>(`/api/monitor/tbs/orders/${orderId}/cancel`)
   },
   async dismissTbsOrder(orderId: string) {
     return ApiClient.post<{ order_id: string }>(`/api/monitor/tbs/orders/${orderId}/dismiss`)
+  },
+
+  // 常用策略监控（type=strategy）
+  async strategyMonitorStatus() {
+    return ApiClient.get<{ items: StrategyMonitorStatus[] }>('/api/monitor/strategies/status')
+  },
+  async toggleStrategyMonitor(strategyId: string, enabled: boolean, name?: string) {
+    return ApiClient.post<{ rule: MonitorRule }>(`/api/monitor/strategies/${strategyId}/monitor`, { enabled, name })
   },
 }

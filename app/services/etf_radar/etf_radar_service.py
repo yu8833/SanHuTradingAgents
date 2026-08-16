@@ -4,7 +4,7 @@
   1. fund_etf_spot_em()            全量ETF资金流（~1575只，含主力净流入/超大单/大单/小单/量比/份额）
   2. stock_fund_flow_industry()    行业资金流（~90行业，净额/流入/流出，做行业交叉校验）
   3. 按名称关键词识别行业主题ETF（一行业多ETF取流通市值最大为代表）
-  4. 按 ETF 主力净流入分位评分（资金为王，动量/量能仅展示不参与排序）→ Top5 卡片 + 全排名表
+  4. 按 ETF 主力净流入「净占比」分位评分（资金为王，动量/量能仅展示不参与排序）→ Top5 卡片 + 全排名表
   5. 快照入库 MongoDB `etf_radar_snapshot`（按 as_of 留存），API 读最新快照（不阻塞网络）
 
 注意：东财 stock_sector_fund_flow_rank 连接被拒，不可用；行业资金流统一走同花顺。
@@ -25,7 +25,8 @@ from app.services.data_sources.akshare_adapter import AKShareAdapter
 
 logger = logging.getLogger(__name__)
 
-# 资金为王：排名主依据为 ETF 主力净流入分位（动量/量能仅展示，不参与排序）
+# 资金为王：排名主依据为 ETF 主力净流入「净占比」分位（相对强度，避免大市值ETF绝对额掩盖小行业真实资金流入强度；
+# 动量/量能仅展示，不参与排序）
 W_FUND = 1.0
 W_MOM = 0.0
 W_VOL = 0.0
@@ -134,8 +135,10 @@ class EtfRadarService:
         df[mv_col] = pd.to_numeric(df[mv_col], errors="coerce")
         df = df.sort_values(mv_col, ascending=False).drop_duplicates("_industry")
 
-        # 分位评分
-        df["_fund_pct"] = _percentile_rank(df[_COL_FUND_NET]) if _COL_FUND_NET in df.columns else 0.5
+        # 分位评分（资金为王：用「主力净流入净占比」反映相对流入强度，避免大市值ETF绝对净流入掩盖小行业真实资金强度）
+        # 净占比列缺失时回退到净额口径
+        fund_col = _COL_FUND_NET_PCT if _COL_FUND_NET_PCT in df.columns else _COL_FUND_NET
+        df["_fund_pct"] = _percentile_rank(df[fund_col]) if fund_col in df.columns else 0.5
         df["_mom_pct"] = _percentile_rank(df[_COL_PCT]) if _COL_PCT in df.columns else 0.5
         df["_vol_pct"] = _percentile_rank(df[_COL_VOL_RATIO]) if _COL_VOL_RATIO in df.columns else 0.5
 

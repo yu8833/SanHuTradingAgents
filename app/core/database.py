@@ -575,9 +575,9 @@ async def create_database_indexes(db):
         if await _safe_create_index(research_notes, [("user_id", 1), ("kind", 1)]):
             index_count += 1
 
-        # strategy_backtest_results 的索引（回测结果对比，以策略为主键覆盖更新）
+        # strategy_backtest_results 的索引（回测结果对比，允许同一策略多条结果并存）
         bt_results = db["strategy_backtest_results"]
-        if await _safe_create_index(bt_results, [("strategy_id", 1)], unique=True):
+        if await _safe_create_index(bt_results, [("strategy_id", 1)]):
             index_count += 1
         if await _safe_create_index(bt_results, [("saved_at", -1)]):
             index_count += 1

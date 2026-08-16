@@ -393,7 +393,21 @@ const summary = ref<PositionSummary | null>(null)
 // 策略表现
 const perfLoading = ref(false)
 const perfMap = ref<Record<string, StrategyPerformance>>({})
-const strategyKeys = ['extreme_reversal', 'turnaround', 'small_cap_value', 'convertible_arbitrage', 'default']
+// 策略集合与当前策略对齐：以 MA金叉 为基，叠加持仓与已平仓交易中出现的历史策略
+const strategyKeys = ref<string[]>(['default'])
+
+const collectStrategyKeys = (): string[] => {
+  const keys = new Set<string>(['default', 'ma_golden_cross'])
+  for (const p of positions.value) {
+    const s = (p as any).strategy
+    if (s && s !== 'default') keys.add(s)
+  }
+  for (const t of closedTrades.value) {
+    const s = (t as any).strategy
+    if (s && s !== 'default') keys.add(s)
+  }
+  return Array.from(keys)
+}
 
 const loadPositions = async () => {
   loading.value = true
@@ -412,8 +426,9 @@ const loadPositions = async () => {
 const loadPerformance = async () => {
   perfLoading.value = true
   try {
+    strategyKeys.value = collectStrategyKeys()
     const results: Record<string, StrategyPerformance> = {}
-    for (const s of strategyKeys) {
+    for (const s of strategyKeys.value) {
       try {
         const res = await portfolioApi.getStrategyPerformance(s)
         results[s] = res.data
@@ -573,6 +588,8 @@ const strategyLabel = (s: string) => {
     turnaround: '困境反转',
     small_cap_value: '小盘价值',
     convertible_arbitrage: '转债套利',
+    ma_golden_cross: 'MA金叉',
+    tbs: 'MA金叉', // 旧数据兼容
     default: '默认',
   }
   return map[s] || s
@@ -584,6 +601,8 @@ const getStrategyTagType = (s: string) => {
     turnaround: 'warning',
     small_cap_value: 'success',
     convertible_arbitrage: 'info',
+    ma_golden_cross: 'success',
+    tbs: 'success',
     default: '',
   }
   return map[s] || ''

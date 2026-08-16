@@ -205,12 +205,55 @@ export interface WalkForwardResult {
 
 // 回测结果对比项（后端从 MongoDB 持久化返回的精简字段）
 export interface CompareResultItem {
+  id?: string
   strategy_id: string
   strategy_name: string
   config?: { start: string; end: string }
   stats: BacktestStats
   equity_curve: Array<{ date: string; value: number }>
   saved_at: number
+}
+
+// ===== 流水线回测（行业→个股→三买三卖择时） =====
+export interface PipelineFunnel {
+  industries: number
+  candidates: number
+  signals: number
+  trades: number
+}
+
+export interface PipelineRebalancePeriod {
+  start: string
+  end: string
+  industries: string[]
+  candidate_count: number
+  pool: string[]
+}
+
+export interface PipelineBacktestResult {
+  success: boolean
+  config: {
+    strategy_id: string
+    strategy_name: string
+    start: string
+    end: string
+    rebalance_freq: string
+    top_industries: number
+    global_top_n: number
+    initial_capital: number
+    max_positions: number
+  }
+  stats: BacktestStats
+  equity_curve: Array<{ date: string; value: number }>
+  trades: any[]
+  funnel: PipelineFunnel
+  rebalance_schedule: PipelineRebalancePeriod[]
+  signal_stats: Record<string, any>
+  sell_reason_stats: Record<string, any>
+  data_contract_report: Record<string, any>
+  final_capital: number
+  elapsed_ms: number
+  error?: string
 }
 
 // 因子候选列表（与后端 indicators 计算出的列对应）
@@ -251,6 +294,8 @@ export const strategyApi = {
     ApiClient.post<{ task_id: string; status: string; kind: string }>('/api/strategy/optimize/start', payload),
   startWalkforward: (payload: any) =>
     ApiClient.post<{ task_id: string; status: string; kind: string }>('/api/strategy/walkforward/start', payload),
+  startPipelineBacktest: (payload: any) =>
+    ApiClient.post<{ task_id: string; status: string; kind: string }>('/api/strategy/pipeline/backtest/start', payload),
   getTask: (taskId: string) =>
     ApiClient.get<{
       task_id: string
@@ -267,6 +312,6 @@ export const strategyApi = {
   backtestResults: () => ApiClient.get<CompareResultItem[]>('/api/strategy/backtest/results'),
   importBacktestResult: (result: BacktestResult) =>
     ApiClient.post<{ saved: boolean }>('/api/strategy/backtest/results', result),
-  deleteBacktestResult: (strategyId: string) =>
-    ApiClient.delete<{ deleted: number }>(`/api/strategy/backtest/results/${encodeURIComponent(strategyId)}`),
+  deleteBacktestResult: (recordId: string) =>
+    ApiClient.delete<{ deleted: number }>(`/api/strategy/backtest/results/${encodeURIComponent(recordId)}`),
 }

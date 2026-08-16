@@ -2214,6 +2214,9 @@ class ThreeBuysThreeSellsService:
             "min_avg_amount": 1_000_000.0,  # 20日日均成交额估算阈值，低于则过滤
             "trailing_stop_min_profit": 8.0,
             "trailing_stop_atr_mult": 2.5,
+            # 最大亏损硬止损(百分比正数)。None/0 表示不启用(保持教材默认行为)；
+            # 回测可通过 tbts_overrides 设置(如 8.0)截断深亏，提升夏普。
+            "max_loss_pct": 0.0,
             "max_holdings": 30
         }
         default_params.update(params)
@@ -2255,6 +2258,21 @@ class ThreeBuysThreeSellsService:
         end_str = end_date.strftime('%Y-%m-%d')
         backtest_dates = [d for d in trade_dates if start_str <= d <= end_str]
         logger.info(f"📊 回测交易日数量: {len(backtest_dates)}")
+
+        # ===== 流水线候选池过滤（内部参数，非用户暴露）=====
+        # 允许按"再平衡周期"限制建仓候选池：仅当股票在当日所属周期对应的候选池内，
+        # 才允许产生新买入信号；已持有的股票不受影响（持仓保留，继续跑三买三卖直至离场）。
+        eligible_schedule = params.get("_eligible_schedule")
+        eligible_by_date: dict[str, set] | None = None
+        if eligible_schedule:
+            eligible_by_date = {}
+            for td in backtest_dates:
+                pool: set | None = None
+                for period in eligible_schedule:
+                    if period["start"] <= td <= period["end"]:
+                        pool = period["pool"]
+                        break
+                eligible_by_date[td] = pool or set()
 
         # 计算大盘环境
         logger.info("📊 计算市场环境指标...")
@@ -2355,6 +2373,7 @@ class ThreeBuysThreeSellsService:
         # 收集每日信号
         logger.info("📊 收集每日信号...")
         daily_signals: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        total_signals = 0  # 流水线漏斗：累计买入信号数（含所有命中&打分通过）
 
         for code, ind in indicators_cache.items():
             date_to_idx = ind["date_to_idx"]
@@ -2452,6 +2471,9 @@ class ThreeBuysThreeSellsService:
                     sig = self._check_gmma_b2(ind, idx, local_params)
 
                 if sig:
+                        # 流水线候选池过滤：仅允许当前周期候选池内的股票建仓（持仓保留，不影响已持仓）
+                        if eligible_by_date is not None and code not in eligible_by_date.get(td, set()):
+                            continue
                         sig_type = sig["type"]
                         score, details, score_validation = self._calc_signal_score(
                             ind, idx, sig_type, market_trend, dg_info
@@ -2479,6 +2501,7 @@ class ThreeBuysThreeSellsService:
                                 "idx": idx,
                                 "ind": ind
                             })
+                            total_signals += 1
                             # 命中并入池后，该股在本回测区间不再重复产生信号，
                             # 避免连续多日重复建仓（每只股票最多入池一次）。
                             # 注意：若打分不达标，则不会走到这里 → 不 break，
@@ -2603,8 +2626,29 @@ class ThreeBuysThreeSellsService:
                         codes_to_sell.append(code)
                         continue
 
-                # 优先级3: ATR移动止损（盈利8%以上才启动，锁定利润）
-                ts = self._check_trailing_stop(ind, idx, pos["highest_price"], pos["buy_price"])
+                # 优先级2.7: 最大亏损硬止损（回测可配置，截断深亏以提升夏普）
+                max_loss_pct = params.get("max_loss_pct", 0.0) or 0.0
+                if max_loss_pct > 0:
+                    loss_pct = (close - pos["buy_price"]) / pos["buy_price"] * 100
+                    if loss_pct <= -max_loss_pct:
+                        proceeds = pos["remaining_shares"] * close * 0.999
+                        capital += proceeds
+                        trade_record = self._build_and_validate_sell_trade(
+                            pos, ind, td, close, "硬止损"
+                        )
+                        if trade_record is not None:
+                            all_trades.append(trade_record)
+                        else:
+                            data_contract_report["blocked_sells"] += 1
+                        codes_to_sell.append(code)
+                        continue
+
+                # 优先级3: ATR移动止损（盈利达到阈值后才启动，锁定利润）
+                ts = self._check_trailing_stop(
+                    ind, idx, pos["highest_price"], pos["buy_price"],
+                    atr_multiplier=params.get("trailing_stop_atr_mult", 2.5),
+                    min_profit_pct=params.get("trailing_stop_min_profit", 8.0),
+                )
                 if ts:
                     proceeds = pos["remaining_shares"] * close * 0.999
                     capital += proceeds
@@ -2951,6 +2995,11 @@ class ThreeBuysThreeSellsService:
             "params": params,
             "took_ms": took_ms
         }
+        # 流水线全量输出（内部参数 _full_output）：供流水线回测 Tab 展示完整净值曲线与交易明细
+        if params.get("_full_output"):
+            result["trades"] = all_trades
+            result["equity_curve"] = daily_results
+            result["total_signals"] = total_signals
 
         return _to_native(result)
 

@@ -96,24 +96,27 @@ def _load_market_rows() -> list[dict]:
 
 
 def _pct_band_rows(values: list[float]) -> list[dict]:
+    """按涨跌幅区间归类。dir: -1=跌 0=平 1=涨。
+
+    涨区间严格只统计 v>0，平盘(v==0)单独归为 "0%"，避免平盘被计入涨导致
+    涨柱总数与 breadth.up 不一致。
+    """
     bands = [
-        ("<-5%", None, -5.0),
-        ("-5~-3%", -5.0, -3.0),
-        ("-3~-1%", -3.0, -1.0),
-        ("-1~0%", -1.0, 0.0),
-        ("0~1%", 0.0, 1.0),
-        ("1~3%", 1.0, 3.0),
-        ("3~5%", 3.0, 5.0),
-        (">5%", 5.0, None),
+        ("<-5%", lambda v: v < -5.0, -1),
+        ("-5~-3%", lambda v: -5.0 <= v < -3.0, -1),
+        ("-3~-1%", lambda v: -3.0 <= v < -1.0, -1),
+        ("-1~0%", lambda v: -1.0 <= v < 0.0, -1),
+        ("0%", lambda v: v == 0.0, 0),
+        ("0~1%", lambda v: 0.0 < v < 1.0, 1),
+        ("1~3%", lambda v: 1.0 <= v < 3.0, 1),
+        ("3~5%", lambda v: 3.0 <= v < 5.0, 1),
+        (">5%", lambda v: v >= 5.0, 1),
     ]
     total = len(values) or 1
     out = []
-    for label, low, high in bands:
-        count = 0
-        for v in values:
-            if low is None and v < high or high is None and v >= low or low is not None and high is not None and low <= v < high:
-                count += 1
-        out.append({"label": label, "count": count, "pct": round(count / total * 100, 1)})
+    for label, cond, dir_ in bands:
+        count = sum(1 for v in values if cond(v))
+        out.append({"label": label, "count": count, "pct": round(count / total * 100, 1), "dir": dir_})
     return out
 
 

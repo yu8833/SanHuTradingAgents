@@ -541,6 +541,49 @@ def run_strategy(
     }
 
 
+def run_strategy_signals(
+    db,
+    strategy_id: str,
+    pool: list[str] | None = None,
+    as_of: str | None = None,
+) -> dict:
+    """对指定股票池运行策略，返回筛选命中与离场信号命中的代码列表。
+
+    供「常用策略监控」使用：
+      - entry: 策略筛选命中（买入信号）的股票代码
+      - exit:  策略离场信号（exit_signals 任一布尔列触发）的股票代码
+
+    复用面板/指标缓存，小池子（自选/持仓）开销可控。
+    """
+    strategy = get_strategy(strategy_id)
+    if strategy is None:
+        return {"entry": [], "exit": []}
+
+    as_of_date = _resolve_as_of(db, as_of)
+    df = _load_computed_panel(db, pool, as_of_date)
+    if df.empty:
+        return {"entry": [], "exit": []}
+    target = _get_enriched_target(db, df, pool, as_of_date)
+    if target.empty:
+        return {"entry": [], "exit": []}
+
+    # 买入：策略筛选过滤命中
+    mask = run_strategy_filter(strategy_id, target, {}).fillna(False)
+    entry_codes = [str(s) for s in target.loc[mask, "symbol"]]
+
+    # 卖出：任一 exit_signal 布尔列触发
+    exit_codes: list[str] = []
+    exit_sigs = strategy.get("exit_signals", []) or []
+    if exit_sigs:
+        exit_mask = pd.Series(False, index=target.index)
+        for sig in exit_sigs:
+            if sig in target.columns:
+                exit_mask |= target[sig].fillna(False).astype(bool)
+        exit_codes = [str(s) for s in target.loc[exit_mask, "symbol"]]
+
+    return {"entry": entry_codes, "exit": exit_codes}
+
+
 def get_trade_dates(db, limit: int = 30) -> list[str]:
     """获取最近 limit 个交易日（倒序），用于前端日期选择下拉。"""
     dates = db["stock_daily_quotes"].distinct(

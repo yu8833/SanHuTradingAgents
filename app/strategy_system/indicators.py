@@ -41,6 +41,27 @@ SIGNAL_COLUMNS = [
     "signal_volume_surge",
 ]
 
+# 信号 → 其依赖的指标列（用于回测"按需计算"：只保留策略所需信号对应的指标列）。
+# close 为基础列，始终存在，故不列入。
+SIGNAL_INDICATOR_DEPS: dict[str, set[str]] = {
+    "signal_ma_golden_5_20": {"ma5", "ma20"},
+    "signal_ma_dead_5_20": {"ma5", "ma20"},
+    "signal_ma_golden_20_60": {"ma20", "ma60"},
+    "signal_macd_golden": {"macd_dif", "macd_dea"},
+    "signal_macd_dead": {"macd_dif", "macd_dea"},
+    "signal_ma20_breakout": {"ma20"},
+    "signal_ma20_breakdown": {"ma20"},
+    "signal_ma5_breakout": {"ma5"},
+    "signal_ma5_breakdown": {"ma5"},
+    "signal_ma10_breakout": {"ma10"},
+    "signal_ma10_breakdown": {"ma10"},
+    "signal_n_day_high": {"high_60d"},
+    "signal_n_day_low": {"low_60d"},
+    "signal_boll_breakout_upper": {"boll_upper"},
+    "signal_boll_breakdown_lower": {"boll_lower"},
+    "signal_volume_surge": {"vol_ratio_5d"},
+}
+
 
 def _ema_alpha(span: int) -> float:
     return 2.0 / (span + 1)
@@ -164,13 +185,19 @@ def _group_ewm(col, symbols, alpha):
 def compute_indicators(
     df: pd.DataFrame,
     progress_cb: Callable[[float, str], None] | None = None,
+    keep_columns: set[str] | None = None,
 ) -> pd.DataFrame:
-    """从 OHLCV 计算全套技术指标。输入含 symbol 列，按 symbol 分组计算。
+    """从 OHLCV 计算技术指标。输入含 symbol 列，按 symbol 分组计算。
 
     内存优化：全市场面板（数千只股票 × 数百交易日）若一次性对整个面板做
     groupby 滚动/EWM，会产生大量与全面板等长的中间数组，峰值内存可达数 GB，
     在内存受限的容器中易触发 OOM。因此按股票分批计算，每批处理完即拼接并
     释放中间数组，把峰值内存限制在「单批规模」，与市场股票总数解耦。
+
+    keep_columns（可选）：回测对单策略通常只用少数指标列，传此集合可让本函数
+    只保留命中列（含全部基础列），丢掉其余指标列。这样分批累积的 out 只携带
+    所需列，全市场长区间面板的内存占用大幅下降，避免 3 年期回测触发容器 OOM。
+    默认 None 表示保留全部指标列（筛选/分析等场景不变）。
 
     progress_cb(p, msg) 可选：p 在 [0,1] 内按分批进度回调，供长时全市场回测
     上报进度，避免进度条长时间停留在 0% 造成"卡死"假象。
@@ -183,13 +210,20 @@ def compute_indicators(
     if missing:
         raise ValueError(f"缺少必要列: {missing}")
 
-    df = df.copy()
-    df["date"] = pd.to_datetime(df["date"])
     df = df.sort_values(["symbol", "date"], kind="mergesort").reset_index(drop=True)
+
+    def _keep(result: pd.DataFrame) -> pd.DataFrame:
+        if not keep_columns:
+            return result
+        base = [c for c in df.columns if c in result.columns]
+        # 仅追加尚未在 base 中的命中列，避免 keep_columns 里同时含指标与其信号
+        # 依赖（如 ma5 与 signal_ma5_breakout）时重复选中同一列，产生重复列
+        keep = [c for c in keep_columns if c in result.columns and c not in base]
+        return result[base + keep]
 
     symbols = df["symbol"]
     if len(symbols) <= _INDICATOR_CHUNK_SYMBOLS:
-        return _concat_indicators(df)
+        return _keep(_concat_indicators(df))
 
     # 分批：按 symbol 编码切块，每块最多 _INDICATOR_CHUNK_SYMBOLS 只股票，
     # 每块独立计算后拼接，避免全量中间数组撑爆内存。
@@ -204,7 +238,7 @@ def compute_indicators(
     for i, idx in enumerate(rows_by_chunk.values()):
         if progress_cb:
             progress_cb((i + 1) / n, f"正在计算技术指标（{i + 1}/{n} 批）…")
-        out.append(_concat_indicators(df.iloc[idx]))
+        out.append(_keep(_concat_indicators(df.iloc[idx])))
     return pd.concat(out, axis=0, ignore_index=True)
 
 
@@ -306,21 +340,31 @@ def _concat_indicators(df: pd.DataFrame) -> pd.DataFrame:
 def compute_signals(
     df: pd.DataFrame,
     progress_cb: Callable[[float, str], None] | None = None,
+    keep_columns: set[str] | None = None,
 ) -> pd.DataFrame:
     """从指标列计算原子信号布尔列。保持原索引与既有列不变，仅追加信号列。
 
     内存优化：与 compute_indicators 一致，按股票分批计算以控制峰值内存。
+    keep_columns（可选）：只保留命中的信号列（含全部既有列），丢弃其余信号列，
+    与 compute_indicators 的 keep_columns 配合，压缩回测面板内存占用。
     progress_cb 同 compute_indicators，按分批上报进度。
     """
     if df is None or df.empty:
         return df
 
-    df = df.copy()
     df = df.sort_values(["symbol", "date"], kind="mergesort").reset_index(drop=True)
+
+    def _keep(result: pd.DataFrame) -> pd.DataFrame:
+        if not keep_columns:
+            return result
+        base = [c for c in df.columns if c in result.columns]
+        # 仅追加尚未在 base 中的命中列（keep_columns 含指标列时避免重复选中）
+        keep = [c for c in keep_columns if c in result.columns and c not in base]
+        return result[base + keep]
 
     symbols = df["symbol"]
     if len(symbols) <= _INDICATOR_CHUNK_SYMBOLS:
-        return _concat_signals(df)
+        return _keep(_concat_signals(df))
 
     # 分批：按 symbol 编码切块，每块最多 _INDICATOR_CHUNK_SYMBOLS 只股票。
     # 必须按“固定股票数”切块而非按 symbol 变更处切块，否则每只股票单独成块，
@@ -333,12 +377,16 @@ def compute_signals(
     for i, idx in enumerate(rows_by_chunk.values()):
         if progress_cb:
             progress_cb((i + 1) / n, f"正在计算信号（{i + 1}/{n} 批）…")
-        out.append(_concat_signals(df.iloc[idx]))
+        out.append(_keep(_concat_signals(df.iloc[idx])))
     return pd.concat(out, axis=0, ignore_index=True)
 
 
 def _concat_signals(df: pd.DataFrame) -> pd.DataFrame:
-    """对单批 DataFrame 计算全部原子信号布尔列（分批计算的核心逻辑）。"""
+    """对单批 DataFrame 计算原子信号布尔列（分批计算的核心逻辑）。
+
+    仅计算依赖列均存在的信号：配合 compute_indicators 的 keep_columns 按需计算，
+    某些信号依赖的指标列（如 ma20/ma60）未保留时自动跳过，避免 KeyError。
+    """
     df = df.sort_values(["symbol", "date"]).reset_index(drop=True)
     symbols = df["symbol"]
 
@@ -346,22 +394,60 @@ def _concat_signals(df: pd.DataFrame) -> pd.DataFrame:
         return col.groupby(symbols, sort=False).shift(1)
 
     s = pd.DataFrame(index=df.index)
-    s["signal_ma_golden_5_20"] = (df["ma5"] > df["ma20"]) & (_shift(df["ma5"]) <= _shift(df["ma20"]))
-    s["signal_ma_dead_5_20"] = (df["ma5"] < df["ma20"]) & (_shift(df["ma5"]) >= _shift(df["ma20"]))
-    s["signal_ma_golden_20_60"] = (df["ma20"] > df["ma60"]) & (_shift(df["ma20"]) <= _shift(df["ma60"]))
-    s["signal_macd_golden"] = (df["macd_dif"] > df["macd_dea"]) & (_shift(df["macd_dif"]) <= _shift(df["macd_dea"]))
-    s["signal_macd_dead"] = (df["macd_dif"] < df["macd_dea"]) & (_shift(df["macd_dif"]) >= _shift(df["macd_dea"]))
-    s["signal_ma20_breakout"] = (df["close"] > df["ma20"]) & (_shift(df["close"]) <= _shift(df["ma20"]))
-    s["signal_ma20_breakdown"] = (df["close"] < df["ma20"]) & (_shift(df["close"]) >= _shift(df["ma20"]))
-    s["signal_ma5_breakout"] = (df["close"] > df["ma5"]) & (_shift(df["close"]) <= _shift(df["ma5"]))
-    s["signal_ma5_breakdown"] = (df["close"] < df["ma5"]) & (_shift(df["close"]) >= _shift(df["ma5"]))
-    s["signal_ma10_breakout"] = (df["close"] > df["ma10"]) & (_shift(df["close"]) <= _shift(df["ma10"]))
-    s["signal_ma10_breakdown"] = (df["close"] < df["ma10"]) & (_shift(df["close"]) >= _shift(df["ma10"]))
-    s["signal_n_day_high"] = df["close"] >= df["high_60d"]
-    s["signal_n_day_low"] = df["close"] <= df["low_60d"]
-    s["signal_boll_breakout_upper"] = df["close"] > df["boll_upper"]
-    s["signal_boll_breakdown_lower"] = df["close"] < df["boll_lower"]
-    s["signal_volume_surge"] = df["vol_ratio_5d"] >= 2.0
+    # 信号 → 其实际访问的列；仅当这些列全部存在时才计算该信号
+    _signal_deps = {
+        "signal_ma_golden_5_20": {"ma5", "ma20"},
+        "signal_ma_dead_5_20": {"ma5", "ma20"},
+        "signal_ma_golden_20_60": {"ma20", "ma60"},
+        "signal_macd_golden": {"macd_dif", "macd_dea"},
+        "signal_macd_dead": {"macd_dif", "macd_dea"},
+        "signal_ma20_breakout": {"close", "ma20"},
+        "signal_ma20_breakdown": {"close", "ma20"},
+        "signal_ma5_breakout": {"close", "ma5"},
+        "signal_ma5_breakdown": {"close", "ma5"},
+        "signal_ma10_breakout": {"close", "ma10"},
+        "signal_ma10_breakdown": {"close", "ma10"},
+        "signal_n_day_high": {"close", "high_60d"},
+        "signal_n_day_low": {"close", "low_60d"},
+        "signal_boll_breakout_upper": {"close", "boll_upper"},
+        "signal_boll_breakdown_lower": {"close", "boll_lower"},
+        "signal_volume_surge": {"vol_ratio_5d"},
+    }
+    available = set(df.columns)
+    computable = {name for name, deps in _signal_deps.items() if deps <= available}
+
+    if "signal_ma_golden_5_20" in computable:
+        s["signal_ma_golden_5_20"] = (df["ma5"] > df["ma20"]) & (_shift(df["ma5"]) <= _shift(df["ma20"]))
+    if "signal_ma_dead_5_20" in computable:
+        s["signal_ma_dead_5_20"] = (df["ma5"] < df["ma20"]) & (_shift(df["ma5"]) >= _shift(df["ma20"]))
+    if "signal_ma_golden_20_60" in computable:
+        s["signal_ma_golden_20_60"] = (df["ma20"] > df["ma60"]) & (_shift(df["ma20"]) <= _shift(df["ma60"]))
+    if "signal_macd_golden" in computable:
+        s["signal_macd_golden"] = (df["macd_dif"] > df["macd_dea"]) & (_shift(df["macd_dif"]) <= _shift(df["macd_dea"]))
+    if "signal_macd_dead" in computable:
+        s["signal_macd_dead"] = (df["macd_dif"] < df["macd_dea"]) & (_shift(df["macd_dif"]) >= _shift(df["macd_dea"]))
+    if "signal_ma20_breakout" in computable:
+        s["signal_ma20_breakout"] = (df["close"] > df["ma20"]) & (_shift(df["close"]) <= _shift(df["ma20"]))
+    if "signal_ma20_breakdown" in computable:
+        s["signal_ma20_breakdown"] = (df["close"] < df["ma20"]) & (_shift(df["close"]) >= _shift(df["ma20"]))
+    if "signal_ma5_breakout" in computable:
+        s["signal_ma5_breakout"] = (df["close"] > df["ma5"]) & (_shift(df["close"]) <= _shift(df["ma5"]))
+    if "signal_ma5_breakdown" in computable:
+        s["signal_ma5_breakdown"] = (df["close"] < df["ma5"]) & (_shift(df["close"]) >= _shift(df["ma5"]))
+    if "signal_ma10_breakout" in computable:
+        s["signal_ma10_breakout"] = (df["close"] > df["ma10"]) & (_shift(df["close"]) <= _shift(df["ma10"]))
+    if "signal_ma10_breakdown" in computable:
+        s["signal_ma10_breakdown"] = (df["close"] < df["ma10"]) & (_shift(df["close"]) >= _shift(df["ma10"]))
+    if "signal_n_day_high" in computable:
+        s["signal_n_day_high"] = df["close"] >= df["high_60d"]
+    if "signal_n_day_low" in computable:
+        s["signal_n_day_low"] = df["close"] <= df["low_60d"]
+    if "signal_boll_breakout_upper" in computable:
+        s["signal_boll_breakout_upper"] = df["close"] > df["boll_upper"]
+    if "signal_boll_breakdown_lower" in computable:
+        s["signal_boll_breakdown_lower"] = df["close"] < df["boll_lower"]
+    if "signal_volume_surge" in computable:
+        s["signal_volume_surge"] = df["vol_ratio_5d"] >= 2.0
 
     return pd.concat([df, s], axis=1)
 
@@ -369,11 +455,13 @@ def _concat_signals(df: pd.DataFrame) -> pd.DataFrame:
 def compute_all(
     df: pd.DataFrame,
     progress_cb: Callable[[float, str], None] | None = None,
+    keep_columns: set[str] | None = None,
 ) -> pd.DataFrame:
     """一站式计算：指标 + 信号。
 
     progress_cb(p, msg) 可选：p 在 [0,1] 内，指标阶段占 [0, 0.7]，信号阶段占
     [0.7, 1.0]，供回测/筛选在长时全市场计算时上报进度。
+    keep_columns（可选）：只计算并保留命中的指标/信号列，压缩回测面板内存。
     """
     sub = progress_cb if progress_cb else None
 
@@ -385,6 +473,6 @@ def compute_all(
         if sub:
             sub(0.7 + 0.3 * min(1.0, max(0.0, float(p))), msg)
 
-    df = compute_indicators(df, progress_cb=_indic if sub else None)
-    df = compute_signals(df, progress_cb=_signal if sub else None)
+    df = compute_indicators(df, progress_cb=_indic if sub else None, keep_columns=keep_columns)
+    df = compute_signals(df, progress_cb=_signal if sub else None, keep_columns=keep_columns)
     return df

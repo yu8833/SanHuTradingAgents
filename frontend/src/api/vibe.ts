@@ -165,7 +165,7 @@ export interface MarketDashboard {
     strong_down: number
   }
   amount: { total: number; avg: number }
-  distribution: { label: string; count: number; pct: number }[]
+  distribution: { label: string; count: number; pct: number; dir: -1 | 0 | 1 }[]
   limit: DashboardLimit
   activity: { avg_turnover: number; high_turnover: number; high_turnover_pct: number }
   radar: RadarDim[]

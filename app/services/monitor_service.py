@@ -26,6 +26,7 @@
 from __future__ import annotations
 from app.utils.timezone import now_tz
 
+import json
 import logging
 import re
 import time
@@ -36,7 +37,7 @@ from typing import Any
 from bson import ObjectId
 from pydantic import BaseModel
 
-from app.core.database import get_mongo_db
+from app.core.database import get_mongo_db, get_mongo_db_sync
 from app.services.candidate_pool.auxiliary_signal_layer import compute_auxiliary
 from app.utils.trading_time import is_trading_time
 
@@ -44,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 # ── 常量 ────────────────────────────────────────────────
 ID_RE = re.compile(r"^[a-z0-9_]{1,40}$")
-RULE_TYPES = {"signal", "price", "market", "aux", "tbs"}
+RULE_TYPES = {"signal", "price", "market", "aux", "tbs", "strategy"}
 SCOPES = {"symbols", "watchlist", "all", "positions"}
 LOGICS = {"and", "or"}
 SEVERITIES = {"info", "warn", "critical"}
@@ -159,6 +160,8 @@ class RuleModel(BaseModel):
     message: str = ""
     tbs_dir: str = "buy"      # type=tbs 时：buy | sell | both
     tbs_signals: list[str] = []   # type=tbs 时：限定监听的信号（B1/B2/B3/S1/S2/S3）
+    strategy_id: str | None = None   # type=strategy 时：对应 /screening/common 的内置策略 id
+    tag: str | None = None    # type=strategy 时：命中股票同步到自选池时使用的标签
     builtin: bool = False     # 内置规则（三买三卖核心，不可删除）
 
 
@@ -199,6 +202,20 @@ def validate(rule: dict) -> None:
         if not isinstance(tbs_signals, list) or not all(s in valid_signals for s in tbs_signals):
             raise ValueError(f"tbs_signals 必须是 {valid_signals} 的子集")
         # tbs 规则不需要阈值/信号 conditions
+        return
+    # 常用策略监控规则：基于 /screening/common 的内置策略，按买入/卖出方向生成交易指令
+    if rule.get("type") == "strategy":
+        if rule.get("scope", "watchlist") not in TBS_ALLOWED_SCOPES:
+            raise ValueError("策略监控规则作用域仅支持「自选股」「持仓」或「指定标的」")
+        if rule.get("tbs_dir", "buy") not in TBS_DIRS:
+            raise ValueError(f"tbs_dir 必须是 {TBS_DIRS} 之一")
+        if not rule.get("strategy_id"):
+            raise ValueError("策略监控规则必须指定 strategy_id")
+        if not rule.get("user_id"):
+            raise ValueError("策略监控规则必须绑定 user_id（指令归属执行账户）")
+        cd = rule.get("cooldown_seconds", 3600)
+        if not isinstance(cd, int) or cd < 0:
+            raise ValueError("cooldown_seconds 必须是非负整数")
         return
     if rule.get("scope") == "symbols":
         syms = rule.get("symbols")
@@ -251,14 +268,20 @@ def normalize(rule: dict) -> dict:
     r.setdefault("user_id", None)
     r.setdefault("tbs_dir", "buy")
     r.setdefault("tbs_signals", [])
+    r.setdefault("strategy_id", None)
+    r.setdefault("tag", None)
     r.setdefault("builtin", False)
     # 非「指定标的」作用域时清空 symbols，避免展示冗余代码
     if r.get("scope") != "symbols":
         r["symbols"] = []
-    # 非 tbs 规则无需 tbs_dir；非 aux 规则无需 aux 字段
-    if r.get("type") != "tbs":
+    # 非 tbs/strategy 规则无需 tbs_dir；非 aux 规则无需 aux 字段
+    if r.get("type") not in ("tbs", "strategy"):
         r.pop("tbs_dir", None)
         r.pop("tbs_signals", None)
+    # 非策略监控规则无需 strategy_id
+    if r.get("type") != "strategy":
+        r.pop("strategy_id", None)
+        r.pop("tag", None)
     r.setdefault("created_at", now_tz().isoformat())
     return r
 
@@ -312,40 +335,28 @@ class MonitorService:
         return rules
 
     async def ensure_default_rules(self, user_id: str | None) -> None:
-        """为指定用户播种内置三买三卖规则（幂等，已存在则保留用户的自定义 enabled/name 等）。
+        """三买三卖（type=tbs）规则已废弃（回测收益率偏低），不再播种。
 
-        id 字段在 DB 上有唯一索引，故内置规则 id 需按用户作用域唯一（追加 user_id 哈希后缀），
-        避免多用户内置规则冲突。
+        仅清理用户下残留的内置 tbs 规则（含旧版无用户后缀与带后缀两种），
+        避免历史数据残留导致「全部规则」中仍出现三买三卖。
         """
         if not user_id:
             return
         db = await self._get_db()
         suffix = hashlib.sha1(user_id.encode()).hexdigest()[:8]
-        # 清理旧版（无用户后缀）内置规则，避免残留重复
         legacy_ids = {tpl["id"] for tpl in DEFAULT_TBS_RULES}
+        # 旧版（无用户后缀）
         await db[self.rules_coll].delete_many({
             "id": {"$in": list(legacy_ids)},
             "user_id": user_id,
             "builtin": True,
         })
-        for tpl in DEFAULT_TBS_RULES:
-            rule = dict(tpl)
-            rule["id"] = f"{tpl['id']}_{suffix}"
-            rule["user_id"] = user_id
-            rule["builtin"] = True
-            rule.setdefault("cooldown_seconds", 3600)
-            rule.setdefault("logic", "and")
-            rule.setdefault("conditions", [])
-            existing = await db[self.rules_coll].find_one({
-                "id": rule["id"], "user_id": user_id})
-            if existing:
-                continue
-            rule.setdefault("created_at", now_tz().isoformat())
-            await db[self.rules_coll].update_one(
-                {"id": rule["id"], "user_id": user_id},
-                {"$set": rule},
-                upsert=True,
-            )
+        # 带用户后缀的版本
+        await db[self.rules_coll].delete_many({
+            "id": {"$in": [f"{tid}_{suffix}" for tid in legacy_ids]},
+            "user_id": user_id,
+            "builtin": True,
+        })
 
     async def save_rule(self, rule: dict) -> dict:
         db = await self._get_db()
@@ -370,9 +381,76 @@ class MonitorService:
         db = await self._get_db()
         existing = await db[self.rules_coll].find_one({"id": rule_id})
         if existing and existing.get("builtin"):
-            raise ValueError("内置规则（三买三卖核心）不可删除，可关闭或修改")
+            raise ValueError("内置规则不可删除，可关闭或修改")
         result = await db[self.rules_coll].delete_one({"id": rule_id})
         return result.deleted_count > 0
+
+    # ── 常用策略监控（type=strategy）启停/状态 ─────────────
+    def _strategy_rule_id(self, user_id: str, strategy_id: str) -> str:
+        """生成该用户某策略的监控规则 id（幂等，按用户作用域唯一）。"""
+        suffix = hashlib.sha1(user_id.encode()).hexdigest()[:8]
+        safe_id = re.sub(r'[^a-z0-9_]', '_', strategy_id.lower())
+        return f"strategy_mon_{safe_id}_{suffix}"
+
+    async def get_strategy_monitoring(self, user_id: str) -> list[dict]:
+        """返回当前用户各常用策略的监控开关状态。"""
+        db = await self._get_db()
+        rules = await db[self.rules_coll].find(
+            {"type": "strategy", "user_id": user_id}).to_list(length=None)
+        by_id = {r.get("strategy_id"): r for r in rules}
+        out = []
+        for sid in sorted(by_id):
+            r = by_id[sid]
+            out.append({
+                "strategy_id": sid,
+                "rule_id": r.get("id"),
+                "name": r.get("tag") or r.get("name", ""),
+                "enabled": bool(r.get("enabled", False)),
+            })
+        return out
+
+    async def set_strategy_monitoring(self, user_id: str, strategy_id: str,
+                                      enabled: bool, strategy_name: str | None = None) -> dict:
+        """开启/关闭某常用策略的监控。
+
+        开启时创建（幂等）一条 type=strategy 规则：买入扫自选→命中同步自选并生成买入指令，
+        卖出扫持仓→生成卖出指令。关闭时仅置 enabled=False，保留规则便于再次开启。
+        """
+        db = await self._get_db()
+        rule_id = self._strategy_rule_id(user_id, strategy_id)
+        existing = await db[self.rules_coll].find_one({"id": rule_id})
+        if existing:
+            if existing.get("enabled") != enabled:
+                await db[self.rules_coll].update_one(
+                    {"id": rule_id}, {"$set": {"enabled": enabled}})
+                existing["enabled"] = enabled
+            existing.pop("_id", None)
+            return existing
+
+        name = strategy_name or strategy_id
+        rule = {
+            "id": rule_id,
+            "name": f"常用策略·{name}",
+            "enabled": enabled,
+            "type": "strategy",
+            "scope": "watchlist",
+            "symbols": [],
+            "user_id": user_id,
+            "conditions": [],
+            "logic": "and",
+            "cooldown_seconds": 3600,
+            "severity": "warn",
+            "message": "",
+            "tbs_dir": "both",
+            "tbs_signals": [],
+            "strategy_id": strategy_id,
+            "tag": name,
+            "builtin": False,
+            "created_at": now_tz().isoformat(),
+        }
+        await db[self.rules_coll].insert_one(rule)
+        rule.pop("_id", None)
+        return rule
 
     # ── 告警存储 ──────────────────────────────────────
     async def list_alerts(self, days: int = 7, limit: int = 500,
@@ -600,6 +678,204 @@ class MonitorService:
             logger.info(f"✅ 三买三卖监控: 生成 {created} 条待确认指令")
         return created
 
+    # ── 常用策略监控（type=strategy）待确认指令 ─────────────
+    async def _strategy_item(self, sym: str) -> dict:
+        """获取单只股票的名称与现价（供策略监控指令展示）。"""
+        name = ""
+        price = None
+        try:
+            db = await self._get_db()
+            doc = await db["stock_basic_info"].find_one(
+                {"code": sym}, {"_id": 0, "name": 1})
+            name = (doc or {}).get("name", "")
+        except Exception:
+            pass
+        try:
+            quotes = await self._fetch_symbol_quotes([sym])
+            price = quotes.get(sym, {}).get("price")
+        except Exception:
+            pass
+        return {"name": name, "close": price}
+
+    async def _ensure_watchlist_tagged(self, user_id: str | None, sym: str,
+                                       item: dict, rule: dict) -> None:
+        """确保股票在自选中并带策略标签（用于策略买入命中同步自选池）。"""
+        if not user_id:
+            return
+        try:
+            from app.services.favorites_service import favorites_service
+            if await favorites_service.is_favorite(user_id, sym):
+                return
+            tag = rule.get("tag") or rule.get("name") or "策略监控"
+            await favorites_service.add_favorite(
+                user_id=user_id, stock_code=sym,
+                stock_name=item.get("name") or sym, market="A股",
+                tags=[tag],
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ 策略监控同步自选失败 {sym}: {e}")
+
+    def _strategy_order_exists(self, rules_orders: list[dict], rule_id: str,
+                               sym: str, sig_type: str) -> bool:
+        """判断同源指令是否已存在（pending/executed 视为已处理，避免重复生成）。"""
+        for o in rules_orders:
+            if (o.get("rule_id") == rule_id and o.get("symbol") == sym
+                    and o.get("signal_type") == sig_type
+                    and o.get("status") in ("pending", "executed")):
+                return True
+        return False
+
+    async def _publish_new_order(self, order: dict) -> None:
+        """新生成待确认指令时，向所属用户实时发布 SSE 信号（前端主动弹窗确认）。"""
+        u = order.get("user_id")
+        if not u:
+            return
+        try:
+            from app.core.database import get_redis_client
+            r = get_redis_client()
+            # insert_one 会原地给 order 注入 _id(ObjectId)，发布前剔除并做防御性序列化
+            clean = dict(order)
+            clean.pop("_id", None)
+            payload = {
+                "type": "pending_order",
+                "user_id": u,
+                "order": clean,
+            }
+            await r.publish(
+                f"monitor_orders:{u}",
+                json.dumps(payload, ensure_ascii=False, default=str))
+        except Exception as e:
+            logger.warning(f"⚠️ 发布待确认指令实时信号失败: {e}")
+
+    async def scan_strategy_instructions(self) -> int:
+        """评估所有启用的 strategy 规则，把常用策略命中/离场信号落为待确认指令。
+
+        买入：对自选池（或指定标的）运行策略筛选，命中股票确保同步到自选池（带策略标签），
+              并生成买入待确认指令。
+        卖出：对纸面持仓运行策略离场信号检测，触发则生成卖出待确认指令。
+        """
+        import asyncio
+
+        from app.strategy_system import screener
+
+        db = await self._get_db()
+        # screener 需要同步 pymongo client（异步 Motor client 在 to_thread 线程中不可用）
+        db_sync = get_mongo_db_sync()
+        rules = await db[self.rules_coll].find(
+            {"enabled": True, "type": "strategy"}).to_list(length=None)
+        if not rules:
+            return 0
+
+        now = time.time()
+        now_iso = now_tz().isoformat()
+        created = 0
+
+        for r in rules:
+            strategy_id = r.get("strategy_id")
+            if not strategy_id:
+                continue
+            user_id = r.get("user_id")
+            tbs_dir = r.get("tbs_dir", "buy")
+            scope = r.get("scope", "watchlist")
+
+            # 买入发现池：指定标的（或全市场）。
+            # 需求是"策略命中的股票放进自选池"，因此默认扫描全市场来发现命中，
+            # 命中后才同步进自选池并生成买入指令。若只扫自选池则命中的新股永远进不来。
+            if scope == "symbols":
+                buy_pool = [str(s).zfill(6) for s in r.get("symbols", []) if s]
+            else:
+                buy_pool = None  # 全市场发现命中
+            sell_pool = await self._resolve_position_symbols(user_id)
+
+            # 预取同源指令，用于去重判断
+            existing_orders = await db[self.tbs_orders_coll].find(
+                {"rule_id": r["id"], "status": {"$in": ["pending", "executed"]}}
+            ).to_list(length=None)
+
+            if tbs_dir in ("buy", "both"):
+                try:
+                    sig_res = await asyncio.to_thread(
+                        screener.run_strategy_signals, db_sync, strategy_id, buy_pool, None)
+                except Exception as e:
+                    logger.error(f"❌ 策略 {strategy_id} 买入监控扫描失败: {e}", exc_info=True)
+                    sig_res = {"entry": [], "exit": []}
+                for sym in sig_res.get("entry", []):
+                    item = await self._strategy_item(sym)
+                    # 买入命中：同步到自选池并带策略标签
+                    await self._ensure_watchlist_tagged(user_id, sym, item, r)
+                    sig_type = "entry"
+                    if self._strategy_order_exists(existing_orders, r["id"], sym, sig_type):
+                        continue
+                    key = (r["id"], sym, sig_type)
+                    last = self._last_fire.get(key)
+                    if last is not None and (now - last) < r.get("cooldown_seconds", 3600):
+                        continue
+                    self._last_fire[key] = now
+                    order = {
+                        "user_id": user_id,
+                        "rule_id": r["id"],
+                        "rule_name": r.get("name", ""),
+                        "symbol": sym,
+                        "name": item.get("name", ""),
+                        "signal_type": sig_type,
+                        "signal_label": "策略买入",
+                        "direction": "buy",
+                        "position_pct": 1.0,
+                        "stop_loss_price": None,
+                        "reference_price": item.get("close"),
+                        "status": "pending",
+                        "created_at": now_iso,
+                        "executed_at": None,
+                        "reason": f"常用策略「{r.get('name', strategy_id)}」：{item.get('name', '')} 命中买入信号，现价 {item.get('close')}",
+                    }
+                    insert_res = await db[self.tbs_orders_coll].insert_one(order)
+                    order["id"] = str(insert_res.inserted_id)
+                    await self._publish_new_order(order)
+                    created += 1
+
+            if tbs_dir in ("sell", "both") and sell_pool:
+                try:
+                    sig_res = await asyncio.to_thread(
+                        screener.run_strategy_signals, db_sync, strategy_id, sell_pool, None)
+                except Exception as e:
+                    logger.error(f"❌ 策略 {strategy_id} 卖出监控扫描失败: {e}", exc_info=True)
+                    sig_res = {"entry": [], "exit": []}
+                for sym in sig_res.get("exit", []):
+                    item = await self._strategy_item(sym)
+                    sig_type = "exit"
+                    if self._strategy_order_exists(existing_orders, r["id"], sym, sig_type):
+                        continue
+                    key = (r["id"], sym, sig_type)
+                    last = self._last_fire.get(key)
+                    if last is not None and (now - last) < r.get("cooldown_seconds", 3600):
+                        continue
+                    self._last_fire[key] = now
+                    order = {
+                        "user_id": user_id,
+                        "rule_id": r["id"],
+                        "rule_name": r.get("name", ""),
+                        "symbol": sym,
+                        "name": item.get("name", ""),
+                        "signal_type": sig_type,
+                        "signal_label": "策略卖出",
+                        "direction": "sell",
+                        "position_pct": 1.0,
+                        "stop_loss_price": None,
+                        "reference_price": item.get("close"),
+                        "status": "pending",
+                        "created_at": now_iso,
+                        "executed_at": None,
+                        "reason": f"常用策略「{r.get('name', strategy_id)}」：{item.get('name', '')} 触发离场信号，现价 {item.get('close')}",
+                    }
+                    insert_res = await db[self.tbs_orders_coll].insert_one(order)
+                    order["id"] = str(insert_res.inserted_id)
+                    await self._publish_new_order(order)
+                    created += 1
+
+        if created:
+            logger.info(f"✅ 策略监控: 生成 {created} 条待确认指令")
+        return created
+
     async def list_tbs_orders(self, user_id: str | None, status: str | None = None,
                               limit: int = 200) -> list[dict]:
         """列出某用户的待确认指令（时间倒序）。"""
@@ -638,8 +914,13 @@ class MonitorService:
             query, {"$set": {"status": "dismissed"}})
         return result.modified_count > 0
 
-    async def execute_tbs_order(self, order_id: str, user_id: str | None) -> dict[str, Any]:
-        """确认执行待确认指令：按建议仓位折算数量并走纸面交易成交入口。"""
+    async def execute_tbs_order(
+        self, order_id: str, user_id: str | None, quantity: int | None = None
+    ) -> dict[str, Any]:
+        """确认执行待确认指令：按建议仓位折算数量并走纸面交易成交入口。
+
+        quantity 不为空时（买入）使用用户手动指定数量，否则按建议仓位折算。
+        """
         db = await self._get_db()
         query: dict[str, Any] = {"_id": ObjectId(order_id), "status": "pending"}
         if user_id:
@@ -653,6 +934,13 @@ class MonitorService:
         position_pct = float(order.get("position_pct") or 0)
         if position_pct <= 0:
             position_pct = 1.0
+
+        # 解析真实策略 id（常用策略监控：写真实策略，便于策略表现对齐；兜底 default）
+        strategy_tag = "default"
+        if order.get("rule_id"):
+            rule = await db[self.rules_coll].find_one({"id": order["rule_id"]})
+            if rule:
+                strategy_tag = rule.get("strategy_id") or "default"
 
         from app.services.paper_executor import (
             execute_market_order,
@@ -670,12 +958,18 @@ class MonitorService:
 
         # 折算数量（A股按 100 股一手取整）
         if direction == "buy":
-            acc = await get_or_create_account(target_user)
-            cash = float((acc.get("cash") or {}).get("CNY", 0.0))
-            alloc = cash * position_pct
-            qty = int(alloc / price / 100) * 100
-            if qty <= 0:
-                qty = 100 if cash >= price * 100 else 0
+            if quantity and quantity > 0:
+                # 用户手动指定数量：按 100 股一手取整（至少一手）
+                qty = int(quantity / 100) * 100
+                if qty <= 0:
+                    qty = 100
+            else:
+                acc = await get_or_create_account(target_user)
+                cash = float((acc.get("cash") or {}).get("CNY", 0.0))
+                alloc = cash * position_pct
+                qty = int(alloc / price / 100) * 100
+                if qty <= 0:
+                    qty = 100 if cash >= price * 100 else 0
             if qty <= 0:
                 raise ValueError("可用资金不足，无法买入一手")
         else:
@@ -695,7 +989,7 @@ class MonitorService:
             side=direction,
             quantity=qty,
             market="CN",
-            strategy="tbs",
+            strategy=strategy_tag,
             stock_name=order.get("name"),
             stop_loss_price=order.get("stop_loss_price") if direction == "buy" else None,
         )
@@ -871,11 +1165,14 @@ class MonitorService:
     async def run_evaluation(self, respect_trading_time: bool = True) -> int:
         """评估所有启用规则，触发条件时写入告警记录。返回触发条数。
 
-        respect_trading_time=True 时，非 A 股交易时间（含收盘后缓冲期）跳过评估，
-        避免基于盘后冻结行情在夜间反复触发重复告警。
+        respect_trading_time=True 时，非 A 股交易时间（含收盘后缓冲期）仅跳过行情类
+        (signal/price/market/aux) 规则评估，避免基于盘后冻结行情在夜间反复触发重复告警。
+        而三买三卖 / 常用策略监控基于日K信号（收盘后反而更明确），不受交易时间限制，
+        始终执行——保证用户半夜/收盘后开启策略监控也能把命中股票同步到自选池并生成指令。
         """
         if respect_trading_time and not is_trading_time():
-            logger.debug("非交易时间，跳过监控规则评估")
+            logger.debug("非交易时间，仅跳过行情类监控规则评估（日K类信号监控仍执行）")
+            await self._run_daily_signal_scans()
             return 0
         try:
             db = await self._get_db()
@@ -980,16 +1277,28 @@ class MonitorService:
                 await db[self.alerts_coll].insert_many(events)
                 logger.info(f"✅ 监控评估: 检查 {len(rules)} 条规则, 触发 {len(events)} 条")
 
-            # tbs 规则：把三买三卖信号落为待确认指令（独立于行情布尔评估）
-            try:
-                await self.scan_tbs_instructions()
-            except Exception as e:
-                logger.error(f"❌ 三买三卖指令生成失败: {e}", exc_info=True)
+            # 三买三卖 / 常用策略监控：基于日K信号，交易与收盘后均执行
+            await self._run_daily_signal_scans()
 
             return len(events)
         except Exception as e:
             logger.error(f"❌ 监控评估失败: {e}", exc_info=True)
             return 0
+
+    async def _run_daily_signal_scans(self) -> None:
+        """执行基于日K信号的指令扫描：三买三卖(scan_tbs) + 常用策略监控(scan_strategy)。
+
+        这些信号以日线收盘数据计算，收盘后结果反而更明确，因此不受交易时间限制，
+        无论盘中还是盘后/夜间都运行（内部有去重与冷却，重复运行不会产生重复指令）。
+        """
+        try:
+            await self.scan_tbs_instructions()
+        except Exception as e:
+            logger.error(f"❌ 三买三卖指令生成失败: {e}", exc_info=True)
+        try:
+            await self.scan_strategy_instructions()
+        except Exception as e:
+            logger.error(f"❌ 策略监控指令生成失败: {e}", exc_info=True)
 
 
 def _to_float(v: Any) -> float | None:

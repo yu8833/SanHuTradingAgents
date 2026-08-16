@@ -297,14 +297,6 @@ async def execute_market_order(
 
     # 8. 执行买卖逻辑
     if side == "buy":
-        # C2 账户级回撤风控：按当前回撤等级约束股数，暂停时拒绝
-        from app.services.retail.drawdown_risk_control import enforce_buy
-        risk = await enforce_buy(user_id, normalized_code, qty, price)
-        if not risk["allowed"]:
-            raise ValueError(f"买入被风控拦截：{risk['reason']}")
-        if risk["qty"] < qty:
-            logger.warning(f"🔒 {normalized_code} 买入股数由风控 {qty}→{risk['qty']}：{risk['reason']}")
-            qty = risk["qty"]
         notional = round(price * qty, 2)
         rules = await _get_market_rules(market)
         commission = _calculate_commission(market, side, notional, rules) if rules else 0.0
@@ -415,12 +407,6 @@ async def execute_market_order(
                     "updated_at": now_iso,
                 }}
             )
-            # C2 连续止损记账：清仓后累计连续止损，达阈值暂停该标的
-            try:
-                from app.services.retail.drawdown_risk_control import record_exit
-                await record_exit(user_id, normalized_code, pnl, "sell_order")
-            except Exception as e:
-                logger.error(f"⚠️ 连续止损记账失败 {normalized_code}: {e}")
         else:
             new_available = max(0, pos.get("available_qty", old_qty) - qty)
             await db["paper_positions"].update_one(
@@ -510,12 +496,5 @@ async def execute_market_order(
                 })
     except Exception as alert_err:
         logger.warning(f"⚠️ 自动止损预警管理失败（不影响交易）: {alert_err}")
-
-    # C2 净值快照：交易后刷新当日账户净值，供回撤风控使用
-    try:
-        from app.services.retail.drawdown_risk_control import snapshot_equity
-        await snapshot_equity(user_id)
-    except Exception as snap_err:
-        logger.warning(f"⚠️ 净值快照失败（不影响交易）: {snap_err}")
 
     return {k: v for k, v in order_doc.items() if k != "_id"}

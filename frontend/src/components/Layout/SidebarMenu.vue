@@ -27,10 +27,20 @@
       <el-menu-item index="/vibe/intel/radar">资讯雷达</el-menu-item>
     </el-sub-menu>
 
-    <el-menu-item index="/candidate">
-      <el-icon><Aim /></el-icon>
-      <template #title>候选</template>
-    </el-menu-item>
+    <el-sub-menu index="/screening">
+      <template #title>
+        <el-icon><Search /></el-icon>
+        <span>策略</span>
+      </template>
+      <el-menu-item index="/candidate">三买三卖</el-menu-item>
+      <el-menu-item index="/screening/common">常用策略</el-menu-item>
+      <el-menu-item index="/screening/backtest">策略回测</el-menu-item>
+      <!-- 转债博弈（资产类型独立，单独保留入口） -->
+      <el-menu-item index="/screening/convertible-arbitrage">转债博弈</el-menu-item>
+      <!-- 高级变体（折叠，保留但不并列展示） -->
+      <el-menu-item index="/screening/macd-divergence" v-show="false">MACD背离</el-menu-item>
+      <el-menu-item index="/screening/extreme-reversal" v-show="false">极端反转</el-menu-item>
+    </el-sub-menu>
 
     <el-menu-item index="/favorites">
       <el-icon><Star /></el-icon>
@@ -56,20 +66,6 @@
       <el-menu-item index="/analysis/single">单股分析</el-menu-item>
       <el-menu-item index="/analysis/batch">批量分析</el-menu-item>
       <el-menu-item index="/reports">分析报告</el-menu-item>
-    </el-sub-menu>
-
-    <el-sub-menu index="/screening">
-      <template #title>
-        <el-icon><Search /></el-icon>
-        <span>策略</span>
-      </template>
-      <el-menu-item index="/screening/common">常用策略</el-menu-item>
-      <el-menu-item index="/screening/backtest">策略回测</el-menu-item>
-      <!-- 转债博弈（资产类型独立，单独保留入口） -->
-      <el-menu-item index="/screening/convertible-arbitrage">转债博弈</el-menu-item>
-      <!-- 高级变体（折叠，保留但不并列展示） -->
-      <el-menu-item index="/screening/macd-divergence" v-show="false">MACD背离</el-menu-item>
-      <el-menu-item index="/screening/extreme-reversal" v-show="false">极端反转</el-menu-item>
     </el-sub-menu>
 
     <el-menu-item index="/tasks">
@@ -134,8 +130,7 @@ import {
   DataAnalysis,
   Wallet,
   Bell,
-  ChatDotRound,
-  Aim
+  ChatDotRound
 } from '@element-plus/icons-vue'
 
 const route = useRoute()

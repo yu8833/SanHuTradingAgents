@@ -66,6 +66,20 @@
           <div class="strategy-tags">
             <el-tag v-for="t in s.tags" :key="t" size="small" effect="plain" class="strategy-tag">{{ t }}</el-tag>
           </div>
+          <div class="strategy-foot">
+            <div class="strategy-monitor">
+              <el-switch
+                :model-value="monitorOn(s.id)"
+                size="small"
+                :loading="monitorSaving === s.id"
+                data-monitor
+                @change="(v) => toggleMonitor(s, v)"
+                @click.stop
+              />
+              <span class="monitor-label" :class="{ on: monitorOn(s.id) }">监控</span>
+            </div>
+            <span v-if="monitorOn(s.id)" class="monitor-hint">命中自动入自选 · 触发买卖待确认</span>
+          </div>
         </div>
       </div>
     </el-card>
@@ -153,6 +167,7 @@ import {
 } from '@element-plus/icons-vue'
 import { strategyApi, type StrategyMeta, type StrategyRunItem, type StrategyRunAllItem } from '@/api/strategy'
 import { favoritesApi } from '@/api/favorites'
+import { monitorApi } from '@/api/monitor'
 
 defineOptions({ name: 'StrategyScreener' })
 
@@ -189,6 +204,37 @@ const asOf = ref('')
 const tradeDates = ref<string[]>([])
 const computedAt = ref('')
 const allStrategyRunning = ref(false)
+
+// ── 常用策略监控开关 ────────────────────────────────────
+const monitorStatus = ref<Record<string, boolean>>({})
+const monitorSaving = ref<string | null>(null)
+
+const monitorOn = (id: string) => !!monitorStatus.value[id]
+
+const loadMonitorStatus = async () => {
+  try {
+    const res = await monitorApi.strategyMonitorStatus()
+    const items = (res as any)?.data?.items ?? []
+    const map: Record<string, boolean> = {}
+    for (const it of items) map[it.strategy_id] = !!it.enabled
+    monitorStatus.value = map
+  } catch (e) {
+    console.warn('加载策略监控状态失败', e)
+  }
+}
+
+const toggleMonitor = async (s: StrategyMeta, on: boolean) => {
+  monitorSaving.value = s.id
+  try {
+    await monitorApi.toggleStrategyMonitor(s.id, on, s.name)
+    monitorStatus.value = { ...monitorStatus.value, [s.id]: on }
+    ElMessage.success(on ? `已开启「${s.name}」监控` : `已关闭「${s.name}」监控`)
+  } catch (e: any) {
+    ElMessage.error('切换监控失败：' + (e?.message || '未知错误'))
+  } finally {
+    monitorSaving.value = null
+  }
+}
 
 const displayRows = computed<StrategyRunItem[]>(() => {
   if (showAll.value && showAllResult.value) {
@@ -360,6 +406,7 @@ const batchAddToFavorites = async () => {
 
 onMounted(() => {
   loadStrategies()
+  loadMonitorStatus()
 })
 </script>
 
@@ -583,6 +630,37 @@ onMounted(() => {
           --el-tag-bg-color: color-mix(in srgb, var(--sc) 9%, transparent);
           --el-tag-border-color: color-mix(in srgb, var(--sc) 25%, transparent);
           --el-tag-text-color: var(--sc);
+        }
+      }
+
+      .strategy-foot {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-top: 12px;
+        padding-top: 10px;
+        border-top: 1px dashed var(--el-border-color-lighter);
+
+        .strategy-monitor {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+
+          .monitor-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--el-text-color-secondary);
+            &.on { color: var(--sc); }
+          }
+        }
+
+        .monitor-hint {
+          font-size: 11px;
+          color: var(--el-text-color-secondary);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
       }
     }

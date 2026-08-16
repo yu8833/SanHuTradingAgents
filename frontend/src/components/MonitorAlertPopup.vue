@@ -40,11 +40,52 @@
       <el-button type="primary" @click="acknowledge">我知道了</el-button>
     </template>
   </el-dialog>
+
+  <!-- 待确认交易指令实时弹窗：监控引擎生成新的买卖待确认指令时主动弹出 -->
+  <el-dialog
+    v-model="orderVisible"
+    title="待确认交易指令"
+    width="640px"
+    append-to-body
+    :close-on-click-modal="false"
+    :close-on-press-escape="false"
+    class="monitor-order-popup"
+  >
+    <el-empty v-if="pendingOrders.length === 0" description="暂无待确认指令" :image-size="70" />
+    <div v-else class="order-list">
+      <div v-for="o in pendingOrders" :key="o.id" class="order-item">
+        <div :class="['order-dir', o.direction]">{{ o.direction === 'buy' ? '买' : '卖' }}</div>
+        <div class="order-main">
+          <div class="order-top">
+            <span class="order-symbol">{{ o.symbol }}</span>
+            <span class="order-name">{{ o.name }}</span>
+            <span v-if="o.reference_price != null" class="order-price">现价 {{ o.reference_price }}</span>
+          </div>
+          <div class="order-meta">
+            <el-tag size="small" :type="o.direction === 'buy' ? 'danger' : 'success'" effect="plain">
+              {{ o.rule_name || (o.direction === 'buy' ? '策略买入' : '策略卖出') }}
+            </el-tag>
+            <span class="order-time">{{ formatTsStr(o.created_at) }}</span>
+          </div>
+          <div v-if="o.reason" class="order-reason">{{ o.reason }}</div>
+        </div>
+        <div class="order-actions">
+          <el-button type="primary" size="small" :loading="executingId === o.id" @click="confirmOrder(o)">确认</el-button>
+          <el-button size="small" text type="danger" @click="ignoreOrder(o)">忽略</el-button>
+        </div>
+      </div>
+    </div>
+    <template #footer>
+      <el-button @click="orderVisible = false">稍后处理</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ElMessage } from 'element-plus'
 import { monitorApi, type MonitorAlert } from '@/api/monitor'
+import { subscribeMonitorOrders, type PendingOrderEvent } from '@/utils/monitorOrdersSSE'
 import router from '@/router'
 
 // 上次已确认（已读）的最大触发时间戳（毫秒），跨页面刷新持久化。
@@ -135,6 +176,55 @@ const formatTs = (ts: number) => {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
+// ── 待确认交易指令实时弹窗 ──────────────────────────────
+const orderVisible = ref(false)
+const pendingOrders = ref<Record<string, any>[]>([])
+const executingId = ref('')
+let orderUnsub: (() => void) | null = null
+
+const formatTsStr = (iso?: string) => {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+// 收到新实时指令：去重后加入队列并弹出确认页
+const handleOrderEvent = (event: PendingOrderEvent) => {
+  const order = event.order
+  if (!order || !order.id) return
+  if (pendingOrders.value.some((x) => x.id === order.id)) return
+  pendingOrders.value.push(order)
+  orderVisible.value = true
+}
+
+// 确认执行：走纸面交易成交入口
+const confirmOrder = async (o: Record<string, any>) => {
+  executingId.value = o.id
+  try {
+    await monitorApi.executeTbsOrder(o.id)
+    pendingOrders.value = pendingOrders.value.filter((x) => x.id !== o.id)
+    ElMessage.success(`${o.name || o.symbol} ${o.direction === 'buy' ? '买入' : '卖出'}指令已确认执行`)
+    if (pendingOrders.value.length === 0) orderVisible.value = false
+  } catch (e: any) {
+    ElMessage.error('执行失败：' + (e?.message || '未知错误'))
+  } finally {
+    executingId.value = ''
+  }
+}
+
+// 忽略：不再执行，留待下次评估可再次触发
+const ignoreOrder = async (o: Record<string, any>) => {
+  try {
+    await monitorApi.dismissTbsOrder(o.id)
+    pendingOrders.value = pendingOrders.value.filter((x) => x.id !== o.id)
+    ElMessage.info(`已忽略 ${o.name || o.symbol} 的待确认指令`)
+    if (pendingOrders.value.length === 0) orderVisible.value = false
+  } catch (e: any) {
+    ElMessage.error('忽略失败：' + (e?.message || '未知错误'))
+  }
+}
+
 onMounted(() => {
   // 恢复上次已确认游标；已有历史游标 → 直接进入增量检测（会把关闭页面期间的新告警补弹出来），
   // 无历史游标（首次使用）→ 先初始化游标，不弹历史告警。
@@ -149,12 +239,19 @@ onMounted(() => {
 
   checkForNewAlerts()
   pollTimer = window.setInterval(checkForNewAlerts, POLL_INTERVAL)
+
+  // 订阅待确认指令实时推送：新指令生成 → 主动弹窗确认
+  orderUnsub = subscribeMonitorOrders(handleOrderEvent)
 })
 
 onBeforeUnmount(() => {
   if (pollTimer) {
     clearInterval(pollTimer)
     pollTimer = null
+  }
+  if (orderUnsub) {
+    orderUnsub()
+    orderUnsub = null
   }
 })
 </script>
@@ -236,6 +333,87 @@ onBeforeUnmount(() => {
         color: var(--el-text-color-placeholder);
         font-family: monospace;
       }
+    }
+  }
+}
+
+.monitor-order-popup {
+  :deep(.el-dialog__header) {
+    border-bottom: 1px solid var(--el-border-color-lighter);
+    .el-dialog__title {
+      font-weight: 600;
+    }
+  }
+}
+
+.order-list {
+  max-height: 360px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+
+  .order-item {
+    display: flex;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--el-border-color-lighter);
+    border-radius: 8px;
+    background: var(--el-fill-color-blank);
+
+    .order-dir {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      color: #fff;
+      &.buy { background: var(--el-color-danger); }
+      &.sell { background: var(--el-color-success); }
+    }
+
+    .order-main {
+      flex: 1;
+      min-width: 0;
+
+      .order-top {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        .order-symbol { font-family: monospace; font-weight: 600; font-size: 14px; }
+        .order-name { font-size: 12px; color: var(--el-text-color-secondary); }
+        .order-price { font-family: monospace; font-size: 13px; font-weight: 600; color: var(--el-color-primary); }
+      }
+
+      .order-meta {
+        margin-top: 4px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        .order-time { font-size: 11px; color: var(--el-text-color-placeholder); font-family: monospace; }
+      }
+
+      .order-reason {
+        margin-top: 6px;
+        font-size: 13px;
+        color: var(--el-text-color-regular);
+        background: var(--el-fill-color-light);
+        padding: 6px 8px;
+        border-radius: 6px;
+        line-height: 1.5;
+      }
+    }
+
+    .order-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      justify-content: center;
+      flex-shrink: 0;
     }
   }
 }

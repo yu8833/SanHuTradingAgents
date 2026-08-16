@@ -69,6 +69,27 @@ def _dispatch(kind: str, request: dict, db, task_id: str):
         return bt.run_optimizer(db, request, progress_cb=cb)
     if kind == "walkforward":
         return bt.run_walkforward(db, request, progress_cb=cb)
+    if kind == "pipeline":
+        import asyncio
+        from app.core.database import init_database
+        from app.services.pipeline_backtest_service import (
+            PIPELINE_STRATEGY_ID,
+            run_pipeline_backtest,
+        )
+
+        async def _run() -> dict:
+            # 三买三卖服务依赖异步 get_mongo_db()，而 worker 进程未运行
+            # FastAPI lifespan，需在此初始化异步数据库连接。
+            await init_database()
+            return await run_pipeline_backtest(db, request, progress_cb=cb)
+
+        result = asyncio.run(_run())
+        if result.get("success"):
+            save_backtest_result(db, {
+                **result,
+                "strategy_info": {"id": PIPELINE_STRATEGY_ID, "name": "三买三卖回测"},
+            })
+        return result
     raise ValueError(f"未知回测任务类型: {kind}")
 
 

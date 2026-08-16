@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from app.core.response import ok
 from app.routers.auth_db import get_current_user
@@ -15,7 +16,6 @@ from app.services.monitor_service import (
     AUX_WARNING_FIELDS,
     SIGNAL_FIELDS,
     THRESHOLD_FIELDS,
-    TBS_DIRS,
     RuleModel,
     monitor_service,
 )
@@ -23,6 +23,16 @@ from app.services.monitor_service import (
 logger = logging.getLogger("webapi")
 
 router = APIRouter(prefix="/api/monitor", tags=["监控中心"])
+
+
+class StrategyMonitorRequest(BaseModel):
+    enabled: bool
+    name: str | None = None
+
+
+class ExecuteTbsOrderRequest(BaseModel):
+    """执行待确认指令时可选指定买入数量（股）。"""
+    quantity: int | None = Field(default=None, gt=0, description="买入数量（股），不传则按建议仓位自动折算")
 
 
 # ── 字段选项 ─────────────────────────────────────────────
@@ -35,11 +45,11 @@ async def get_options(current_user: dict = Depends(get_current_user)):
         "aux_fields": [{"key": k, "label": v} for k, v in AUX_WARNING_FIELDS.items()],
         "operators": [">", ">=", "<", "<=", "==", "!="],
         "types": [
+            {"key": "strategy", "label": "常用策略监控"},
             {"key": "signal", "label": "信号"},
             {"key": "price", "label": "价格/涨跌"},
             {"key": "market", "label": "市场异动"},
             {"key": "aux", "label": "辅助信号预警"},
-            {"key": "tbs", "label": "三买三卖自动执行"},
         ],
         "scopes": [
             {"key": "symbols", "label": "指定标的"},
@@ -120,6 +130,31 @@ async def delete_rule(rule_id: str, current_user: dict = Depends(get_current_use
         raise HTTPException(status_code=500, detail=f"删除监控规则失败: {str(e)}")
 
 
+# ── 常用策略监控（type=strategy）启停/状态 ───────────────
+@router.get("/strategies/status")
+async def strategy_monitor_status(current_user: dict = Depends(get_current_user)):
+    """返回当前用户各常用策略的监控开关状态。"""
+    try:
+        items = await monitor_service.get_strategy_monitoring(current_user["id"])
+        return ok({"items": items})
+    except Exception as e:
+        logger.error(f"❌ 获取策略监控状态失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取策略监控状态失败: {str(e)}")
+
+
+@router.post("/strategies/{strategy_id}/monitor")
+async def strategy_monitor_toggle(strategy_id: str, req: StrategyMonitorRequest,
+                                  current_user: dict = Depends(get_current_user)):
+    """开启/关闭某常用策略的监控。"""
+    try:
+        rule = await monitor_service.set_strategy_monitoring(
+            current_user["id"], strategy_id, req.enabled, req.name)
+        return ok({"rule": rule}, "策略监控已开启" if req.enabled else "策略监控已关闭")
+    except Exception as e:
+        logger.error(f"❌ 切换策略监控失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"切换策略监控失败: {str(e)}")
+
+
 # ── 触发记录 ─────────────────────────────────────────────
 @router.get("/alerts")
 async def list_alerts(
@@ -193,10 +228,20 @@ async def list_tbs_orders(
 
 
 @router.post("/tbs/orders/{order_id}/execute")
-async def execute_tbs_order(order_id: str, current_user: dict = Depends(get_current_user)):
-    """确认执行待确认指令（走纸面交易成交入口）。"""
+async def execute_tbs_order(
+    order_id: str,
+    payload: ExecuteTbsOrderRequest | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """确认执行待确认指令（走纸面交易成交入口）。
+
+    买入时可选传 quantity 指定数量（股），不传则按建议仓位自动折算。
+    """
     try:
-        order = await monitor_service.execute_tbs_order(order_id, current_user["id"])
+        qty = (payload.quantity if payload else None)
+        order = await monitor_service.execute_tbs_order(
+            order_id, current_user["id"], quantity=qty
+        )
         return ok({"order": order}, "指令已执行")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

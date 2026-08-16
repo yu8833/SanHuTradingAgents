@@ -10,6 +10,8 @@
 """
 from __future__ import annotations
 
+import ast
+import inspect
 import itertools
 import logging
 import time
@@ -24,7 +26,7 @@ import pandas as pd
 
 from app.strategy_system import data_adapter
 from app.strategy_system import screener
-from app.strategy_system.indicators import compute_all
+from app.strategy_system.indicators import SIGNAL_INDICATOR_DEPS, compute_all
 from app.strategy_system.strategies import run_strategy_filter
 
 logger = logging.getLogger(__name__)
@@ -47,11 +49,86 @@ def _parse_date(d) -> str:
     return str(d)[:10]
 
 
+# 过滤器辅助函数中，列名位于第 index 个参数（_lt(df, col, val) → col 为第 1 个参数）
+_FILTER_HELPER_COL_ARG = {"_lt": 1, "_gt": 1, "_ge": 1, "_signal": 1}
+
+# 基本面/股息列（由 _enrich_panel_fundamentals 注入）。仅依赖技术指标的策略
+# （如"超跌反弹"）无需这些列，跳过注入可避免全市场加载估值/分红数据，显著省内存。
+FUNDAMENTAL_COLUMNS = {
+    "industry", "total_mv", "pe_ttm", "pb",
+    "div_12m_ps", "div_paying_years", "div_yield",
+}
+
+
+def _strategy_needs_fundamentals(strategy_id: str) -> bool:
+    """判断策略是否依赖基本面/股息列，决定 _load_panel 是否注入基本面数据。"""
+    return bool(_strategy_required_columns(strategy_id) & FUNDAMENTAL_COLUMNS)
+
+
+def _extract_filter_columns(filter_fn) -> set[str]:
+    """从策略 filter 函数源码解析其引用的列名（df["col"] 与 _lt/_gt/_ge/_signal(df, "col")）。
+
+    用于"按需计算指标/信号列"：只计算策略真正用到的列，压缩全市场回测面板内存。
+    解析失败时保守返回空集（调用方会通过 entry/exit/scoring 兜底，不会缺列）。
+    """
+    cols: set[str] = set()
+    try:
+        src = inspect.getsource(filter_fn)
+        tree = ast.parse(src)
+    except Exception:  # noqa: BLE001
+        return cols
+    for node in ast.walk(tree):
+        # df["col"] 形式
+        if (isinstance(node, ast.Subscript)
+                and isinstance(node.value, ast.Name) and node.value.id == "df"
+                and isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, str)):
+            cols.add(node.slice.value)
+        # _gt/_lt/_ge/_signal(df, "col", ...) 形式
+        if (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in _FILTER_HELPER_COL_ARG):
+            idx = _FILTER_HELPER_COL_ARG[node.func.id]
+            if len(node.args) > idx and isinstance(node.args[idx], ast.Constant) and isinstance(node.args[idx].value, str):
+                cols.add(node.args[idx].value)
+    return cols
+
+
+def _strategy_required_columns(strategy_id: str) -> set[str]:
+    """返回某策略回测所需的最小列集合（信号列 + 指标列 + 评分列）。
+
+    组成：
+    - 进出场信号列（entry_signals / exit_signals）及其依赖的指标列
+    - 评分列（scoring 的键）
+    - filter 函数直接引用的列
+    基础列（symbol/date/open/high/low/close/volume）恒被保留，无需在此列出。
+    """
+    strategy = _get_strategy_map().get(strategy_id) or {}
+    req: set[str] = set()
+    for sig in (strategy.get("entry_signals") or []) + (strategy.get("exit_signals") or []):
+        req.add(sig)
+    req |= set((strategy.get("scoring") or {}).keys())
+    filter_fn = strategy.get("filter")
+    if filter_fn is not None:
+        req |= _extract_filter_columns(filter_fn)
+    # 展开信号列的指标依赖（如 signal_ma5_breakout 需要 ma5）
+    for sig in list(req):
+        if sig.startswith("signal_"):
+            req |= SIGNAL_INDICATOR_DEPS.get(sig, set())
+    return req
+
+
 def _load_panel(db, config, end_extra_days: int = 0,
-                progress_cb: Callable[[float, str], None] | None = None) -> pd.DataFrame:
+                progress_cb: Callable[[float, str], None] | None = None,
+                keep_columns: set[str] | None = None,
+                enrich_fundamentals: bool = True) -> pd.DataFrame:
     """加载回测区间 + warmup 历史，并计算指标/信号。
 
-    通过 progress_cb 分阶段上报进度，避免长时数据加载期间前端进度条长时间停留在 0%。
+    keep_columns（可选）：只计算并保留策略所需的指标/信号列，压缩全市场长区间
+    回测面板内存，避免 3 年期回测触发容器 OOM。默认 None 计算全部列。
+    enrich_fundamentals（可选）：基本面/股息策略置 True 注入估值/分红列；纯技术
+    策略（如超跌反弹）置 False 跳过注入，避免全市场加载每日估值，进一步省内存。
+
+    通过 progress_cb 分阶段上报进度，避免长时数据加载期间前端进度条长时间停留
     """
     def _report(p: float, msg: str) -> None:
         if progress_cb:
@@ -76,19 +153,22 @@ def _load_panel(db, config, end_extra_days: int = 0,
     def _ind_cb(p: float, msg: str) -> None:
         _report(0.02 + 0.025 * min(1.0, max(0.0, float(p))), msg)
 
-    df = compute_all(df, progress_cb=_ind_cb)
-    # compute_all 会把 date 转为 datetime64，统一转回字符串便于下游字符串比较
-    df["date"] = df["date"].dt.strftime("%Y-%m-%d")
+    df = compute_all(df, progress_cb=_ind_cb, keep_columns=keep_columns)
+    # 统一转回字符串便于下游字符串比较。compute_all 不改变 date 的 dtype
+    # （load_daily_panel 已返回 "%Y-%m-%d" 字符串），这里用 to_datetime 兜底，
+    # 兼容 date 为字符串或 datetime64 两种入参，避免 .dt 访问器报错。
+    df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")
     # 注入基本面(行业/市值/估值)与分红列，供价值/股息类策略在回测中也能产生信号，
     # 与筛选侧 screener._enrich_target 保持一致的口径
-    _report(0.045, "正在注入基本面与股息数据（全市场可能较慢）…")
-    # 将子阶段的 0-1 进度映射到整体 [0.045, 0.05]，避免子进度直接写回导致进度条跳变
-    base_from, base_to = 0.045, 0.05
+    if enrich_fundamentals:
+        _report(0.045, "正在注入基本面与股息数据（全市场可能较慢）…")
+        # 将子阶段的 0-1 进度映射到整体 [0.045, 0.05]，避免子进度直接写回导致进度条跳变
+        base_from, base_to = 0.045, 0.05
 
-    def _child(p: float, msg: str, _a: float = base_from, _b: float = base_to) -> None:
-        _report(_a + (_b - _a) * min(1.0, max(0.0, float(p))), msg)
+        def _child(p: float, msg: str, _a: float = base_from, _b: float = base_to) -> None:
+            _report(_a + (_b - _a) * min(1.0, max(0.0, float(p))), msg)
 
-    df = _enrich_panel_fundamentals(db, df, progress_cb=_child)
+        df = _enrich_panel_fundamentals(db, df, progress_cb=_child)
     # 兜底：全市场面板（407万行×60+列）在 8GB 容器中必须压缩 dtype。
     # 指标/merge 引入的 float64 列统一降 float32，内存减半，避免全局 OOM。
     float64_cols = [c for c in df.columns if df[c].dtype == "float64"]
@@ -415,7 +495,11 @@ def run_strategy_backtest(db, config: StrategyBtConfig, panel: pd.DataFrame | No
 
     try:
         if panel is None:
-            panel = _load_panel(db, config.as_dict or config.__dict__, progress_cb=progress_cb)
+            # 按策略所需最小列集计算指标/信号，压缩全市场长区间面板内存，规避容器 OOM
+            keep_columns = _strategy_required_columns(config.strategy_id)
+            panel = _load_panel(db, config.as_dict or config.__dict__,
+                                progress_cb=progress_cb, keep_columns=keep_columns,
+                                enrich_fundamentals=_strategy_needs_fundamentals(config.strategy_id))
         # 传入的 panel 只读不复用拷贝，避免大内存下因深拷贝 OOM
     except Exception as e:
         return _err(f"数据加载失败: {e}")

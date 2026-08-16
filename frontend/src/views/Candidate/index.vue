@@ -7,7 +7,7 @@
           <el-icon :size="26"><TrendCharts /></el-icon>
         </div>
         <div class="page-hero-text">
-          <h2 class="page-hero-title">候选</h2>
+          <h2 class="page-hero-title">三买三卖</h2>
           <p class="page-hero-sub">资金为王 · 行业资金流排序 → 个股资金流 → 择时进出</p>
         </div>
       </div>
@@ -26,7 +26,7 @@
           :closable="false"
           show-icon
           class="tab-hint"
-          title="资金为王：按行业主题 ETF 主力净流入分位排名（主力净流入=超大单+大单），同花顺行业净流入交叉核验方向。点击行进入个股筛选。"
+          title="资金为王：按行业主题 ETF 主力净流入「净占比」分位排名（主力净流入=超大单+大单），同花顺行业净流入交叉核验方向。点击行进入个股筛选。"
         />
         <div class="screening-toolbar">
           <el-button type="primary" :icon="Lightning" :loading="screenRefreshing" @click="loadScreening(true)">
@@ -64,15 +64,10 @@
               <span class="muted etf-code">{{ row.etf_code }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="资金流分" prop="fund_flow_score" width="90" align="center" sortable :sort-method="(a, b) => (a.fund_flow_score||0) - (b.fund_flow_score||0)">
+          <el-table-column label="主力净占比" prop="fund_net_inflow_pct" min-width="130" align="right" sortable :sort-method="(a, b) => (a.fund_net_inflow_pct||0) - (b.fund_net_inflow_pct||0)">
             <template #default="{ row }">
-              <span class="score-num" :class="scoreTone(row.fund_flow_score)">{{ row.fund_flow_score }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="主力净流入" prop="fund_net_inflow" min-width="130" align="right" sortable :sort-method="(a, b) => (a.fund_net_inflow||0) - (b.fund_net_inflow||0)">
-            <template #default="{ row }">
-              <span :class="(row.fund_net_inflow || 0) >= 0 ? 'up' : 'down'">{{ fmtYi(row.fund_net_inflow) }}亿</span>
-              <span class="muted">({{ fmtSign(row.fund_net_inflow_pct) }}%)</span>
+              <span :class="(row.fund_net_inflow_pct || 0) >= 0 ? 'up' : 'down'">{{ fmtSign(row.fund_net_inflow_pct) }}%</span>
+              <span class="muted">({{ fmtYi(row.fund_net_inflow) }}亿)</span>
             </template>
           </el-table-column>
           <el-table-column label="涨跌幅" prop="pct_chg" width="90" align="right" sortable>
@@ -275,13 +270,6 @@ function scoreColor(v: number | null | undefined) {
   if (s >= 70) return '#f56c6c'
   if (s >= 50) return '#e6a23c'
   return '#2b6cb0'
-}
-
-function scoreTone(v: number | null | undefined) {
-  const s = Number(v || 0)
-  if (s >= 70) return 'tone-strong'
-  if (s >= 50) return 'tone-mid'
-  return 'tone-weak'
 }
 
 function dgTagType(q: string) {

@@ -401,3 +401,93 @@ async def stream_quotes_update(
             "X-Accel-Buffering": "no"
         }
     )
+
+
+async def monitor_orders_generator(user_id: str):
+    """
+    生成待确认指令实时推送 SSE 流。
+
+    订阅 Redis 频道 `monitor_orders:{user_id}`，当监控引擎生成新的股票买卖（策略/三买三卖）
+    待确认指令时会 publish 该指令。前端收到 `order` 事件后立即弹出确认页供用户处理。
+    """
+    r = get_redis_client()
+    pubsub = None
+    channel = f"monitor_orders:{user_id}"
+
+    try:
+        pubsub = r.pubsub()
+        try:
+            await pubsub.subscribe(channel)
+            yield "event: connected\ndata: {\"message\": \"已连接待确认指令流\"}\n\n"
+        except Exception as subscribe_error:
+            logger.error(f"❌ [SSE-Orders] 订阅频道失败: {subscribe_error}")
+            with contextlib.suppress(Exception):
+                await pubsub.close()
+            raise
+
+        poll_timeout = float(getattr(settings, "SSE_POLL_TIMEOUT_SECONDS", 1.0))
+        heartbeat_every = int(getattr(settings, "SSE_HEARTBEAT_INTERVAL_SECONDS", 10))
+        max_idle_seconds = int(getattr(settings, "SSE_QUOTES_MAX_IDLE_SECONDS", 1800))
+
+        idle_elapsed = 0.0
+        last_hb = time.monotonic()
+
+        while idle_elapsed < max_idle_seconds:
+            try:
+                message = await asyncio.wait_for(
+                    pubsub.get_message(ignore_subscribe_messages=True),
+                    timeout=poll_timeout
+                )
+                if message and message['type'] == 'message':
+                    idle_elapsed = 0.0
+                    try:
+                        data = json.loads(message['data'])
+                        yield f"event: order\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+                    except json.JSONDecodeError:
+                        logger.warning(f"Invalid JSON in monitor_orders message: {message['data']}")
+                else:
+                    idle_elapsed += poll_timeout
+                    now = time.monotonic()
+                    if now - last_hb >= heartbeat_every:
+                        yield f"event: heartbeat\ndata: {{\"timestamp\": {time.time()}}}\n\n"
+                        last_hb = now
+            except asyncio.TimeoutError:
+                idle_elapsed += poll_timeout
+                continue
+
+    except Exception as e:
+        logger.exception(f"SSE monitor_orders error: {e}")
+        yield f"event: error\ndata: {{\"error\": \"连接异常: {str(e)}\"}}\n\n"
+    finally:
+        if pubsub:
+            logger.info("🧹 [SSE-Orders] 清理 PubSub 连接")
+            with contextlib.suppress(Exception):
+                await pubsub.unsubscribe(channel)
+            with contextlib.suppress(Exception):
+                await pubsub.close()
+
+
+@router.get("/monitor-orders")
+async def stream_monitor_orders(
+    token: str | None = Query(default=None, description="SSE 认证 token（EventSource 不支持自定义 header）"),
+    authorization: str | None = Header(default=None),
+):
+    """
+    待确认指令实时推送 SSE 端点。
+
+    当监控引擎生成新的买入/卖出待确认指令时，通过 Redis publish 通知到该用户频道。
+    前端订阅后收到 `order` 事件即弹出确认页供用户确认执行或忽略。
+
+    认证方式：支持 `?token=xxx` query 参数（EventSource 兼容）或 Authorization header。
+    """
+    user = await get_current_user_for_sse(authorization=authorization, token=token)
+
+    return StreamingResponse(
+        monitor_orders_generator(user["id"]),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )

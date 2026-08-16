@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from app.core.database import get_mongo_db
 from app.core.response import ok
 from app.routers.auth_db import get_current_user
-from app.services.paper_executor import execute_market_order
+from app.services.paper_executor import INITIAL_CASH_BY_MARKET, execute_market_order
 
 router = APIRouter(prefix="/paper", tags=["paper"])
 logger = logging.getLogger("webapi")
@@ -303,17 +303,6 @@ async def get_account(current_user: dict = Depends(get_current_user)):
     }
 
     return ok({"account": summary, "positions": detailed_positions})
-
-
-@router.get("/risk", response_model=dict)
-async def get_risk_status(current_user: dict = Depends(get_current_user)):
-    """账户级回撤风控状态（教材5.2账户级止损 + 连续止损暂停）。
-
-    返回当前周/月回撤、风控等级、总仓位上限、账户/标的暂停状态。
-    """
-    from app.services.retail.drawdown_risk_control import get_risk_control
-    risk = await get_risk_control(current_user["id"])
-    return ok({"risk": risk})
 
 
 @router.post("/order", response_model=dict)

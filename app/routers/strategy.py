@@ -10,6 +10,7 @@ import threading
 import time
 from typing import Any
 
+from bson import ObjectId
 from fastapi import APIRouter
 from pydantic import BaseModel
 
@@ -372,6 +373,57 @@ async def walkforward_start(req: WalkForwardRequest):
         return fail(f"创建回测任务失败: {e}")
 
 
+class PipelineBacktestRequest(BaseModel):
+    """三级流水线回测请求（行业→个股→三买三卖择时）。"""
+
+    start: str
+    end: str
+    rebalance_freq: str = "weekly"  # weekly / biweekly / monthly
+    top_industries: int = 10
+    global_top_n: int = 20
+    initial_capital: float = 1_000_000
+    max_positions: int = 20
+    tbts_overrides: dict | None = None
+
+
+@router.post("/api/strategy/pipeline/backtest/start")
+async def pipeline_backtest_start(req: PipelineBacktestRequest):
+    """发起异步流水线回测，立即返回 task_id。"""
+    try:
+        task = task_manager.create("pipeline")
+        task_id = task.task_id
+        request_dict = req.model_dump(mode="json")
+
+        def _run() -> None:
+            from app.services.pipeline_backtest_service import (
+                PIPELINE_STRATEGY_ID,
+                run_pipeline_backtest,
+            )
+            from app.strategy_system.backtest_results_store import save_backtest_result
+            try:
+                db = get_mongo_db_sync()
+                result = asyncio.run(run_pipeline_backtest(
+                    db, request_dict, progress_cb=make_progress_cb(task_id)
+                ))
+                task_manager.update(task_id, status="success", result=result, progress=1.0)
+                # 落库：并入「结果对比」Tab（stats/equity_curve 为分数口径，兼容现有对比）
+                if result.get("success"):
+                    save_backtest_result(db, {
+                        **result,
+                        "strategy_info": {"id": PIPELINE_STRATEGY_ID, "name": "三买三卖回测"},
+                    })
+            except Exception as e:
+                logger.exception("流水线回测任务异常")
+                task_manager.update(task_id, status="failure", error=str(e))
+
+        if not bt_enqueue("pipeline", task_id, request_dict):
+            threading.Thread(target=_run, daemon=True).start()
+        return ok({"task_id": task_id, "status": "running", "kind": "pipeline"})
+    except Exception as e:
+        logger.exception("创建流水线回测任务失败")
+        return fail(f"创建回测任务失败: {e}")
+
+
 @router.get("/api/strategy/task/{task_id}")
 async def strategy_task_status(task_id: str):
     """查询回测任务状态/进度/结果。"""
@@ -408,10 +460,13 @@ async def list_backtest_results():
         docs = list(
             db[BACKTEST_RESULTS_COLLECTION].find(
                 {},
-                {"_id": 0, "strategy_id": 1, "strategy_name": 1, "config": 1,
+                {"_id": 1, "strategy_id": 1, "strategy_name": 1, "config": 1,
                  "stats": 1, "equity_curve": 1, "saved_at": 1},
             ).sort("saved_at", -1)
         )
+        # 将 ObjectId 转换为字符串 id，供前端作为唯一记录标识（同一策略可有多条记录）
+        for d in docs:
+            d["id"] = str(d.pop("_id"))
         return ok(docs)
     except Exception as e:
         logger.exception("获取回测结果对比数据失败")
@@ -434,12 +489,13 @@ async def import_backtest_result(body: dict):
         return fail(f"导入回测结果失败: {e}")
 
 
-@router.delete("/api/strategy/backtest/results/{strategy_id}")
-async def delete_backtest_result(strategy_id: str):
-    """删除指定策略的持久化回测结果。"""
+@router.delete("/api/strategy/backtest/results/{record_id}")
+async def delete_backtest_result(record_id: str):
+    """删除指定记录 id 的持久化回测结果（同一策略可有多条记录，按记录删除）。"""
     try:
         db = get_mongo_db_sync()
-        res = db[BACKTEST_RESULTS_COLLECTION].delete_one({"strategy_id": strategy_id})
+        oid = ObjectId(record_id)
+        res = db[BACKTEST_RESULTS_COLLECTION].delete_one({"_id": oid})
         return ok({"deleted": res.deleted_count})
     except Exception as e:
         logger.exception("删除回测结果失败")
