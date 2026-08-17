@@ -174,6 +174,8 @@ def _parse_gtimg(data: str) -> dict[str, dict]:
             "price": num(3),
             "last_close": num(4),
             "open": num(5),
+            # 6: 成交量(手)，用于盘中实时增强面板（拼接今日K线时单位与日线一致）
+            "volume": num(6),
             "change_amt": num(31),
             "change_pct": num(32),
             "high": num(33),

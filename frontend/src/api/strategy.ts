@@ -272,9 +272,9 @@ export const FACTOR_OPTIONS = [
 export const strategyApi = {
   list: () => ApiClient.get<StrategyMeta[]>('/api/strategy/list'),
   tradeDates: (limit?: number) => ApiClient.get<{ dates: string[] }>('/api/strategy/trade-dates', { limit: limit ?? 30 }),
-  run: (payload: { strategy_id: string; as_of?: string | null; params?: any; limit?: number; pool?: string[] }, options?: { timeout?: number }) =>
+  run: (payload: { strategy_id: string; as_of?: string | null; params?: any; limit?: number; pool?: string[]; realtime?: boolean; user_id?: string | null }, options?: { timeout?: number }) =>
     ApiClient.post<StrategyRunResult>('/api/strategy/run', payload, { timeout: options?.timeout ?? 300000 }),
-  runAll: (payload: { as_of?: string | null; limit?: number; pool?: string[]; refresh?: boolean }, options?: { timeout?: number }) =>
+  runAll: (payload: { as_of?: string | null; limit?: number; pool?: string[]; refresh?: boolean; realtime?: boolean; user_id?: string | null }, options?: { timeout?: number }) =>
     ApiClient.post<StrategyRunAllResult>('/api/strategy/run-all', payload, { timeout: options?.timeout ?? 300000 }),
   backtest: (payload: BacktestConfig, options?: { timeout?: number }) =>
     ApiClient.post<BacktestResult>('/api/strategy/backtest', payload, { timeout: options?.timeout ?? 600000 }),

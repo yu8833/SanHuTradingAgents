@@ -116,6 +116,13 @@
                 <span v-else style="color:#909399;">未设置</span>
               </template>
             </el-table-column>
+            <el-table-column label="买入原因" min-width="180" prop="thesis">
+              <template #default="{ row }">
+                <el-tooltip :content="row.thesis || '无'" placement="top" :disabled="!row.thesis">
+                  <span class="thesis-text">{{ row.thesis || '-' }}</span>
+                </el-tooltip>
+              </template>
+            </el-table-column>
             <el-table-column label="买入日期" width="110" prop="buy_date" />
             <el-table-column label="操作" width="200" fixed="right">
               <template #default="{ row }">
@@ -190,6 +197,13 @@
             <el-table-column label="策略" width="120">
               <template #default="{ row }">
                 <el-tag size="small" :type="getStrategyTagType(row.strategy)">{{ strategyLabel(row.strategy) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="买入原因" min-width="180">
+              <template #default="{ row }">
+                <el-tooltip :content="row.thesis || '无'" placement="top" :disabled="!row.thesis">
+                  <span class="thesis-text">{{ row.thesis || '-' }}</span>
+                </el-tooltip>
               </template>
             </el-table-column>
             <el-table-column label="买入日" width="110" prop="buy_date" />
@@ -382,6 +396,7 @@ import type { UploadInstance, UploadFile, UploadFiles } from 'element-plus'
 import { Wallet, List, DataLine, EditPen } from '@element-plus/icons-vue'
 import { portfolioApi, type PositionItem, type PositionSummary, type StrategyPerformance, type AddPositionPayload, type UpdatePositionPayload, type ClosedTrade } from '@/api/portfolio'
 import { vibeApi } from '@/api/vibe'
+import { getStrategyNameMap, strategyNameSync } from '@/utils/strategyName'
 
 defineOptions({ name: 'PortfolioView' })
 
@@ -582,17 +597,9 @@ const confirmClose = async () => {
 const formatNum = (n: any) => (typeof n === 'number' ? n.toFixed(2) : '0.00')
 const formatPct = (n: any) => (typeof n === 'number' ? n.toFixed(2) + '%' : '0.00%')
 
+const strategyNames = ref<Record<string, string>>({})
 const strategyLabel = (s: string) => {
-  const map: Record<string, string> = {
-    extreme_reversal: '极端反转',
-    turnaround: '困境反转',
-    small_cap_value: '小盘价值',
-    convertible_arbitrage: '转债套利',
-    ma_golden_cross: 'MA金叉',
-    tbs: 'MA金叉', // 旧数据兼容
-    default: '默认',
-  }
-  return map[s] || s
+  return strategyNames.value[s] || strategyNameSync(s) || s
 }
 
 const getStrategyTagType = (s: string) => {
@@ -655,6 +662,9 @@ const confirmImport = async () => {
 onMounted(() => {
   loadPositions()
   loadPerformance()
+  getStrategyNameMap().then((m) => {
+    strategyNames.value = m
+  })
 })
 
 // ============ 交易复盘 ============
@@ -782,5 +792,13 @@ const getExitReasonTagType = (r?: string | null) => {
   :deep(.el-descriptions) {
     .el-descriptions__label { width: 60px; }
   }
+}
+.thesis-text {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
 }
 </style>

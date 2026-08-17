@@ -29,6 +29,36 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["strategy"])
 
 
+def _resolve_watch_positions_pool(user_id: str) -> list[str]:
+    """解析用户自选 + 纸面持仓的股票代码池（同步 MongoDB，供盘中实时触发）。
+
+    与「常用策略监控」的盘中作用域保持一致：仅扫自选+持仓，避免全市场过于繁重。
+    """
+    db = get_mongo_db_sync()
+    pool: list[str] = []
+    seen: set[str] = set()
+
+    fav_doc = db["user_favorites"].find_one(
+        {"user_id": user_id}, {"favorites": 1, "_id": 0}
+    )
+    for fav in (fav_doc or {}).get("favorites", []):
+        code = str(fav.get("stock_code") or fav.get("symbol") or "").strip()
+        if code and code not in seen:
+            seen.add(code)
+            pool.append(code)
+
+    for pos in db["paper_positions"].find(
+        {"user_id": user_id, "quantity": {"$gt": 0}},
+        {"_id": 0, "code": 1},
+    ):
+        code = str(pos.get("code") or "").strip()
+        if code and code not in seen:
+            seen.add(code)
+            pool.append(code)
+
+    return pool
+
+
 # ──────────────────────────────────────────────────────────────
 # 请求模型
 # ──────────────────────────────────────────────────────────────
@@ -39,6 +69,9 @@ class StrategyRunRequest(BaseModel):
     params: dict | None = None
     limit: int = 100
     pool: list[str] | None = None
+    # 盘中实时触发（仅支持自选+持仓池，由 user_id 解析；不指定 user_id 时走 EOD 日K）
+    realtime: bool = False
+    user_id: str | None = None
 
 
 class StrategyRunAllRequest(BaseModel):
@@ -46,6 +79,8 @@ class StrategyRunAllRequest(BaseModel):
     limit: int = 30
     pool: list[str] | None = None
     refresh: bool = False
+    realtime: bool = False
+    user_id: str | None = None
 
 
 class BacktestRequest(BaseModel):
@@ -135,8 +170,13 @@ async def run_strategy(req: StrategyRunRequest):
     """运行单个策略筛选。"""
     try:
         db = get_mongo_db_sync()
+        # 盘中实时触发：若不显式指定 pool，则按 user_id 解析自选+持仓池
+        pool = req.pool
+        if req.realtime and not pool and req.user_id:
+            pool = _resolve_watch_positions_pool(req.user_id)
         result = await asyncio.to_thread(
-            screener.run_strategy, db, req.strategy_id, req.as_of, req.params, req.limit, req.pool
+            screener.run_strategy, db, req.strategy_id, req.as_of,
+            req.params, req.limit, pool, req.realtime,
         )
         return ok(result)
     except Exception as e:
@@ -149,8 +189,12 @@ async def run_all_strategies(req: StrategyRunAllRequest):
     """批量运行全部策略。"""
     try:
         db = get_mongo_db_sync()
+        pool = req.pool
+        if req.realtime and not pool and req.user_id:
+            pool = _resolve_watch_positions_pool(req.user_id)
         result = await asyncio.to_thread(
-            screener.run_all_strategies, db, req.as_of, req.limit, req.pool, req.refresh
+            screener.run_all_strategies, db, req.as_of, req.limit,
+            pool, req.refresh, req.realtime,
         )
         return ok(result)
     except Exception as e:

@@ -331,6 +331,10 @@ class MonitorService:
         for d in docs:
             r = dict(d)
             r.pop("_id", None)
+            # type=strategy 是「常用策略监控」规则，由页面上的独立策略监控概览开关管理，
+            # 不混入「监控规则」Tab（信号/价格/市场/三买三卖），避免列表冗余与误操作。
+            if r.get("type") == "strategy":
+                continue
             rules.append(r)
         return rules
 
@@ -555,6 +559,52 @@ class MonitorService:
             logger.error(f"❌ 解析持仓失败 user_id={user_id}: {e}", exc_info=True)
             return []
 
+    async def _resolve_strategy_position_symbols(
+        self, user_id: str | None, strategy_id: str
+    ) -> list[str]:
+        """解析某用户由指定策略买入的未平仓持仓代码。
+
+        买入/卖出必须使用同一策略：卖出监控只对"由该策略开仓"的持仓生成离场指令，
+        避免用另一个策略的离场信号卖出另一策略的持仓（跨策略交易）。
+        兼容旧数据：策略字段缺失的持仓视为 default（不归属任何具体策略），不会被策略卖出。
+        """
+        if not user_id:
+            return []
+        try:
+            db = await self._get_db()
+            cursor = db["paper_positions"].find(
+                {"user_id": user_id, "quantity": {"$gt": 0}, "strategy": strategy_id},
+                {"_id": 0, "code": 1},
+            )
+            return [str(d.get("code", "")).zfill(6) async for d in cursor]
+        except Exception as e:
+            logger.error(f"❌ 解析策略持仓失败 user_id={user_id}: {e}", exc_info=True)
+            return []
+
+    async def _strategy_position_buy_dates(
+        self, user_id: str | None, strategy_id: str
+    ) -> dict[str, str]:
+        """解析指定策略未平仓持仓的买入日期，用于 A股 T+1 约束（当日买入不得当日卖出）。
+
+        Returns:
+            {code: buy_date(YYYY-MM-DD)}；匹配不到或异常时返回空 dict。
+        """
+        if not user_id:
+            return {}
+        try:
+            db = await self._get_db()
+            cursor = db["paper_positions"].find(
+                {"user_id": user_id, "quantity": {"$gt": 0}, "strategy": strategy_id},
+                {"_id": 0, "code": 1, "buy_date": 1},
+            )
+            return {
+                str(d.get("code", "")).zfill(6): str(d.get("buy_date") or "")
+                async for d in cursor
+            }
+        except Exception as e:
+            logger.error(f"❌ 解析策略持仓买入日期失败 user_id={user_id}: {e}", exc_info=True)
+            return {}
+
     # ── 三买三卖（type=tbs）待确认指令 ──────────────────
     @staticmethod
     def _tbs_direction(sig_type: str, tbs_dir: str) -> str | None:
@@ -563,6 +613,21 @@ class MonitorService:
             return "buy"
         if sig_type in TBS_SELL_SIGNALS and tbs_dir in ("sell", "both"):
             return "sell"
+        return None
+
+    @staticmethod
+    def _effective_stop_loss(direction: str, exec_price: float, order: dict) -> float | None:
+        """策略买入默认止损：未显式指定时按成交价 -5% 生成（仅设止损，不设止盈）。
+
+        卖出方向不设止损；非策略买入（无 strategy_id）沿用指令自带值或 None。
+        """
+        if direction != "buy":
+            return None
+        explicit = order.get("stop_loss_price")
+        if explicit is not None and float(explicit) > 0:
+            return float(explicit)
+        if order.get("strategy_id") and exec_price and exec_price > 0:
+            return round(float(exec_price) * 0.95, 2)
         return None
 
     @staticmethod
@@ -778,14 +843,28 @@ class MonitorService:
             tbs_dir = r.get("tbs_dir", "buy")
             scope = r.get("scope", "watchlist")
 
-            # 买入发现池：指定标的（或全市场）。
-            # 需求是"策略命中的股票放进自选池"，因此默认扫描全市场来发现命中，
-            # 命中后才同步进自选池并生成买入指令。若只扫自选池则命中的新股永远进不来。
+            # 盘中实时触发：只扫自选+持仓（不扫全市场），用实时增强面板；
+            # 盘后/EOD：默认全市场日线扫描发现命中（命中后才同步进自选池）。
+            trading = is_trading_time()
+
             if scope == "symbols":
-                buy_pool = [str(s).zfill(6) for s in r.get("symbols", []) if s]
+                fixed_pool = [str(s).zfill(6) for s in r.get("symbols", []) if s]
+                # 指定标的：盘中也只扫指定标的（实时增强面板）
+                buy_pool = fixed_pool
+                buy_intraday = trading
             else:
-                buy_pool = None  # 全市场发现命中
-            sell_pool = await self._resolve_position_symbols(user_id)
+                fixed_pool = None  # 盘后全市场发现命中
+                if trading:
+                    # 盘中只扫自选+持仓（用实时增强面板，价格实时、接受 MACD 盘中噪音）
+                    buy_pool = sorted(set(
+                        (await self._resolve_watchlist_symbols(user_id))
+                        + (await self._resolve_position_symbols(user_id))
+                    ))
+                    buy_intraday = True
+                else:
+                    buy_pool = None
+                    buy_intraday = False
+            sell_pool = await self._resolve_strategy_position_symbols(user_id, strategy_id)
 
             # 预取同源指令，用于去重判断
             existing_orders = await db[self.tbs_orders_coll].find(
@@ -794,8 +873,13 @@ class MonitorService:
 
             if tbs_dir in ("buy", "both"):
                 try:
-                    sig_res = await asyncio.to_thread(
-                        screener.run_strategy_signals, db_sync, strategy_id, buy_pool, None)
+                    if buy_intraday:
+                        sig_res = await asyncio.to_thread(
+                            screener.run_strategy_signals_intraday,
+                            db_sync, strategy_id, buy_pool)
+                    else:
+                        sig_res = await asyncio.to_thread(
+                            screener.run_strategy_signals, db_sync, strategy_id, buy_pool, None)
                 except Exception as e:
                     logger.error(f"❌ 策略 {strategy_id} 买入监控扫描失败: {e}", exc_info=True)
                     sig_res = {"entry": [], "exit": []}
@@ -811,10 +895,12 @@ class MonitorService:
                     if last is not None and (now - last) < r.get("cooldown_seconds", 3600):
                         continue
                     self._last_fire[key] = now
+                    detail = (sig_res.get("entry_reasons") or {}).get(sym) or "命中买入信号"
                     order = {
                         "user_id": user_id,
                         "rule_id": r["id"],
                         "rule_name": r.get("name", ""),
+                        "strategy_id": strategy_id,
                         "symbol": sym,
                         "name": item.get("name", ""),
                         "signal_type": sig_type,
@@ -826,7 +912,7 @@ class MonitorService:
                         "status": "pending",
                         "created_at": now_iso,
                         "executed_at": None,
-                        "reason": f"常用策略「{r.get('name', strategy_id)}」：{item.get('name', '')} 命中买入信号，现价 {item.get('close')}",
+                        "reason": f"常用策略「{r.get('name', strategy_id)}」：{item.get('name', '')} {detail}，现价 {item.get('close')}",
                     }
                     insert_res = await db[self.tbs_orders_coll].insert_one(order)
                     order["id"] = str(insert_res.inserted_id)
@@ -835,12 +921,23 @@ class MonitorService:
 
             if tbs_dir in ("sell", "both") and sell_pool:
                 try:
-                    sig_res = await asyncio.to_thread(
-                        screener.run_strategy_signals, db_sync, strategy_id, sell_pool, None)
+                    if trading:
+                        sig_res = await asyncio.to_thread(
+                            screener.run_strategy_signals_intraday,
+                            db_sync, strategy_id, sell_pool)
+                    else:
+                        sig_res = await asyncio.to_thread(
+                            screener.run_strategy_signals, db_sync, strategy_id, sell_pool, None)
                 except Exception as e:
                     logger.error(f"❌ 策略 {strategy_id} 卖出监控扫描失败: {e}", exc_info=True)
                     sig_res = {"entry": [], "exit": []}
+                # A股 T+1：当日买入的持仓不得当日卖出，跳过当天的离场信号
+                today = now_tz().strftime("%Y-%m-%d")
+                buy_dates = await self._strategy_position_buy_dates(user_id, strategy_id)
                 for sym in sig_res.get("exit", []):
+                    if buy_dates.get(sym) == today:
+                        logger.debug(f"T+1: {strategy_id} {sym} 当日买入，跳过同日卖出")
+                        continue
                     item = await self._strategy_item(sym)
                     sig_type = "exit"
                     if self._strategy_order_exists(existing_orders, r["id"], sym, sig_type):
@@ -850,10 +947,12 @@ class MonitorService:
                     if last is not None and (now - last) < r.get("cooldown_seconds", 3600):
                         continue
                     self._last_fire[key] = now
+                    detail = (sig_res.get("exit_reasons") or {}).get(sym) or "触发离场信号"
                     order = {
                         "user_id": user_id,
                         "rule_id": r["id"],
                         "rule_name": r.get("name", ""),
+                        "strategy_id": strategy_id,
                         "symbol": sym,
                         "name": item.get("name", ""),
                         "signal_type": sig_type,
@@ -865,7 +964,7 @@ class MonitorService:
                         "status": "pending",
                         "created_at": now_iso,
                         "executed_at": None,
-                        "reason": f"常用策略「{r.get('name', strategy_id)}」：{item.get('name', '')} 触发离场信号，现价 {item.get('close')}",
+                        "reason": f"常用策略「{r.get('name', strategy_id)}」：{item.get('name', '')} {detail}，现价 {item.get('close')}",
                     }
                     insert_res = await db[self.tbs_orders_coll].insert_one(order)
                     order["id"] = str(insert_res.inserted_id)
@@ -991,7 +1090,10 @@ class MonitorService:
             market="CN",
             strategy=strategy_tag,
             stock_name=order.get("name"),
-            stop_loss_price=order.get("stop_loss_price") if direction == "buy" else None,
+            # 策略买入未显式指定止损时，用实际成交价 -5% 作默认止损（策略建仓仅设止损，不设止盈）
+            stop_loss_price=self._effective_stop_loss(direction, price, order),
+            # 把指令的详细原因写入持仓/交易，供持仓追踪与交易复盘展示
+            thesis=order.get("reason") or order.get("signal_label"),
         )
         await db[self.tbs_orders_coll].update_one(
             {"_id": order["_id"]},

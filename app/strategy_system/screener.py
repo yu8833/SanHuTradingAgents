@@ -125,6 +125,30 @@ def _load_computed_panel(db, pool: list[str] | None, as_of_date: str) -> pd.Data
         return df
 
 
+def _load_raw_panel(db, pool: list[str] | None, as_of_date: str) -> pd.DataFrame:
+    """加载最近 SCREEN_MAX_WINDOW_DAYS 个交易日的原始日线面板（不计算指标）。
+
+    供盘中实时增强面板复用：原始日K历史 + 今日实时bar 拼合后再统一 compute_all，
+    避免对已含指标列的面板重复计算产生重复列。结果按 (raw, as_of, pool) 进程内缓存。
+    """
+    key = ("raw", _panel_cache_key(as_of_date, pool))
+    cached = _cache_get(_panel_cache, key)
+    if cached is not None:
+        return cached
+    with _get_load_lock(_panel_load_locks, key):
+        cached = _cache_get(_panel_cache, key)
+        if cached is not None:
+            return cached
+        as_of_dt = pd.to_datetime(as_of_date)
+        start_dt = as_of_dt - timedelta(days=WARMUP_DAYS)
+        raw = data_adapter.load_daily_panel(db, pool, start_dt, as_of_date)
+        if raw.empty:
+            return raw
+        raw = _trim_to_last_days(raw, SCREEN_MAX_WINDOW_DAYS)
+        _cache_put(_panel_cache, key, raw, _PANEL_CACHE_MAX)
+        return raw
+
+
 def _get_enriched_target(db, panel: pd.DataFrame, pool: list[str] | None, as_of_date: str) -> pd.DataFrame:
     """取目标交易日行并注入基本面/分红，结果按 (as_of, pool) 进程内缓存。"""
     key = _panel_cache_key(as_of_date, pool)
@@ -475,6 +499,41 @@ def _enrich_target(db, target: pd.DataFrame, as_of_date: str) -> pd.DataFrame:
     return out
 
 
+def _build_intraday_target(db, pool: list[str] | None):
+    """构建盘中实时增强面板的『今日』目标行。
+
+    历史日K截至最新 EOD 交易日，拼接今日实时合成K后重算指标，返回 today 行。
+    若今日日线已入库（as_of==today）或无法取到实时行情，返回 (None, as_of_date, False)，
+    由调用方回落到常规 EOD 面板。
+
+    Returns:
+        (target, as_of_date, is_intraday): target 为今日行 DataFrame；is_intraday=True
+        表示已采用实时合成面板。
+    """
+    if not pool:
+        return None, None, False
+    pool = [str(s) for s in pool if s]
+    if not pool:
+        return None, None, False
+    as_of_date = _resolve_as_of(db, None)
+    today = date.today().strftime("%Y-%m-%d")
+    if as_of_date == today:
+        return None, as_of_date, False
+    df = _load_raw_panel(db, pool, as_of_date)
+    if df.empty:
+        return None, as_of_date, False
+    bars = _fetch_live_bars(pool)
+    today_rows = _build_intraday_rows(pool, bars, today)
+    if today_rows.empty:
+        return None, as_of_date, False
+    enhanced = pd.concat([df, today_rows], ignore_index=True, sort=False)
+    enhanced = compute_all(enhanced)
+    target = enhanced[enhanced["date"] == today].copy()
+    if target.empty:
+        return None, as_of_date, False
+    return target, today, True
+
+
 def run_strategy(
     db,
     strategy_id: str,
@@ -482,20 +541,35 @@ def run_strategy(
     params: dict | None = None,
     limit: int = 100,
     pool: list[str] | None = None,
+    realtime: bool = False,
 ) -> dict:
-    """运行单个策略筛选，返回命中股票列表。"""
+    """运行单个策略筛选，返回命中股票列表。
+
+    realtime=True 且提供 pool 时，用「历史日K + 当日实时合成K」做盘中实时信号触发
+    （仅支持自选/持仓等小池，避免全市场过于繁重）；否则走常规 EOD 日K面板。
+    """
     t0 = time.perf_counter()
     strategy = get_strategy(strategy_id)
     if strategy is None:
         raise ValueError(f"未知策略: {strategy_id}")
 
-    as_of_date = _resolve_as_of(db, as_of)
+    is_intraday = False
+    target = None
+    as_of_date = None
+    if realtime and pool:
+        target, as_of_date, is_intraday = _build_intraday_target(db, pool)
 
-    df = _load_computed_panel(db, pool, as_of_date)
-    if df.empty:
-        return _empty_result(as_of_date, strategy_id, "无行情数据")
+    if target is None:
+        as_of_date = _resolve_as_of(db, as_of)
+        df = _load_computed_panel(db, pool, as_of_date)
+        if df.empty:
+            return _empty_result(as_of_date, strategy_id, "无行情数据")
+        target = _get_enriched_target(db, df, pool, as_of_date)
+    else:
+        as_of_date = as_of_date or _resolve_as_of(db, as_of)
+        # 实时合成面板未做基本面/估值增强，与 EOD 路径保持一致地补全
+        target = _enrich_target(db, target, as_of_date)
 
-    target = _get_enriched_target(db, df, pool, as_of_date)
     if target.empty:
         return _empty_result(as_of_date, strategy_id, "目标交易日无数据")
 
@@ -531,7 +605,7 @@ def run_strategy(
             "date": as_of_date,
         })
 
-    return {
+    result = {
         "as_of": as_of_date,
         "strategy_id": strategy_id,
         "strategy_name": strategy.get("name"),
@@ -539,6 +613,128 @@ def run_strategy(
         "items": items,
         "elapsed_ms": round((time.perf_counter() - t0) * 1000, 1),
     }
+    # 实时合成面板标记，供前端识别为盘中实时触发结果
+    if is_intraday:
+        result["realtime"] = True
+    return result
+
+
+# 策略信号列 → 中文标签（用于把命中信号转译为可读的买入/卖出原因）
+_SIGNAL_LABELS: dict[str, str] = {
+    "signal_ma_golden_5_20": "MA5 上穿 MA20",
+    "signal_ma_dead_5_20": "MA5 下穿 MA20",
+    "signal_ma_golden_20_60": "MA20 上穿 MA60",
+    "signal_macd_golden": "MACD 金叉（DIF 上穿 DEA）",
+    "signal_macd_dead": "MACD 死叉（DIF 下穿 DEA）",
+    "signal_ma5_breakout": "站上 MA5",
+    "signal_ma5_breakdown": "跌破 MA5",
+    "signal_ma10_breakout": "站上 MA10",
+    "signal_ma10_breakdown": "跌破 MA10",
+    "signal_ma20_breakout": "向上突破 MA20",
+    "signal_ma20_breakdown": "跌破 MA20",
+    "signal_n_day_high": "创 60 日新高",
+    "signal_n_day_low": "创 60 日新低",
+    "signal_boll_breakout_upper": "突破布林上轨",
+    "signal_boll_breakdown_lower": "跌破布林下轨",
+    "signal_volume_surge": "放量（量比≥2）",
+}
+
+# 信号列 → 参与数值接续的指标列（用于在原因里补充关键数值）
+_SIGNAL_VALUE_COLS: dict[str, tuple[str, ...]] = {
+    "signal_ma_golden_5_20": ("ma5", "ma20"),
+    "signal_ma_dead_5_20": ("ma5", "ma20"),
+    "signal_ma_golden_20_60": ("ma20", "ma60"),
+    "signal_macd_golden": ("macd_dif", "macd_dea"),
+    "signal_macd_dead": ("macd_dif", "macd_dea"),
+    "signal_ma5_breakout": ("ma5",),
+    "signal_ma5_breakdown": ("ma5",),
+    "signal_ma10_breakout": ("ma10",),
+    "signal_ma10_breakdown": ("ma10",),
+    "signal_ma20_breakout": ("ma20",),
+    "signal_ma20_breakdown": ("ma20",),
+    "signal_boll_breakout_upper": ("boll_upper",),
+    "signal_boll_breakdown_lower": ("boll_lower",),
+}
+
+
+def _fmt2(v) -> str:
+    try:
+        return f"{float(v):.2f}"
+    except Exception:
+        return "-"
+
+
+def _fmt3(v) -> str:
+    try:
+        return f"{float(v):.3f}"
+    except Exception:
+        return "-"
+
+
+def _describe_hits(
+    strategy: dict,
+    target: pd.DataFrame,
+    hit_codes: list[str],
+    direction: str,
+) -> dict[str, str]:
+    """为命中（买入/卖出）股票构建人类可读的详细原因。
+
+    在策略名称之外补充具体触发信号与关键指标数值，便于持仓追踪与交易复盘回溯。
+    返回 {code: reason}，如：
+      "MACD 金叉（DIF 上穿 DEA）；DIF 0.214 上穿 DEA 0.186；现价 14.20，较昨收 +3.2%"
+    """
+    if direction not in ("entry", "exit"):
+        direction = "entry"
+    sig_columns = (
+        (strategy.get("entry_signals") or [])
+        if direction == "entry"
+        else (strategy.get("exit_signals") or [])
+    )
+    if not sig_columns:
+        return {}
+
+    out: dict[str, str] = {}
+    idx = target.set_index("symbol")
+    for code in hit_codes:
+        if code not in idx.index:
+            continue
+        try:
+            row = idx.loc[code]
+        except KeyError:
+            continue
+        parts: list[str] = []
+        for c in sig_columns:
+            if c not in row.index:
+                continue
+            try:
+                fired = bool(row[c])
+            except Exception:
+                fired = False
+            if not fired:
+                continue
+            label = _SIGNAL_LABELS.get(c, c)
+            # 补充关键数值：如 DIF/DEA、MA5/MA20
+            extra = ""
+            for vc in _SIGNAL_VALUE_COLS.get(c, ()):
+                if vc in row.index and row[vc] is not None and not pd.isna(row[vc]):
+                    extra += f" {vc}={_fmt3(row[vc])}" if vc.startswith("macd") else f" {vc}={_fmt2(row[vc])}"
+            parts.append(label + extra)
+        try:
+            close = float(row["close"])
+        except Exception:
+            close = None
+        if close is not None:
+            price_bit = f"现价 {close:.2f}"
+            try:
+                pct = float(row["pct_chg"]) * 100
+                price_bit += f"，较昨收 {pct:+.2f}%"
+            except Exception:
+                pass
+            parts.append(price_bit)
+        if not parts:
+            parts.append("触发信号")
+        out[code] = "；".join(parts)
+    return out
 
 
 def run_strategy_signals(
@@ -581,7 +777,154 @@ def run_strategy_signals(
                 exit_mask |= target[sig].fillna(False).astype(bool)
         exit_codes = [str(s) for s in target.loc[exit_mask, "symbol"]]
 
-    return {"entry": entry_codes, "exit": exit_codes}
+    return {
+        "entry": entry_codes,
+        "exit": exit_codes,
+        "entry_reasons": _describe_hits(strategy, target, entry_codes, "entry"),
+        "exit_reasons": _describe_hits(strategy, target, exit_codes, "exit"),
+    }
+
+
+# ──────────────────────────────────────────────────────────────
+# 盘中实时增强面板（阶段2）
+# 盘中扫描仅覆盖自选+持仓，用"昨收日K历史 + 今日实时bar"合成增强面板，
+# 重算指标/信号，检测 MACD 金叉等策略信号实时触发。
+# MACD 盘中确认接受噪音：直接以实时收盘价参与金叉判断，不等待日线收盘确认。
+# ──────────────────────────────────────────────────────────────
+
+def _fetch_live_bars(pool: list[str]) -> dict[str, dict]:
+    """从实时行情构建今日K线字段（open/high/low/close/volume/amount/pct_chg）。
+
+    优先腾讯源（字段全：现价/开/高/低/量）。无法返回 OHLC 的股票用现价兜底 open/
+    high/low（MACD 信号仅依赖 close，不受影响）。amount 单位为元（amount_wan→*10000）。
+    """
+    from app.services.unified_quotes import get_unified_quotes
+
+    try:
+        raw = get_unified_quotes(pool, prefer_source="tencent")
+    except Exception as e:
+        logger.warning(f"⚠️ 盘中实时行情获取失败: {e}")
+        raw = {}
+
+    bars: dict[str, dict] = {}
+    for sym in pool:
+        q = raw.get(sym) or {}
+        close = _to_float(q.get("price"))
+        if close is None or close <= 0:
+            continue
+        open_ = _to_float(q.get("open")) or close
+        high = _to_float(q.get("high")) or close
+        low = _to_float(q.get("low")) or close
+        volume = _to_float(q.get("volume")) or 0.0
+        amount_wan = _to_float(q.get("amount_wan"))
+        pct = _to_float(q.get("change_pct"))
+        bars[sym] = {
+            "symbol": sym,
+            "open": open_,
+            "high": high,
+            "low": low,
+            "close": close,
+            "volume": volume,
+            "amount": (amount_wan * 10000) if amount_wan is not None else None,
+            # 与日线面板一致：pct_chg 为小数（tencent 为百分数 → /100）
+            "pct_chg": (pct / 100.0) if pct is not None else None,
+        }
+    return bars
+
+
+def _build_intraday_rows(pool: list[str], bars: dict[str, dict], today: str) -> pd.DataFrame:
+    """把实时 bar 组装为今日K线行（列与日线面板一致）。"""
+    if not bars:
+        return pd.DataFrame(columns=data_adapter.PANEL_COLUMNS)
+    rows = []
+    for sym in pool:
+        b = bars.get(sym)
+        if not b:
+            continue
+        rows.append({
+            "symbol": b["symbol"],
+            "date": today,
+            "open": b["open"],
+            "high": b["high"],
+            "low": b["low"],
+            "close": b["close"],
+            "volume": b["volume"],
+            "amount": b["amount"],
+            "pct_chg": b["pct_chg"],
+        })
+    df = pd.DataFrame(rows, columns=data_adapter.PANEL_COLUMNS)
+    for col in ("open", "high", "low", "close", "pct_chg", "volume"):
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").astype("float32", copy=False)
+    if "amount" in df.columns:
+        df["amount"] = pd.to_numeric(df["amount"], errors="coerce")
+    return df
+
+
+def run_strategy_signals_intraday(
+    db,
+    strategy_id: str,
+    pool: list[str] | None,
+) -> dict:
+    """盘中实时扫描自选+持仓的增强面板（昨收日K + 今日实时bar）。
+
+    历史日K截至最新 EOD 交易日（as_of），拼接今日实时合成行后再算指标/信号，
+    对"今日"行执行策略过滤，返回命中（entry）与离场（exit）代码列表。
+    若今日日线已入库（as_of==today，如收盘后），自动回落常规日线扫描，避免重复。
+
+    注意：今日量能仅为盘中已成交量，vol_ratio 类过滤在盘中会失真；策略过滤是否
+    依赖量能由具体策略决定（MACD金叉不依赖量能，可安全盘中实时触发）。
+    """
+    strategy = get_strategy(strategy_id)
+    if strategy is None:
+        return {"entry": [], "exit": []}
+    pool = [str(s) for s in pool if s]
+    if not pool:
+        return {"entry": [], "exit": []}
+
+    as_of_date = _resolve_as_of(db, None)
+    today = date.today().strftime("%Y-%m-%d")
+    if as_of_date == today:
+        return run_strategy_signals(db, strategy_id, pool, as_of=today)
+
+    df = _load_raw_panel(db, pool, as_of_date)
+    if df.empty:
+        return {"entry": [], "exit": []}
+
+    bars = _fetch_live_bars(pool)
+    today_rows = _build_intraday_rows(pool, bars, today)
+    if today_rows.empty:
+        return {"entry": [], "exit": []}
+
+    # 原始日K历史 + 今日实时bar 拼合后统一算指标/信号（避免重复列）
+    enhanced = pd.concat(
+        [df, today_rows], ignore_index=True, sort=False
+    )
+    enhanced = compute_all(enhanced)
+    target = enhanced[enhanced["date"] == today].copy()
+    if target.empty:
+        return {"entry": [], "exit": []}
+
+    # 买入：策略筛选过滤命中
+    mask = run_strategy_filter(strategy_id, target, {}).fillna(False)
+    entry_codes = [str(s) for s in target.loc[mask, "symbol"]]
+
+    # 卖出：任一 exit_signal 布尔列触发
+    exit_codes: list[str] = []
+    exit_sigs = strategy.get("exit_signals", []) or []
+    if exit_sigs:
+        exit_mask = pd.Series(False, index=target.index)
+        for sig in exit_sigs:
+            if sig in target.columns:
+                exit_mask |= target[sig].fillna(False).astype(bool)
+        exit_codes = [str(s) for s in target.loc[exit_mask, "symbol"]]
+
+    return {
+        "entry": entry_codes,
+        "exit": exit_codes,
+        "entry_reasons": _describe_hits(strategy, target, entry_codes, "entry"),
+        "exit_reasons": _describe_hits(strategy, target, exit_codes, "exit"),
+    }
 
 
 def get_trade_dates(db, limit: int = 30) -> list[str]:
@@ -603,33 +946,50 @@ def run_all_strategies(
     limit: int = 30,
     pool: list[str] | None = None,
     refresh: bool = False,
+    realtime: bool = False,
 ) -> dict:
     """批量运行全部策略，返回每个策略的命中数与 top 结果。
 
-    结果按 (as_of, pool) 缓存到 MongoDB；同一交易日数据幂等，命中缓存时直接返回，
-    并附带 computed_at（计算时间）。refresh=True 时强制重算。
+    realtime=True 且提供 pool 时，用「历史日K + 当日实时合成K」做盘中实时触发
+    （仅支持自选/持仓等小池）；此时结果逐次多变，不做 MongoDB 缓存。
+    否则默认流程：结果按 (as_of, pool) 缓存到 MongoDB，同一交易日幂等。
     """
     t0 = time.perf_counter()
-    as_of_date = _resolve_as_of(db, as_of)
-    key = _cache_key(as_of_date, pool)
 
-    if not refresh:
-        cached = db[SCREEN_CACHE_COLLECTION].find_one(
-            key, {"_id": 0, "result": 1, "computed_at": 1}
-        )
-        if cached and cached.get("result"):
-            result = cached["result"]
-            result["computed_at"] = cached.get("computed_at")
-            result["cached"] = True
-            return result
+    is_intraday = False
+    target = None
+    as_of_date = None
+    if realtime and pool:
+        target, as_of_date, is_intraday = _build_intraday_target(db, pool)
 
-    df = _load_computed_panel(db, pool, as_of_date)
-    if df.empty:
-        return {"as_of": as_of_date, "strategies": [], "elapsed_ms": 0}
+    if target is None:
+        as_of_date = _resolve_as_of(db, as_of)
+        key = _cache_key(as_of_date, pool)
 
-    target = _get_enriched_target(db, df, pool, as_of_date)
-    if target.empty:
-        return {"as_of": as_of_date, "strategies": [], "elapsed_ms": 0}
+        if not refresh:
+            cached = db[SCREEN_CACHE_COLLECTION].find_one(
+                key, {"_id": 0, "result": 1, "computed_at": 1}
+            )
+            if cached and cached.get("result"):
+                result = cached["result"]
+                result["computed_at"] = cached.get("computed_at")
+                result["cached"] = True
+                return result
+
+        df = _load_computed_panel(db, pool, as_of_date)
+        if df.empty:
+            return {"as_of": as_of_date, "strategies": [], "elapsed_ms": 0}
+
+        target = _get_enriched_target(db, df, pool, as_of_date)
+        if target.empty:
+            return {"as_of": as_of_date, "strategies": [], "elapsed_ms": 0}
+    else:
+        as_of_date = as_of_date or _resolve_as_of(db, as_of)
+        key = None
+        # 实时合成面板未做基本面/估值增强，与 EOD 路径保持一致地补全
+        target = _enrich_target(db, target, as_of_date)
+        if target.empty:
+            return {"as_of": as_of_date, "strategies": [], "elapsed_ms": 0, "realtime": True}
 
     strategies = []
     name_map = _stock_name_map(db)
@@ -689,20 +1049,22 @@ def run_all_strategies(
         "strategies": strategies,
         "elapsed_ms": round((time.perf_counter() - t0) * 1000, 1),
     }
-    computed_at = now_tz().strftime("%Y-%m-%d %H:%M:%S")
-    result["computed_at"] = computed_at
-    result["cached"] = False
-    db[SCREEN_CACHE_COLLECTION].update_one(
-        key,
-        {
-            "$set": {
-                "result": result,
-                "computed_at": computed_at,
-                "updated_at": computed_at,
-            }
-        },
-        upsert=True,
-    )
+    result["realtime"] = is_intraday
+    # 实时结果逐次多变，不做缓存；仅 EOD 结果按 (as_of, pool) 持久化
+    if not is_intraday:
+        computed_at = now_tz().strftime("%Y-%m-%d %H:%M:%S")
+        result["computed_at"] = computed_at
+        db[SCREEN_CACHE_COLLECTION].update_one(
+            key,
+            {
+                "$set": {
+                    "result": result,
+                    "computed_at": computed_at,
+                    "updated_at": computed_at,
+                }
+            },
+            upsert=True,
+        )
     return result
 
 

@@ -52,10 +52,15 @@
         <el-table :data="cycles" v-loading="loading" stripe empty-text="暂无已平仓交易">
           <el-table-column prop="code" label="代码" width="100" />
           <el-table-column prop="name" label="名称" min-width="120" />
-          <el-table-column prop="strategy" label="策略" width="120">
+          <el-table-column prop="strategy" label="策略" width="110">
             <template #default="{ row }">
-              <el-tag size="small" v-if="row.strategy">{{ row.strategy }}</el-tag>
+              <el-tag size="small" v-if="row.strategy">{{ strategyLabel(row.strategy) }}</el-tag>
               <span v-else>-</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="reason" label="交易原因" min-width="220">
+            <template #default="{ row }">
+              <span class="reason-text">{{ row.reason || '-' }}</span>
             </template>
           </el-table-column>
           <el-table-column prop="buy_price" label="建仓价" width="100" align="right" />
@@ -93,7 +98,7 @@
             <div class="note-title">
               <el-tag size="small" type="warning" v-if="n.result">{{ resultLabel(n.result) }}</el-tag>
               <span class="note-subject">{{ n.code ? (n.name || n.code) : '自由记录' }}</span>
-              <el-tag size="small" v-if="n.strategy">{{ n.strategy }}</el-tag>
+              <el-tag size="small" v-if="n.strategy">{{ strategyLabel(n.strategy) }}</el-tag>
             </div>
             <div class="note-actions">
               <el-button size="small" text @click="openEditNote(n)">编辑</el-button>
@@ -155,6 +160,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { reviewApi, type ReviewCycleItem, type ReviewNoteItem, type ReviewStats } from '@/api/paper'
+import { getStrategyNameMap, strategyNameSync } from '@/utils/strategyName'
 
 defineOptions({ name: 'PaperReview' })
 
@@ -189,6 +195,12 @@ function resultLabel(v: string) {
   return RESULT_LABELS[v] || v
 }
 
+const strategyNames = ref<Record<string, string>>({})
+function strategyLabel(s?: string | null): string {
+  if (!s) return '-'
+  return strategyNames.value[s] || strategyNameSync(s)
+}
+
 function formatTime(t?: string) {
   if (!t) return '-'
   return t.replace('T', ' ').slice(0, 19)
@@ -206,6 +218,10 @@ async function loadAll() {
     notes.value = notesRes.data.items || []
     stats.value = statsRes.data
     resultOptions.value = statsRes.data?.result_options || []
+    // 预载策略名称映射，保证店铺展示与「常用策略」名称对齐
+    getStrategyNameMap().then((m) => {
+      strategyNames.value = m
+    })
   } catch (e) {
     ElMessage.error('加载交易复盘数据失败')
   } finally {

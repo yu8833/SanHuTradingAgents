@@ -78,6 +78,7 @@ export interface ReviewCycleItem {
   code: string
   name: string
   strategy: string
+  reason?: string
   buy_price: number
   sell_price: number
   quantity: number

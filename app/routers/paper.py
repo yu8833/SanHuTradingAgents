@@ -477,6 +477,8 @@ async def review_trades(current_user: dict = Depends(get_current_user)):
                 "pnl_pct": round(pnl / (buy_price * qty) * 100, 2) if (buy_price * qty) else 0.0,
                 "buy_time": buy.get("timestamp"),
                 "sell_time": t.get("timestamp"),
+                # 详细交易原因（策略之外的买入/卖出具体依据，取自指令 reason→trade.thesis）
+                "reason": t.get("thesis") or buy.get("thesis") or "",
             })
     # 按卖出时间倒序
     cycles.sort(key=lambda c: c.get("sell_time") or "", reverse=True)

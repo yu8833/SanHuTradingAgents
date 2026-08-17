@@ -10,14 +10,21 @@
           <h2 class="page-hero-title">常用策略</h2>
           <p class="page-hero-sub">
             基于本地行情数据 · 策略筛选与评分排序
-            <template v-if="computedAt"> · <el-icon :size="13"><Clock /></el-icon> 数据更新于 {{ computedAt }}</template>
+            <template v-if="isRealtimeResult">
+              · <el-icon :size="13"><Connection /></el-icon> 盘中实时（自选+持仓合成K）
+            </template>
+            <template v-else-if="computedAt"> · <el-icon :size="13"><Clock /></el-icon> 数据更新于 {{ computedAt }}</template>
           </p>
         </div>
       </div>
       <div class="page-hero-meta">
-        <el-select v-model="asOf" placeholder="选择交易日" size="default" class="date-select" filterable @change="onAsOfChange">
+        <el-select v-model="asOf" placeholder="选择交易日" size="default" class="date-select" filterable @change="onAsOfChange" :disabled="realtimeScan">
           <el-option v-for="d in tradeDates" :key="d" :label="d" :value="d" />
         </el-select>
+        <div class="realtime-switch" :title="realtimeNote">
+          <span class="rt-label">实时扫描</span>
+          <el-switch :model-value="realtimeScan" size="default" @change="toggleRealtime" />
+        </div>
         <el-button type="primary" size="default" :loading="runningAll" @click="runAll(true)">
           <el-icon><Refresh /></el-icon>
           运行全部
@@ -92,7 +99,8 @@
             <span class="panel-dot result-dot" />
             <span class="result-title">{{ showAll ? '全部策略' : (activeStrategyName || '') }}</span>
             <span class="result-hit">命中 <b>{{ displayRows.length }}</b> 只</span>
-            <span class="text-muted">· {{ asOf }}</span>
+            <span v-if="isRealtimeResult"><el-tag size="small" type="warning" effect="light" round>实时</el-tag></span>
+            <span v-else class="text-muted">· {{ asOf }}</span>
           </div>
           <div class="header-actions">
             <el-button size="small" :type="showAll ? 'primary' : 'default'" @click="toggleShowAll" :disabled="!allStrategyRunning">
@@ -159,7 +167,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   TrendCharts, Refresh, Loading, Connection, Star, Clock,
@@ -168,8 +176,12 @@ import {
 import { strategyApi, type StrategyMeta, type StrategyRunItem, type StrategyRunAllItem } from '@/api/strategy'
 import { favoritesApi } from '@/api/favorites'
 import { monitorApi } from '@/api/monitor'
+import { useAuthStore } from '@/stores/auth'
 
 defineOptions({ name: 'StrategyScreener' })
+
+const authStore = useAuthStore()
+const currentUserId = computed(() => authStore.user?.id ?? null)
 
 // 策略卡片配色画板（通过 --sc 变量注入，保证深浅色主题下都清晰）
 const palette = [
@@ -204,6 +216,36 @@ const asOf = ref('')
 const tradeDates = ref<string[]>([])
 const computedAt = ref('')
 const allStrategyRunning = ref(false)
+
+// ── 盘中实时触发（仅自选+持仓池） ─────────────────────────
+const realtimeScan = ref(false)        // 是否开启实时扫描
+const isRealtimeResult = ref(false)    // 最近一次结果是否为实时合成面板
+const realtimeNote = ref('')           // 实时扫描说明/失效提示
+
+// 实时扫描中，结果即时来自『历史日K + 当日实时合成K』，不展示旧的 computed_at
+const dataFreshnessText = computed(() => {
+  if (isRealtimeResult.value) return '盘中实时'
+  return computedAt.value ? `数据更新于 ${computedAt.value}` : ''
+})
+
+const toggleRealtime = async (on: boolean) => {
+  realtimeScan.value = on
+  isRealtimeResult.value = false
+  if (on) {
+    if (!currentUserId.value) {
+      ElMessage.warning('未获取到登录用户，无法实时扫描自选+持仓')
+      realtimeScan.value = false
+      return
+    }
+    ElMessage.info('实时扫描开启：基于自选+持仓池，历史日K + 当日实时K合成')
+    await runAll(true)
+  } else {
+    result.value = null
+    showAllResult.value = null
+    activeStrategy.value = null
+    await runAll()
+  }
+}
 
 // ── 常用策略监控开关 ────────────────────────────────────
 const monitorStatus = ref<Record<string, boolean>>({})
@@ -287,10 +329,20 @@ const runAll = async (refresh = false) => {
   if (runningAll.value) return
   runningAll.value = true
   try {
-    const res = await strategyApi.runAll({ as_of: asOf.value || null, limit: 30, refresh })
+    const res = await strategyApi.runAll({
+      as_of: asOf.value || null, limit: 30, refresh,
+      realtime: realtimeScan.value || undefined,
+      user_id: (realtimeScan.value ? currentUserId.value : null),
+    })
     const data = (res as any)?.data ?? res
-    if (data?.as_of) asOf.value = data.as_of
-    if (data?.computed_at) computedAt.value = data.computed_at
+    isRealtimeResult.value = !!data?.realtime
+    if (isRealtimeResult.value) {
+      // 实时结果以当日为准，交易日下拉与 computed_at 不适用
+      asOf.value = data.as_of || asOf.value
+    } else {
+      if (data?.as_of) asOf.value = data.as_of
+      if (data?.computed_at) computedAt.value = data.computed_at
+    }
     const counts: Record<string, number> = {}
     for (const s of data?.strategies ?? []) {
       counts[s.id] = s.count
@@ -335,8 +387,13 @@ const runAll = async (refresh = false) => {
 
 const runSingle = async (id: string) => {
   try {
-    const res = await strategyApi.run({ strategy_id: id, as_of: asOf.value || null, limit: 100 })
+    const res = await strategyApi.run({
+      strategy_id: id, as_of: asOf.value || null, limit: 100,
+      realtime: realtimeScan.value || undefined,
+      user_id: (realtimeScan.value ? currentUserId.value : null),
+    })
     const data = (res as any)?.data ?? res
+    isRealtimeResult.value = !!data?.realtime
     if (data?.as_of) asOf.value = data.as_of
     result.value = data
     if (data?.strategy_id) {
@@ -407,7 +464,19 @@ const batchAddToFavorites = async () => {
 onMounted(() => {
   loadStrategies()
   loadMonitorStatus()
+  // 实时扫描开启时，交易时段内每 90s 自动刷新一次
+  realtimeTimer = window.setInterval(() => {
+    if (realtimeScan.value && !runningAll.value) {
+      runAll(true)
+    }
+  }, 90_000)
 })
+
+onBeforeUnmount(() => {
+  if (realtimeTimer) window.clearInterval(realtimeTimer)
+})
+
+let realtimeTimer: number | undefined
 </script>
 
 <style lang="scss" scoped>
@@ -419,6 +488,17 @@ onMounted(() => {
   /* ===== 顶部横幅（由全局 .page-hero 提供，此处仅保留选择器宽度） ===== */
   .date-select {
     width: 160px;
+  }
+
+  .realtime-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 4px;
+    .rt-label {
+      font-size: 13px;
+      color: var(--el-text-color-secondary);
+    }
   }
 
   /* ===== 卡片通用 ===== */

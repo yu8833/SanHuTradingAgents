@@ -6,6 +6,7 @@
 from __future__ import annotations
 from app.utils.timezone import now_tz
 
+import asyncio
 import logging
 import re
 from datetime import datetime
@@ -187,11 +188,23 @@ async def _get_available_quantity(user_id: str, code: str, market: str) -> int:
 
 
 async def get_last_price(code: str, market: str) -> float | None:
-    """获取股票最新价格（支持多市场）"""
+    """获取股票最新价格（支持多市场）。
+
+    A股任何时段（含盘外）一律优先实时行情（腾讯/AKShare）：
+      - 盘中：返回实时现价；
+      - 盘外：返回实时接口的昨收/收盘价。
+    实时行情取不到有效价时才回落数据库快照（market_quotes / stock_basic_info）。
+    买、卖共用本入口，因此买卖成交价均由实时行情主导，不以旧快照为准。
+    """
     db = get_mongo_db()
 
-    # A股：从数据库获取
+    # A股
     if market == "CN":
+        # 0. 一律优先实时行情（腾讯）
+        live_price = await _fetch_live_price(code)
+        if live_price:
+            return live_price
+
         # 1. 尝试从 market_quotes 获取
         q = await db["market_quotes"].find_one(
             {"$or": [{"code": code}, {"symbol": code}]},
@@ -218,7 +231,7 @@ async def get_last_price(code: str, market: str) -> float | None:
             except Exception as e:
                 logger.warning(f"⚠️ stock_basic_info 价格转换失败 {code}: {e}")
 
-        logger.error(f"❌ 无法从数据库获取A股价格: {code}")
+        logger.error(f"❌ 无法获取A股价格: {code}")
         return None
 
     # 港股/美股：使用 ForeignStockService
@@ -237,6 +250,28 @@ async def get_last_price(code: str, market: str) -> float | None:
             return None
 
     logger.error(f"❌ 无法获取股票价格: {code} (market={market})")
+    return None
+
+
+async def _fetch_live_price(code: str) -> float | None:
+    """获取A股实时行情（腾讯/AKShare），供 get_last_price 盘中成交价使用。
+
+    盘中一律优先实时行情，避免以旧快照（market_quotes/stock_basic_info）成交；
+    取不到有效价时返回 None，由调用方回落数据库快照。
+    """
+    try:
+        from app.services.unified_quotes import get_unified_quotes
+
+        live = await asyncio.to_thread(get_unified_quotes, [code], "tencent")
+        q = live.get(code) or {}
+        p = q.get("price")
+        if p is not None:
+            fp = float(p)
+            if fp > 0:
+                return fp
+        logger.warning(f"⚠️ 实时行情未取到有效价: {code} ({q})")
+    except Exception as e:
+        logger.warning(f"⚠️ 实时行情获取失败 {code}: {e}")
     return None
 
 
@@ -450,11 +485,19 @@ async def execute_market_order(
         "pnl": realized_pnl_delta if side == "sell" else 0.0,
         "timestamp": now_iso,
     }
+    if thesis:
+        trade_doc["thesis"] = thesis
+    # 买卖都记录同一次开仓策略：买入用传入策略，卖出沿用持仓开仓策略，
+    # 保证交易复盘里买卖同策略、策略名称一致。
+    if strategy:
+        trade_doc["strategy"] = strategy
+    elif pos and pos.get("strategy"):
+        trade_doc["strategy"] = pos["strategy"]
     if pos:
-        if pos.get("strategy"):
-            trade_doc["strategy"] = pos["strategy"]
         if pos.get("stock_name"):
             trade_doc["stock_name"] = pos["stock_name"]
+        if not thesis and pos.get("thesis"):
+            trade_doc["thesis"] = pos["thesis"]
     if analysis_id:
         trade_doc["analysis_id"] = analysis_id
     await db["paper_trades"].insert_one(trade_doc)
