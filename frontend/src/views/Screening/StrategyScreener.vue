@@ -240,6 +240,9 @@ const toggleRealtime = async (on: boolean) => {
     ElMessage.info('实时扫描开启：基于自选+持仓池，历史日K + 当日实时K合成')
     await runAll(true)
   } else {
+    // 关闭实时扫描：重置交易日，避免残留“今天”导致 EOD 面板取到无数据的当日而一直无结果
+    asOf.value = ''
+    isRealtimeResult.value = false
     result.value = null
     showAllResult.value = null
     activeStrategy.value = null
