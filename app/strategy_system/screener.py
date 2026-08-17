@@ -179,6 +179,148 @@ def _latest_trade_date(db) -> str:
     return doc["trade_date"] if doc else None
 
 
+# ── 大盘行情上下文（轻量）：供策略卡片「行情适配」提醒 ──────────────
+# 仅做轻量聚合（按交易日分组统计全市场涨跌家数/均涨跌幅），不加载逐股历史，
+# 因此可高频无损调用；结果做进程内 TTL 缓存（与全站 6h 缓存约定一致）。
+_MARKET_CONTEXT_TTL = 6 * 3600
+_market_context_cache: dict = {"time": 0.0, "data": None}
+
+
+def _resolve_match_dates(db) -> tuple[str, list[str]]:
+    """解析最新交易日与其前约 30 个自然日内的交易日集合，拼接 $in 过滤。"""
+    latest = _latest_trade_date(db)
+    if not latest:
+        return None, []
+    try:
+        latest_dt = datetime.strptime(str(latest), "%Y-%m-%d")
+    except ValueError:
+        return latest, []
+    start_dt = latest_dt - timedelta(days=35)
+    dates = set(db["stock_daily_quotes"].distinct(
+        "trade_date",
+        {"period": "daily", "trade_date": {"$gte": start_dt.strftime("%Y-%m-%d"), "$lte": str(latest)}},
+    ))
+    sorted_dates = sorted(d for d in dates if isinstance(d, str))
+    return str(latest), sorted_dates[-22:]  # 保留约22个交易日（20日用 + 缓冲）
+
+
+def compute_market_context(db) -> dict:
+    """计算大盘行情上下文：趋势(bull/sideways/bear) + 波动(high/low) + 宽度。
+
+    数据源：本地 stock_daily_quotes 日线聚合（涨跌家数/均涨跌幅），无外部依赖。
+    趋势 = 近5个交易日全市场涨跌家数比 + 平均涨跌幅；波动 = 近20日均每日波动幅度。
+    """
+    now_ts = time.time()
+    if now_ts - _market_context_cache["time"] < _MARKET_CONTEXT_TTL:
+        cached = _market_context_cache["data"]
+        if cached:
+            cached = dict(cached)
+            cached["cache"] = True
+            return cached
+
+    latest, dates = _resolve_match_dates(db)
+    if not latest:
+        return {"as_of": None, "trend": "unknown", "volatility": "unknown",
+                "detail": "暂无行情数据", "cache": False}
+
+    # 汇总文档里 pct_chg/pre_close 可能未回填(null)，故基于 close 逐symbol按日计算
+    # 日收益率（pct），再按交易日聚合出全市场宽度（涨跌家数/均涨跌幅）。
+    pipe = [
+        {"$match": {"period": "daily", "trade_date": {"$in": dates}, "close": {"$ne": None}}},
+        {"$sort": {"symbol": 1, "trade_date": -1}},
+        {"$group": {"_id": "$symbol", "arr": {"$push": {"d": "$trade_date", "c": "$close"}}}},
+        {"$project": {
+            "pairs": {
+                "$map": {
+                    "input": {"$range": [0, {"$subtract": [{"$size": "$arr"}, 1]}]},
+                    "as": "i",
+                    "in": {
+                        "d": {"$arrayElemAt": ["$arr.d", "$$i"]},
+                        "c": {"$arrayElemAt": ["$arr.c", "$$i"]},
+                        "pc": {"$arrayElemAt": ["$arr.c", {"$add": ["$$i", 1]}]},
+                    },
+                }
+            }
+        }},
+        {"$unwind": "$pairs"},
+        {"$match": {"pairs.pc": {"$gt": 0}}},
+        {"$project": {
+            "date": "$pairs.d",
+            "pct": {"$multiply": [{"$subtract": [{"$divide": ["$pairs.c", "$pairs.pc"]}, 1]}, 100]},
+        }},
+        {"$group": {
+            "_id": "$date",
+            "total": {"$sum": 1},
+            "up": {"$sum": {"$cond": [{"$gt": ["$pct", 0]}, 1, 0]}},
+            "down": {"$sum": {"$cond": [{"$lt": ["$pct", 0]}, 1, 0]}},
+            "flat": {"$sum": {"$cond": [{"$eq": ["$pct", 0]}, 1, 0]}},
+            "avg_pct": {"$avg": "$pct"},
+            "avg_abs": {"$avg": {"$abs": "$pct"}},
+        }},
+        {"$sort": {"_id": 1}},
+    ]
+    rows = list(db["stock_daily_quotes"].aggregate(pipe, allowDiskUse=True))
+    if not rows:
+        return {"as_of": latest, "trend": "unknown", "volatility": "unknown",
+                "detail": "暂无行情数据", "cache": False}
+
+    # 近5交易日宽度
+    recent5 = rows[-5:]
+    total = sum(r["total"] for r in recent5) or 1
+    up = sum(r["up"] for r in recent5)
+    down = sum(r["down"] for r in recent5)
+    up_ratio = up / total
+    avg_chg5 = sum(r["avg_pct"] for r in recent5) / max(len(recent5), 1)
+
+    # 近20交易日波动/震荡判定：价格振幅 + 涨跌家数日内摆动幅度
+    avg_abs20 = sum(r["avg_abs"] for r in rows) / max(len(rows), 1)
+    # 涨跌家数日内摆动 = 相邻交易日涨家占比之差的绝对值均值，反映行情方向反转的剧烈程度
+    broad_ratios = [(r["up"] / t) if t else 0.5 for r, t in zip(rows, [r["up"] + r["down"] for r in rows])]
+    if len(broad_ratios) >= 2:
+        broad_swing = sum(abs(broad_ratios[i] - broad_ratios[i - 1]) for i in range(1, len(broad_ratios))) / (
+            len(broad_ratios) - 1
+        )
+    else:
+        broad_swing = 0.0
+    volatility = "high" if (avg_abs20 >= 2.5 or broad_swing >= 0.18) else "low"
+
+    # 趋势判定
+    if up_ratio >= 0.55 and avg_chg5 > 0:
+        trend, label = "bull", "偏强"
+    elif up_ratio <= 0.45 and avg_chg5 < 0:
+        trend, label = "bear", "偏弱"
+    else:
+        trend, label = "sideways", "中性"
+
+    latest_row = rows[-1]
+    pct_chg = float(round(latest_row["avg_pct"], 2))
+    detail = (
+        f"近5日全市场涨家占比 {up_ratio:.0%}、日均{'涨' if avg_chg5 >= 0 else '跌'}"
+        f" {abs(avg_chg5):.2f}%；近20日个股日均振幅 {avg_abs20:.2f}%、"
+        f"涨跌家数每日摆动 {broad_swing:.0%}pp——"
+        f"行情{label}，{'高' if volatility == 'high' else '低'}波动"
+    )
+
+    data = {
+        "as_of": latest,
+        "trend": trend,
+        "trend_label": label,
+        "volatility": volatility,
+        "volatility_label": "高波动" if volatility == "high" else "低波动",
+        "up_ratio": round(up_ratio, 4),
+        "up_count": int(up),
+        "down_count": int(down),
+        "pct_chg": pct_chg,
+        "breadth_swing": round(broad_swing, 4),
+        "avg_abs": round(avg_abs20, 2),
+        "detail": detail,
+        "cache": False,
+    }
+    _market_context_cache["time"] = now_ts
+    _market_context_cache["data"] = data
+    return data
+
+
 def _score_rank(df: pd.DataFrame, scoring: dict, universe: pd.Series) -> np.ndarray:
     """按评分权重对候选做排序打分（0-100），返回 score 数组。"""
     idx = df.index

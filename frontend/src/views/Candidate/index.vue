@@ -672,4 +672,52 @@ onMounted(() => {
 .rank-table {
   cursor: pointer;
 }
+
+/* ============ 响应式：手机端适配 ============ */
+@media (max-width: 768px) {
+  .screening-toolbar {
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: stretch;
+  }
+  .screening-toolbar > * {
+    flex: 0 0 auto;
+  }
+  .screening-hint {
+    width: 100%;
+    margin-top: 4px;
+  }
+  .stocks-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .industry-select {
+    width: 100%;
+  }
+  .signal-filter {
+    width: 100%;
+    gap: 6px;
+  }
+  .signal-filter .el-radio-button__inner {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+  .candidate-tabs :deep(.el-tabs__item) {
+    font-size: 13px;
+    padding: 0 10px;
+  }
+  .section-title {
+    font-size: 13px;
+  }
+  .rank-table, .candidate-table {
+    font-size: 13px;
+  }
+}
+
+@media (max-width: 480px) {
+  .signal-filter .el-radio-button {
+    flex: 1 1 calc(50% - 6px);
+  }
+}
 </style>

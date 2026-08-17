@@ -1244,4 +1244,36 @@ onMounted(() => {
     }
   }
 }
+
+/* ============ 响应式：手机端适配 ============ */
+@media (max-width: 768px) {
+  .favorites {
+    .action-card {
+      :deep(.el-col) {
+        flex: 0 0 100% !important;
+        max-width: 100% !important;
+        margin-bottom: 8px;
+      }
+      .action-buttons {
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: flex-start;
+      }
+      .action-buttons .el-button {
+        flex: 1 1 auto;
+        min-width: calc(50% - 4px);
+      }
+    }
+
+    .favorites-list-card {
+      .op-btns {
+        gap: 2px;
+      }
+      .op-btns .el-button {
+        padding: 6px 4px;
+        font-size: 12px;
+      }
+    }
+  }
+}
 </style>

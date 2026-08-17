@@ -598,4 +598,19 @@ onUnmounted(() => {
 <style scoped>
 .paper-trading { padding: 24px; }
 .card-hd { font-weight: 600; }
+
+/* ============ 响应式：手机端适配 ============ */
+@media (max-width: 768px) {
+  .paper-trading {
+    padding: 12px;
+  }
+  .paper-trading :deep(.el-row) > :deep(.el-col) {
+    flex: 0 0 100% !important;
+    max-width: 100% !important;
+    margin-bottom: 12px;
+  }
+  .paper-trading .el-table {
+    font-size: 13px;
+  }
+}
 </style>

@@ -32,6 +32,38 @@
       </div>
     </div>
 
+    <!-- 大盘行情上下文：指导策略「行情适配」提醒 -->
+    <div class="market-bar" :class="'trend-' + marketTrend">
+      <div class="market-left">
+        <div class="market-chip" :class="'trend-' + marketTrend">
+          <span class="pulse-dot" />
+          <span v-if="marketLoading" class="market-chip-text">行情研判中…</span>
+          <template v-else>
+            <span class="market-chip-text">行情<em>{{ trendText.label }}</em>· {{ volText.label }}</span>
+          </template>
+        </div>
+        <div v-if="!marketLoading && marketCtx" class="market-stats">
+          <span class="stat">
+            近5日涨家占比 <b :class="'up-' + trendText.dir">{{ upRatioText }}</b>
+          </span>
+          <span class="stat">
+            近5日均涨跌 <b :class="'up-' + trendText.dir">{{ (marketCtx.pct_chg ?? 0) >= 0 ? '+' : '' }}{{ (marketCtx.pct_chg ?? 0).toFixed(2) }}%</b>
+          </span>
+          <span v-if="marketCtx.as_of" class="stat muted">数据截止 {{ marketCtx.as_of }}</span>
+        </div>
+      </div>
+      <div class="market-detail">
+        <template v-if="!marketLoading && marketCtx">
+          <el-tooltip :content="marketCtx.detail || trendText.tip" placement="top" :show-after="100">
+            <span class="detail-text">{{ detailText }}</span>
+          </el-tooltip>
+        </template>
+        <el-tooltip v-else content="大盘行情数据暂不可用，策略适配提醒将保持中性" placement="top">
+          <span class="detail-text muted">暂无大盘行情数据，适配提醒暂按中性处理</span>
+        </el-tooltip>
+      </div>
+    </div>
+
     <!-- 策略卡片 -->
     <el-card class="strategy-panel" shadow="never">
       <template #header>
@@ -73,6 +105,25 @@
           <div class="strategy-tags">
             <el-tag v-for="t in s.tags" :key="t" size="small" effect="plain" class="strategy-tag">{{ t }}</el-tag>
           </div>
+          <!-- 行情适配提醒：适合 / 慎用 + 实时三态徽标 -->
+          <el-tooltip placement="top" :show-after="120" :content="fitTooltip(s)">
+            <div class="strategy-fit" :class="'lv-' + fit(s).level">
+              <span class="fit-badge">
+                <el-icon :size="12"><component :is="fitIcon(fit(s))" /></el-icon>
+                {{ fit(s).label }}
+              </span>
+              <div class="fit-rows">
+                <div class="fit-row suit">
+                  <span class="fit-key">适合</span>
+                  <span class="fit-val">{{ fit(s).meta.suits }}</span>
+                </div>
+                <div class="fit-row avoid">
+                  <span class="fit-key">慎用</span>
+                  <span class="fit-val">{{ fit(s).meta.avoids }}</span>
+                </div>
+              </div>
+            </div>
+          </el-tooltip>
           <div class="strategy-foot">
             <div class="strategy-monitor">
               <el-switch
@@ -172,8 +223,12 @@ import { ElMessage } from 'element-plus'
 import {
   TrendCharts, Refresh, Loading, Connection, Star, Clock,
   Histogram, DataAnalysis, Odometer, Aim, MagicStick, Sunny, Cpu, Coin, Files, DataBoard,
+  CircleCheckFilled, WarningFilled, RemoveFilled, QuestionFilled,
 } from '@element-plus/icons-vue'
 import { strategyApi, type StrategyMeta, type StrategyRunItem, type StrategyRunAllItem } from '@/api/strategy'
+import {
+  marketFitLevel, type MarketContext, type FitResult,
+} from '@/utils/marketFit'
 import { favoritesApi } from '@/api/favorites'
 import { monitorApi } from '@/api/monitor'
 import { useAuthStore } from '@/stores/auth'
@@ -216,6 +271,80 @@ const asOf = ref('')
 const tradeDates = ref<string[]>([])
 const computedAt = ref('')
 const allStrategyRunning = ref(false)
+
+// ── 大盘行情上下文（策略行情适配提醒） ────────────────────
+const marketCtx = ref<MarketContext | null>(null)
+const marketLoading = ref(false)
+
+// 趋势态兜底归一化
+const marketTrend = computed<MarketContext['trend']>(() => {
+  const t = marketCtx.value?.trend
+  return t === 'bull' || t === 'bear' || t === 'sideways' ? t : 'unknown'
+})
+
+// 某策略当前行情适配三态（适合 / 中性 / 慎用）
+const fitResultCache = new Map<string, FitResult>()
+const fit = (s: StrategyMeta): FitResult => {
+  let r = fitResultCache.get(s.id)
+  if (!r) {
+    r = marketFitLevel(s.id, marketCtx.value || {})
+    if (!r.meta) {
+      // 未收录适配元数据的策略：保持中性，避免 null 访问
+      r = { level: 0, label: '中性', meta: { suits: '', avoids: '', signals: { bull: 0, sideways: 0, bear: 0 } } }
+    }
+    fitResultCache.set(s.id, r)
+  }
+  return r
+}
+const fitIcon = (f: FitResult) =>
+  f.level === 1 ? CircleCheckFilled : f.level === -1 ? WarningFilled : RemoveFilled
+
+// 顶部行情条展示文案
+const TREND_TEXT: Record<string, { label: string; dir: 'up' | 'down' | 'flat'; tip: string }> = {
+  bull: { label: '偏强', dir: 'up', tip: '大盘整体上涨，多头趋势为宜，趋势/突破类策略机会更多' },
+  bear: { label: '偏弱', dir: 'down', tip: '大盘整体下跌，宜谨慎，超跌/价值避险类策略相对抗跌' },
+  sideways: { label: '中性', dir: 'flat', tip: '大盘窄幅震荡，区间操作为主，注意假突破风险' },
+  unknown: { label: '待研判', dir: 'flat', tip: '暂无大盘行情数据，适配提醒暂按中性处理' },
+}
+const trendText = computed(() => TREND_TEXT[marketTrend.value] || TREND_TEXT.unknown)
+const volText = computed(() => {
+  const v = marketCtx.value?.volatility
+  if (v === 'high') return { label: '高波动' }
+  if (v === 'low') return { label: '低波动' }
+  return { label: '波动待研判' }
+})
+const upRatioText = computed(() => {
+  const r = marketCtx.value?.up_ratio
+  return r != null ? `${(r * 100).toFixed(0)}%` : '--'
+})
+const detailText = computed(() => {
+  const c = marketCtx.value
+  if (!c) return '暂无大盘行情数据'
+  return c.detail || `${c.trend_label || '待研判'}行情，${c.volatility_label || '波动待研判'}`
+})
+
+// 卡片适配悬浮详情
+const fitTooltip = (s: StrategyMeta) => {
+  const c = marketCtx.value
+  const f = fit(s)
+  const basis = c
+    ? `当前大盘${c.trend_label || '待研判'}、${c.volatility_label || '波动待研判'}`
+    : '暂无大盘行情数据'
+  return `${basis}，该策略当前判定为「${f.label}」。适合：${f.meta.suits}；慎用：${f.meta.avoids}。`
+}
+
+const loadMarketContext = async () => {
+  marketLoading.value = true
+  try {
+    const res = await strategyApi.marketContext()
+    marketCtx.value = ((res as any)?.data as MarketContext | undefined) ?? null
+    fitResultCache.clear()
+  } catch (e) {
+    console.warn('加载大盘行情上下文失败', e)
+  } finally {
+    marketLoading.value = false
+  }
+}
 
 // ── 盘中实时触发（仅自选+持仓池） ─────────────────────────
 const realtimeScan = ref(false)        // 是否开启实时扫描
@@ -467,6 +596,7 @@ const batchAddToFavorites = async () => {
 onMounted(() => {
   loadStrategies()
   loadMonitorStatus()
+  loadMarketContext()
   // 实时扫描开启时，交易时段内每 90s 自动刷新一次
   realtimeTimer = window.setInterval(() => {
     if (realtimeScan.value && !runningAll.value) {
@@ -502,6 +632,106 @@ let realtimeTimer: number | undefined
       font-size: 13px;
       color: var(--el-text-color-secondary);
     }
+  }
+
+  /* ===== 大盘行情上下文条 ===== */
+  .market-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    padding: 14px 20px;
+    margin-bottom: 18px;
+    border-radius: 14px;
+    border: 1px solid var(--el-border-color-lighter);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--mbc) 9%, transparent), var(--el-bg-color) 52%);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
+    --mbc: var(--el-color-primary);
+
+    &.trend-bull { --mbc: var(--el-color-danger); }
+    &.trend-bear { --mbc: var(--el-color-success); }
+    &.trend-sideways { --mbc: var(--el-color-warning); }
+    &.trend-unknown { --mbc: var(--el-text-color-secondary); }
+
+    .market-left {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+      min-width: 0;
+    }
+
+    .market-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--mbc);
+      background: color-mix(in srgb, var(--mbc) 12%, transparent);
+      border: 1px solid color-mix(in srgb, var(--mbc) 28%, transparent);
+
+      .pulse-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--mbc);
+        box-shadow: 0 0 0 0 color-mix(in srgb, var(--mbc) 45%, transparent);
+        animation: mbar-pulse 1.8s infinite;
+      }
+
+      .market-chip-text {
+        em {
+          font-style: normal;
+          color: var(--mbc);
+          margin: 0 2px;
+        }
+      }
+    }
+
+    .market-stats {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+
+      .stat {
+        font-size: 13px;
+        color: var(--el-text-color-regular);
+
+        b { font-weight: 700; }
+        &.muted { color: var(--el-text-color-secondary); }
+      }
+    }
+
+    b.up-up { color: var(--el-color-danger); }
+    b.up-down { color: var(--el-color-success); }
+    b.up-flat { color: var(--el-color-warning); }
+
+    .market-detail {
+      min-width: 0;
+
+      .detail-text {
+        font-size: 12.5px;
+        color: var(--el-text-color-secondary);
+        cursor: help;
+        overflow: hidden;
+        display: -webkit-box;
+        -webkit-line-clamp: 1;
+        -webkit-box-orient: vertical;
+
+        &.muted { font-style: italic; }
+      }
+    }
+  }
+
+  @keyframes mbar-pulse {
+    0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--mbc) 45%, transparent); }
+    70% { box-shadow: 0 0 0 7px transparent; }
+    100% { box-shadow: 0 0 0 0 transparent; }
   }
 
   /* ===== 卡片通用 ===== */
@@ -713,6 +943,78 @@ let realtimeTimer: number | undefined
           --el-tag-bg-color: color-mix(in srgb, var(--sc) 9%, transparent);
           --el-tag-border-color: color-mix(in srgb, var(--sc) 25%, transparent);
           --el-tag-text-color: var(--sc);
+        }
+      }
+
+      /* ===== 行情适配提醒 ===== */
+      .strategy-fit {
+        --fit: var(--el-color-warning);
+        margin-top: 12px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        background: color-mix(in srgb, var(--fit) 7%, transparent);
+        border-left: 3px solid var(--fit);
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+
+        &.lv-1 { --fit: var(--el-color-success); }
+        &.lv-0 { --fit: var(--el-color-warning); }
+        &.lv--1 { --fit: var(--el-color-danger); }
+
+        .fit-badge {
+          align-self: flex-start;
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          padding: 2px 10px;
+          border-radius: 999px;
+          font-size: 12px;
+          font-weight: 700;
+          color: var(--fit);
+          background: color-mix(in srgb, var(--fit) 14%, transparent);
+          border: 1px solid color-mix(in srgb, var(--fit) 32%, transparent);
+        }
+
+        .fit-rows {
+          display: flex;
+          flex-direction: column;
+          gap: 5px;
+
+          .fit-row {
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+            font-size: 12.5px;
+
+            .fit-key {
+              flex-shrink: 0;
+              width: 34px;
+              text-align: center;
+              padding: 1px 0;
+              border-radius: 5px;
+              font-size: 11px;
+              font-weight: 600;
+            }
+
+            .fit-val {
+              color: var(--el-text-color-regular);
+              line-height: 1.45;
+              overflow: hidden;
+              display: -webkit-box;
+              -webkit-line-clamp: 2;
+              -webkit-box-orient: vertical;
+            }
+
+            &.suit .fit-key {
+              color: var(--el-color-success);
+              background: color-mix(in srgb, var(--el-color-success) 12%, transparent);
+            }
+            &.avoid .fit-key {
+              color: var(--el-color-danger);
+              background: color-mix(in srgb, var(--el-color-danger) 10%, transparent);
+            }
+          }
         }
       }
 

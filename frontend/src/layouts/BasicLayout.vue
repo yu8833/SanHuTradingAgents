@@ -271,11 +271,45 @@ watch(() => route.fullPath, () => {
   }
 
   .main-content {
-    padding: 16px;
+    padding: 12px;
   }
 
   .header {
-    padding: 0 16px;
+    padding: 0 12px;
+    gap: 8px;
+
+    .header-left {
+      gap: 8px;
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+
+    .header-right {
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    .header-right :deep(.el-button) {
+      padding: 6px;
+    }
+
+    .header-right .header-action-label,
+    .breadcrumb,
+    :deep(.el-breadcrumb) {
+      // 面包屑在手机上省略中间项
+      .el-breadcrumb__separator {
+        display: none;
+      }
+    }
+  }
+}
+
+@media (max-width: 480px) {
+  .header {
+    height: 52px;
+    .header-left .sidebar-toggle {
+      padding: 6px;
+    }
   }
 }
 

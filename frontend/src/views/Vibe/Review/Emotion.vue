@@ -376,6 +376,52 @@ onMounted(() => {
 }
 
 @media (max-width: 768px) {
-  .grid-4 { grid-template-columns: repeat(2, 1fr); }
+  .vibe-emotion {
+    padding: 2px;
+  }
+  .grid-6 {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+  .grid-3 {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .count-card :deep(.el-card__body) {
+    padding: 12px 8px;
+  }
+  .cnt-label {
+    font-size: 12px;
+    line-height: 1.2;
+  }
+  .cnt-num {
+    font-size: 26px;
+    margin: 4px 0 2px;
+    line-height: 1;
+    word-break: break-all;
+  }
+  .cnt-real {
+    font-size: 11px;
+    line-height: 1.3;
+    word-break: break-all;
+  }
+  .rt-num {
+    font-size: 22px;
+    margin: 4px 0 8px;
+  }
+  .block-head {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .ladder-text {
+    font-size: 13px;
+    word-break: break-all;
+  }
+}
+
+@media (max-width: 480px) {
+  .grid-6 {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 </style>

@@ -202,6 +202,22 @@ async def run_all_strategies(req: StrategyRunAllRequest):
         return fail(f"批量策略筛选失败: {e}")
 
 
+@router.get("/api/strategy/market-context")
+async def market_context():
+    """大盘行情上下文（轻量，6h 缓存）——供策略卡片「行情适配」提醒。
+
+    返回当前趋势(bull/sideways/bear)、波动(high/low)、近5日涨家占比等，
+    由本地 stock_daily_quotes 日线聚合得出，无外部数据源依赖。
+    """
+    try:
+        db = get_mongo_db_sync()
+        data = await asyncio.to_thread(screener.compute_market_context, db)
+        return ok(data)
+    except Exception as e:
+        logger.exception("获取大盘行情上下文失败")
+        return fail(f"获取大盘行情上下文失败: {e}")
+
+
 @router.get("/api/strategy/trade-dates")
 async def list_trade_dates(limit: int = 30):
     """获取最近 limit 个交易日（倒序），用于前端日期选择。"""

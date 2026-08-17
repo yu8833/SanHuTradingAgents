@@ -314,4 +314,19 @@ export const strategyApi = {
     ApiClient.post<{ saved: boolean }>('/api/strategy/backtest/results', result),
   deleteBacktestResult: (recordId: string) =>
     ApiClient.delete<{ deleted: number }>(`/api/strategy/backtest/results/${encodeURIComponent(recordId)}`),
+
+  // ===== 大盘行情上下文（策略行情适配提醒） =====
+  marketContext: () => ApiClient.get<{
+    as_of?: string | null
+    trend?: string
+    trend_label?: string
+    volatility?: string
+    volatility_label?: string
+    up_ratio?: number
+    up_count?: number
+    down_count?: number
+    pct_chg?: number
+    detail?: string
+    cache?: boolean
+  }>('/api/strategy/market-context'),
 }

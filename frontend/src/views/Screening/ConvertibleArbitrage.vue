@@ -1015,4 +1015,52 @@ onUnmounted(() => { window.removeEventListener('resize', handleResize) })
     color: #909399;
   }
 }
+
+/* ============ 响应式：手机端适配 ============ */
+@media (max-width: 768px) {
+  .convertible-arbitrage-page {
+    padding: 12px;
+  }
+  // 强制所有参数列堆叠
+  .params-form > :deep(.el-row) > :deep(.el-col) {
+    flex: 0 0 100% !important;
+    max-width: 100% !important;
+    margin-bottom: 4px;
+  }
+  .strategy-intro-collapse {
+    :deep(.el-collapse-item__header) {
+      height: auto;
+      padding: 10px 12px;
+      line-height: 1.4;
+    }
+    .collapse-title {
+      font-size: 13px;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+  }
+  .strategy-detail .strategy-overview {
+    font-size: 13px;
+    line-height: 1.6;
+    word-break: break-word;
+  }
+  .card-header {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  // 统计卡片堆叠
+  .convertible-arbitrage-page :deep(.el-row > .el-col) {
+    margin-bottom: 12px;
+  }
+  .metric-card {
+    margin-bottom: 12px;
+  }
+  .form-actions {
+    flex-direction: column;
+    gap: 10px;
+    .el-button {
+      width: 100%;
+    }
+  }
+}
 </style>

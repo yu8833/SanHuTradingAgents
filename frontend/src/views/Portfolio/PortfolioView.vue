@@ -801,4 +801,36 @@ const getExitReasonTagType = (r?: string | null) => {
   white-space: nowrap;
   vertical-align: middle;
 }
+
+/* ============ 响应式：手机端适配 ============ */
+@media (max-width: 768px) {
+  .portfolio-view {
+    padding: 12px;
+  }
+  .portfolio-view :deep(.el-row) > :deep(.el-col) {
+    flex: 0 0 50% !important;
+    max-width: 50% !important;
+    margin-bottom: 12px;
+  }
+  .portfolio-view .stat-value {
+    font-size: 18px;
+  }
+  .portfolio-view .card-header {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .portfolio-view .perf-body .perf-row {
+    font-size: 13px;
+  }
+  .portfolio-view .el-table {
+    font-size: 13px;
+  }
+}
+
+@media (max-width: 480px) {
+  .portfolio-view :deep(.el-row) > :deep(.el-col) {
+    flex: 0 0 100% !important;
+    max-width: 100% !important;
+  }
+}
 </style>

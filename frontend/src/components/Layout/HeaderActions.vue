@@ -251,4 +251,15 @@ function showHelp() {
     color: var(--el-text-color-placeholder);
   }
 }
+
+/* ============ 响应式：手机端适配 ============ */
+@media (max-width: 768px) {
+  .header-actions {
+    gap: 4px;
+  }
+  .header-actions .action-btn {
+    width: 32px;
+    height: 32px;
+  }
+}
 </style>
