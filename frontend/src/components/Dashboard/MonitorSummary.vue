@@ -237,5 +237,37 @@ onBeforeUnmount(() => {
       }
     }
   }
+
+  @media (max-width: 768px) {
+    .card-header {
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .summary-stats {
+      gap: 8px;
+      .stat-item {
+        padding: 8px 6px;
+        .stat-num {
+          font-size: 20px;
+        }
+      }
+    }
+
+    .summary-list {
+      .summary-item {
+        flex-wrap: wrap;
+        gap: 6px;
+        .summary-msg {
+          flex-basis: 100%;
+          order: 3;
+          white-space: normal;
+          -webkit-line-clamp: 2;
+          display: -webkit-box;
+          -webkit-box-orient: vertical;
+        }
+      }
+    }
+  }
 }
 </style>

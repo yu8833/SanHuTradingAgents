@@ -328,15 +328,20 @@ onUnmounted(() => {
   }
 
   .header {
-    padding: 0 12px;
-    gap: 8px;
+    padding: 0 8px;
+    gap: 4px;
     position: sticky;
     top: 0;
 
     .header-left {
-      gap: 8px;
+      gap: 4px;
       flex: 0 0 auto;
-      min-width: 0;
+      flex-shrink: 0;
+      min-width: auto;
+    }
+
+    .header-left .sidebar-toggle {
+      flex-shrink: 0;
     }
 
     .header-left .breadcrumb {
@@ -350,12 +355,13 @@ onUnmounted(() => {
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      max-width: 60vw;
+      max-width: 45vw;
       line-height: 40px;
+      min-width: 0;
     }
 
     .header-right {
-      gap: 6px;
+      gap: 4px;
       flex-shrink: 0;
       margin-left: auto;
     }
