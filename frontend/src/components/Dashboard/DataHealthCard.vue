@@ -142,7 +142,7 @@ const systemStatus = ref<any | null>(null)
 
 const systemStatusSubsystems = computed(() => {
   if (!systemStatus.value) return {}
-  const s = systemStatus.value.data
+  const s = systemStatus.value
   return {
     realtime: {
       label: '实时行情',
@@ -237,8 +237,10 @@ const loadSystemStatus = async () => {
   try {
     const res = await fetch('/api/v1/data/status')
     if (res.ok) {
-      const data = await res.json()
-      systemStatus.value = data
+      const result = await res.json()
+      if (result.success && result.data) {
+        systemStatus.value = result.data
+      }
     }
   } catch (e) {
     console.warn('加载系统健康状态失败', e)

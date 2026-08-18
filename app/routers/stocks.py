@@ -484,8 +484,8 @@ async def get_quote(
     prev_close = pre_close_saved
 
     # 🔥 修复：昨收价兜底。market_quotes 中 pre_close 可能为 null（收盘后外部接口不返回昨收），
-    #    且历史版本残留的 prev_close 字段可能是陈旧脏值（如 300902 残留 7/31 的 14.67，而 8/7 真实收盘 16.65），
-    #    导致涨跌幅被虚高误算。以 stock_daily_quotes 最近交易日收盘作为权威昨收兜底，并据此重算涨跌幅。
+    #    且历史版本残留的 prev_close 字段可能是陈旧脏值，导致涨跌幅误算。
+    #    以 stock_daily_quotes 最近交易日收盘作为权威昨收兜底，始终用权威昨收重算涨跌幅。
     try:
         latest_dq = await db["stock_daily_quotes"].find_one(
             {"$or": [{"code": code6}, {"symbol": code6}], "period": "daily"},
@@ -494,14 +494,12 @@ async def get_quote(
         )
         if latest_dq and latest_dq.get("close") is not None:
             dq_close = float(latest_dq["close"])
-            # 仅当库中最近收盘可作昨收（且与当前 close 不同）时才用，避免把当日自身当昨收
-            if dq_close > 0 and (close is None or abs(dq_close - float(close)) > 1e-9):
-                # 昨收缺失，或与权威昨收明显不符（脏残留）时，用权威昨收并重算涨幅
-                if prev_close is None or abs(prev_close - dq_close) / dq_close > 0.01:
-                    old_prev, old_pct = prev_close, pct
-                    prev_close = dq_close
-                    if close is not None:
-                        pct = round((float(close) / dq_close - 1.0) * 100.0, 2)
+            if dq_close > 0:
+                # 始终以权威昨收价为准，确保涨跌幅计算正确
+                old_prev, old_pct = prev_close, pct
+                prev_close = dq_close
+                if close is not None:
+                    pct = round((float(close) / dq_close - 1.0) * 100.0, 2)
                     logger.info(
                         f"🔧 昨收修正: {code6} prev_close {old_prev} -> {dq_close}（stock_daily_quotes {latest_dq.get('trade_date')}），"
                         f"pct_chg {old_pct} -> {pct}"

@@ -1,5 +1,5 @@
 <template>
-  <div class="vibe-emotion" v-loading="loading">
+  <div class="vibe-emotion app-page">
     <!-- 页面标题 -->
     <div class="page-hero">
       <div class="page-hero-main">
@@ -17,6 +17,8 @@
         </el-button>
       </div>
     </div>
+
+    <div class="emotion-content" v-loading="loading" element-loading-background="rgba(255,255,255,0.85)">
 
     <template v-if="emotion">
       <!-- 关键计数 -->
@@ -154,6 +156,7 @@
     </template>
 
     <el-empty v-else-if="!loading" description="暂无短线情绪数据" />
+    </div>
   </div>
 </template>
 

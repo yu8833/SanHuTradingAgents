@@ -432,6 +432,46 @@ html, body {
   .mobile-hidden {
     display: none !important;
   }
+
+  // 🔥 修复：禁用 el-table fixed 列在移动端的固定定位，改为横向滚动
+  // Element Plus 的 fixed 列通过创建独立的固定表格覆盖实现，移动端会遮挡内容
+  .el-table .el-table__fixed,
+  .el-table .el-table__fixed-right,
+  .el-table .el-table__fixed-left {
+    display: none !important;
+  }
+  .el-table {
+    padding-right: 0 !important;
+    padding-left: 0 !important;
+  }
+  .el-table .el-table__body-wrapper {
+    overflow-x: auto !important;
+  }
+  .el-table .el-table__header-wrapper {
+    overflow-x: auto !important;
+  }
+  // 允许整个表格横向滚动
+  .el-table {
+    display: block !important;
+    overflow-x: auto !important;
+    white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
+  // 固定列的单元格改为普通单元格样式
+  .el-table td.el-table-fixed-column--right,
+  .el-table td.el-table-fixed-column--left,
+  .el-table th.el-table-fixed-column--right,
+  .el-table th.el-table-fixed-column--left {
+    position: relative !important;
+    left: auto !important;
+    right: auto !important;
+    z-index: auto !important;
+    background-color: transparent !important;
+  }
+  // 固定列分组也取消固定
+  .el-table .el-table-fixed-column {
+    position: relative !important;
+  }
 }
 
 @media (min-width: 769px) {
