@@ -365,7 +365,7 @@ def test_bug_012_unified_quotes_merge_akshare_amount_wan_correct():
 
     assert "688669" in merged
     q = merged["688669"]
-    assert q["_source"] == "akshare"
+    assert q["source"] == "akshare"
 
     expected_wan = 241000000.0 / 10000.0  # = 24,100 万元
     assert q["amount_wan"] is not None, "AKShare merge后 amount_wan 不应为None"
@@ -390,7 +390,7 @@ def test_bug_012_unified_quotes_merge_tencent_amount_wan_untouched():
     }
     merged = _merge_quotes({}, tencent)
     q = merged["688669"]
-    assert q["_source"] == "tencent"
+    assert q["source"] == "tencent"
     assert abs(q["amount_wan"] - 24100.0) < 0.001
 
 

@@ -176,7 +176,7 @@ def get_unified_quotes(codes: list[str], prefer_source: str = "auto") -> dict[st
         else:
             quotes = {code: dict(q) for code, q in tencent_quotes.items()}
             for code in quotes:
-                quotes[code]["_source"] = "tencent"
+                quotes[code]["source"] = "tencent"
 
     elif prefer_source == "akshare":
         logger.info(f"统一行情使用AKShare接口: {len(codes)}只股票")
