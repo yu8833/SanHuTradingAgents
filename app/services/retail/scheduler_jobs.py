@@ -278,7 +278,7 @@ def register_retail_jobs(scheduler, settings):
         scheduler: APScheduler 调度器实例
         settings: 应用配置（取 TIMEZONE）
     """
-    from apscheduler.triggers.cron import CronTrigger
+    from app.utils.scheduler_utils import cron_trigger
 
     tz = settings.TIMEZONE
 
@@ -286,7 +286,7 @@ def register_retail_jobs(scheduler, settings):
     #    原为两个独立任务（预警每10分钟、退出每30分钟），合并后减少调度条目与重复行情拉取。
     scheduler.add_job(
         run_unified_intraday_scan,
-        CronTrigger.from_crontab("*/15 9-15 * * 1-5", timezone=tz),
+        cron_trigger("*/15 9-15 * * 1-5", timezone=tz),
         id="retail_intraday_scan",
         name="盘中统一扫描（个股预警+持仓退出，每15分钟）",
         replace_existing=True,
@@ -295,7 +295,7 @@ def register_retail_jobs(scheduler, settings):
     # 2. 市场环境检测：工作日 9:30
     scheduler.add_job(
         detect_market_regime_daily,
-        CronTrigger.from_crontab("30 9 * * 1-5", timezone=tz),
+        cron_trigger("30 9 * * 1-5", timezone=tz),
         id="retail_regime_detect",
         name="散户市场环境检测（每日9:30）",
         replace_existing=True,

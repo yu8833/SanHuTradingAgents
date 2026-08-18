@@ -45,6 +45,13 @@
             <span>{{ fmtPercent(quote.changePercent) }}</span>
           </div>
           <el-tag type="info" size="small">{{ refreshText }}</el-tag>
+          <!-- 🔥 数据新鲜度徽章 -->
+          <div v-if="dataFreshness" class="freshness-badge" :class="dataFreshness.level">
+            <el-tooltip :content="dataFreshness.tooltip" placement="top">
+              <span class="freshness-icon">{{ dataFreshness.icon }}</span>
+              <span class="freshness-text">{{ dataFreshness.text }}</span>
+            </el-tooltip>
+          </div>
           <el-button text size="small" @click="refreshMockQuote" :icon="Refresh">刷新</el-button>
         </div>
         <div class="stats">
@@ -263,6 +270,12 @@
               <span class="confidence">
                 <el-icon><TrendCharts /></el-icon>
                 信心度：{{ fmtConf(lastAnalysis?.confidence_score ?? lastAnalysis?.overall_score) }}
+                <!-- 🔥 分析透明卡按钮 -->
+                <el-tooltip v-if="lastAnalysis?.explanation" content="查看分析透明卡" placement="top">
+                  <el-button type="primary" link size="small" @click="showExplanationDialog = true">
+                    <el-icon><InfoFilled /></el-icon>
+                  </el-button>
+                </el-tooltip>
               </span>
             </div>
 
@@ -1032,12 +1045,82 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 🔥 分析透明卡弹窗 -->
+    <el-dialog
+      v-model="showExplanationDialog"
+      title="分析透明卡"
+      :width="isMobile ? '95%' : '480px'"
+      :close-on-click-modal="true"
+    >
+      <div class="explanation-card" v-if="lastAnalysis?.explanation">
+        <div class="exp-section">
+          <div class="exp-title">📅 数据覆盖范围</div>
+          <div class="exp-content">
+            <div>日期范围: {{ lastAnalysis.explanation.data_coverage?.date_range || 'N/A' }}</div>
+            <div>使用分析师: {{ (lastAnalysis.explanation.data_coverage?.analysts_used || []).join(', ') || 'N/A' }}</div>
+          </div>
+        </div>
+
+        <div class="exp-section">
+          <div class="exp-title">🔌 使用的数据源</div>
+          <div class="exp-content">
+            <el-tag
+              v-for="src in (lastAnalysis.explanation.data_sources_used || [])"
+              :key="src"
+              size="small"
+              style="margin-right: 4px; margin-bottom: 4px;"
+            >
+              {{ sourceLabel(src) }}
+            </el-tag>
+          </div>
+        </div>
+
+        <div class="exp-section">
+          <div class="exp-title">💡 分析假设</div>
+          <ul class="exp-list">
+            <li v-for="(assumption, idx) in (lastAnalysis.explanation.assumptions || [])" :key="idx">
+              {{ assumption }}
+            </li>
+          </ul>
+        </div>
+
+        <div class="exp-section">
+          <div class="exp-title">🎯 信心度构成</div>
+          <div class="exp-content">
+            <div class="conf-breakdown">
+              <div class="breakdown-item">
+                <span>数据新鲜度</span>
+                <el-progress :percentage="lastAnalysis.explanation.confidence_breakdown?.data_freshness || 0" :stroke-width="8" />
+              </div>
+              <div class="breakdown-item">
+                <span>数据完整性</span>
+                <el-progress :percentage="lastAnalysis.explanation.confidence_breakdown?.data_completeness || 0" :stroke-width="8" />
+              </div>
+              <div class="breakdown-item">
+                <span>模型一致性</span>
+                <el-progress :percentage="lastAnalysis.explanation.confidence_breakdown?.model_consistency || 0" :stroke-width="8" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="exp-section">
+          <div class="exp-title">⚡ 执行元信息</div>
+          <div class="exp-content">
+            <div>执行耗时: {{ lastAnalysis.explanation.execution_metadata?.execution_time?.toFixed(2) || 'N/A' }} 秒</div>
+            <div>Token 消耗: {{ lastAnalysis.explanation.execution_metadata?.tokens_used || 0 }}</div>
+          </div>
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useWindowSize } from '@vueuse/core'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { TrendCharts, Star, Refresh, Link, Document, Clock, Reading, CreditCard, Delete, Warning, WarningFilled, CircleCheckFilled, CaretBottom, CaretTop, QuestionFilled, InfoFilled } from '@element-plus/icons-vue'
 import { marked } from 'marked'
@@ -1076,6 +1159,25 @@ const lastTaskInfo = ref<any | null>(null) // 保存任务信息（包含 end_ti
 const showReportsDialog = ref(false)
 const activeReportTab = ref('')
 
+// 🔥 响应式：移动端判断
+const { width } = useWindowSize()
+const isMobile = computed(() => width.value < 768)
+
+// 🔥 分析透明卡对话框
+const showExplanationDialog = ref(false)
+
+// 🔥 数据源标签映射
+function sourceLabel(source: string): string {
+  const map: Record<string, string> = {
+    tushare: 'Tushare',
+    akshare: 'AKShare',
+    tencent: '腾讯行情',
+    baostock: 'BaoStock',
+    unknown: '未知数据源',
+  }
+  return map[source] || source
+}
+
 // 股票代码（从路由参数获取）
 const code = computed(() => {
   const routeCode = String(route.params.code || '').toUpperCase()
@@ -1112,12 +1214,52 @@ const quote = reactive({
   turnoverDate: null as string | null,  // 换手率数据日期
   amplitudeDate: null as string | null,  // 振幅数据日期
   updatedAt: null as string | null,  // 🔥 数据更新时间
-  staleDays: 0  // 后端计算的交易日过期天数（0=最新）
+  staleDays: 0,  // 后端计算的交易日过期天数（0=最新）
+  // 🔥 新增数据新鲜度元信息
+  fetchedAt: null as string | null,  // 后端抓取时间 ISO8601
+  dataSource: 'unknown' as string,  // 数据源：tencent/akshare
+  ageSeconds: 0 as number,  // 数据龄（秒）
 })
 
 const lastRefreshAt = ref<Date | null>(null)
 const refreshText = computed(() => lastRefreshAt.value ? `已刷新 ${lastRefreshAt.value.toLocaleTimeString()}` : '未刷新')
 const changeClass = computed(() => quote.changePercent > 0 ? 'up' : quote.changePercent < 0 ? 'down' : '')
+
+// 🔥 数据新鲜度徽章计算属性
+const dataFreshness = computed(() => {
+  if (!quote.fetchedAt) return null
+
+  const age = quote.ageSeconds
+  const sourceMap: Record<string, string> = {
+    tencent: '腾讯',
+    akshare: 'AKShare',
+    unknown: '未知'
+  }
+  const sourceName = sourceMap[quote.dataSource] || quote.dataSource
+
+  if (age < 30) {
+    return {
+      level: 'fresh',
+      icon: '🟢',
+      text: `${Math.round(age)}秒前 · ${sourceName}`,
+      tooltip: `数据来源: ${sourceName} | 抓取时间: ${quote.fetchedAt}`
+    }
+  } else if (age < 300) {
+    return {
+      level: 'warn',
+      icon: '🟡',
+      text: `${Math.round(age)}秒前 · ${sourceName}`,
+      tooltip: `数据来源: ${sourceName} | 抓取时间: ${quote.fetchedAt} | 数据延迟较高`
+    }
+  } else {
+    return {
+      level: 'stale',
+      icon: '🔴',
+      text: `${Math.round(age)}秒前 · ${sourceName}`,
+      tooltip: `数据来源: ${sourceName} | 抓取时间: ${quote.fetchedAt} | 数据已严重过期，请手动刷新`
+    }
+  }
+})
 
 // 🔥 日期判断和格式化函数
 function isToday(dateStr: string | null): boolean {
@@ -1350,6 +1492,11 @@ async function fetchQuote(forceRefresh = false) {
     quote.amplitudeDate = d.amplitude_date || d.trade_date || null
     quote.updatedAt = d.updated_at || null  // 🔥 数据更新时间
     quote.staleDays = d.stale_days ?? 0  // 后端计算的交易日过期天数
+
+    // 🔥 解析数据新鲜度元信息
+    quote.fetchedAt = d.fetched_at || null
+    quote.dataSource = d.source || 'unknown'
+    quote.ageSeconds = Number(d.age_seconds) || 0
 
     if (d.name) stockName.value = d.name
     if (d.market) market.value = d.market
@@ -2305,6 +2452,40 @@ function exportReport() {
   background: linear-gradient(90deg, var(--el-fill-color-light) 0%, transparent 100%);
 }
 
+/* 🔥 数据新鲜度徽章 */
+.freshness-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  &.fresh {
+    background: var(--el-color-success-light-9);
+    color: var(--el-color-success);
+  }
+  &.warn {
+    background: var(--el-color-warning-light-9);
+    color: var(--el-color-warning);
+  }
+  &.stale {
+    background: var(--el-color-danger-light-9);
+    color: var(--el-color-danger);
+    animation: pulse-warn 1.5s infinite;
+  }
+
+  .freshness-icon { font-size: 14px; }
+  .freshness-text { font-weight: 500; }
+}
+
+@keyframes pulse-warn {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
 .price { font-size: 36px; font-weight: 800; letter-spacing: -1px; }
 .change { font-size: 18px; font-weight: 700; }
 
@@ -3155,6 +3336,68 @@ function exportReport() {
   .stats { grid-template-columns: repeat(4, 1fr); }
 }
 
+/* 🔥 移动端（手机）专项修复 */
+@media (max-width: 768px) {
+  /* hero 区域按钮组纵向堆叠 */
+  .page-hero-meta {
+    flex-direction: column;
+    width: 100%;
+    gap: 8px;
+
+    .el-button {
+      width: 100%;
+      justify-content: center;
+    }
+  }
+
+  /* 报价行换行 */
+  .price-row {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px 16px;
+
+    .price { font-size: 28px; }
+    .change { font-size: 16px; }
+  }
+
+  /* 新鲜度徽章缩小 */
+  .freshness-badge {
+    font-size: 11px;
+    padding: 2px 8px;
+  }
+
+  /* stats 网格改为 2 列 */
+  .stats {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+    padding: 0 12px 12px;
+  }
+
+  .stats .item {
+    font-size: 11px;
+    padding: 6px 4px;
+  }
+
+  .stats .item b {
+    font-size: 13px;
+  }
+
+  /* 评分网格单列 */
+  .score-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* 决策建议盒子内边距缩小 */
+  .decision-box {
+    padding: 12px 16px;
+  }
+
+  /* K线图区域 */
+  .chart-container {
+    padding: 8px;
+  }
+}
+
 /* 报告相关样式 */
 .reports-section {
   margin-top: 8px;
@@ -3481,6 +3724,58 @@ function exportReport() {
           }
         }
       }
+    }
+  }
+}
+
+/* 🔥 分析透明卡样式 */
+.explanation-card {
+  .exp-section {
+    margin-bottom: 16px;
+    padding: 12px;
+    background: var(--el-fill-color-lighter);
+    border-radius: 8px;
+  }
+
+  .exp-title {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: var(--el-text-color-primary);
+  }
+
+  .exp-content {
+    font-size: 13px;
+    color: var(--el-text-color-regular);
+    line-height: 1.8;
+  }
+
+  .exp-list {
+    margin: 0;
+    padding-left: 20px;
+    font-size: 13px;
+    color: var(--el-text-color-regular);
+    line-height: 1.8;
+  }
+
+  .conf-breakdown {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .breakdown-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+
+    span {
+      min-width: 80px;
+      font-size: 13px;
+    }
+
+    .el-progress {
+      flex: 1;
     }
   }
 }

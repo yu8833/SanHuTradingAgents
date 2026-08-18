@@ -398,6 +398,35 @@ html, body {
   justify-content: space-between;
 }
 
+// —— 全局移动端强制适配（解决 Element Plus 栅格在移动端横向溢出的问题）——
+@media (max-width: 768px) {
+  // 强制所有 el-col 在移动端占满 100% 宽度
+  .el-col {
+    max-width: 100% !important;
+    flex: 0 0 100% !important;
+    margin-bottom: 12px;
+  }
+  // 强制 el-row 允许换行
+  .el-row {
+    row-gap: 12px;
+  }
+  // 全局表格允许横向滚动
+  .el-table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+  // 全局对话框适配
+  .el-dialog {
+    width: 95% !important;
+    margin: 10px auto !important;
+  }
+  // 全局卡片内边距适配
+  .el-card .el-card__body {
+    padding: 12px !important;
+  }
+}
+
 // 响应式工具类
 @media (max-width: 768px) {
   .mobile-hidden {

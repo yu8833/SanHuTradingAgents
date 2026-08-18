@@ -1343,10 +1343,10 @@ class SchedulerService:
 
                 # 更新 Cron 表达式
                 if cron_expression:
-                    from apscheduler.triggers.cron import CronTrigger
+                    from app.utils.scheduler_utils import cron_trigger
 
                     from app.core.config import settings
-                    trigger = CronTrigger.from_crontab(cron_expression, timezone=settings.TIMEZONE)
+                    trigger = cron_trigger(cron_expression, timezone=settings.TIMEZONE)
                     self.scheduler.reschedule_job(job_id, trigger=trigger)
                     await self._update_job_metadata_field(job_id, "cron_expression", cron_expression)
                     await self._record_job_action(job_id, "batch_update", "success", f"更新cron表达式: {cron_expression}")

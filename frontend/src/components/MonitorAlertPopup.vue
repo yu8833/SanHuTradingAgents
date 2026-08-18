@@ -2,7 +2,7 @@
   <el-dialog
     :model-value="visible"
     :title="popupTitle"
-    width="560px"
+    :width="isMobile ? '95%' : '560px'"
     append-to-body
     :close-on-click-modal="false"
     :close-on-press-escape="false"
@@ -45,7 +45,7 @@
   <el-dialog
     v-model="orderVisible"
     title="待确认交易指令"
-    width="640px"
+    :width="isMobile ? '95%' : '640px'"
     append-to-body
     :close-on-click-modal="false"
     :close-on-press-escape="false"
@@ -83,10 +83,15 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { useWindowSize } from '@vueuse/core'
 import { ElMessage } from 'element-plus'
 import { monitorApi, type MonitorAlert } from '@/api/monitor'
 import { subscribeMonitorOrders, type PendingOrderEvent } from '@/utils/monitorOrdersSSE'
 import router from '@/router'
+
+// 响应式：判断是否为移动端
+const { width } = useWindowSize()
+const isMobile = computed(() => width.value < 768)
 
 // 上次已确认（已读）的最大触发时间戳（毫秒），跨页面刷新持久化。
 const LAST_SEEN_KEY = 'monitor_alert_last_seen_ts'

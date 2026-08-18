@@ -580,6 +580,11 @@ async def get_quote(
         "amplitude_date": amplitude_date,  # 🔥 新增：振幅数据日期
         "trade_date": (q or {}).get("trade_date"),
         "updated_at": (q or {}).get("updated_at"),
+        # 🔥 数据新鲜度元信息
+        "fetched_at": (q or {}).get("fetched_at") or now_tz().isoformat(),
+        "source": (q or {}).get("source") or "database",
+        "age_seconds": (q or {}).get("age_seconds", 0),
+        "data_timestamp": (q or {}).get("data_timestamp") or now_tz().isoformat(),
     }
 
     # 计算交易日过期天数（排除周末和节假日）

@@ -879,6 +879,75 @@ def _describe_hits(
     return out
 
 
+def _build_signal_context(
+    strategy: dict,
+    target: pd.DataFrame,
+    hit_codes: list[str],
+    direction: str,
+) -> dict[str, dict]:
+    """为命中的股票构建完整的信号上下文信息（用于历史追溯）。
+
+    返回 {code: context_dict}，包含：
+    - price_at_signal: 信号发生时的价格
+    - pct_chg: 当日涨跌幅
+    - indicator_values: 关键指标数值（MA5/MA20/DIF/DEA 等）
+    - volume_ratio: 成交量相对历史水平的倍数
+    - signal_time: 信号生成时间
+    """
+    if not hit_codes or target.empty:
+        return {}
+
+    indicator_cols = [
+        "ma5", "ma10", "ma20", "ma60",
+        "dif", "dea", "macd",
+        "rsi6", "rsi12", "rsi24",
+        "volume", "amount", "vol_ratio",
+    ]
+
+    idx = target.set_index("symbol")
+    signal_time = now_tz().isoformat()
+    out: dict[str, dict] = {}
+
+    for code in hit_codes:
+        if code not in idx.index:
+            continue
+        try:
+            row = idx.loc[code]
+        except KeyError:
+            continue
+
+        try:
+            price = float(row.get("close", 0))
+        except (ValueError, TypeError):
+            price = None
+
+        try:
+            pct = float(row.get("pct_chg", 0)) * 100 if row.get("pct_chg") is not None else None
+        except (ValueError, TypeError):
+            pct = None
+
+        # 提取可用的指标值
+        indicator_values: dict[str, float] = {}
+        for col in indicator_cols:
+            if col in row.index and row[col] is not None and not pd.isna(row[col]):
+                try:
+                    indicator_values[col] = float(row[col])
+                except (ValueError, TypeError):
+                    pass
+
+        out[code] = {
+            "price_at_signal": price,
+            "pct_chg": round(pct, 2) if pct is not None else None,
+            "indicator_values": indicator_values,
+            "signal_time": signal_time,
+            "direction": direction,
+            "strategy_id": strategy.get("id", "unknown"),
+            "strategy_name": strategy.get("name", "unknown"),
+        }
+
+    return out
+
+
 def run_strategy_signals(
     db,
     strategy_id: str,
@@ -924,6 +993,9 @@ def run_strategy_signals(
         "exit": exit_codes,
         "entry_reasons": _describe_hits(strategy, target, entry_codes, "entry"),
         "exit_reasons": _describe_hits(strategy, target, exit_codes, "exit"),
+        # 🔥 新增：信号完整上下文（用于历史追溯）
+        "entry_context": _build_signal_context(strategy, target, entry_codes, "entry"),
+        "exit_context": _build_signal_context(strategy, target, exit_codes, "exit"),
     }
 
 
@@ -1066,6 +1138,9 @@ def run_strategy_signals_intraday(
         "exit": exit_codes,
         "entry_reasons": _describe_hits(strategy, target, entry_codes, "entry"),
         "exit_reasons": _describe_hits(strategy, target, exit_codes, "exit"),
+        # 🔥 新增：信号完整上下文（用于历史追溯）
+        "entry_context": _build_signal_context(strategy, target, entry_codes, "entry"),
+        "exit_context": _build_signal_context(strategy, target, exit_codes, "exit"),
     }
 
 

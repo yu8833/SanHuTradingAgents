@@ -4,8 +4,11 @@
 - 少量股票：腾讯接口（数据全、实时性高）
 - 大量股票：AKShare全市场快照（效率高）
 - 使用统一同步缓存层
+
+🔥 新增：每个行情数据都附带时间戳和数据源信息
 """
 import logging
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +26,12 @@ def _merge_quotes(akshare_quotes: dict[str, dict], tencent_quotes: dict[str, dic
     - 腾讯源：amount_wan = 万元（tencent_quote 直接返回）
     - AKShare源：amount = 元（适配器按全局"amount=元"口径输出），
       合并到 amount_wan 时需要 ÷10000 转换为万元
+
+    🔥 新增元信息：每个行情数据附带 fetched_at, source, age_seconds
     """
+    now = datetime.now()
+    now_iso = now.isoformat()
+
     result = {}
     all_codes = set(list(akshare_quotes.keys()) + list(tencent_quotes.keys()))
     for code in all_codes:
@@ -31,6 +39,7 @@ def _merge_quotes(akshare_quotes: dict[str, dict], tencent_quotes: dict[str, dic
         aq = akshare_quotes.get(code, {})
         if tq:
             result[code] = dict(tq)
+            source = "tencent"
         else:
             ak_amount = aq.get("amount")
             # AKShare 的 amount 是元，转成万元填充 amount_wan
@@ -48,7 +57,14 @@ def _merge_quotes(akshare_quotes: dict[str, dict], tencent_quotes: dict[str, dic
                 "float_mcap_yi": None,
                 "turnover_pct": None,
             }
-        result[code]["_source"] = "tencent" if tq else "akshare"
+            source = "akshare"
+
+        # 🔥 添加元信息：时间戳和数据源
+        result[code]["fetched_at"] = now_iso
+        result[code]["source"] = source
+        result[code]["age_seconds"] = 0  # 当前抓取，age=0
+        result[code]["data_timestamp"] = now_iso  # 数据源的原始时间（近似用抓取时间）
+
     return result
 
 

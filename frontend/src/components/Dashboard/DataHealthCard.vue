@@ -23,6 +23,34 @@
     </template>
 
     <div v-loading="loading" class="health-body">
+      <!-- 🔥 系统健康总览 -->
+      <div v-if="systemStatus" class="system-status-row">
+        <div :class="['sys-badge', systemStatus.overall.status]">
+          <el-icon v-if="systemStatus.overall.status === 'healthy'"><CircleCheck /></el-icon>
+          <el-icon v-else-if="systemStatus.overall.status === 'degraded'"><WarningFilled /></el-icon>
+          <el-icon v-else><CircleCloseFilled /></el-icon>
+          {{ systemStatus.overall.message }}
+        </div>
+        <span class="sys-time" v-if="systemStatus.overall.checked_at">
+          检查于 {{ formatCheckedAt(systemStatus.overall.checked_at) }}
+        </span>
+      </div>
+
+      <!-- 🔥 各子系统状态 -->
+      <div v-if="systemStatus" class="subsystems-row">
+        <div
+          v-for="(sub, key) in systemStatusSubsystems"
+          :key="key"
+          class="subsystem-item"
+          :class="sub.status"
+          :title="sub.message"
+        >
+          <span class="sub-label">{{ sub.label }}</span>
+          <span class="sub-status-dot" :class="sub.status"></span>
+          <span class="sub-status-text">{{ statusLabel(sub.status) }}</span>
+        </div>
+      </div>
+
       <!-- 数据源可用性 -->
       <div class="sources-row">
         <div
@@ -108,6 +136,31 @@ const router = useRouter()
 const loading = ref(false)
 const dataSources = ref<DataSourceStatus[]>([])
 const syncStatus = ref<SyncStatus | null>(null)
+
+// 🔥 新增：系统健康状态
+const systemStatus = ref<any | null>(null)
+
+const systemStatusSubsystems = computed(() => {
+  if (!systemStatus.value) return {}
+  const s = systemStatus.value.data
+  return {
+    realtime: {
+      label: '实时行情',
+      status: s.realtime_quotes?.status || 'unknown',
+      message: s.realtime_quotes?.message || '',
+    },
+    historical: {
+      label: '历史K线',
+      status: s.historical_daily?.status || 'unknown',
+      message: s.historical_daily?.message || '',
+    },
+    scheduler: {
+      label: '任务调度',
+      status: s.scheduler?.status || 'unknown',
+      message: s.scheduler?.message || '',
+    },
+  }
+})
 const freshness = ref<{
   overall_is_fresh: boolean
   message?: string
@@ -175,8 +228,44 @@ const loadSyncStatus = async () => {
 
 const loadAll = async () => {
   loading.value = true
-  await Promise.all([loadFreshness(), loadDataSources(), loadSyncStatus()])
+  await Promise.all([loadFreshness(), loadDataSources(), loadSyncStatus(), loadSystemStatus()])
   loading.value = false
+}
+
+// 🔥 加载系统健康状态
+const loadSystemStatus = async () => {
+  try {
+    const res = await fetch('/api/v1/data/status')
+    if (res.ok) {
+      const data = await res.json()
+      systemStatus.value = data
+    }
+  } catch (e) {
+    console.warn('加载系统健康状态失败', e)
+  }
+}
+
+// 🔥 辅助函数
+const statusLabel = (status: string) => {
+  const map: Record<string, string> = {
+    healthy: '正常',
+    degraded: '降级',
+    stale: '过期',
+    critical: '严重',
+    unavailable: '不可用',
+    unknown: '未知',
+  }
+  return map[status] || status
+}
+
+const formatCheckedAt = (timeStr: string) => {
+  if (!timeStr) return ''
+  try {
+    const d = new Date(timeStr)
+    return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  } catch {
+    return timeStr
+  }
 }
 
 const goToSyncPage = () => router.push('/settings/sync')
@@ -242,6 +331,88 @@ onBeforeUnmount(() => {
     display: flex;
     flex-direction: column;
     gap: 12px;
+  }
+
+  /* 🔥 系统健康总览样式 */
+  .system-status-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    background: var(--el-fill-color-lighter);
+    border-radius: 8px;
+
+    .sys-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 12px;
+      border-radius: 14px;
+      font-size: 13px;
+      font-weight: 600;
+
+      &.healthy { background: var(--el-color-success-light-9); color: var(--el-color-success); }
+      &.degraded { background: var(--el-color-warning-light-9); color: var(--el-color-warning); }
+      &.critical { background: var(--el-color-danger-light-9); color: var(--el-color-danger); }
+      &.unknown { background: var(--el-color-info-light-9); color: var(--el-color-info); }
+    }
+
+    .sys-time {
+      font-size: 11px;
+      color: var(--el-text-color-placeholder);
+    }
+  }
+
+  /* 🔥 子系统状态 */
+  .subsystems-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+
+    .subsystem-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      padding: 8px 6px;
+      background: var(--el-bg-color);
+      border-radius: 6px;
+      border: 1px solid var(--el-border-color-lighter);
+      cursor: help;
+
+      .sub-label {
+        font-size: 11px;
+        color: var(--el-text-color-secondary);
+      }
+
+      .sub-status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+
+        &.healthy { background: var(--el-color-success); }
+        &.degraded, &.stale { background: var(--el-color-warning); }
+        &.critical, &.unavailable { background: var(--el-color-danger); }
+        &.unknown { background: var(--el-color-info); }
+      }
+
+      .sub-status-text {
+        font-size: 11px;
+        font-weight: 500;
+
+        .healthy { color: var(--el-color-success); }
+        .degraded, .stale { color: var(--el-color-warning); }
+        .critical, .unavailable { color: var(--el-color-danger); }
+        .unknown { color: var(--el-color-info); }
+      }
+
+      &.healthy .sub-status-text { color: var(--el-color-success); }
+      &.degraded .sub-status-text { color: var(--el-color-warning); }
+      &.stale .sub-status-text { color: var(--el-color-warning); }
+      &.critical .sub-status-text { color: var(--el-color-danger); }
+      &.unavailable .sub-status-text { color: var(--el-color-danger); }
+      &.unknown .sub-status-text { color: var(--el-color-info); }
+    }
   }
 
   .sources-row {
@@ -358,6 +529,27 @@ onBeforeUnmount(() => {
     .sync-progress, .sync-time {
       font-size: 12px;
       color: var(--el-text-color-secondary);
+    }
+  }
+
+  /* 🔥 移动端适配 */
+  @media (max-width: 768px) {
+    .system-status-row {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 6px;
+    }
+
+    .subsystems-row {
+      grid-template-columns: repeat(3, 1fr);
+      gap: 4px;
+    }
+
+    .subsystem-item {
+      padding: 6px 4px;
+
+      .sub-label { font-size: 10px; }
+      .sub-status-text { font-size: 10px; }
     }
   }
 }

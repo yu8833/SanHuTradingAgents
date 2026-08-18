@@ -24,6 +24,7 @@ import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
+from app.utils.scheduler_utils import cron_trigger
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -43,6 +44,7 @@ from app.routers import (
     baostock_init,
     cache,
     config,
+    data_status,
     database,
     favorites,
     financial_data,
@@ -354,7 +356,7 @@ async def lifespan(app: FastAPI):
                 # 如果提供了cron表达式
                 scheduler.add_job(
                     lambda: multi_source_service.run_full_sync(force=False, preferred_sources=preferred_sources),
-                    CronTrigger.from_crontab(settings.SYNC_STOCK_BASICS_CRON, timezone=settings.TIMEZONE),
+                    cron_trigger(settings.SYNC_STOCK_BASICS_CRON, timezone=settings.TIMEZONE),
                     id="basics_sync_service",
                     name="股票基础信息同步（多数据源）"
                 )
@@ -443,7 +445,7 @@ async def lifespan(app: FastAPI):
             if settings.TUSHARE_HISTORICAL_SYNC_ENABLED:
                 scheduler.add_job(
                     run_tushare_historical_sync_with_integrity,
-                    CronTrigger.from_crontab(settings.TUSHARE_HISTORICAL_SYNC_CRON, timezone=settings.TIMEZONE),
+                    cron_trigger(settings.TUSHARE_HISTORICAL_SYNC_CRON, timezone=settings.TIMEZONE),
                     id="tushare_historical_sync",
                     name="历史数据同步（Tushare，含估值+完整性检查）",
                 )
@@ -471,7 +473,7 @@ async def lifespan(app: FastAPI):
 
                 scheduler.add_job(
                     run_tushare_financial_dividend_sync,
-                    CronTrigger.from_crontab(settings.TUSHARE_FINANCIAL_SYNC_CRON, timezone=settings.TIMEZONE),
+                    cron_trigger(settings.TUSHARE_FINANCIAL_SYNC_CRON, timezone=settings.TIMEZONE),
                     id="tushare_financial_sync",
                     name="财务+分红数据同步（Tushare）"
                 )
@@ -484,7 +486,7 @@ async def lifespan(app: FastAPI):
             if settings.TUSHARE_DAILY_BASIC_SYNC_ENABLED and not settings.TUSHARE_HISTORICAL_SYNC_ENABLED:
                 scheduler.add_job(
                     run_tushare_daily_basic_sync,
-                    CronTrigger.from_crontab(settings.TUSHARE_DAILY_BASIC_SYNC_CRON, timezone=settings.TIMEZONE),
+                    cron_trigger(settings.TUSHARE_DAILY_BASIC_SYNC_CRON, timezone=settings.TIMEZONE),
                     id="tushare_daily_basic_sync",
                     name="每日估值数据同步（Tushare）",
                     kwargs={"days_back": settings.TUSHARE_DAILY_BASIC_SYNC_DAYS_BACK}
@@ -497,7 +499,7 @@ async def lifespan(app: FastAPI):
             if settings.TUSHARE_STATUS_CHECK_ENABLED:
                 scheduler.add_job(
                     run_tushare_status_check,
-                    CronTrigger.from_crontab(settings.TUSHARE_STATUS_CHECK_CRON, timezone=settings.TIMEZONE),
+                    cron_trigger(settings.TUSHARE_STATUS_CHECK_CRON, timezone=settings.TIMEZONE),
                     id="tushare_status_check",
                     name="数据源状态检查（Tushare）"
                 )
@@ -516,7 +518,7 @@ async def lifespan(app: FastAPI):
             if settings.AKSHARE_BASIC_INFO_SYNC_ENABLED:
                 scheduler.add_job(
                     run_akshare_basic_info_sync,
-                    CronTrigger.from_crontab(settings.AKSHARE_BASIC_INFO_SYNC_CRON, timezone=settings.TIMEZONE),
+                    cron_trigger(settings.AKSHARE_BASIC_INFO_SYNC_CRON, timezone=settings.TIMEZONE),
                     id="akshare_basic_info_sync",
                     name="股票基础信息同步（AKShare）",
                     kwargs={"force_update": False}
@@ -529,7 +531,7 @@ async def lifespan(app: FastAPI):
             if settings.AKSHARE_QUOTES_SYNC_ENABLED:
                 scheduler.add_job(
                     run_akshare_quotes_sync,
-                    CronTrigger.from_crontab(settings.AKSHARE_QUOTES_SYNC_CRON, timezone=settings.TIMEZONE),
+                    cron_trigger(settings.AKSHARE_QUOTES_SYNC_CRON, timezone=settings.TIMEZONE),
                     id="akshare_quotes_sync",
                     name="实时行情同步（AKShare）"
                 )
@@ -541,7 +543,7 @@ async def lifespan(app: FastAPI):
             if settings.AKSHARE_HISTORICAL_SYNC_ENABLED:
                 scheduler.add_job(
                     run_akshare_historical_sync,
-                    CronTrigger.from_crontab(settings.AKSHARE_HISTORICAL_SYNC_CRON, timezone=settings.TIMEZONE),
+                    cron_trigger(settings.AKSHARE_HISTORICAL_SYNC_CRON, timezone=settings.TIMEZONE),
                     id="akshare_historical_sync",
                     name="历史数据同步（AKShare）",
                     kwargs={"incremental": True}
@@ -554,7 +556,7 @@ async def lifespan(app: FastAPI):
             if settings.AKSHARE_FINANCIAL_SYNC_ENABLED:
                 scheduler.add_job(
                     run_akshare_financial_sync,
-                    CronTrigger.from_crontab(settings.AKSHARE_FINANCIAL_SYNC_CRON, timezone=settings.TIMEZONE),
+                    cron_trigger(settings.AKSHARE_FINANCIAL_SYNC_CRON, timezone=settings.TIMEZONE),
                     id="akshare_financial_sync",
                     name="财务数据同步（AKShare）"
                 )
@@ -566,7 +568,7 @@ async def lifespan(app: FastAPI):
             if settings.AKSHARE_STATUS_CHECK_ENABLED:
                 scheduler.add_job(
                     run_akshare_status_check,
-                    CronTrigger.from_crontab(settings.AKSHARE_STATUS_CHECK_CRON, timezone=settings.TIMEZONE),
+                    cron_trigger(settings.AKSHARE_STATUS_CHECK_CRON, timezone=settings.TIMEZONE),
                     id="akshare_status_check",
                     name="数据源状态检查（AKShare）"
                 )
@@ -584,7 +586,7 @@ async def lifespan(app: FastAPI):
             if settings.BAOSTOCK_BASIC_INFO_SYNC_ENABLED:
                 scheduler.add_job(
                     run_baostock_basic_info_sync,
-                    CronTrigger.from_crontab(settings.BAOSTOCK_BASIC_INFO_SYNC_CRON, timezone=settings.TIMEZONE),
+                    cron_trigger(settings.BAOSTOCK_BASIC_INFO_SYNC_CRON, timezone=settings.TIMEZONE),
                     id="baostock_basic_info_sync",
                     name="股票基础信息同步（BaoStock）"
                 )
@@ -596,7 +598,7 @@ async def lifespan(app: FastAPI):
             if settings.BAOSTOCK_DAILY_QUOTES_SYNC_ENABLED:
                 scheduler.add_job(
                     run_baostock_daily_quotes_sync,
-                    CronTrigger.from_crontab(settings.BAOSTOCK_DAILY_QUOTES_SYNC_CRON, timezone=settings.TIMEZONE),
+                    cron_trigger(settings.BAOSTOCK_DAILY_QUOTES_SYNC_CRON, timezone=settings.TIMEZONE),
                     id="baostock_daily_quotes_sync",
                     name="日K线数据同步（BaoStock）"
                 )
@@ -608,7 +610,7 @@ async def lifespan(app: FastAPI):
             if settings.BAOSTOCK_HISTORICAL_SYNC_ENABLED:
                 scheduler.add_job(
                     run_baostock_historical_sync,
-                    CronTrigger.from_crontab(settings.BAOSTOCK_HISTORICAL_SYNC_CRON, timezone=settings.TIMEZONE),
+                    cron_trigger(settings.BAOSTOCK_HISTORICAL_SYNC_CRON, timezone=settings.TIMEZONE),
                     id="baostock_historical_sync",
                     name="历史数据同步（BaoStock）"
                 )
@@ -620,7 +622,7 @@ async def lifespan(app: FastAPI):
             if settings.BAOSTOCK_STATUS_CHECK_ENABLED:
                 scheduler.add_job(
                     run_baostock_status_check,
-                    CronTrigger.from_crontab(settings.BAOSTOCK_STATUS_CHECK_CRON, timezone=settings.TIMEZONE),
+                    cron_trigger(settings.BAOSTOCK_STATUS_CHECK_CRON, timezone=settings.TIMEZONE),
                     id="baostock_status_check",
                     name="数据源状态检查（BaoStock）"
                 )
@@ -667,7 +669,7 @@ async def lifespan(app: FastAPI):
         elif settings.DATA_INTEGRITY_CHECK_ENABLED:
             scheduler.add_job(
                 run_data_integrity_check,
-                CronTrigger.from_crontab(settings.DATA_INTEGRITY_CHECK_CRON, timezone=settings.TIMEZONE),
+                cron_trigger(settings.DATA_INTEGRITY_CHECK_CRON, timezone=settings.TIMEZONE),
                 id="data_integrity_check",
                 name="数据完整性检查与自动补数",
             )
@@ -746,7 +748,7 @@ async def lifespan(app: FastAPI):
 
         scheduler.add_job(
             run_news_sync,
-            CronTrigger.from_crontab(settings.NEWS_SYNC_CRON, timezone=settings.TIMEZONE),
+            cron_trigger(settings.NEWS_SYNC_CRON, timezone=settings.TIMEZONE),
             id="news_sync",
             name="新闻数据同步（自选股 + 市场新闻）"
         )
@@ -782,7 +784,7 @@ async def lifespan(app: FastAPI):
 
             scheduler.add_job(
                 run_etf_radar_collect,
-                CronTrigger.from_crontab("*/30 9-15 * * 1-5", timezone=settings.TIMEZONE),
+                cron_trigger("*/30 9-15 * * 1-5", timezone=settings.TIMEZONE),
                 id="etf_radar_collect",
                 name="ETF雷达盘中采集（每30分钟）",
                 replace_existing=True,
@@ -817,7 +819,7 @@ async def lifespan(app: FastAPI):
 
         scheduler.add_job(
             run_dg_prosperity_sync,
-            CronTrigger.from_crontab(settings.DG_PROSPERITY_SYNC_CRON, timezone=settings.TIMEZONE),
+            cron_trigger(settings.DG_PROSPERITY_SYNC_CRON, timezone=settings.TIMEZONE),
             id="dg_prosperity_sync",
             name="ΔG景气度数据季度刷新",
         )
@@ -894,7 +896,7 @@ async def lifespan(app: FastAPI):
                     # 用 CronTrigger 反推"上一次应触发时间"：
                     # 1. next_fire 从 now 往后算下一次触发点
                     # 2. prev_fire = next_fire 往前回退一个 cron 周期
-                    _trigger = CronTrigger.from_crontab(_cron, timezone=_tz)
+                    _trigger = cron_trigger(_cron, timezone=_tz)
                     _next_fire = _trigger.get_next_fire_time(None, _now)
                     if _next_fire is None:
                         continue
@@ -1114,6 +1116,7 @@ async def test_log():
 
 # 注册路由
 app.include_router(health.router, prefix="/api", tags=["health"])
+app.include_router(data_status.router, tags=["data-status"])
 app.include_router(auth.router, prefix="/api/auth", tags=["authentication"])
 app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"])
 # 已废弃：quick_analysis 模块的 GET /{stock_code} 通配路由会遮蔽 /api/favorites、
