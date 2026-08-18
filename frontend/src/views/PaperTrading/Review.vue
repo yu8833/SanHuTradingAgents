@@ -79,7 +79,7 @@
           <el-table-column prop="sell_time" label="平仓时间" width="170">
             <template #default="{ row }">{{ formatTime(row.sell_time) }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="120" fixed="right">
+          <el-table-column label="操作" width="120">
             <template #default="{ row }">
               <el-button size="small" type="primary" plain @click="openAddNote(row)">记录复盘</el-button>
             </template>

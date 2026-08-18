@@ -21,8 +21,8 @@ async def _check_realtime_quotes_status() -> dict:
     """检查实时行情数据源状态"""
     try:
         from app.services.unified_quotes import get_unified_quotes
-        # 尝试获取少量股票行情来测试数据源
-        test_codes = ["000001.SZ", "600519.SH"]
+        # 使用纯6位代码（不带交易所后缀），以兼容腾讯/AKShare接口
+        test_codes = ["000001", "600519"]
         result = get_unified_quotes(test_codes)
 
         if not result:

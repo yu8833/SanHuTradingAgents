@@ -25,19 +25,21 @@ UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
 
 
 def get_prefix(code: str) -> str:
-    """6 位代码 → 交易所前缀。"""
-    if code.startswith(("6", "9")):
+    """6 位代码 → 交易所前缀，自动去掉 .SZ/.SH/.BJ 后缀。"""
+    clean = code.split(".")[0]
+    if clean.startswith(("6", "9")):
         return "sh"
-    if code.startswith("8"):
+    if clean.startswith("8"):
         return "bj"
     return "sz"
 
 
 def _get_limit_pct(code: str) -> float:
     """根据代码返回涨跌停限制百分比。"""
-    if code.startswith(("300", "301", "688", "689")):
+    clean = code.split(".")[0]
+    if clean.startswith(("300", "301", "688", "689")):
         return 20.0
-    if code.startswith(("8", "43", "83", "87", "92")):
+    if clean.startswith(("8", "43", "83", "87", "92")):
         return 30.0
     return 10.0
 
@@ -198,8 +200,20 @@ def _parse_gtimg(data: str) -> dict[str, dict]:
 
 def tencent_quote(codes: list[str]) -> dict[str, dict]:
     """批量个股实时行情：现价 / 涨跌 / PE / PB / 市值 / 换手 / 涨跌停。"""
-    prefixed = [f"{get_prefix(c)}{c}" for c in codes]
-    return _parse_gtimg(_fetch_gtimg(prefixed))
+    code_map = {}
+    clean_codes = []
+    for c in codes:
+        clean = c.split(".")[0]
+        code_map[clean] = c
+        clean_codes.append(clean)
+    prefixed = [f"{get_prefix(c)}{c}" for c in clean_codes]
+    raw_result = _parse_gtimg(_fetch_gtimg(prefixed))
+    # 将 clean code 映射回原始 code
+    result = {}
+    for clean, original in code_map.items():
+        if clean in raw_result:
+            result[original] = raw_result[clean]
+    return result
 
 
 # A股大盘指数（前缀规则与个股不同，固定带前缀代码）

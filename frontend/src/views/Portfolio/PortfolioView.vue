@@ -116,15 +116,8 @@
                 <span v-else style="color:#909399;">未设置</span>
               </template>
             </el-table-column>
-            <el-table-column label="买入原因" min-width="180" prop="thesis">
-              <template #default="{ row }">
-                <el-tooltip :content="row.thesis || '无'" placement="top" :disabled="!row.thesis">
-                  <span class="thesis-text">{{ row.thesis || '-' }}</span>
-                </el-tooltip>
-              </template>
-            </el-table-column>
             <el-table-column label="买入日期" width="110" prop="buy_date" />
-            <el-table-column label="操作" width="200" fixed="right">
+            <el-table-column label="操作" width="200">
               <template #default="{ row }">
                 <el-button size="small" link @click="openEditDialog(row)">编辑</el-button>
                 <el-button size="small" type="warning" link @click="openCloseDialog(row)">平仓</el-button>
@@ -168,72 +161,6 @@
               </el-card>
             </el-col>
           </el-row>
-        </el-card>
-      </el-tab-pane>
-
-      <!-- ============ Tab 3: 交易复盘 ============ -->
-      <el-tab-pane label="交易复盘" name="reviews">
-        <el-card shadow="never">
-          <template #header>
-            <div class="card-header">
-              <el-icon><EditPen /></el-icon>
-              <span class="panel-title">已平仓交易复盘</span>
-              <span class="header-hint">回顾每笔交易，沉淀经验，形成学习闭环</span>
-              <el-button size="small" :loading="closedLoading" @click="loadClosedTrades" style="margin-left:auto;">刷新</el-button>
-            </div>
-          </template>
-
-          <el-table :data="closedTrades" v-loading="closedLoading" stripe border style="width:100%">
-            <el-table-column label="代码" width="100" prop="code">
-              <template #default="{ row }">
-                <router-link :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
-              </template>
-            </el-table-column>
-            <el-table-column label="名称" width="100" prop="stock_name">
-              <template #default="{ row }">
-                <router-link :to="`/stocks/${row.code}`" class="stock-name">{{ row.stock_name }}</router-link>
-              </template>
-            </el-table-column>
-            <el-table-column label="策略" width="120">
-              <template #default="{ row }">
-                <el-tag size="small" :type="getStrategyTagType(row.strategy)">{{ strategyLabel(row.strategy) }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="买入原因" min-width="180">
-              <template #default="{ row }">
-                <el-tooltip :content="row.thesis || '无'" placement="top" :disabled="!row.thesis">
-                  <span class="thesis-text">{{ row.thesis || '-' }}</span>
-                </el-tooltip>
-              </template>
-            </el-table-column>
-            <el-table-column label="买入日" width="110" prop="buy_date" />
-            <el-table-column label="平仓日" width="110" prop="exit_date" />
-            <el-table-column label="成本价" width="90">
-              <template #default="{ row }">{{ formatNum(row.avg_cost) }}</template>
-            </el-table-column>
-            <el-table-column label="平仓价" width="90">
-              <template #default="{ row }">{{ row.exit_price != null ? formatNum(row.exit_price) : '-' }}</template>
-            </el-table-column>
-            <el-table-column label="盈亏" width="120">
-              <template #default="{ row }">
-                <span v-if="row.realized_pnl != null" :class="{ up: row.realized_pnl >= 0, down: row.realized_pnl < 0 }">
-                  {{ row.realized_pnl >= 0 ? '+' : '' }}¥{{ formatNum(row.realized_pnl) }}
-                </span>
-                <span v-else style="color:#909399;">-</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="平仓原因" width="100">
-              <template #default="{ row }">
-                <el-tag size="small" :type="getExitReasonTagType(row.exit_reason)">{{ exitReasonLabel(row.exit_reason) }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="120" fixed="right">
-              <template #default="{ row }">
-                <el-button size="small" type="primary" link @click="openReviewDialog(row)">写复盘</el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-          <el-empty v-if="!closedLoading && closedTrades.length === 0" description="暂无已平仓交易记录" />
         </el-card>
       </el-tab-pane>
     </el-tabs>
@@ -682,11 +609,8 @@ const loadClosedTrades = async () => {
   }
 }
 
-// 切换到复盘tab时懒加载
-watch(activeTab, (tab) => {
-  if (tab === 'reviews' && closedTrades.value.length === 0) {
-    loadClosedTrades()
-  }
+// 切换到复盘tab时懒加载（已移除交易复盘tab，保留结构兼容）
+watch(activeTab, () => {
 })
 
 // 复盘对话框
