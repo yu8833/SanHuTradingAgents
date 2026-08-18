@@ -1,15 +1,15 @@
 <template>
-  <div class="basic-layout">
+  <div class="basic-layout" :class="{ 'sidebar-open on-mobile': isMobile && !appStore.sidebarCollapsed }">
     <!-- 侧边栏 -->
     <aside
       class="sidebar"
-      :class="{ collapsed: appStore.sidebarCollapsed }"
-      :style="{ width: appStore.actualSidebarWidth + 'px' }"
+      :class="{ collapsed: appStore.sidebarCollapsed, 'is-mobile': isMobile }"
+      :style="{ width: sidebarWidthPx }"
     >
       <div class="sidebar-header">
         <div class="logo">
           <img src="/logo.svg" alt="股票分析系统" />
-          <span v-show="!appStore.sidebarCollapsed" class="logo-text">
+          <span v-show="!appStore.sidebarCollapsed || isMobile" class="logo-text">
             股票分析系统
           </span>
         </div>
@@ -32,7 +32,7 @@
     ></div>
 
     <!-- 主内容区 -->
-    <div class="main-container" :style="{ marginLeft: appStore.actualSidebarWidth + 'px' }" @click="handleMainClick">
+    <div class="main-container" :style="{ marginLeft: mainMarginLeft }" @click="handleMainClick">
       <!-- 顶部导航栏 -->
       <header class="header">
         <div class="header-left">
@@ -81,7 +81,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useWindowSize } from '@vueuse/core'
 import { useAppStore } from '@/stores/app'
@@ -112,6 +112,22 @@ const keepAliveComponents = computed(() => [
 // 移动端判断
 const isMobile = computed(() => width.value < 768)
 
+// 计算实际侧边栏宽度（考虑移动端）
+const sidebarWidthPx = computed(() => {
+  if (isMobile.value && appStore.sidebarCollapsed) {
+    return '0px'
+  }
+  return appStore.actualSidebarWidth + 'px'
+})
+
+// 计算主内容区左边距
+const mainMarginLeft = computed(() => {
+  if (isMobile.value) {
+    return '0px'
+  }
+  return appStore.actualSidebarWidth + 'px'
+})
+
 // 点击主内容时，若移动端且侧边栏已展开，则收起
 const handleMainClick = () => {
   if (isMobile.value && !appStore.sidebarCollapsed) {
@@ -119,10 +135,27 @@ const handleMainClick = () => {
   }
 }
 
+// 移动端侧边栏打开时锁定 body 滚动
+const syncBodyScroll = () => {
+  if (isMobile.value && !appStore.sidebarCollapsed) {
+    document.body.style.overflow = 'hidden'
+  } else {
+    document.body.style.overflow = ''
+  }
+}
+
+watch([isMobile, () => appStore.sidebarCollapsed], () => {
+  syncBodyScroll()
+})
+
 // 监听窗口大小变化：在小屏幕上自动折叠侧边栏
 watch(width, (newWidth) => {
   if (newWidth < 768 && !appStore.sidebarCollapsed) {
     appStore.setSidebarCollapsed(true)
+  }
+  if (newWidth >= 768 && appStore.sidebarCollapsed) {
+    // 恢复桌面端时，如果之前是默认展开的，可以保持展开
+    // 这里保持 collapsed 状态，由用户手动展开
   }
 })
 
@@ -131,6 +164,14 @@ watch(() => route.fullPath, () => {
   if (isMobile.value) {
     appStore.setSidebarCollapsed(true)
   }
+})
+
+onMounted(() => {
+  syncBodyScroll()
+})
+
+onUnmounted(() => {
+  document.body.style.overflow = ''
 })
 </script>
 
@@ -144,7 +185,7 @@ watch(() => route.fullPath, () => {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.35);
-  z-index: 950; // 低于侧边栏(1000)，高于内容区
+  z-index: 950;
 }
 
 .sidebar {
@@ -154,12 +195,12 @@ watch(() => route.fullPath, () => {
   height: 100vh;
   background-color: var(--el-bg-color);
   border-right: 1px solid var(--el-border-color-light);
-  transition: width 0.3s ease;
+  transition: width 0.3s ease, transform 0.3s ease;
   z-index: 1000;
   display: flex;
   flex-direction: column;
 
-  &.collapsed {
+  &.collapsed:not(.is-mobile) {
     width: 64px !important;
   }
 
@@ -244,7 +285,7 @@ watch(() => route.fullPath, () => {
 .main-content {
   flex: 1;
   padding: 24px;
-  min-height: calc(100vh - 60px - 60px); // 减去header和footer高度
+  min-height: calc(100vh - 60px - 60px);
 
   .content-wrapper {
     max-width: min(1680px, 96vw);
@@ -260,23 +301,29 @@ watch(() => route.fullPath, () => {
 @media (max-width: 768px) {
   .sidebar {
     transform: translateX(-100%);
+    box-shadow: none;
     
     &:not(.collapsed) {
       transform: translateX(0);
+      box-shadow: 4px 0 24px rgba(0, 0, 0, 0.12);
     }
   }
 
   .main-container {
     margin-left: 0 !important;
+    width: 100%;
   }
 
   .main-content {
     padding: 12px;
+    padding-top: 12px;
   }
 
   .header {
     padding: 0 12px;
     gap: 8px;
+    position: sticky;
+    top: 0;
 
     .header-left {
       gap: 8px;
@@ -296,7 +343,6 @@ watch(() => route.fullPath, () => {
     .header-right .header-action-label,
     .breadcrumb,
     :deep(.el-breadcrumb) {
-      // 面包屑在手机上省略中间项
       .el-breadcrumb__separator {
         display: none;
       }

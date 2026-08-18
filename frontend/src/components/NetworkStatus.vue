@@ -99,7 +99,7 @@ onUnmounted(() => {
 <style scoped>
 .network-status {
   position: fixed;
-  top: 20px;
+  top: 80px;
   right: 20px;
   z-index: 9999;
   max-width: 400px;
@@ -113,5 +113,14 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+@media (max-width: 768px) {
+  .network-status {
+    top: 60px;
+    right: 12px;
+    left: 12px;
+    max-width: none;
+  }
 }
 </style>
