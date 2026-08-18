@@ -718,18 +718,34 @@ const syncAllRealtime = async () => {
 
 const loadUserTags = async () => {
   try {
-    const res = await tagsApi.list()
-    const list = (res as any)?.data
-    if (Array.isArray(list)) {
-      userTags.value = list.map((t: any) => t.name)
-      tagColorMap.value = list.reduce((acc: Record<string, string>, t: any) => {
-        acc[t.name] = t.color
-        return acc
-      }, {})
-    } else {
-      userTags.value = []
-      tagColorMap.value = {}
+    const [customRes, favoritesRes] = await Promise.allSettled([
+      tagsApi.list(),
+      favoritesApi.tags()
+    ])
+
+    const customTags = customRes.status === 'fulfilled' ? ((customRes.value as any)?.data || []) : []
+    const favoriteTags = favoritesRes.status === 'fulfilled' ? ((favoritesRes.value as any)?.data || []) : []
+
+    const tagNames = new Set<string>()
+    const colorMap: Record<string, string> = {}
+
+    if (Array.isArray(customTags)) {
+      customTags.forEach((t: any) => {
+        if (t?.name) {
+          tagNames.add(t.name)
+          if (t.color) colorMap[t.name] = t.color
+        }
+      })
     }
+
+    if (Array.isArray(favoriteTags)) {
+      favoriteTags.forEach((name: string) => {
+        if (name) tagNames.add(name)
+      })
+    }
+
+    userTags.value = Array.from(tagNames).sort()
+    tagColorMap.value = colorMap
   } catch (error) {
     console.error('加载标签失败:', error)
     userTags.value = []

@@ -396,28 +396,16 @@ class FavoritesService:
             raise
 
     async def get_user_tags(self, user_id: str) -> list[str]:
-        """获取用户使用的所有标签（兼容字符串ID与ObjectId）"""
+        """获取用户使用的所有标签（从 user_favorites 集合中提取）"""
         db = await self._get_db()
-
-        if self._is_valid_object_id(user_id):
-            pipeline = [
-                {"$match": {"_id": ObjectId(user_id)}},
-                {"$unwind": "$favorite_stocks"},
-                {"$unwind": "$favorite_stocks.tags"},
-                {"$group": {"_id": "$favorite_stocks.tags"}},
-                {"$sort": {"_id": 1}}
-            ]
-            result = await db.users.aggregate(pipeline).to_list(None)
-        else:
-            pipeline = [
-                {"$match": {"user_id": user_id}},
-                {"$unwind": "$favorites"},
-                {"$unwind": "$favorites.tags"},
-                {"$group": {"_id": "$favorites.tags"}},
-                {"$sort": {"_id": 1}}
-            ]
-            result = await db.user_favorites.aggregate(pipeline).to_list(None)
-
+        pipeline = [
+            {"$match": {"user_id": str(user_id)}},
+            {"$unwind": "$favorites"},
+            {"$unwind": {"path": "$favorites.tags", "preserveNullAndEmptyArrays": False}},
+            {"$group": {"_id": "$favorites.tags"}},
+            {"$sort": {"_id": 1}}
+        ]
+        result = await db.user_favorites.aggregate(pipeline).to_list(None)
         return [item["_id"] for item in result if item.get("_id")]
 
     @staticmethod
