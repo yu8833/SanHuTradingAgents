@@ -44,6 +44,7 @@
             <el-icon><Expand v-if="appStore.sidebarCollapsed" /><Fold v-else /></el-icon>
           </el-button>
           
+          <span v-if="isMobile" class="mobile-page-title">{{ currentPageTitle }}</span>
           <Breadcrumb />
         </div>
         
@@ -111,6 +112,14 @@ const keepAliveComponents = computed(() => [
 
 // 移动端判断
 const isMobile = computed(() => width.value < 768)
+
+// 当前页面标题（用于移动端 header 显示）
+const currentPageTitle = computed(() => {
+  const matched = route.matched.filter(item => item.meta && item.meta.title)
+  if (matched.length === 0) return ''
+  const last = matched[matched.length - 1]
+  return (last.meta?.title as string) || ''
+})
 
 // 计算实际侧边栏宽度（考虑移动端）
 const sidebarWidthPx = computed(() => {
@@ -327,13 +336,29 @@ onUnmounted(() => {
 
     .header-left {
       gap: 8px;
-      flex: 1 1 auto;
+      flex: 0 0 auto;
       min-width: 0;
+    }
+
+    .header-left .breadcrumb {
+      display: none;
+    }
+
+    .mobile-page-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--el-text-color-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 60vw;
+      line-height: 40px;
     }
 
     .header-right {
       gap: 6px;
       flex-shrink: 0;
+      margin-left: auto;
     }
 
     .header-right :deep(.el-button) {
