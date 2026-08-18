@@ -18,6 +18,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Any
 from app.utils.timezone import now_tz
+from app.utils.trading_time import get_latest_trade_day
 
 from app.core.database import get_mongo_db
 
@@ -74,11 +75,25 @@ class DataIntegrityService:
         try:
             # 1. 确定交易日期
             if not trade_date:
-                trade_date = await self._get_latest_trade_date(db)
-            if not trade_date:
-                logger.warning("⚠️ 无法确定最新交易日，跳过完整性检查")
-                result["status"] = "no_trade_date"
-                return result
+                db_latest = await self._get_latest_trade_date(db)
+                if not db_latest:
+                    logger.warning("⚠️ stock_daily_quotes 为空，跳过完整性检查")
+                    result["status"] = "no_trade_date"
+                    return result
+
+                try:
+                    expected_latest = get_latest_trade_day().strftime("%Y-%m-%d")
+                except Exception:
+                    logger.warning("⚠️ 交易日历获取失败，回退到DB最新日期")
+                    expected_latest = db_latest
+
+                if db_latest < expected_latest:
+                    logger.warning(
+                        f"📅 数据缺口：DB最新日期={db_latest}, 预期最新交易日={expected_latest}, "
+                        f"将补数覆盖中间所有日期"
+                    )
+
+                trade_date = expected_latest
 
             result["trade_date"] = trade_date
             logger.info(f"🔍 开始检查 {trade_date} 的历史数据完整性...")
