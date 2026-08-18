@@ -121,11 +121,9 @@ const currentPageTitle = computed(() => {
   return (last.meta?.title as string) || ''
 })
 
-// 计算实际侧边栏宽度（考虑移动端）
+// 计算实际侧边栏宽度
+// 移动端不使用 width:0 隐藏侧边栏，而是用 transform 控制，避免内容溢出
 const sidebarWidthPx = computed(() => {
-  if (isMobile.value && appStore.sidebarCollapsed) {
-    return '0px'
-  }
   return appStore.actualSidebarWidth + 'px'
 })
 
@@ -311,7 +309,8 @@ onUnmounted(() => {
   .sidebar {
     transform: translateX(-100%);
     box-shadow: none;
-    
+    overflow: hidden;
+
     &:not(.collapsed) {
       transform: translateX(0);
       box-shadow: 4px 0 24px rgba(0, 0, 0, 0.12);
