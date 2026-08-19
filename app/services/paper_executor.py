@@ -275,6 +275,52 @@ async def _fetch_live_price(code: str) -> float | None:
     return None
 
 
+async def _rollback_execution(
+    user_id: str,
+    code: str,
+    currency: str,
+    request_id: str,
+    cash_before: dict,
+    pnl_before: dict,
+    pos_before: dict | None,
+):
+    """补偿回滚：恢复账户现金/已实现盈亏与持仓到变更前快照，删除本次订单与交易记录。
+
+    单机 MongoDB 不支持多文档事务，下单多步写入失败时调用此函数保证一致性。
+    回滚自身失败仅记日志，不抛异常（避免掩盖原始错误）。
+    """
+    db = get_mongo_db()
+    try:
+        # 1. 恢复账户现金与已实现盈亏快照
+        await db["paper_accounts"].update_one(
+            {"user_id": user_id},
+            {
+                "$set": {
+                    f"cash.{currency}": float(cash_before.get(currency, 0.0) or 0.0),
+                    f"realized_pnl.{currency}": float(pnl_before.get(currency, 0.0) or 0.0),
+                    "updated_at": now_tz().isoformat(),
+                }
+            }
+        )
+        # 2. 恢复持仓：原无持仓则删除本次新建；有持仓则还原为变更前快照
+        if pos_before is None:
+            await db["paper_positions"].delete_one({"user_id": user_id, "code": code})
+        else:
+            snap = dict(pos_before)
+            snap.pop("_id", None)
+            snap["updated_at"] = now_tz().isoformat()
+            await db["paper_positions"].replace_one(
+                {"user_id": user_id, "code": code},
+                snap,
+                upsert=True,
+            )
+        # 3. 删除本次产生的订单与交易记录
+        await db["paper_orders"].delete_many({"user_id": user_id, "request_id": request_id})
+        await db["paper_trades"].delete_many({"user_id": user_id, "request_id": request_id})
+    except Exception as e:
+        logger.error(f"❌ 订单回滚失败（需人工核对）: {code} request_id={request_id}: {e}")
+
+
 async def execute_market_order(
     user_id: str,
     code: str,
@@ -330,177 +376,195 @@ async def execute_market_order(
     now_iso = now_tz().isoformat()
     realized_pnl_delta = 0.0
 
-    # 8. 执行买卖逻辑
-    if side == "buy":
-        notional = round(price * qty, 2)
-        rules = await _get_market_rules(market)
-        commission = _calculate_commission(market, side, notional, rules) if rules else 0.0
-        total_cost = notional + commission
+    # —— 一致性保护：记录变更前快照 + 幂等 request_id，失败时补偿回滚 ——
+    import uuid
+    request_id = uuid.uuid4().hex
+    acc_cash_before = dict((acc.get("cash") or {}) if isinstance(acc.get("cash"), dict) else {})
+    acc_pnl_before = dict((acc.get("realized_pnl") or {}) if isinstance(acc.get("realized_pnl"), dict) else {})
+    pos_before = dict(pos) if pos else None
 
-        cash = acc.get("cash", {})
-        if isinstance(cash, dict):
-            available_cash = float(cash.get(currency, 0.0))
-        else:
-            available_cash = float(cash) if currency == "CNY" else 0.0
+    try:
+        # 8. 执行买卖逻辑
+        if side == "buy":
+            notional = round(price * qty, 2)
+            rules = await _get_market_rules(market)
+            commission = _calculate_commission(market, side, notional, rules) if rules else 0.0
+            total_cost = notional + commission
 
-        if available_cash < total_cost:
-            raise ValueError(f"可用{currency}不足：需要 {total_cost:.2f}，可用 {available_cash:.2f}")
-
-        new_cash = round(available_cash - total_cost, 2)
-        await db["paper_accounts"].update_one(
-            {"user_id": user_id},
-            {"$set": {f"cash.{currency}": new_cash, "updated_at": now_iso}}
-        )
-
-        if not pos:
-            new_pos = {
-                "user_id": user_id,
-                "code": normalized_code,
-                "market": market,
-                "currency": currency,
-                "quantity": qty,
-                "available_qty": qty if market != "CN" else 0,  # A股T+1，今天买入不可用
-                "frozen_qty": 0,
-                "avg_cost": price,
-                "updated_at": now_iso,
-                "strategy": strategy or "default",
-                "stop_loss_price": stop_loss_price,
-                "take_profit_price": take_profit_price,
-                "thesis": thesis,
-                "stock_name": stock_name or "",
-                "buy_date": now_tz().strftime("%Y-%m-%d"),
-            }
-            await db["paper_positions"].insert_one(new_pos)
-        else:
-            old_qty = int(pos.get("quantity", 0))
-            old_cost = float(pos.get("avg_cost", 0.0))
-            new_qty = old_qty + qty
-            new_avg = round((old_cost * old_qty + price * qty) / new_qty, 4) if new_qty > 0 else price
-
-            if market == "CN":
-                new_available = pos.get("available_qty", old_qty)
+            cash = acc.get("cash", {})
+            if isinstance(cash, dict):
+                available_cash = float(cash.get(currency, 0.0))
             else:
-                new_available = new_qty
+                available_cash = float(cash) if currency == "CNY" else 0.0
 
-            update_set = {
-                "quantity": new_qty,
-                "available_qty": new_available,
-                "avg_cost": new_avg,
-                "updated_at": now_iso,
-            }
-            if strategy:
-                update_set["strategy"] = strategy
-            if stop_loss_price is not None:
-                update_set["stop_loss_price"] = stop_loss_price
-            if take_profit_price is not None:
-                update_set["take_profit_price"] = take_profit_price
-            if thesis:
-                update_set["thesis"] = thesis
-            if stock_name:
-                update_set["stock_name"] = stock_name
+            if available_cash < total_cost:
+                raise ValueError(f"可用{currency}不足：需要 {total_cost:.2f}，可用 {available_cash:.2f}")
 
-            await db["paper_positions"].update_one(
-                {"_id": pos["_id"]},
-                {"$set": update_set}
+            new_cash = round(available_cash - total_cost, 2)
+            await db["paper_accounts"].update_one(
+                {"user_id": user_id},
+                {"$set": {f"cash.{currency}": new_cash, "updated_at": now_iso}}
             )
 
-    else:  # sell
-        available_qty = await _get_available_quantity(user_id, normalized_code, market)
-        if available_qty < qty:
-            raise ValueError(f"可用持仓不足：需要 {qty}，可用 {available_qty}")
-
-        old_qty = int(pos.get("quantity", 0))
-        avg_cost = float(pos.get("avg_cost", 0.0))
-        new_qty = old_qty - qty
-        pnl = round((price - avg_cost) * qty, 2)
-        realized_pnl_delta = pnl
-
-        net_proceeds = notional - commission
-        await db["paper_accounts"].update_one(
-            {"user_id": user_id},
-            {
-                "$inc": {
-                    f"cash.{currency}": net_proceeds,
-                    f"realized_pnl.{currency}": realized_pnl_delta
-                },
-                "$set": {"updated_at": now_iso}
-            }
-        )
-
-        if new_qty == 0:
-            await db["paper_positions"].update_one(
-                {"_id": pos["_id"]},
-                {"$set": {
-                    "quantity": 0,
-                    "available_qty": 0,
+            if not pos:
+                new_pos = {
+                    "user_id": user_id,
+                    "code": normalized_code,
+                    "market": market,
+                    "currency": currency,
+                    "quantity": qty,
+                    "available_qty": qty if market != "CN" else 0,  # A股T+1，今天买入不可用
                     "frozen_qty": 0,
-                    "status": "closed",
-                    "exit_price": price,
-                    "exit_date": now_tz().strftime("%Y-%m-%d"),
-                    "exit_reason": "sell_order",
-                    "realized_pnl": pnl,
+                    "avg_cost": price,
                     "updated_at": now_iso,
-                }}
-            )
-        else:
-            new_available = max(0, pos.get("available_qty", old_qty) - qty)
-            await db["paper_positions"].update_one(
-                {"_id": pos["_id"]},
-                {"$set": {
+                    "strategy": strategy or "default",
+                    "stop_loss_price": stop_loss_price,
+                    "take_profit_price": take_profit_price,
+                    "thesis": thesis,
+                    "stock_name": stock_name or "",
+                    "buy_date": now_tz().strftime("%Y-%m-%d"),
+                }
+                await db["paper_positions"].insert_one(new_pos)
+            else:
+                old_qty = int(pos.get("quantity", 0))
+                old_cost = float(pos.get("avg_cost", 0.0))
+                new_qty = old_qty + qty
+                new_avg = round((old_cost * old_qty + price * qty) / new_qty, 4) if new_qty > 0 else price
+
+                if market == "CN":
+                    new_available = pos.get("available_qty", old_qty)
+                else:
+                    new_available = new_qty
+
+                update_set = {
                     "quantity": new_qty,
                     "available_qty": new_available,
-                    "updated_at": now_iso
-                }}
+                    "avg_cost": new_avg,
+                    "updated_at": now_iso,
+                }
+                if strategy:
+                    update_set["strategy"] = strategy
+                if stop_loss_price is not None:
+                    update_set["stop_loss_price"] = stop_loss_price
+                if take_profit_price is not None:
+                    update_set["take_profit_price"] = take_profit_price
+                if thesis:
+                    update_set["thesis"] = thesis
+                if stock_name:
+                    update_set["stock_name"] = stock_name
+
+                await db["paper_positions"].update_one(
+                    {"_id": pos["_id"]},
+                    {"$set": update_set}
+                )
+
+        else:  # sell
+            available_qty = await _get_available_quantity(user_id, normalized_code, market)
+            if available_qty < qty:
+                raise ValueError(f"可用持仓不足：需要 {qty}，可用 {available_qty}")
+
+            old_qty = int(pos.get("quantity", 0))
+            avg_cost = float(pos.get("avg_cost", 0.0))
+            new_qty = old_qty - qty
+            pnl = round((price - avg_cost) * qty, 2)
+            realized_pnl_delta = pnl
+
+            net_proceeds = notional - commission
+            await db["paper_accounts"].update_one(
+                {"user_id": user_id},
+                {
+                    "$inc": {
+                        f"cash.{currency}": net_proceeds,
+                        f"realized_pnl.{currency}": realized_pnl_delta
+                    },
+                    "$set": {"updated_at": now_iso}
+                }
             )
 
-    # 9. 记录订单与成交（即成）
-    order_doc = {
-        "user_id": user_id,
-        "code": normalized_code,
-        "market": market,
-        "currency": currency,
-        "side": side,
-        "quantity": qty,
-        "price": price,
-        "amount": notional,
-        "commission": commission,
-        "status": "filled",
-        "created_at": now_iso,
-        "filled_at": now_iso,
-    }
-    if analysis_id:
-        order_doc["analysis_id"] = analysis_id
-    await db["paper_orders"].insert_one(order_doc)
+            if new_qty == 0:
+                await db["paper_positions"].update_one(
+                    {"_id": pos["_id"]},
+                    {"$set": {
+                        "quantity": 0,
+                        "available_qty": 0,
+                        "frozen_qty": 0,
+                        "status": "closed",
+                        "exit_price": price,
+                        "exit_date": now_tz().strftime("%Y-%m-%d"),
+                        "exit_reason": "sell_order",
+                        "realized_pnl": pnl,
+                        "updated_at": now_iso,
+                    }}
+                )
+            else:
+                new_available = max(0, pos.get("available_qty", old_qty) - qty)
+                await db["paper_positions"].update_one(
+                    {"_id": pos["_id"]},
+                    {"$set": {
+                        "quantity": new_qty,
+                        "available_qty": new_available,
+                        "updated_at": now_iso
+                    }}
+                )
 
-    trade_doc = {
-        "user_id": user_id,
-        "code": normalized_code,
-        "market": market,
-        "currency": currency,
-        "side": side,
-        "quantity": qty,
-        "price": price,
-        "amount": notional,
-        "commission": commission,
-        "pnl": realized_pnl_delta if side == "sell" else 0.0,
-        "timestamp": now_iso,
-    }
-    if thesis:
-        trade_doc["thesis"] = thesis
-    # 买卖都记录同一次开仓策略：买入用传入策略，卖出沿用持仓开仓策略，
-    # 保证交易复盘里买卖同策略、策略名称一致。
-    if strategy:
-        trade_doc["strategy"] = strategy
-    elif pos and pos.get("strategy"):
-        trade_doc["strategy"] = pos["strategy"]
-    if pos:
-        if pos.get("stock_name"):
-            trade_doc["stock_name"] = pos["stock_name"]
-        if not thesis and pos.get("thesis"):
-            trade_doc["thesis"] = pos["thesis"]
-    if analysis_id:
-        trade_doc["analysis_id"] = analysis_id
-    await db["paper_trades"].insert_one(trade_doc)
+        # 9. 记录订单与成交（即成）
+        order_doc = {
+            "user_id": user_id,
+            "code": normalized_code,
+            "market": market,
+            "currency": currency,
+            "side": side,
+            "quantity": qty,
+            "price": price,
+            "amount": notional,
+            "commission": commission,
+            "status": "filled",
+            "request_id": request_id,
+            "created_at": now_iso,
+            "filled_at": now_iso,
+        }
+        if analysis_id:
+            order_doc["analysis_id"] = analysis_id
+        await db["paper_orders"].insert_one(order_doc)
+
+        trade_doc = {
+            "user_id": user_id,
+            "code": normalized_code,
+            "market": market,
+            "currency": currency,
+            "side": side,
+            "quantity": qty,
+            "price": price,
+            "amount": notional,
+            "commission": commission,
+            "pnl": realized_pnl_delta if side == "sell" else 0.0,
+            "request_id": request_id,
+            "timestamp": now_iso,
+        }
+        if thesis:
+            trade_doc["thesis"] = thesis
+        # 买卖都记录同一次开仓策略：买入用传入策略，卖出沿用持仓开仓策略，
+        # 保证交易复盘里买卖同策略、策略名称一致。
+        if strategy:
+            trade_doc["strategy"] = strategy
+        elif pos and pos.get("strategy"):
+            trade_doc["strategy"] = pos["strategy"]
+        if pos:
+            if pos.get("stock_name"):
+                trade_doc["stock_name"] = pos["stock_name"]
+            if not thesis and pos.get("thesis"):
+                trade_doc["thesis"] = pos["thesis"]
+        if analysis_id:
+            trade_doc["analysis_id"] = analysis_id
+        await db["paper_trades"].insert_one(trade_doc)
+    except Exception:
+        # 一致性补偿：任一步失败即回滚账户/持仓到变更前快照，删除本次订单与交易记录
+        logger.warning(f"⚠️ 订单执行失败，执行回滚: {normalized_code} {side} qty={qty}")
+        await _rollback_execution(
+            user_id, normalized_code, currency, request_id,
+            acc_cash_before, acc_pnl_before, pos_before,
+        )
+        raise
 
     # 自动管理止损预警：买入时创建，清仓时删除
     try:

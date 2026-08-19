@@ -275,20 +275,23 @@ class QueueService:
     async def cleanup_expired_tasks(self):
         """清理过期任务（可见性超时）"""
         try:
-            # 获取所有可见性超时键
-            timeout_keys = await self.r.keys(VISIBILITY_TIMEOUT_PREFIX + "*")
-
+            # 用 SCAN 游标替代 KEYS，避免大键空间下阻塞 Redis
             current_time = int(time.time())
             expired_tasks = []
 
-            for timeout_key in timeout_keys:
-                timeout_data = await self.r.hgetall(timeout_key)
-                if timeout_data:
-                    timeout_at = int(timeout_data.get("timeout_at", 0))
-                    if current_time > timeout_at:
-                        task_id = timeout_data.get("task_id")
-                        if task_id:
-                            expired_tasks.append(task_id)
+            async for timeout_key in self.r.scan_iter(
+                match=VISIBILITY_TIMEOUT_PREFIX + "*", count=200
+            ):
+                try:
+                    timeout_data = await self.r.hgetall(timeout_key)
+                    if timeout_data:
+                        timeout_at = int(timeout_data.get("timeout_at", 0))
+                        if current_time > timeout_at:
+                            task_id = timeout_data.get("task_id")
+                            if task_id:
+                                expired_tasks.append(task_id)
+                except Exception:
+                    continue
 
             # 处理过期任务
             for task_id in expired_tasks:

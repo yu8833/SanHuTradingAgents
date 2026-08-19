@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -18,6 +19,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# Redis 健康状态短缓存：避免每次缓存访问都 ping Redis
+_redis_health_at: float = 0.0
+_redis_health_ok: bool = False
+_REDIS_HEALTH_TTL = 5.0
 
 BEIJING = timezone(timedelta(hours=8))
 
@@ -70,25 +76,36 @@ def _memory_set(key: str, value: Any, ttl: int = 60):
 
 
 async def _ensure_redis_available() -> bool:
-    """确保Redis可用，如果不可用则尝试重新初始化。"""
+    """确保Redis可用，不可用则仅重建Redis连接（不重建MongoDB视图/索引）。"""
+    global _redis_health_at, _redis_health_ok
+    # 5s 内复用上次健康状态，避免每次缓存访问都 ping Redis
+    if _redis_health_at and time.time() - _redis_health_at < _REDIS_HEALTH_TTL:
+        return _redis_health_ok
+
+    ok = False
     try:
-        from app.core.database import db_manager, redis_client
-        if redis_client is not None and db_manager._redis_healthy:
+        import app.core.database as db_mod
+        client = db_mod.redis_client
+        if client is not None and db_mod.db_manager._redis_healthy:
             try:
-                await redis_client.ping()
-                return True
+                await client.ping()
+                ok = True
             except Exception:
-                pass
-        
-        await db_manager.init_redis()
-        from app.core.database import init_database
-        await init_database()
-        return True
+                ok = False
+        if not ok:
+            # 仅重建 Redis 连接；不要调用 init_database()，
+            # 否则会 drop/重建 MongoDB 视图与索引，造成性能雪崩
+            await db_mod.db_manager.init_redis()
+            db_mod.redis_client = db_mod.db_manager.redis_client
+            db_mod.redis_pool = db_mod.db_manager.redis_pool
+            ok = True
     except Exception as e:
-        import logging
-        logger = logging.getLogger("webapi")
         logger.warning(f"Redis重新初始化失败: {e}")
-        return False
+        ok = False
+
+    _redis_health_at = time.time()
+    _redis_health_ok = ok
+    return ok
 
 
 async def get_cache(key: str) -> Any | None:
@@ -134,7 +151,11 @@ async def cached(key: str, build_fn: Callable, category: str = "default",
     if hit is not None:
         return hit
 
-    value = build_fn()
+    # 未命中：同步构建函数放入线程池执行，避免重负载阻塞事件循环
+    if asyncio.iscoroutinefunction(build_fn):
+        value = await build_fn()
+    else:
+        value = await asyncio.to_thread(build_fn)
 
     if valid(value):
         await set_cache(key, value, category=category)

@@ -515,12 +515,8 @@ async def create_database_indexes(db):
         if await _safe_create_index(daily_basic, [("symbol", 1), ("trade_date", 1)], background=True):
             index_count += 1
 
-        # stock_screening_view 的索引（筛选视图 - 全表扫描频繁）
-        screening_view = db["stock_screening_view"]
-        if await _safe_create_index(screening_view, [("code", 1)], unique=True, background=True):
-            index_count += 1
-        if await _safe_create_index(screening_view, [("amount", -1)], background=True):
-            index_count += 1
+        # 注意：MongoDB 视图不支持 createIndex，stock_screening_view 无需（也无法）建索引，
+        # 其查询性能依赖源集合（stock_basic_info / stock_market_quotes）上的索引。
 
         # stock_financial_data 的索引（财务数据）
         stock_financial_data = db["stock_financial_data"]

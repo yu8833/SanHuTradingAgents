@@ -344,8 +344,9 @@ async def lifespan(app: FastAPI):
             preferred_sources = ["akshare", "baostock"]
             logger.info("📊 股票基础信息同步优先数据源: AKShare > BaoStock (Tushare已禁用)")
 
-        # 立即在启动后尝试一次（不阻塞）
+        # 立即在启动后尝试一次（不阻塞）：延迟执行，避免与启动期初始化争抢资源
         async def run_sync_with_sources():
+            await asyncio.sleep(15)
             await multi_source_service.run_full_sync(force=False, preferred_sources=preferred_sources)
 
         asyncio.create_task(run_sync_with_sources())
@@ -1111,7 +1112,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 @app.get("/api/test-log")
 async def test_log():
     """测试日志中间件是否工作"""
-    print("🧪 测试端点被调用 - 这条消息应该出现在控制台")
+    logging.getLogger("webapi").info("🧪 测试端点被调用")
     return {"message": "测试成功", "timestamp": time.time()}
 
 # 注册路由
@@ -1191,7 +1192,7 @@ app.include_router(strategy_router.router, tags=["strategy"])
 @app.get("/")
 async def root():
     """根路径，返回API信息"""
-    print("🏠 根路径被访问")
+    logging.getLogger("webapi").info("🏠 根路径被访问")
     return {
         "name": "股票分析系统 API",
         "version": get_version(),
