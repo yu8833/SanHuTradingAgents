@@ -921,7 +921,7 @@
           sortable="custom"
         >
           <template #default="{ row }">
-            <span v-if="row.close" class="price-text">¥{{ row.close?.toFixed(2) }}</span>
+            <span v-if="row.close" class="price-text">¥{{ fmtNum(row.close) }}</span>
             <span v-else class="text-gray-400">-</span>
           </template>
         </el-table-column>
@@ -935,7 +935,7 @@
         >
           <template #default="{ row }">
             <span v-if="row.pct_chg !== null && row.pct_chg !== undefined" :class="getChangeClass(row.pct_chg)">
-              {{ row.pct_chg > 0 ? '+' : '' }}{{ row.pct_chg?.toFixed(2) }}%
+              {{ fmtPct(row.pct_chg) }}
             </span>
             <span v-else class="text-gray-400">-</span>
           </template>
@@ -949,7 +949,7 @@
           sortable="custom"
         >
           <template #default="{ row }">
-            <span v-if="row.total_mv">{{ formatMarketCap(row.total_mv) }}</span>
+            <span v-if="row.total_mv">{{ fmtMarketCap(row.total_mv * 1e8) }}</span>
             <span v-else class="text-gray-400">-</span>
           </template>
         </el-table-column>
@@ -961,7 +961,7 @@
           align="right"
         >
           <template #default="{ row }">
-            <span v-if="row.circ_mv">{{ formatMarketCap(row.circ_mv) }}</span>
+            <span v-if="row.circ_mv">{{ fmtMarketCap(row.circ_mv * 1e8) }}</span>
             <span v-else class="text-gray-400">-</span>
           </template>
         </el-table-column>
@@ -974,7 +974,7 @@
           sortable="custom"
         >
           <template #default="{ row }">
-            <span v-if="row.turnover_rate !== null && row.turnover_rate !== undefined">{{ row.turnover_rate?.toFixed(2) }}%</span>
+            <span v-if="row.turnover_rate !== null && row.turnover_rate !== undefined">{{ fmtPct(row.turnover_rate) }}</span>
             <span v-else class="text-gray-400">-</span>
           </template>
         </el-table-column>
@@ -987,7 +987,7 @@
           sortable="custom"
         >
           <template #default="{ row }">
-            <span v-if="row.volume_ratio !== null && row.volume_ratio !== undefined">{{ row.volume_ratio?.toFixed(2) }}</span>
+            <span v-if="row.volume_ratio !== null && row.volume_ratio !== undefined">{{ fmtNum(row.volume_ratio) }}</span>
             <span v-else class="text-gray-400">-</span>
           </template>
         </el-table-column>
@@ -1052,6 +1052,7 @@ import { ApiClient } from '@/api/request'
 import { favoritesApi } from '@/api/favorites'
 import { getCurrentDataSource } from '@/api/sync'
 import { normalizeMarketForAnalysis, exchangeCodeToMarket, getMarketByStockCode } from '@/utils/market'
+import { fmtMarketCap, fmtNum, fmtPct } from '@/utils/format'
 
 // 响应式数据
 const screeningLoading = ref(false)
@@ -1987,14 +1988,6 @@ const getChangeClass = (changePercent: number) => {
   return ''
 }
 
-const formatMarketCap = (marketCap: number) => {
-  if (marketCap >= 10000) {
-    return `${(marketCap / 10000).toFixed(2)}万亿`
-  } else {
-    return `${marketCap.toFixed(2)}亿`
-  }
-}
-
 const handleSizeChange = (size: number) => {
   pageSize.value = size
   currentPage.value = 1
@@ -2559,7 +2552,7 @@ html.dark {
           135deg,
           var(--el-text-color-secondary) 0%,
           var(--el-text-color-placeholder) 100%
-        ) !important;
+        );
       }
 
       .strategy-info {

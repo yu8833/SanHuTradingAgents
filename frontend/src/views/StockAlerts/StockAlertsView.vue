@@ -27,4 +27,8 @@ defineOptions({ name: 'StockAlertsView' })
 
 <style lang="scss" scoped>
 .stock-alerts-view { padding: 24px; }
+
+@media (max-width: 768px) {
+  .stock-alerts-view { padding: 12px; }
+}
 </style>

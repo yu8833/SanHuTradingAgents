@@ -1,36 +1,39 @@
 <template>
-  <div id="app" class="app-container">
-    <!-- 网络状态指示器 -->
-    <NetworkStatus />
+  <el-config-provider :locale="zhCn">
+    <div id="app" class="app-container">
+      <!-- 网络状态指示器 -->
+      <NetworkStatus />
 
-    <!-- 监控中心触发全局提醒弹窗 -->
-    <MonitorAlertPopup />
+      <!-- 监控中心触发全局提醒弹窗 -->
+      <MonitorAlertPopup />
 
-    <!-- 主要内容区域 -->
-    <router-view v-slot="{ Component, route }">
-      <transition
-        :name="(route?.meta?.transition as string) || 'fade'"
-        mode="out-in"
-        appear
-      >
-        <!-- 修复：移除无效的 keep-alive。此层级渲染的是 BasicLayout/Login/Register/404 等顶层组件，
-             include 列表用的是路由 name（Dashboard 等）而非组件 name，导致缓存完全失效。
-             BasicLayout 内部已有自己的 keep-alive 处理子路由缓存，此处无需再缓存。 -->
-        <component :is="Component" :key="route?.fullPath || 'default'" />
-      </transition>
-    </router-view>
+      <!-- 主要内容区域 -->
+      <router-view v-slot="{ Component, route }">
+        <transition
+          :name="(route?.meta?.transition as string) || 'fade'"
+          mode="out-in"
+          appear
+        >
+          <!-- 修复：移除无效的 keep-alive。此层级渲染的是 BasicLayout/Login/Register/404 等顶层组件，
+               include 列表用的是路由 name（Dashboard 等）而非组件 name，导致缓存完全失效。
+               BasicLayout 内部已有自己的 keep-alive 处理子路由缓存，此处无需再缓存。 -->
+          <component :is="Component" :key="route?.fullPath || 'default'" />
+        </transition>
+      </router-view>
 
-    <!-- 配置向导 -->
-    <ConfigWizard
-      v-model="showConfigWizard"
-      @complete="handleWizardComplete"
-    />
-  </div>
+      <!-- 配置向导 -->
+      <ConfigWizard
+        v-model="showConfigWizard"
+        @complete="handleWizardComplete"
+      />
+    </div>
+  </el-config-provider>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import NetworkStatus from '@/components/NetworkStatus.vue'
 import MonitorAlertPopup from '@/components/MonitorAlertPopup.vue'
 import axios from 'axios'

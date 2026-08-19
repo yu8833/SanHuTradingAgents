@@ -60,10 +60,10 @@
       <el-col :span="6">
         <el-card class="metric-card" shadow="never">
           <div class="metric-content">
-            <div class="metric-value">{{ formatNumber(overview.totalRequests) }}</div>
+            <div class="metric-value">{{ fmtVol(overview.totalRequests) }}</div>
             <div class="metric-label">总请求数</div>
             <div class="metric-change" :class="getChangeClass(overview.requestsChange)">
-              {{ formatChange(overview.requestsChange) }}
+              {{ fmtPct(overview.requestsChange, 1) }}
             </div>
           </div>
         </el-card>
@@ -71,10 +71,10 @@
       <el-col :span="6">
         <el-card class="metric-card" shadow="never">
           <div class="metric-content">
-            <div class="metric-value">{{ formatNumber(overview.totalTokens) }}</div>
+            <div class="metric-value">{{ fmtVol(overview.totalTokens) }}</div>
             <div class="metric-label">总Token数</div>
             <div class="metric-change" :class="getChangeClass(overview.tokensChange)">
-              {{ formatChange(overview.tokensChange) }}
+              {{ fmtPct(overview.tokensChange, 1) }}
             </div>
           </div>
         </el-card>
@@ -82,10 +82,10 @@
       <el-col :span="6">
         <el-card class="metric-card" shadow="never">
           <div class="metric-content">
-            <div class="metric-value">¥{{ formatNumber(overview.totalCost) }}</div>
+            <div class="metric-value">¥{{ fmtAmount(overview.totalCost) }}</div>
             <div class="metric-label">总成本</div>
             <div class="metric-change" :class="getChangeClass(overview.costChange)">
-              {{ formatChange(overview.costChange) }}
+              {{ fmtPct(overview.costChange, 1) }}
             </div>
           </div>
         </el-card>
@@ -93,10 +93,10 @@
       <el-col :span="6">
         <el-card class="metric-card" shadow="never">
           <div class="metric-content">
-            <div class="metric-value">¥{{ formatNumber(overview.avgCostPerRequest) }}</div>
+            <div class="metric-value">¥{{ fmtAmount(overview.avgCostPerRequest) }}</div>
             <div class="metric-label">平均单次成本</div>
             <div class="metric-change" :class="getChangeClass(overview.avgCostChange)">
-              {{ formatChange(overview.avgCostChange) }}
+              {{ fmtPct(overview.avgCostChange, 1) }}
             </div>
           </div>
         </el-card>
@@ -153,9 +153,9 @@
               <div class="model-info">
                 <div class="model-name">{{ model.name }}</div>
                 <div class="model-stats">
-                  {{ formatNumber(model.requests) }} 次请求 · 
-                  {{ formatNumber(model.tokens) }} Token · 
-                  ¥{{ formatNumber(model.cost) }}
+                  {{ fmtVol(model.requests) }} 次请求 · 
+                  {{ fmtVol(model.tokens) }} Token · 
+                  ¥{{ fmtAmount(model.cost) }}
                 </div>
               </div>
               <div class="usage-bar">
@@ -217,7 +217,7 @@
         <el-table-column prop="total_tokens" label="总Token" width="100" align="right" sortable />
         <el-table-column prop="cost" label="成本(¥)" width="100" align="right" sortable>
           <template #default="{ row }">
-            ¥{{ formatNumber(row.cost) }}
+            ¥{{ fmtAmount(row.cost) }}
           </template>
         </el-table-column>
         <el-table-column prop="duration" label="耗时(ms)" width="100" align="right" sortable />
@@ -283,6 +283,7 @@ import {
   type UsageRecord,
   type UsageStatistics
 } from '@/api/usage'
+import { fmtVol, fmtAmount, fmtPct } from '@/utils/format'
 
 type TokenRecord = {
   timestamp: string
@@ -346,21 +347,6 @@ const filteredRecords = ref<TokenRecord[]>([])
 const modelRanking = ref<ModelRankingItem[]>([])
 
 // 方法
-const formatNumber = (num: number): string => {
-  if (num >= 1000000) {
-    return (num / 1000000).toFixed(1) + 'M'
-  } else if (num >= 1000) {
-    return (num / 1000).toFixed(1) + 'K'
-  }
-  return num.toFixed(2)
-}
-
-const formatChange = (change: number): string => {
-  if (change > 0) return `+${change.toFixed(1)}%`
-  if (change < 0) return `${change.toFixed(1)}%`
-  return '0%'
-}
-
 const getChangeClass = (change: number): string => {
   if (change > 0) return 'positive'
   if (change < 0) return 'negative'

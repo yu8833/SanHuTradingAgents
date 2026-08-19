@@ -75,21 +75,21 @@
         <div class="grid grid-3">
           <el-card shadow="never" class="ratio-card">
             <div class="rt-label">封板率</div>
-            <div class="rt-num up">{{ formatRate(emotion.seal_rate) }}</div>
+            <div class="rt-num up">{{ fmtPctFromFraction(emotion.seal_rate, 1) }}</div>
             <div class="rt-bar">
               <div class="bar-fill up" :style="{ width: rateWidth(emotion.seal_rate) }"></div>
             </div>
           </el-card>
           <el-card shadow="never" class="ratio-card">
             <div class="rt-label">炸板率</div>
-            <div class="rt-num down">{{ formatRate(emotion.break_rate) }}</div>
+            <div class="rt-num down">{{ fmtPctFromFraction(emotion.break_rate, 1) }}</div>
             <div class="rt-bar">
               <div class="bar-fill down" :style="{ width: rateWidth(emotion.break_rate) }"></div>
             </div>
           </el-card>
           <el-card shadow="never" class="ratio-card">
             <div class="rt-label">晋级率</div>
-            <div class="rt-num">{{ formatRate(emotion.promotion_rate) }}</div>
+            <div class="rt-num">{{ fmtPctFromFraction(emotion.promotion_rate, 1) }}</div>
             <div class="rt-bar">
               <div class="bar-fill neutral" :style="{ width: rateWidth(emotion.promotion_rate) }"></div>
             </div>
@@ -134,11 +134,11 @@
               </template>
             </el-table-column>
             <el-table-column label="现价" width="100" align="right" sortable>
-              <template #default="{ row }">{{ row.price.toFixed(2) }}</template>
+              <template #default="{ row }">{{ fmtPrice(row.price) }}</template>
             </el-table-column>
             <el-table-column label="涨停%" width="100" align="right" sortable>
               <template #default="{ row }">
-                <span class="up">{{ row.pct.toFixed(2) }}%</span>
+                <span class="up">{{ fmtPct(row.pct) }}</span>
               </template>
             </el-table-column>
             <el-table-column label="成交额(亿)" width="120" align="right" sortable>
@@ -172,6 +172,7 @@ import {
   Histogram,
 } from '@element-plus/icons-vue'
 import { vibeApi, type ShortTermEmotion } from '@/api/vibe'
+import { fmtPrice, fmtYi, fmtPctFromFraction, fmtAbsPct, fmtPct } from '@/utils/format'
 
 const loading = ref(false)
 const emotion = ref<ShortTermEmotion | null>(null)
@@ -183,12 +184,8 @@ const ladderText = computed(() => {
     .join('  |  ')
 })
 
-const formatRate = (v: number | null | undefined) =>
-  v == null ? '—' : (v * 100).toFixed(1) + '%'
 const rateWidth = (v: number | null | undefined) =>
   v == null ? '0%' : Math.min(100, Math.max(0, v * 100)).toFixed(1) + '%'
-const formatYi = (v: number | null | undefined) =>
-  v == null ? '—' : (v / 1e8).toFixed(2)
 
 const load = async () => {
   loading.value = true

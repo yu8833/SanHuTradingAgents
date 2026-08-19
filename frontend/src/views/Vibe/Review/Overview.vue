@@ -37,10 +37,10 @@
           class="idx-card"
         >
           <div class="idx-name">{{ item.name }}</div>
-          <div class="idx-price">{{ formatPrice(item.price) }}</div>
+          <div class="idx-price">{{ fmtPrice(item.price) }}</div>
           <div class="idx-change" :class="colorClass(item.change_pct)">
-            <span class="pct">{{ sign(item.change_pct) }}{{ formatPct(item.change_pct) }}%</span>
-            <span class="amt">{{ sign(item.change_amt) }}{{ formatPrice(item.change_amt) }}</span>
+            <span class="pct">{{ fmtPct(item.change_pct) }}</span>
+            <span class="amt">{{ fmtSigned(item.change_amt) }}</span>
           </div>
         </el-card>
         <el-card v-if="!indices.length && !loading" shadow="never" class="idx-card empty-card">
@@ -77,7 +77,7 @@
           <div class="kpi-value">
             <span class="up">{{ dashboard.limit.limit_up }}</span><span class="kpi-sep">/</span><span class="down">{{ dashboard.limit.limit_down }}</span>
           </div>
-          <div class="kpi-sub">封板率 {{ dashboard.limit.seal_rate == null ? '—' : (dashboard.limit.seal_rate * 100).toFixed(0) }}%</div>
+          <div class="kpi-sub">封板率 {{ dashboard.limit.seal_rate == null ? '—' : fmtAbsPct(dashboard.limit.seal_rate * 100, 0) }}</div>
         </div>
         <div class="kpi-cell">
           <div class="kpi-label">最高连板</div>
@@ -86,8 +86,8 @@
         </div>
         <div class="kpi-cell">
           <div class="kpi-label">成交额</div>
-          <div class="kpi-value accent">{{ fmtBigNum(dashboard.amount.total) }}</div>
-          <div class="kpi-sub">均额 {{ fmtBigNum(dashboard.amount.avg) }}</div>
+          <div class="kpi-value accent">{{ fmtAmount(dashboard.amount.total) }}</div>
+          <div class="kpi-sub">均额 {{ fmtAmount(dashboard.amount.avg) }}</div>
         </div>
         <div class="kpi-cell">
           <div class="kpi-label">换手</div>
@@ -126,7 +126,7 @@
               </text>
             </svg>
           </div>
-          <div v-else class="radar-empty">暂无雷达数据</div>
+          <div v-else class="radar-empty">{{ dashboard.radar.length ? '今日情绪数据为空' : '暂无雷达数据' }}</div>
         </el-card>
 
         <el-card shadow="never" class="dash-card">
@@ -174,7 +174,7 @@
               <div class="rank-name" :title="item.name">{{ item.name }}</div>
               <div class="rank-sub">{{ item.count }}只 · 净流入{{ item.net }}亿</div>
             </div>
-            <span class="rank-pct up">{{ sign(item.pct) }}{{ formatPct(item.pct) }}%</span>
+            <span class="rank-pct up">{{ fmtPct(item.pct) }}</span>
           </div>
         </div>
         <div class="rank-col">
@@ -185,7 +185,7 @@
               <div class="rank-name" :title="item.name">{{ item.name }}</div>
               <div class="rank-sub">{{ item.count }}只 · 净流出{{ Math.abs(item.net) }}亿</div>
             </div>
-            <span class="rank-pct down">{{ sign(item.pct) }}{{ formatPct(item.pct) }}%</span>
+            <span class="rank-pct down">{{ fmtPct(item.pct) }}</span>
           </div>
         </div>
       </div>
@@ -210,10 +210,10 @@
               <div class="list-code">{{ r.code }}</div>
             </div>
             <div class="list-right">
-              <div v-if="col.mode === 'amount'" class="list-amt">{{ fmtBigNum(r.amount) }}</div>
+              <div v-if="col.mode === 'amount'" class="list-amt">{{ fmtAmount(r.amount) }}</div>
               <div v-else-if="col.mode === 'active'" class="list-amt accent">{{ r.turnover_rate }}%</div>
-              <div :class="pctClass(r.pct_chg)">{{ sign(r.pct_chg) }}{{ formatPct(r.pct_chg) }}%</div>
-              <div v-if="col.mode === 'gain' || col.mode === 'loss'" class="list-close">{{ r.close.toFixed(2) }}</div>
+              <div :class="clsByVal(r.pct_chg)">{{ fmtPct(r.pct_chg) }}</div>
+              <div v-if="col.mode === 'gain' || col.mode === 'loss'" class="list-close">{{ fmtPrice(r.close) }}</div>
             </div>
           </div>
         </div>
@@ -237,9 +237,9 @@
               <div class="idx-name">
                 {{ item.name }}<span class="region">{{ item.region }}</span>
               </div>
-              <div class="idx-price">{{ item.price == null ? '—' : formatPrice(item.price) }}</div>
+              <div class="idx-price">{{ fmtPrice(item.price) }}</div>
               <div class="idx-change" :class="colorClass(item.change_pct)">
-                {{ item.change_pct == null ? '—' : sign(item.change_pct) + formatPct(item.change_pct) + '%' }}
+                {{ fmtPct(item.change_pct) }}
               </div>
             </el-card>
             <el-card v-if="!globalIndices.length && !loading" shadow="never" class="idx-card empty-card">
@@ -262,9 +262,9 @@
               <div class="idx-name">
                 {{ item.name }}<span class="region">美股</span>
               </div>
-              <div class="idx-price">{{ item.price == null ? '—' : formatPrice(item.price) }}</div>
+              <div class="idx-price">{{ fmtPrice(item.price) }}</div>
               <div class="idx-change" :class="colorClass(item.change_pct)">
-                {{ item.change_pct == null ? '—' : sign(item.change_pct) + formatPct(item.change_pct) + '%' }}
+                {{ fmtPct(item.change_pct) }}
               </div>
             </el-card>
             <el-card v-if="!usStocks.length && !loading" shadow="never" class="idx-card empty-card">
@@ -287,9 +287,9 @@
               <div class="idx-name">
                 {{ item.name }}<span class="region">港股</span>
               </div>
-              <div class="idx-price">{{ item.price == null ? '—' : formatPrice(item.price) }}</div>
+              <div class="idx-price">{{ fmtPrice(item.price) }}</div>
               <div class="idx-change" :class="colorClass(item.change_pct)">
-                {{ item.change_pct == null ? '—' : sign(item.change_pct) + formatPct(item.change_pct) + '%' }}
+                {{ fmtPct(item.change_pct) }}
               </div>
             </el-card>
             <el-card v-if="!hkStocks.length && !loading" shadow="never" class="idx-card empty-card">
@@ -324,6 +324,7 @@ import {
   type GlobalStock,
   type MarketDashboard,
 } from '@/api/vibe'
+import { fmtPrice, fmtAbsPct, fmtAmount, fmtSigned, clsByVal } from '@/utils/format'
 
 const loading = ref(false)
 const activeTab = ref('ashare')
@@ -344,12 +345,6 @@ const today = computed(() => {
   return `${y}-${m}-${day}`
 })
 
-const formatPrice = (v: number | null | undefined) =>
-  v == null ? '—' : v.toFixed(2)
-const formatPct = (v: number | null | undefined) =>
-  v == null ? '—' : Math.abs(v).toFixed(2)
-const sign = (v: number | null | undefined) =>
-  v == null ? '' : v > 0 ? '+' : v < 0 ? '-' : ''
 const colorClass = (v: number | null | undefined) => {
   if (v == null) return 'flat'
   if (v > 0) return 'up'
@@ -371,23 +366,16 @@ const scoreStyle = computed(() => {
   return { color: c, borderColor: c + '40', background: c + '14' }
 })
 
-const fmtBigNum = (v: number | null | undefined) => {
-  const x = v
-  if (x == null || !isFinite(x)) return '—'
-  if (Math.abs(x) >= 1e8) return (x / 1e8).toFixed(2) + '亿'
-  if (Math.abs(x) >= 1e4) return (x / 1e4).toFixed(1) + '万'
-  return x.toFixed(0)
-}
-
-const pctClass = (v: number | null | undefined) => {
-  if (v == null || v === 0) return 'flat'
-  return v > 0 ? 'up' : 'down'
-}
-
 // 雷达图几何
 const RADAR_CX = 120
 const RADAR_CY = 120
 const RADAR_MAX_R = 78
+
+// 雷达极端值兜底：当所有维度均为 0 时，多边形会塌陷为圆心一个点，
+// 视觉上无意义。此时视为"今日无有效情绪数据"，展示空态而非退化图形。
+const radarHasData = computed(() =>
+  (dashboard.value?.radar || []).some(r => Number(r.value) > 0)
+)
 
 // 各维度说明（悬停提示）
 const RADAR_DESC: Record<string, string> = {

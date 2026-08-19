@@ -68,7 +68,7 @@
                     覆盖 {{ scannedCount }} 只
                   </el-tag>
                   <el-tag v-if="tookMs" type="info" size="small" effect="plain">
-                    耗时 {{ (tookMs / 1000).toFixed(1) }}s
+                    耗时 {{ fmtNum(tookMs / 1000, 1) }}s
                   </el-tag>
                 </div>
                 <div style="display: flex; align-items: center; gap: 12px;">
@@ -105,7 +105,7 @@
                   </el-col>
                   <el-col :span="6">
                     <div class="stat-item">
-                      <div class="stat-value">{{ avgScore.toFixed(1) }}</div>
+                      <div class="stat-value">{{ fmtNum(avgScore, 1) }}</div>
                       <div class="stat-label">平均综合评分</div>
                     </div>
                   </el-col>
@@ -117,7 +117,7 @@
                   </el-col>
                   <el-col :span="6">
                     <div class="stat-item">
-                      <div class="stat-value">{{ (tookMs / 1000).toFixed(1) }}s</div>
+                      <div class="stat-value">{{ fmtNum(tookMs / 1000, 1) }}s</div>
                       <div class="stat-label">扫描耗时</div>
                     </div>
                   </el-col>
@@ -156,13 +156,13 @@
             <el-table-column prop="industry" label="行业" width="110" />
             <el-table-column prop="close" label="现价" width="90" sortable align="right">
               <template #default="{ row }">
-                <span class="price">{{ formatNum(row.close) }}</span>
+                <span class="price">{{ fmtNum(row.close) }}</span>
               </template>
             </el-table-column>
             <el-table-column prop="pct_chg" label="涨跌幅" width="100" sortable align="right">
               <template #default="{ row }">
                 <span :class="['pct', (row.pct_chg ?? 0) >= 0 ? 'up' : 'down']">
-                  {{ (row.pct_chg ?? 0) >= 0 ? '+' : '' }}{{ (row.pct_chg ?? 0).toFixed(2) }}%
+                  {{ fmtPct(row.pct_chg ?? 0) }}
                 </span>
               </template>
             </el-table-column>
@@ -171,14 +171,14 @@
             </el-table-column>
             <el-table-column prop="cumulative_drop" label="累计跌幅" width="110" sortable align="right">
               <template #default="{ row }">
-                <span class="pct down">-{{ formatNum(row.cumulative_drop) }}%</span>
+                <span class="pct down">-{{ fmtNum(row.cumulative_drop) }}%</span>
               </template>
             </el-table-column>
             <el-table-column prop="pe_percentile" label="PE分位" width="100" sortable align="right">
-              <template #default="{ row }">{{ formatNum(row.pe_percentile) }}%</template>
+              <template #default="{ row }">{{ fmtNum(row.pe_percentile) }}%</template>
             </el-table-column>
             <el-table-column prop="pb_percentile" label="PB分位" width="100" sortable align="right">
-              <template #default="{ row }">{{ formatNum(row.pb_percentile) }}%</template>
+              <template #default="{ row }">{{ fmtNum(row.pb_percentile) }}%</template>
             </el-table-column>
             <el-table-column prop="signal_type" label="信号类型" width="140">
               <template #default="{ row }">
@@ -217,7 +217,7 @@
                         <div class="score-detail-bar-wrap">
                           <el-progress :percentage="typeof val === 'number' ? Math.min(100, val) : 0" :stroke-width="8" :show-text="false" :color="getScoreColor(val as number)" />
                         </div>
-                        <span class="score-detail-val">{{ typeof val === 'number' ? val.toFixed(1) : val }}分</span>
+                        <span class="score-detail-val">{{ typeof val === 'number' ? fmtNum(val, 1) : val }}分</span>
                       </div>
                     </div>
                     <div v-else class="score-detail-empty">暂无评分明细</div>
@@ -307,15 +307,15 @@
           <!-- 核心指标 -->
           <el-row :gutter="16">
             <el-col :span="6"><el-card shadow="never" class="metric-card"><div class="metric-label">总交易次数</div><div class="metric-value">{{ backtestResult.total_trades }}</div></el-card></el-col>
-            <el-col :span="6"><el-card shadow="never" class="metric-card"><div class="metric-label">胜率</div><div class="metric-value" :class="backtestResult.win_rate >= 0.5 ? 'up' : 'down'">{{ (backtestResult.win_rate * 100).toFixed(2) }}%</div></el-card></el-col>
-            <el-col :span="6"><el-card shadow="never" class="metric-card"><div class="metric-label">平均收益</div><div class="metric-value" :class="backtestResult.avg_return >= 0 ? 'up' : 'down'">{{ backtestResult.avg_return >= 0 ? '+' : '' }}{{ (backtestResult.avg_return * 100).toFixed(2) }}%</div></el-card></el-col>
-            <el-col :span="6"><el-card shadow="never" class="metric-card"><div class="metric-label">最大回撤</div><div class="metric-value down">{{ (backtestResult.max_drawdown * 100).toFixed(2) }}%</div></el-card></el-col>
+            <el-col :span="6"><el-card shadow="never" class="metric-card"><div class="metric-label">胜率</div><div class="metric-value" :class="backtestResult.win_rate >= 0.5 ? 'up' : 'down'">{{ fmtPctFromFraction(backtestResult.win_rate) }}</div></el-card></el-col>
+            <el-col :span="6"><el-card shadow="never" class="metric-card"><div class="metric-label">平均收益</div><div class="metric-value" :class="backtestResult.avg_return >= 0 ? 'up' : 'down'">{{ fmtPctFromFraction(backtestResult.avg_return) }}</div></el-card></el-col>
+            <el-col :span="6"><el-card shadow="never" class="metric-card"><div class="metric-label">最大回撤</div><div class="metric-value down">{{ fmtPctFromFraction(backtestResult.max_drawdown) }}</div></el-card></el-col>
           </el-row>
           <el-row :gutter="16" style="margin-top: 16px;">
-            <el-col :span="6"><el-card shadow="never" class="metric-card"><div class="metric-label">总收益</div><div class="metric-value" :class="backtestResult.total_return >= 0 ? 'up' : 'down'">{{ backtestResult.total_return >= 0 ? '+' : '' }}{{ (backtestResult.total_return * 100).toFixed(2) }}%</div></el-card></el-col>
-            <el-col :span="6"><el-card shadow="never" class="metric-card"><div class="metric-label">盈亏比</div><div class="metric-value" :class="backtestResult.profit_loss_ratio >= 1 ? 'up' : 'down'">{{ backtestResult.profit_loss_ratio.toFixed(2) }}</div></el-card></el-col>
-            <el-col :span="6"><el-card shadow="never" class="metric-card"><div class="metric-label">夏普比率</div><div class="metric-value" :class="backtestResult.sharpe_ratio >= 1 ? 'up' : 'down'">{{ backtestResult.sharpe_ratio.toFixed(2) }}</div></el-card></el-col>
-            <el-col :span="6"><el-card shadow="never" class="metric-card"><div class="metric-label">年化收益</div><div class="metric-value" :class="backtestResult.annualized_return >= 0 ? 'up' : 'down'">{{ backtestResult.annualized_return >= 0 ? '+' : '' }}{{ (backtestResult.annualized_return * 100).toFixed(2) }}%</div></el-card></el-col>
+            <el-col :span="6"><el-card shadow="never" class="metric-card"><div class="metric-label">总收益</div><div class="metric-value" :class="backtestResult.total_return >= 0 ? 'up' : 'down'">{{ fmtPctFromFraction(backtestResult.total_return) }}</div></el-card></el-col>
+            <el-col :span="6"><el-card shadow="never" class="metric-card"><div class="metric-label">盈亏比</div><div class="metric-value" :class="backtestResult.profit_loss_ratio >= 1 ? 'up' : 'down'">{{ fmtNum(backtestResult.profit_loss_ratio) }}</div></el-card></el-col>
+            <el-col :span="6"><el-card shadow="never" class="metric-card"><div class="metric-label">夏普比率</div><div class="metric-value" :class="backtestResult.sharpe_ratio >= 1 ? 'up' : 'down'">{{ fmtNum(backtestResult.sharpe_ratio) }}</div></el-card></el-col>
+            <el-col :span="6"><el-card shadow="never" class="metric-card"><div class="metric-label">年化收益</div><div class="metric-value" :class="backtestResult.annualized_return >= 0 ? 'up' : 'down'">{{ fmtPctFromFraction(backtestResult.annualized_return) }}</div></el-card></el-col>
           </el-row>
 
           <el-card shadow="never" style="margin-top: 16px;">
@@ -338,12 +338,12 @@
               <el-table-column prop="count" label="交易次数" width="120" align="right" sortable />
               <el-table-column prop="win_rate" label="胜率" width="120" align="right" sortable>
                 <template #default="{ row }">
-                  <span :class="['pct', row.win_rate >= 0.5 ? 'up' : 'down']">{{ (row.win_rate * 100).toFixed(2) }}%</span>
+                  <span :class="['pct', row.win_rate >= 0.5 ? 'up' : 'down']">{{ fmtPctFromFraction(row.win_rate) }}</span>
                 </template>
               </el-table-column>
               <el-table-column prop="avg_return" label="平均收益" align="right" sortable>
                 <template #default="{ row }">
-                  <span :class="['pct', row.avg_return >= 0 ? 'up' : 'down']">{{ row.avg_return >= 0 ? '+' : '' }}{{ (row.avg_return * 100).toFixed(2) }}%</span>
+                  <span :class="['pct', row.avg_return >= 0 ? 'up' : 'down']">{{ fmtPctFromFraction(row.avg_return) }}</span>
                 </template>
               </el-table-column>
             </el-table>
@@ -366,14 +366,14 @@
               <el-table-column prop="buy_date" label="买入日期" width="110" />
               <el-table-column prop="sell_date" label="卖出日期" width="110" />
               <el-table-column prop="buy_price" label="买入价" width="90" sortable align="right">
-                <template #default="{ row }">{{ formatNum(row.buy_price) }}</template>
+                <template #default="{ row }">{{ fmtNum(row.buy_price) }}</template>
               </el-table-column>
               <el-table-column prop="sell_price" label="卖出价" width="90" sortable align="right">
-                <template #default="{ row }">{{ formatNum(row.sell_price) }}</template>
+                <template #default="{ row }">{{ fmtNum(row.sell_price) }}</template>
               </el-table-column>
               <el-table-column prop="return_pct" label="收益率" width="110" sortable align="right">
                 <template #default="{ row }">
-                  <span :class="['pct', row.return_pct >= 0 ? 'up' : 'down']">{{ row.return_pct >= 0 ? '+' : '' }}{{ (row.return_pct * 100).toFixed(2) }}%</span>
+                  <span :class="['pct', row.return_pct >= 0 ? 'up' : 'down']">{{ fmtPctFromFraction(row.return_pct) }}</span>
                 </template>
               </el-table-column>
               <el-table-column prop="sell_reason" label="卖出原因" width="120" />
@@ -397,14 +397,14 @@
               <el-table-column prop="buy_date" label="买入日期" width="110" />
               <el-table-column prop="sell_date" label="卖出日期" width="110" />
               <el-table-column prop="buy_price" label="买入价" width="90" sortable align="right">
-                <template #default="{ row }">{{ formatNum(row.buy_price) }}</template>
+                <template #default="{ row }">{{ fmtNum(row.buy_price) }}</template>
               </el-table-column>
               <el-table-column prop="sell_price" label="卖出价" width="90" sortable align="right">
-                <template #default="{ row }">{{ formatNum(row.sell_price) }}</template>
+                <template #default="{ row }">{{ fmtNum(row.sell_price) }}</template>
               </el-table-column>
               <el-table-column prop="return_pct" label="收益率" width="110" sortable align="right">
                 <template #default="{ row }">
-                  <span :class="['pct', row.return_pct >= 0 ? 'up' : 'down']">{{ row.return_pct >= 0 ? '+' : '' }}{{ (row.return_pct * 100).toFixed(2) }}%</span>
+                  <span :class="['pct', row.return_pct >= 0 ? 'up' : 'down']">{{ fmtPctFromFraction(row.return_pct) }}</span>
                 </template>
               </el-table-column>
               <el-table-column prop="sell_reason" label="卖出原因" width="120" />
@@ -438,6 +438,7 @@ import VChart from 'vue-echarts'
 import { screeningApi, type RetailScanReq, type RetailBacktestReq, type RetailScanResp, type RetailBacktestResp } from '@/api/screening'
 import { favoritesApi } from '@/api/favorites'
 import RetailBuyDialog from './components/RetailBuyDialog.vue'
+import { fmtPct, fmtPctFromFraction, fmtNum } from '@/utils/format'
 
 echartsUse([RadarChart, LineChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent, CanvasRenderer])
 
@@ -640,7 +641,7 @@ const doBacktest = async () => {
     backtestResult.value = resp
     saveBacktestResult()
     if (resp.total_trades > 0) {
-      ElMessage.success(`回测完成，共 ${resp.total_trades} 笔交易，胜率 ${(resp.win_rate * 100).toFixed(2)}%`)
+      ElMessage.success(`回测完成，共 ${resp.total_trades} 笔交易，胜率 ${fmtPctFromFraction(resp.win_rate)}`)
     } else {
       ElMessage.warning('回测完成，但未产生交易，请调整参数或日期范围')
     }
@@ -707,8 +708,6 @@ const getRiskLabel = (riskInfo: any) => {
   const names = riskInfo.risks.map((r: any) => r.risk_name.replace('风险', ''))
   return names.join('/')
 }
-
-const formatNum = (n: any) => (typeof n === 'number' ? n.toFixed(2) : '-')
 
 const scoreDimMax: Record<string, number> = {
   '连续下跌': 30,

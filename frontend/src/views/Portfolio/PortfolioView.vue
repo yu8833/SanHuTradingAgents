@@ -35,7 +35,7 @@
           </div>
           <div class="summary-body">
             <div class="stat-label">总成本</div>
-            <div class="stat-value">¥{{ formatNum(summary?.total_cost) }}</div>
+            <div class="stat-value">¥{{ fmtNum(summary?.total_cost) }}</div>
           </div>
         </div>
       </el-col>
@@ -46,7 +46,7 @@
           </div>
           <div class="summary-body">
             <div class="stat-label">总市值</div>
-            <div class="stat-value">¥{{ formatNum(summary?.total_market_value) }}</div>
+            <div class="stat-value">¥{{ fmtNum(summary?.total_market_value) }}</div>
           </div>
         </div>
       </el-col>
@@ -58,8 +58,8 @@
           <div class="summary-body">
             <div class="stat-label">浮动盈亏</div>
             <div class="stat-value" :class="{ up: (summary?.total_profit_loss || 0) >= 0, down: (summary?.total_profit_loss || 0) < 0 }">
-              {{ (summary?.total_profit_loss || 0) >= 0 ? '+' : '' }}¥{{ formatNum(summary?.total_profit_loss) }}
-              <span class="stat-pct">({{ formatPct(summary?.profit_loss_rate) }})</span>
+              {{ (summary?.total_profit_loss || 0) >= 0 ? '+' : '' }}¥{{ fmtNum(summary?.total_profit_loss) }}
+              <span class="stat-pct">({{ fmtPct(summary?.profit_loss_rate) }})</span>
             </div>
           </div>
         </div>
@@ -107,32 +107,32 @@
         </el-table-column>
         <el-table-column label="数量" width="90" prop="quantity" align="right" />
         <el-table-column label="成本价" width="90" align="right">
-          <template #default="{ row }">{{ formatNum(row.cost_price) }}</template>
+          <template #default="{ row }">{{ fmtNum(row.cost_price) }}</template>
         </el-table-column>
         <el-table-column label="现价" width="90" align="right">
-          <template #default="{ row }">{{ row.current_price != null ? formatNum(row.current_price) : '-' }}</template>
+          <template #default="{ row }">{{ row.current_price != null ? fmtNum(row.current_price) : '-' }}</template>
         </el-table-column>
         <el-table-column label="市值" width="100" align="right">
-          <template #default="{ row }">{{ row.market_value != null ? '¥' + formatNum(row.market_value) : '-' }}</template>
+          <template #default="{ row }">{{ row.market_value != null ? '¥' + fmtNum(row.market_value) : '-' }}</template>
         </el-table-column>
         <el-table-column label="盈亏" width="120" align="right">
           <template #default="{ row }">
             <span v-if="row.profit_loss != null" :class="{ up: row.profit_loss >= 0, down: row.profit_loss < 0 }">
-              {{ row.profit_loss >= 0 ? '+' : '' }}¥{{ formatNum(row.profit_loss) }}
-              <span class="stat-pct">({{ formatPct(row.profit_loss_rate) }})</span>
+              {{ row.profit_loss >= 0 ? '+' : '' }}¥{{ fmtNum(row.profit_loss) }}
+              <span class="stat-pct">({{ fmtPct(row.profit_loss_rate) }})</span>
             </span>
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
         <el-table-column label="止损价" width="90" align="right">
           <template #default="{ row }">
-            <span v-if="row.stop_loss_price" class="cell-down">{{ formatNum(row.stop_loss_price) }}</span>
+            <span v-if="row.stop_loss_price" class="cell-down">{{ fmtNum(row.stop_loss_price) }}</span>
             <span v-else class="text-muted">未设置</span>
           </template>
         </el-table-column>
         <el-table-column label="止盈价" width="90" align="right">
           <template #default="{ row }">
-            <span v-if="row.take_profit_price" class="cell-up">{{ formatNum(row.take_profit_price) }}</span>
+            <span v-if="row.take_profit_price" class="cell-up">{{ fmtNum(row.take_profit_price) }}</span>
             <span v-else class="text-muted">未设置</span>
           </template>
         </el-table-column>
@@ -277,7 +277,7 @@
           <el-descriptions-item label="策略">{{ strategyLabel(reviewTarget.strategy || 'default') }}</el-descriptions-item>
           <el-descriptions-item label="盈亏">
             <span :class="{ up: (reviewTarget.realized_pnl || 0) >= 0, down: (reviewTarget.realized_pnl || 0) < 0 }">
-              {{ (reviewTarget.realized_pnl || 0) >= 0 ? '+' : '' }}¥{{ formatNum(reviewTarget.realized_pnl) }}
+              {{ (reviewTarget.realized_pnl || 0) >= 0 ? '+' : '' }}¥{{ fmtNum(reviewTarget.realized_pnl) }}
             </span>
           </el-descriptions-item>
           <el-descriptions-item label="买入">{{ reviewTarget.buy_date || '-' }}</el-descriptions-item>
@@ -308,6 +308,7 @@ import { Wallet, Money, TrendCharts, Odometer, Refresh, Plus, Upload } from '@el
 import { portfolioApi, type PositionItem, type PositionSummary, type AddPositionPayload, type UpdatePositionPayload, type ClosedTrade } from '@/api/portfolio'
 import { vibeApi } from '@/api/vibe'
 import { getStrategyNameMap, strategyNameSync } from '@/utils/strategyName'
+import { fmtNum, fmtPct } from '@/utils/format'
 
 defineOptions({ name: 'PortfolioView' })
 
@@ -463,10 +464,7 @@ const confirmClose = async () => {
   }
 }
 
-// 工具函数
-const formatNum = (n: any) => (typeof n === 'number' ? n.toFixed(2) : '0.00')
-const formatPct = (n: any) => (typeof n === 'number' ? n.toFixed(2) + '%' : '0.00%')
-
+// 工具函数（数值/百分比展示统一走 utils/format）
 const strategyNames = ref<Record<string, string>>({})
 const strategyLabel = (s: string) => {
   return strategyNames.value[s] || strategyNameSync(s) || s
@@ -562,14 +560,14 @@ const reviewSaving = ref(false)
 const openReviewDialog = (row: ClosedTrade) => {
   reviewTarget.value = row
   // 预填复盘模板
-  const pnl = row.realized_pnl != null ? `¥${formatNum(row.realized_pnl)}` : '未知'
+  const pnl = row.realized_pnl != null ? `¥${fmtNum(row.realized_pnl)}` : '未知'
   const pnlSign = (row.realized_pnl || 0) >= 0 ? '盈利' : '亏损'
   reviewContent.value = [
     '## 买入逻辑回顾',
     row.thesis ? `原投资逻辑：${row.thesis}` : '（未记录买入逻辑）',
     '',
     '## 实际走势',
-    `买入价 ${formatNum(row.avg_cost)}，平仓价 ${row.exit_price != null ? formatNum(row.exit_price) : '-'}，${pnlSign} ${pnl}`,
+    `买入价 ${fmtNum(row.avg_cost)}，平仓价 ${row.exit_price != null ? fmtNum(row.exit_price) : '-'}，${pnlSign} ${pnl}`,
     '',
     '## 失误总结',
     '（哪些判断错了？哪些信号被忽略了？）',
@@ -763,8 +761,8 @@ const getExitReasonTagType = (r?: string | null) => {
   }
 
   .summary-row :deep(.el-col) {
-    flex: 0 0 50% !important;
-    max-width: 50% !important;
+    flex: 0 0 50%;
+    max-width: 50%;
     margin-bottom: 12px;
   }
 
@@ -785,8 +783,8 @@ const getExitReasonTagType = (r?: string | null) => {
 
 @media (max-width: 480px) {
   .summary-row :deep(.el-col) {
-    flex: 0 0 100% !important;
-    max-width: 100% !important;
+    flex: 0 0 100%;
+    max-width: 100%;
   }
 }
 

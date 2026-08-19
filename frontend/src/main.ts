@@ -1,11 +1,33 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
-import ElementPlus from 'element-plus'
-import * as ElementPlusIconsVue from '@element-plus/icons-vue'
-import 'element-plus/dist/index.css'
+import {
+  Aim, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Back,
+  Bell, Bottom, Brush, Calendar, Check, CircleCheck,
+  CircleCheckFilled, CircleClose, CircleCloseFilled, Clock, Close, Coin,
+  Collection, Connection, Cpu, CreditCard, Crop, DArrowRight,
+  DataAnalysis, DataBoard, DataLine, Delete, Document, Download,
+  EditPen, Expand, Files, Fold, FullScreen, Grid,
+  Histogram, HomeFilled, House, InfoFilled, Key, Lightning,
+  Link, List, Loading, Lock, MagicStick, Message,
+  Minus, Money, Monitor, Moon, Odometer, OfficeBuilding,
+  Operation, Opportunity, Plus, PriceTag, Promotion, QuestionFilled,
+  Rank, Reading, Refresh, RefreshRight, Remove, Right,
+  Search, Select, Sell, Setting, ShoppingCart, Sort,
+  Star, SuccessFilled, Sunny, SwitchButton, Timer, Tools,
+  TrendCharts, Upload, User, UserFilled, View, Wallet,
+  Warning, WarningFilled,
+} from '@element-plus/icons-vue'
+// 按需引入：模板组件由 unplugin-vue-components 自动注入样式，
+// 此处仅显式补上「命令式 API」所需的浮层样式（ElMessage/ElMessageBox 等在 JS 中手动调用，
+// 无法被模板按需扫描覆盖），从而可以移除全量 element-plus/dist/index.css，大幅减小包体。
 import 'element-plus/theme-chalk/dark/css-vars.css'
+import 'element-plus/es/components/message/style/css'
+import 'element-plus/es/components/message-box/style/css'
+import 'element-plus/es/components/notification/style/css'
+import 'element-plus/es/components/loading/style/css'
+import 'element-plus/es/components/popper/style/css'
+import 'element-plus/es/components/overlay/style/css'
 
-import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import dayjs from 'dayjs'
 import 'dayjs/locale/zh-cn'
 
@@ -20,8 +42,26 @@ import './styles/dark-theme.scss'
 // 创建应用实例
 const app = createApp(App)
 
-// 注册Element Plus图标
-for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
+// 注册 Element Plus 图标（仅注册模板中实际用到的 86 个，避免全量 293 个进包）
+// 白名单由 scripts/extract-icons.mjs 扫描 src 模板自动生成
+const icons = {
+  Aim, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Back,
+  Bell, Bottom, Brush, Calendar, Check, CircleCheck,
+  CircleCheckFilled, CircleClose, CircleCloseFilled, Clock, Close, Coin,
+  Collection, Connection, Cpu, CreditCard, Crop, DArrowRight,
+  DataAnalysis, DataBoard, DataLine, Delete, Document, Download,
+  EditPen, Expand, Files, Fold, FullScreen, Grid,
+  Histogram, HomeFilled, House, InfoFilled, Key, Lightning,
+  Link, List, Loading, Lock, MagicStick, Message,
+  Minus, Money, Monitor, Moon, Odometer, OfficeBuilding,
+  Operation, Opportunity, Plus, PriceTag, Promotion, QuestionFilled,
+  Rank, Reading, Refresh, RefreshRight, Remove, Right,
+  Search, Select, Sell, Setting, ShoppingCart, Sort,
+  Star, SuccessFilled, Sunny, SwitchButton, Timer, Tools,
+  TrendCharts, Upload, User, UserFilled, View, Wallet,
+  Warning, WarningFilled,
+}
+for (const [key, component] of Object.entries(icons)) {
   app.component(key, component)
 }
 
@@ -31,17 +71,6 @@ app.use(pinia)
 app.use(router)
 // 设置全局中文 locale（Element Plus）
 dayjs.locale('zh-cn')
-app.use(ElementPlus, {
-  size: 'default',
-  zIndex: 3000,
-  locale: zhCn,
-  // 配置消息提示
-  message: {
-    max: 3, // 最多同时显示3个消息
-    grouping: true, // 启用消息分组，相同内容的消息不会重复显示
-    duration: 3000, // 默认显示时长3秒
-  },
-})
 
 // 注册全局组件
 setupGlobalComponents(app)

@@ -124,12 +124,12 @@
                 <el-descriptions-item label="总交易次数">{{ perfData.overall.total_trades }}</el-descriptions-item>
                 <el-descriptions-item label="总体胜率">
                   <span :style="{color: perfData.overall.win_rate >= 0.5 ? 'var(--app-up)' : 'var(--app-down)', fontWeight:'bold'}">
-                    {{ (perfData.overall.win_rate * 100).toFixed(1) }}%
+                    {{ fmtPctFromFraction(perfData.overall.win_rate, 1) }}
                   </span>
                 </el-descriptions-item>
-                <el-descriptions-item label="盈亏比">{{ perfData.overall.profit_loss_ratio.toFixed(2) }}</el-descriptions-item>
-                <el-descriptions-item label="平均盈利">{{ (perfData.overall.avg_win * 100).toFixed(2) }}%</el-descriptions-item>
-                <el-descriptions-item label="平均亏损">{{ (perfData.overall.avg_loss * 100).toFixed(2) }}%</el-descriptions-item>
+                <el-descriptions-item label="盈亏比">{{ fmtNum(perfData.overall.profit_loss_ratio) }}</el-descriptions-item>
+                <el-descriptions-item label="平均盈利">{{ fmtPctFromFraction(perfData.overall.avg_win) }}</el-descriptions-item>
+                <el-descriptions-item label="平均亏损">{{ fmtPctFromFraction(perfData.overall.avg_loss) }}</el-descriptions-item>
               </el-descriptions>
 
               <el-table :data="perfTableData" size="small" class="app-table app-table--compact">
@@ -140,24 +140,24 @@
                 <el-table-column label="胜率" width="100" sortable align="right">
                   <template #default="{ row }">
                     <span :style="{color: row.win_rate >= 0.5 ? 'var(--app-up)' : 'var(--app-down)', fontWeight:'bold'}">
-                      {{ (row.win_rate * 100).toFixed(1) }}%
+                      {{ fmtPctFromFraction(row.win_rate, 1) }}
                     </span>
                   </template>
                 </el-table-column>
                 <el-table-column label="盈亏比" width="100" sortable align="right">
-                  <template #default="{ row }">{{ row.profit_loss_ratio.toFixed(2) }}</template>
+                  <template #default="{ row }">{{ fmtNum(row.profit_loss_ratio) }}</template>
                 </el-table-column>
                 <el-table-column label="平均收益" width="120" sortable align="right">
                   <template #default="{ row }">
                     <span :style="{color: row.avg_return >= 0 ? 'var(--app-up)' : 'var(--app-down)'}">
-                      {{ (row.avg_return * 100).toFixed(2) }}%
+                      {{ fmtPctFromFraction(row.avg_return) }}
                     </span>
                   </template>
                 </el-table-column>
                 <el-table-column label="建议胜率参数" width="130">
                   <template #default="{ row }">
                     <el-tag size="small" :type="row.total_trades >= 5 ? 'success' : 'info'">
-                      {{ (perfData.suggested_params[row.strategy].win_rate * 100).toFixed(0) }}%
+                      {{ fmtPctFromFraction(perfData.suggested_params[row.strategy].win_rate, 0) }}
                     </el-tag>
                     <span v-if="row.total_trades < 5" style="font-size:11px;color:#909399;margin-left:4px;">(默认)</span>
                   </template>
@@ -165,7 +165,7 @@
                 <el-table-column label="建议盈亏比参数" width="130">
                   <template #default="{ row }">
                     <el-tag size="small" :type="row.total_trades >= 5 ? 'success' : 'info'">
-                      {{ perfData.suggested_params[row.strategy].profit_loss_ratio.toFixed(1) }}
+                      {{ fmtNum(perfData.suggested_params[row.strategy].profit_loss_ratio, 1) }}
                     </el-tag>
                     <span v-if="row.total_trades < 5" style="font-size:11px;color:#909399;margin-left:4px;">(默认)</span>
                   </template>
@@ -206,9 +206,9 @@
                       <div class="info-row"><span class="info-label">盈利条件：</span>{{ info.win_condition }}</div>
                       <el-divider content-position="left" style="margin: 12px 0;">风控参数</el-divider>
                       <div class="risk-params" v-if="riskParams[key]">
-                        <el-tag type="warning" size="small">单只≤{{ (riskParams[key].max_single_position * 100).toFixed(0) }}%</el-tag>
-                        <el-tag type="warning" size="small">总仓≤{{ (riskParams[key].max_total_position * 100).toFixed(0) }}%</el-tag>
-                        <el-tag type="danger" size="small">止损≤{{ (riskParams[key].max_single_loss * 100).toFixed(0) }}%</el-tag>
+                        <el-tag type="warning" size="small">单只≤{{ fmtPctFromFraction(riskParams[key].max_single_position, 0) }}</el-tag>
+                        <el-tag type="warning" size="small">总仓≤{{ fmtPctFromFraction(riskParams[key].max_total_position, 0) }}</el-tag>
+                        <el-tag type="danger" size="small">止损≤{{ fmtPctFromFraction(riskParams[key].max_single_loss, 0) }}</el-tag>
                       </div>
                     </div>
                   </el-card>
@@ -272,7 +272,7 @@
               </el-col>
               <el-col :span="6">
                 <el-form-item label="历史胜率">
-                  <el-slider v-model="posForm.win_rate" :min="0" :max="1" :step="0.01" show-input :format-tooltip="v => (v*100).toFixed(0)+'%'" />
+                  <el-slider v-model="posForm.win_rate" :min="0" :max="1" :step="0.01" show-input :format-tooltip="v => fmtPctFromFraction(v, 0)" />
                 </el-form-item>
               </el-col>
               <el-col :span="6">
@@ -323,14 +323,14 @@
             <el-result
               :icon="posAdvice.blocked ? 'error' : 'success'"
               :title="posAdvice.blocked ? '买入被风控阻断' : `建议买入 ${posAdvice.suggested_shares} 股`"
-              :sub-title="posAdvice.blocked ? posAdvice.block_reasons.join('；') : `建议金额 ${posAdvice.suggested_amount.toLocaleString()} 元，目标仓位 ${(posAdvice.target_position_ratio*100).toFixed(1)}%`"
+              :sub-title="posAdvice.blocked ? posAdvice.block_reasons.join('；') : `建议金额 ${posAdvice.suggested_amount.toLocaleString()} 元，目标仓位 ${fmtPctFromFraction(posAdvice.target_position_ratio, 1)}`"
             />
             <div v-if="!posAdvice.blocked" class="advice-details">
               <el-descriptions :column="2" border size="small">
                 <el-descriptions-item label="建议股数">{{ posAdvice.suggested_shares }} 股</el-descriptions-item>
                 <el-descriptions-item label="建议金额">{{ posAdvice.suggested_amount.toLocaleString() }} 元</el-descriptions-item>
-                <el-descriptions-item label="目标仓位">{{ (posAdvice.target_position_ratio*100).toFixed(2) }}%</el-descriptions-item>
-                <el-descriptions-item label="买入后总仓位">{{ (posAdvice.total_position_ratio_after*100).toFixed(2) }}%</el-descriptions-item>
+                <el-descriptions-item label="目标仓位">{{ fmtPctFromFraction(posAdvice.target_position_ratio) }}</el-descriptions-item>
+                <el-descriptions-item label="买入后总仓位">{{ fmtPctFromFraction(posAdvice.total_position_ratio_after) }}</el-descriptions-item>
               </el-descriptions>
             </div>
             <div v-if="posAdvice.warnings && posAdvice.warnings.length" class="advice-warnings">
@@ -426,13 +426,13 @@
             <el-table-column label="当前盈亏" width="100" align="right" sortable>
               <template #default="{ row }">
                 <span :style="{color: row.current_pnl_pct >= 0 ? 'var(--app-up)' : 'var(--app-down)', fontWeight:'bold'}">
-                  {{ (row.current_pnl_pct * 100).toFixed(2) }}%
+                  {{ fmtPctFromFraction(row.current_pnl_pct) }}
                 </span>
               </template>
             </el-table-column>
             <el-table-column label="持仓天数" prop="holding_days" width="90" align="right" sortable />
             <el-table-column label="建议卖出比例" width="120" align="right" sortable>
-              <template #default="{ row }">{{ (row.suggested_sell_ratio * 100).toFixed(0) }}%</template>
+              <template #default="{ row }">{{ fmtPctFromFraction(row.suggested_sell_ratio, 0) }}</template>
             </el-table-column>
             <el-table-column label="详情" prop="detail" min-width="200" />
           </el-table>
@@ -562,13 +562,13 @@
           <template v-if="regimeRawData">
             <el-divider content-position="left">自动采集的原始市场数据</el-divider>
             <el-descriptions :column="4" border size="small">
-              <el-descriptions-item label="沪深300价格">{{ regimeRawData.index_price.toFixed(2) }}</el-descriptions-item>
-              <el-descriptions-item label="沪深300 MA250">{{ regimeRawData.index_ma250.toFixed(2) }}</el-descriptions-item>
-              <el-descriptions-item label="波动率分位">{{ (regimeRawData.volatility_percentile * 100).toFixed(1) }}%</el-descriptions-item>
-              <el-descriptions-item label="市场宽度">{{ (regimeRawData.breadth_ratio * 100).toFixed(1) }}%</el-descriptions-item>
-              <el-descriptions-item label="融资余额5日变化">{{ (regimeRawData.margin_balance_change_pct * 100).toFixed(2) }}%</el-descriptions-item>
-              <el-descriptions-item label="全市场换手率">{{ regimeRawData.turnover_ratio.toFixed(2) }}%</el-descriptions-item>
-              <el-descriptions-item label="换手率MA20">{{ regimeRawData.turnover_ma20.toFixed(2) }}%</el-descriptions-item>
+              <el-descriptions-item label="沪深300价格">{{ fmtNum(regimeRawData.index_price) }}</el-descriptions-item>
+              <el-descriptions-item label="沪深300 MA250">{{ fmtNum(regimeRawData.index_ma250) }}</el-descriptions-item>
+              <el-descriptions-item label="波动率分位">{{ fmtPctFromFraction(regimeRawData.volatility_percentile, 1) }}</el-descriptions-item>
+              <el-descriptions-item label="市场宽度">{{ fmtPctFromFraction(regimeRawData.breadth_ratio, 1) }}</el-descriptions-item>
+              <el-descriptions-item label="融资余额5日变化">{{ fmtPctFromFraction(regimeRawData.margin_balance_change_pct) }}</el-descriptions-item>
+              <el-descriptions-item label="全市场换手率">{{ fmtPct(regimeRawData.turnover_ratio) }}</el-descriptions-item>
+              <el-descriptions-item label="换手率MA20">{{ fmtPct(regimeRawData.turnover_ma20) }}</el-descriptions-item>
               <el-descriptions-item label="指数vs MA250">
                 <span :style="{color: regimeRawData.index_price >= regimeRawData.index_ma250 ? 'var(--app-up)' : 'var(--app-down)', fontWeight:'bold'}">
                   {{ regimeRawData.index_price >= regimeRawData.index_ma250 ? '在MA250上方（多头）' : '在MA250下方（空头）' }}
@@ -593,6 +593,7 @@ import {
 } from '@element-plus/icons-vue'
 import { retailApi, type PositionAdvice, type ExitResp, type MarketRegime, type RegimeRawData, type StrategiesResp, type StrategiesPerformanceResp, type StrategyPerformance } from '@/api/retail'
 import { paperApi } from '@/api/paper'
+import { fmtNum, fmtPct, fmtPctFromFraction } from '@/utils/format'
 
 const router = useRouter()
 

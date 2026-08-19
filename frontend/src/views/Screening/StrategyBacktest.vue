@@ -123,7 +123,7 @@
                 </div>
                 <div class="meta-item">
                   <span class="meta-label">费率 / 滑点</span>
-                  <span class="meta-value">{{ (strategyResult.config?.fees_pct * 100).toFixed(2) }}% / {{ strategyResult.config?.slippage_bps }}bp</span>
+                  <span class="meta-value">{{ fmtPctFromFraction(strategyResult.config?.fees_pct) }} / {{ strategyResult.config?.slippage_bps }}bp</span>
                 </div>
                 <div class="meta-item">
                   <span class="meta-label">回测耗时</span>
@@ -166,7 +166,7 @@
               <el-table-column prop="exit_price" label="卖出价" width="95" align="right" sortable />
               <el-table-column prop="pnl_pct" label="收益率" width="95" align="right" sortable>
                 <template #default="{ row }">
-                  <span :class="row.pnl_pct >= 0 ? 'text-red' : 'text-green'">{{ (row.pnl_pct * 100).toFixed(2) }}%</span>
+                  <span :class="row.pnl_pct >= 0 ? 'text-red' : 'text-green'">{{ fmtPctFromFraction(row.pnl_pct) }}</span>
                 </template>
               </el-table-column>
               <el-table-column prop="duration" label="持有(天)" width="90" align="right" sortable />
@@ -226,10 +226,10 @@
             <el-table :data="factorResult.group_returns" size="small" stripe class="app-table app-table--compact">
               <el-table-column prop="group" label="分组" width="120" />
               <el-table-column prop="avg_return" label="平均收益" align="right">
-                <template #default="{ row }"><span :class="row.avg_return >= 0 ? 'text-red' : 'text-green'">{{ (row.avg_return * 100).toFixed(2) }}%</span></template>
+                <template #default="{ row }"><span :class="row.avg_return >= 0 ? 'text-red' : 'text-green'">{{ fmtPctFromFraction(row.avg_return) }}</span></template>
               </el-table-column>
               <el-table-column prop="cum_return" label="累计收益" align="right">
-                <template #default="{ row }"><span :class="row.cum_return >= 0 ? 'text-red' : 'text-green'">{{ (row.cum_return * 100).toFixed(2) }}%</span></template>
+                <template #default="{ row }"><span :class="row.cum_return >= 0 ? 'text-red' : 'text-green'">{{ fmtPctFromFraction(row.cum_return) }}</span></template>
               </el-table-column>
               <el-table-column prop="n_days" label="样本天数" align="right" />
             </el-table>
@@ -284,17 +284,17 @@
                 </template>
               </el-table-column>
               <el-table-column prop="value" label="目标值" align="right" width="120">
-                <template #default="{ row }"><span class="text-red">{{ Number(row.value).toFixed(4) }}</span></template>
+                <template #default="{ row }"><span class="text-red">{{ fmtNum(row.value, 4) }}</span></template>
               </el-table-column>
               <el-table-column prop="stats.total_return" label="总收益" align="right" width="100">
-                <template #default="{ row }">{{ (row.stats?.total_return * 100).toFixed(2) }}%</template>
+                <template #default="{ row }">{{ fmtPctFromFraction(row.stats?.total_return) }}</template>
               </el-table-column>
               <el-table-column prop="stats.sharpe" label="夏普" align="right" width="90" />
               <el-table-column prop="stats.max_drawdown" label="最大回撤" align="right" width="100">
-                <template #default="{ row }">{{ (row.stats?.max_drawdown * 100).toFixed(2) }}%</template>
+                <template #default="{ row }">{{ fmtPctFromFraction(row.stats?.max_drawdown) }}</template>
               </el-table-column>
               <el-table-column prop="stats.win_rate" label="胜率" align="right" width="90">
-                <template #default="{ row }">{{ (row.stats?.win_rate * 100).toFixed(1) }}%</template>
+                <template #default="{ row }">{{ fmtPctFromFraction(row.stats?.win_rate, 1) }}</template>
               </el-table-column>
               <el-table-column prop="stats.n_trades" label="交易数" align="right" width="90" />
             </el-table>
@@ -340,7 +340,7 @@
           <el-card class="chart-panel" shadow="never">
             <template #header>
               <span class="panel-title">各折样本外表现 · 平均测试收益</span>
-              <el-tag size="small" type="success" style="margin-left: 8px">{{ (wfResult.avg_test_return * 100).toFixed(2) }}%</el-tag>
+              <el-tag size="small" type="success" style="margin-left: 8px">{{ fmtPctFromFraction(wfResult.avg_test_return) }}</el-tag>
             </template>
             <el-table :data="wfResult.folds" size="small" stripe class="app-table app-table--compact">
               <el-table-column type="index" label="#" width="50" />
@@ -358,12 +358,12 @@
               </el-table-column>
               <el-table-column label="测试收益" align="right" width="110">
                 <template #default="{ row }">
-                  <span :class="row.stats?.total_return >= 0 ? 'text-red' : 'text-green'">{{ (row.stats?.total_return * 100).toFixed(2) }}%</span>
+                  <span :class="row.stats?.total_return >= 0 ? 'text-red' : 'text-green'">{{ fmtPctFromFraction(row.stats?.total_return) }}</span>
                 </template>
               </el-table-column>
               <el-table-column prop="stats.sharpe" label="夏普" align="right" width="90" />
               <el-table-column prop="stats.max_drawdown" label="最大回撤" align="right" width="100">
-                <template #default="{ row }">{{ (row.stats?.max_drawdown * 100).toFixed(2) }}%</template>
+                <template #default="{ row }">{{ fmtPctFromFraction(row.stats?.max_drawdown) }}</template>
               </el-table-column>
               <el-table-column prop="stats.n_trades" label="交易数" align="right" width="90" />
             </el-table>
@@ -566,7 +566,7 @@
               <el-table-column prop="sell_price" label="卖出价" width="95" align="right" sortable />
               <el-table-column prop="return_pct" label="收益率" width="95" align="right" sortable>
                 <template #default="{ row }">
-                  <span :class="row.return_pct >= 0 ? 'text-red' : 'text-green'">{{ (row.return_pct).toFixed(2) }}%</span>
+                  <span :class="row.return_pct >= 0 ? 'text-red' : 'text-green'">{{ fmtPct(row.return_pct) }}</span>
                 </template>
               </el-table-column>
               <el-table-column prop="signal_type" label="买点" width="80">
@@ -609,27 +609,27 @@
             </el-table-column>
             <el-table-column prop="stats.total_return" label="总收益" align="right" sortable width="105">
               <template #default="{ row }">
-                <span :class="row.stats.total_return >= 0 ? 'text-red' : 'text-green'">{{ (row.stats.total_return * 100).toFixed(2) }}%</span>
+                <span :class="row.stats.total_return >= 0 ? 'text-red' : 'text-green'">{{ fmtPctFromFraction(row.stats.total_return) }}</span>
               </template>
             </el-table-column>
             <el-table-column prop="stats.annual_return" label="年化收益" align="right" sortable width="105">
               <template #default="{ row }">
-                <span :class="row.stats.annual_return >= 0 ? 'text-red' : 'text-green'">{{ (row.stats.annual_return * 100).toFixed(2) }}%</span>
+                <span :class="row.stats.annual_return >= 0 ? 'text-red' : 'text-green'">{{ fmtPctFromFraction(row.stats.annual_return) }}</span>
               </template>
             </el-table-column>
             <el-table-column prop="stats.max_drawdown" label="最大回撤" align="right" sortable width="105">
               <template #default="{ row }">
-                <span class="text-green">{{ (row.stats.max_drawdown * 100).toFixed(2) }}%</span>
+                <span class="text-green">{{ fmtPctFromFraction(row.stats.max_drawdown) }}</span>
               </template>
             </el-table-column>
             <el-table-column prop="stats.sharpe" label="夏普" align="right" sortable width="90">
-              <template #default="{ row }">{{ (row.stats.sharpe ?? 0).toFixed(2) }}</template>
+              <template #default="{ row }">{{ fmtNum(row.stats.sharpe ?? 0) }}</template>
             </el-table-column>
             <el-table-column prop="stats.win_rate" label="胜率" align="right" sortable width="90">
-              <template #default="{ row }">{{ (row.stats.win_rate * 100).toFixed(1) }}%</template>
+              <template #default="{ row }">{{ fmtPctFromFraction(row.stats.win_rate, 1) }}</template>
             </el-table-column>
             <el-table-column prop="stats.profit_factor" label="盈亏比" align="right" sortable width="90">
-              <template #default="{ row }">{{ row.stats.profit_factor != null ? row.stats.profit_factor.toFixed(2) : '-' }}</template>
+              <template #default="{ row }">{{ fmtNum(row.stats.profit_factor) }}</template>
             </el-table-column>
             <el-table-column prop="stats.n_trades" label="交易次数" align="right" sortable width="90" />
             <el-table-column prop="savedAtText" label="更新于" min-width="150" sortable />
@@ -666,6 +666,7 @@ import { TitleComponent, TooltipComponent, LegendComponent, GridComponent } from
 import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
 import { strategyApi, FACTOR_OPTIONS, type StrategyMeta, type BacktestResult, type BacktestStats, type CompareResultItem, type FactorBacktestResult, type OptimizeResult, type WalkForwardResult, type PipelineBacktestResult } from '@/api/strategy'
+import { fmtNum, fmtPct, fmtPctFromFraction } from '@/utils/format'
 
 echartsUse([LineChart, BarChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent, CanvasRenderer])
 
@@ -679,16 +680,15 @@ const StatCards = defineComponent({
   },
   setup(props) {
     const s = props.stats || {}
-    const pct = (v: number) => (v != null ? `${(v * 100).toFixed(2)}%` : '-')
-    // 平均盈利/平均亏损/最佳/最差 为单笔盈亏金额（元），非收益率，不能用 pct 放大成百分比
+    // 平均盈利/平均亏损/最佳/最差 为单笔盈亏金额（元），非收益率，不能用 fmtPctFromFraction 放大成百分比
     const money = (v: number) => (v != null ? `¥${Number(v).toLocaleString('zh-CN', { maximumFractionDigits: 2 })}` : '-')
     const cards = computed(() => [
-      { label: '总收益', value: pct(s.total_return), color: (s.total_return ?? 0) >= 0 ? 'var(--el-color-danger)' : 'var(--el-color-success)' },
-      { label: '年化收益', value: pct(s.annual_return), color: (s.annual_return ?? 0) >= 0 ? 'var(--el-color-danger)' : 'var(--el-color-success)' },
-      { label: '最大回撤', value: pct(s.max_drawdown), color: 'var(--el-color-warning)' },
-      { label: '夏普比率', value: s.sharpe != null ? s.sharpe.toFixed(2) : '-', color: 'var(--el-color-primary)' },
-      { label: '胜率', value: pct(s.win_rate), color: 'var(--el-color-primary)' },
-      { label: '盈亏比', value: s.profit_factor != null ? s.profit_factor.toFixed(2) : '-', color: 'var(--el-color-primary)' },
+      { label: '总收益', value: fmtPctFromFraction(s.total_return), color: (s.total_return ?? 0) >= 0 ? 'var(--el-color-danger)' : 'var(--el-color-success)' },
+      { label: '年化收益', value: fmtPctFromFraction(s.annual_return), color: (s.annual_return ?? 0) >= 0 ? 'var(--el-color-danger)' : 'var(--el-color-success)' },
+      { label: '最大回撤', value: fmtPctFromFraction(s.max_drawdown), color: 'var(--el-color-warning)' },
+      { label: '夏普比率', value: fmtNum(s.sharpe), color: 'var(--el-color-primary)' },
+      { label: '胜率', value: fmtPctFromFraction(s.win_rate), color: 'var(--el-color-primary)' },
+      { label: '盈亏比', value: fmtNum(s.profit_factor), color: 'var(--el-color-primary)' },
       { label: '交易次数', value: String(s.n_trades ?? 0), color: 'var(--el-color-primary)' },
       { label: '平均盈利', value: money(s.avg_win), color: 'var(--el-color-danger)' },
       { label: '平均亏损', value: money(s.avg_loss), color: 'var(--el-color-success)' },

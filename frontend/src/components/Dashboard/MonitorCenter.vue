@@ -145,8 +145,8 @@
                 <div :class="['tbs-dir', o.direction]">{{ o.direction === 'buy' ? '买' : '卖' }}</div>
                 <div class="tbs-main">
                   <div class="tbs-top">
-                    <span class="tbs-symbol">{{ o.symbol }}</span>
-                    <span class="tbs-name">{{ o.name }}</span>
+                    <router-link :to="`/stocks/${o.symbol}`" class="tbs-symbol">{{ o.symbol }}</router-link>
+                    <router-link :to="`/stocks/${o.symbol}`" class="tbs-name">{{ o.name }}</router-link>
                     <el-tag size="small" :type="o.direction === 'buy' ? 'danger' : 'success'" effect="dark">
                       {{ o.signal_label }}
                     </el-tag>
@@ -308,13 +308,15 @@
                 <div :class="['alert-severity-bar', alert.severity || 'info']" />
                 <div class="alert-main">
                   <div class="alert-top">
-                    <span class="alert-symbol">{{ alert.symbol || '—' }}</span>
-                    <span v-if="alert.name" class="alert-name">{{ alert.name }}</span>
+                    <router-link v-if="alert.symbol" :to="`/stocks/${alert.symbol}`" class="alert-symbol">{{ alert.symbol }}</router-link>
+                    <span v-else class="alert-symbol">{{ alert.symbol || '—' }}</span>
+                    <router-link v-if="alert.name && alert.symbol" :to="`/stocks/${alert.symbol}`" class="alert-name">{{ alert.name }}</router-link>
+                    <span v-else class="alert-name">{{ alert.name }}</span>
                     <span v-if="alert.price != null" class="alert-price" :class="(alert.change_pct ?? 0) >= 0 ? 'up' : 'down'">
-                      {{ alert.price }}
+                      {{ fmtPrice(alert.price) }}
                     </span>
                     <span v-if="alert.change_pct != null" class="alert-pct" :class="alert.change_pct >= 0 ? 'up' : 'down'">
-                      {{ alert.change_pct >= 0 ? '+' : '' }}{{ alert.change_pct.toFixed(2) }}%
+                      {{ fmtPct(alert.change_pct) }}
                     </span>
                     <el-tag size="small" :type="severityTag(alert.severity)" effect="plain">
                       {{ sourceLabel(alert.source || alert.rule_type) }}
@@ -468,12 +470,12 @@
     <el-dialog v-model="pendingVisible" title="待确认指令" width="680px" top="8vh">
       <div v-if="pendingOrders.length === 0" class="pending-empty">暂无待处理指令</div>
       <div v-else class="pending-list">
-        <div v-for="o in pendingOrders" :key="o.id" class="pending-item">
+            <div v-for="o in pendingOrders" :key="o.id" class="pending-item">
           <div :class="['p-dir', o.direction]">{{ o.direction === 'buy' ? '买入' : '卖出' }}</div>
           <div class="p-main">
             <div class="p-top">
-              <span class="p-symbol">{{ o.symbol }}</span>
-              <span class="p-name">{{ o.name }}</span>
+              <router-link :to="`/stocks/${o.symbol}`" class="p-symbol">{{ o.symbol }}</router-link>
+              <router-link :to="`/stocks/${o.symbol}`" class="p-name">{{ o.name }}</router-link>
               <el-tag size="small" :type="o.direction === 'buy' ? 'danger' : 'success'" effect="dark">{{ o.signal_label }}</el-tag>
               <el-tag size="small" effect="plain" type="info">{{ o.rule_name }}</el-tag>
             </div>
@@ -533,6 +535,7 @@ import {
 import { paperApi } from '@/api/paper'
 import { favoritesApi } from '@/api/favorites'
 import { strategyApi } from '@/api/strategy'
+import { fmtPct, fmtPrice } from '@/utils/format'
 
 // ── 状态 ────────────────────────────────────────────────
 const checking = ref(false)
@@ -1095,8 +1098,10 @@ onBeforeUnmount(() => { stopPolling() })
         &.buy { background: var(--el-color-danger); } &.sell { background: var(--el-color-success); } }
       .p-main { flex: 1; min-width: 0;
         .p-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-          .p-symbol { font-family: monospace; font-weight: 600; font-size: 13px; }
-          .p-name { font-size: 12px; color: var(--el-text-color-secondary); } }
+          .p-symbol { font-family: monospace; font-weight: 600; font-size: 13px; color: var(--el-color-primary); text-decoration: none;
+            &:hover { text-decoration: underline; } }
+          .p-name { font-size: 12px; color: var(--el-text-color-secondary); text-decoration: none;
+            &:hover { color: var(--el-color-primary); text-decoration: underline; } } }
         .p-reason { margin-top: 4px; font-size: 12px; color: var(--el-text-color-regular); }
       }
       .p-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
@@ -1154,8 +1159,10 @@ onBeforeUnmount(() => { stopPolling() })
       .alert-severity-bar { width: 3px; border-radius: 2px; flex-shrink: 0; &.info { background: var(--el-color-primary); } &.warn { background: var(--el-color-warning); } &.critical { background: var(--el-color-danger); } }
       .alert-main { flex: 1; min-width: 0;
         .alert-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-          .alert-symbol { font-family: monospace; font-weight: 600; font-size: 13px; }
-          .alert-name { font-size: 12px; color: var(--el-text-color-secondary); max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .alert-symbol { font-family: monospace; font-weight: 600; font-size: 13px; color: var(--el-color-primary); text-decoration: none;
+            &:hover { text-decoration: underline; } }
+          .alert-name { font-size: 12px; color: var(--el-text-color-secondary); max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: none;
+            &:hover { color: var(--el-color-primary); text-decoration: underline; } }
           .alert-price { font-family: monospace; font-size: 13px; font-weight: 600; &.up { color: var(--el-color-danger); } &.down { color: var(--el-color-success); } }
           .alert-pct { font-family: monospace; font-size: 12px; &.up { color: var(--el-color-danger); } &.down { color: var(--el-color-success); } }
         }
@@ -1177,8 +1184,10 @@ onBeforeUnmount(() => { stopPolling() })
         &.buy { background: var(--el-color-danger); } &.sell { background: var(--el-color-success); } }
       .tbs-main { flex: 1; min-width: 0;
         .tbs-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-          .tbs-symbol { font-family: monospace; font-weight: 600; font-size: 13px; }
-          .tbs-name { font-size: 12px; color: var(--el-text-color-secondary); } }
+          .tbs-symbol { font-family: monospace; font-weight: 600; font-size: 13px; color: var(--el-color-primary); text-decoration: none;
+            &:hover { text-decoration: underline; } }
+          .tbs-name { font-size: 12px; color: var(--el-text-color-secondary); text-decoration: none;
+            &:hover { color: var(--el-color-primary); text-decoration: underline; } } }
         .tbs-meta { margin-top: 4px; display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--el-text-color-secondary); }
         .tbs-reason { margin-top: 4px; font-size: 12px; color: var(--el-text-color-regular); }
         .tbs-result { margin-top: 4px; font-size: 12px; color: var(--el-color-success); }
@@ -1216,14 +1225,48 @@ onBeforeUnmount(() => { stopPolling() })
 
   // ── 移动端适配 ──────────────────────────────────
   @media (max-width: 768px) {
+    .stock-alerts-view {
+      padding: 12px;
+    }
+
+    .page-hero {
+      padding: 16px 14px;
+      margin-bottom: 12px;
+
+      .page-hero-main {
+        gap: 10px;
+      }
+
+      .page-hero-icon {
+        width: 36px;
+        height: 36px;
+      }
+
+      .page-hero-title {
+        font-size: 18px;
+      }
+
+      .page-hero-sub {
+        font-size: 12px;
+        line-height: 1.5;
+      }
+    }
+
     .monitor-toolbar {
       flex-wrap: wrap;
       gap: 8px;
+      padding: 12px;
+
       .monitor-tip {
         margin-left: 0;
         width: 100%;
         order: 3;
         font-size: 11px;
+      }
+
+      .monitor-actions {
+        width: 100%;
+        justify-content: flex-start;
       }
     }
 
@@ -1232,6 +1275,7 @@ onBeforeUnmount(() => { stopPolling() })
 
       .flow-title {
         flex-wrap: wrap;
+        font-size: 13px;
         .flow-sub {
           display: none;
         }
@@ -1247,16 +1291,16 @@ onBeforeUnmount(() => { stopPolling() })
 
       .flow-node {
         flex: 0 0 auto;
-        width: 130px;
-        padding: 10px;
-        gap: 8px;
+        width: 120px;
+        padding: 10px 8px;
+        gap: 6px;
         flex-direction: column;
         text-align: center;
 
         .flow-ico {
-          width: 32px;
-          height: 32px;
-          font-size: 16px;
+          width: 28px;
+          height: 28px;
+          font-size: 14px;
         }
 
         .flow-info {
@@ -1268,11 +1312,11 @@ onBeforeUnmount(() => { stopPolling() })
         }
 
         .flow-num {
-          font-size: 18px;
+          font-size: 16px;
         }
 
         .flow-desc {
-          font-size: 10px;
+          display: none;
         }
       }
 
@@ -1298,7 +1342,29 @@ onBeforeUnmount(() => { stopPolling() })
       }
 
       .strategy-chip-grid {
-        grid-template-columns: 1fr;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+      }
+
+      .strategy-chip {
+        padding: 10px 8px;
+        min-height: 80px;
+
+        .chip-top {
+          font-size: 12px;
+        }
+
+        .chip-num {
+          font-size: 18px;
+        }
+
+        .chip-desc {
+          font-size: 10px;
+        }
+
+        .chip-tag {
+          font-size: 10px;
+        }
       }
     }
 
@@ -1314,15 +1380,26 @@ onBeforeUnmount(() => { stopPolling() })
 
     .monitor-card {
       margin-bottom: 12px;
+      padding: 12px;
 
       .card-header {
         flex-direction: column;
         align-items: stretch;
         gap: 10px;
 
+        .card-title {
+          font-size: 14px;
+        }
+
         .card-actions {
           width: 100%;
           overflow-x: auto;
+          flex-wrap: nowrap;
+          -webkit-overflow-scrolling: touch;
+
+          :deep(.el-radio-group) {
+            flex-wrap: nowrap;
+          }
         }
       }
     }
@@ -1375,12 +1452,93 @@ onBeforeUnmount(() => { stopPolling() })
           width: 100%;
           justify-content: space-between;
         }
+
+        .alert-name {
+          max-width: 80px;
+        }
+      }
+    }
+
+    .pending-list {
+      .pending-item {
+        flex-direction: column;
+        gap: 8px;
+
+        .p-actions {
+          width: 100%;
+          justify-content: flex-end;
+        }
       }
     }
 
     .monitor-stats {
       .stat-item {
         min-width: calc(50% - 6px);
+        padding: 10px 8px;
+
+        .stat-num {
+          font-size: 20px;
+        }
+
+        .stat-label {
+          font-size: 11px;
+        }
+      }
+    }
+
+    .rule-form {
+      .type-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+  }
+
+  @media (max-width: 480px) {
+    .stock-alerts-view {
+      padding: 10px;
+    }
+
+    .page-hero {
+      padding: 14px 12px;
+
+      .page-hero-title {
+        font-size: 16px;
+      }
+
+      .page-hero-sub {
+        font-size: 11px;
+      }
+    }
+
+    .monitor-stats {
+      flex-wrap: wrap;
+      gap: 8px;
+
+      .stat-item {
+        min-width: calc(50% - 4px);
+        padding: 8px 6px;
+
+        .stat-num {
+          font-size: 18px;
+        }
+      }
+    }
+
+    .strategy-chip-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .flow-node {
+      width: 110px;
+    }
+
+    .monitor-card {
+      padding: 10px;
+
+      .card-header {
+        .card-actions {
+          gap: 4px;
+        }
       }
     }
   }

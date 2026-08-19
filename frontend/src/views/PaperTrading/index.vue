@@ -605,8 +605,8 @@ onUnmounted(() => {
     padding: 12px;
   }
   .paper-trading :deep(.el-row) > :deep(.el-col) {
-    flex: 0 0 100% !important;
-    max-width: 100% !important;
+    flex: 0 0 100%;
+    max-width: 100%;
     margin-bottom: 12px;
   }
   

@@ -99,7 +99,7 @@
                   class="change-percent"
                   :class="getPriceChangeClass(stock.change_percent)"
                 >
-                  {{ stock.change_percent > 0 ? '+' : '' }}{{ Number(stock.change_percent).toFixed(2) }}%
+                  {{ fmtPct(stock.change_percent) }}
                 </div>
               </div>
             </div>
@@ -204,6 +204,7 @@ import * as syncApi from '@/api/sync'
 import * as schedulerApi from '@/api/scheduler'
 import { screeningApi } from '@/api/screening'
 import { subscribeQuotesUpdate } from '@/utils/quotesSSE'
+import { fmtPct, fmtMoney } from '@/utils/format'
 
 const router = useRouter()
 
@@ -642,10 +643,8 @@ const getPriceChangeClass = (changePercent: number) => {
   return 'price-neutral'
 }
 
-// 格式化金额
-const formatMoney = (value: number) => {
-  return value.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
-}
+// 格式化金额（千分位，由调用方携带货币符号）
+const formatMoney = (value: number) => fmtMoney(value, '')
 
 const loadFavoriteStocks = async () => {
   try {

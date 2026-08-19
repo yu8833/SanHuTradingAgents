@@ -178,6 +178,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import * as schedulerApi from '@/api/scheduler'
 import { formatDateTime } from '@/utils/datetime'
+import { fmtNum } from '@/utils/format'
 
 // 任务友好名称映射
 const JOB_NAME_MAP: Record<string, string> = {
@@ -438,9 +439,9 @@ function formatTime(t: string): string {
 }
 function formatDuration(seconds: number): string {
   if (seconds == null) return '—'
-  if (seconds < 60) return `${seconds.toFixed(1)}秒`
+  if (seconds < 60) return `${fmtNum(seconds, 1)}秒`
   if (seconds < 3600) return `${Math.floor(seconds / 60)}分${Math.floor(seconds % 60)}秒`
-  return `${(seconds / 3600).toFixed(1)}小时`
+  return `${fmtNum(seconds / 3600, 1)}小时`
 }
 
 // 轮询：运行中有记录时自动刷新

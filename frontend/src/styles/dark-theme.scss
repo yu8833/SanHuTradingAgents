@@ -5,10 +5,14 @@
 
 // 暗色主题下的全局样式优化
 html.dark {
+  // 语义化设计令牌（暗色主题）：浅色文字与页面底色
+  --app-text-inverse: #ffffff;
+  --app-bg-page: #1a1a2e;
+
   // 全局背景设为深灰色（避免纯黑，减少眼睛疲劳）
-  background-color: #1a1a2e !important;
+  background-color: var(--app-bg-page) !important;
   --el-bg-color: #1e1e32;
-  --el-bg-color-page: #1a1a2e;
+  --el-bg-color-page: var(--app-bg-page);
   --el-bg-color-overlay: #252540;
   --el-text-color-primary: #e0e0e6;
   --el-text-color-regular: #b0b0be;
@@ -33,7 +37,7 @@ html.dark {
 
   // 优化标题文字
   h1, h2, h3, h4, h5, h6 {
-    color: #ffffff !important;
+    color: var(--app-text-inverse) !important;
     font-weight: 600 !important;
   }
 
@@ -56,7 +60,7 @@ html.dark {
   // 优化卡片标题
   .el-card__header {
     h1, h2, h3, h4, h5, h6 {
-      color: #ffffff !important;
+      color: var(--app-text-inverse) !important;
       font-weight: 600 !important;
     }
   }
@@ -65,7 +69,7 @@ html.dark {
   .page-title,
   .section-title,
   .card-title {
-    color: #ffffff !important;
+    color: var(--app-text-inverse) !important;
     font-weight: 600 !important;
   }
   
@@ -73,68 +77,68 @@ html.dark {
   .el-button {
     // 主要按钮
     &.el-button--primary {
-      --el-button-text-color: #ffffff;
+      --el-button-text-color: var(--app-text-inverse);
       --el-button-bg-color: var(--el-color-primary);
       --el-button-border-color: var(--el-color-primary);
-      --el-button-hover-text-color: #ffffff;
+      --el-button-hover-text-color: var(--app-text-inverse);
       --el-button-hover-bg-color: var(--el-color-primary-light-3);
       --el-button-hover-border-color: var(--el-color-primary-light-3);
-      --el-button-active-text-color: #ffffff;
+      --el-button-active-text-color: var(--app-text-inverse);
       --el-button-active-bg-color: var(--el-color-primary-dark-2);
       --el-button-active-border-color: var(--el-color-primary-dark-2);
       
-      color: #ffffff !important;
+      color: var(--app-text-inverse) !important;
       
       &:hover {
-        color: #ffffff !important;
+        color: var(--app-text-inverse) !important;
       }
       
       &:active {
-        color: #ffffff !important;
+        color: var(--app-text-inverse) !important;
       }
     }
     
     // 成功按钮
     &.el-button--success {
-      --el-button-text-color: #ffffff;
-      color: #ffffff !important;
+      --el-button-text-color: var(--app-text-inverse);
+      color: var(--app-text-inverse) !important;
       
       &:hover,
       &:active {
-        color: #ffffff !important;
+        color: var(--app-text-inverse) !important;
       }
     }
     
     // 警告按钮
     &.el-button--warning {
-      --el-button-text-color: #ffffff;
-      color: #ffffff !important;
+      --el-button-text-color: var(--app-text-inverse);
+      color: var(--app-text-inverse) !important;
       
       &:hover,
       &:active {
-        color: #ffffff !important;
+        color: var(--app-text-inverse) !important;
       }
     }
     
     // 危险按钮
     &.el-button--danger {
-      --el-button-text-color: #ffffff;
-      color: #ffffff !important;
+      --el-button-text-color: var(--app-text-inverse);
+      color: var(--app-text-inverse) !important;
       
       &:hover,
       &:active {
-        color: #ffffff !important;
+        color: var(--app-text-inverse) !important;
       }
     }
     
     // 信息按钮
     &.el-button--info {
-      --el-button-text-color: #ffffff;
-      color: #ffffff !important;
+      --el-button-text-color: var(--app-text-inverse);
+      color: var(--app-text-inverse) !important;
       
       &:hover,
       &:active {
-        color: #ffffff !important;
+        color: var(--app-text-inverse) !important;
       }
     }
     
@@ -188,7 +192,7 @@ html.dark {
       
       &.is-active {
         .el-radio-button__inner {
-          color: #ffffff !important;
+          color: var(--app-text-inverse) !important;
           background-color: var(--el-color-primary);
           border-color: var(--el-color-primary);
         }
@@ -231,14 +235,14 @@ html.dark {
     .el-card__header {
       background-color: var(--el-bg-color);
       border-bottom-color: var(--el-border-color-light);
-      color: #ffffff !important;
+      color: var(--app-text-inverse) !important;
       font-weight: 600;
 
       // 卡片标题
       h1, h2, h3, h4, h5, h6,
       .card-title,
       .el-card__title {
-        color: #ffffff !important;
+        color: var(--app-text-inverse) !important;
         font-weight: 600 !important;
       }
     }
@@ -380,7 +384,7 @@ html.dark {
 
     .el-dialog__header {
       .el-dialog__title {
-        color: #ffffff !important;
+        color: var(--app-text-inverse) !important;
         font-weight: 600 !important;
         font-size: 18px !important;
       }
@@ -390,7 +394,7 @@ html.dark {
       color: var(--el-text-color-primary);
 
       h1, h2, h3, h4, h5, h6 {
-        color: #ffffff !important;
+        color: var(--app-text-inverse) !important;
         font-weight: 600 !important;
       }
     }
@@ -401,12 +405,12 @@ html.dark {
     background-color: var(--el-bg-color);
 
     .el-drawer__header {
-      color: #ffffff !important;
+      color: var(--app-text-inverse) !important;
       font-weight: 600 !important;
       font-size: 18px !important;
 
       .el-drawer__title {
-        color: #ffffff !important;
+        color: var(--app-text-inverse) !important;
         font-weight: 600 !important;
       }
     }
@@ -415,7 +419,7 @@ html.dark {
       color: var(--el-text-color-primary);
 
       h1, h2, h3, h4, h5, h6 {
-        color: #ffffff !important;
+        color: var(--app-text-inverse) !important;
         font-weight: 600 !important;
       }
     }
@@ -425,7 +429,7 @@ html.dark {
   .el-descriptions {
     .el-descriptions__header {
       .el-descriptions__title {
-        color: #ffffff !important;
+        color: var(--app-text-inverse) !important;
         font-weight: 600 !important;
       }
     }
@@ -444,7 +448,7 @@ html.dark {
     border-color: var(--el-border-color-light);
 
     .el-collapse-item__header {
-      color: #ffffff !important;
+      color: var(--app-text-inverse) !important;
       font-weight: 600 !important;
       background-color: var(--el-fill-color-light);
       border-bottom-color: var(--el-border-color-light);
@@ -479,7 +483,7 @@ html.dark {
     }
 
     .el-timeline-item__title {
-      color: #ffffff !important;
+      color: var(--app-text-inverse) !important;
       font-weight: 600 !important;
     }
 
@@ -491,7 +495,7 @@ html.dark {
   // 优化结果组件
   .el-result {
     .el-result__title {
-      color: #ffffff !important;
+      color: var(--app-text-inverse) !important;
       font-weight: 600 !important;
     }
 
@@ -511,7 +515,7 @@ html.dark {
   .analysis-page {
     .title-section {
       .page-title {
-        color: #ffffff !important;
+        color: var(--app-text-inverse) !important;
       }
 
       .page-description {
@@ -522,13 +526,13 @@ html.dark {
     .analysis-container {
       .form-section {
         .section-title {
-          color: #ffffff !important;
+          color: var(--app-text-inverse) !important;
           border-bottom-color: var(--el-border-color) !important;
         }
       }
 
       .step-title {
-        color: #ffffff !important;
+        color: var(--app-text-inverse) !important;
       }
 
       .step-description {
@@ -537,7 +541,7 @@ html.dark {
 
       .report-title,
       .report-name {
-        color: #ffffff !important;
+        color: var(--app-text-inverse) !important;
       }
 
       .report-description {
@@ -549,7 +553,7 @@ html.dark {
   // 优化设置页面标题
   .settings-page {
     .page-title {
-      color: #ffffff !important;
+      color: var(--app-text-inverse) !important;
     }
 
     .page-description {
@@ -560,11 +564,11 @@ html.dark {
   // 优化仪表盘页面标题
   .dashboard-page {
     .page-title {
-      color: #ffffff !important;
+      color: var(--app-text-inverse) !important;
     }
 
     .section-title {
-      color: #ffffff !important;
+      color: var(--app-text-inverse) !important;
     }
   }
 
@@ -574,7 +578,7 @@ html.dark {
     .page-title,
     .section-title,
     .card-title {
-      color: #ffffff !important;
+      color: var(--app-text-inverse) !important;
       font-weight: 600 !important;
     }
 
@@ -591,7 +595,7 @@ html.dark {
     .page-title,
     .section-title,
     h1, h2, h3, h4, h5, h6 {
-      color: #ffffff !important;
+      color: var(--app-text-inverse) !important;
     }
   }
 
@@ -602,13 +606,13 @@ html.dark {
     .framework-info,
     .contact-card {
       h3, h4 {
-        color: #ffffff !important;
+        color: var(--app-text-inverse) !important;
       }
 
       .tech-name,
       .name,
       p {
-        color: #ffffff !important;
+        color: var(--app-text-inverse) !important;
       }
 
       .tech-desc,
@@ -668,21 +672,21 @@ html.dark {
     .metrics-content {
       .metric-item {
         .metric-label {
-          color: #ffffff !important;
+          color: var(--app-text-inverse) !important;
         }
 
         .recommendation-value {
-          color: #ffffff !important;
+          color: var(--app-text-inverse) !important;
         }
 
         .confidence-label {
-          color: #ffffff !important;
+          color: var(--app-text-inverse) !important;
         }
 
         .confidence-text {
           .confidence-number,
           .confidence-unit {
-            color: #ffffff !important;
+            color: var(--app-text-inverse) !important;
           }
         }
 
@@ -697,11 +701,11 @@ html.dark {
 
       .key-points {
         h4 {
-          color: #ffffff !important;
+          color: var(--app-text-inverse) !important;
         }
 
         li {
-          color: #ffffff !important;
+          color: var(--app-text-inverse) !important;
         }
       }
     }
@@ -716,7 +720,7 @@ html.dark {
       }
 
       .page-title {
-        color: #ffffff !important;
+        color: var(--app-text-inverse) !important;
       }
 
       .page-description {
@@ -734,7 +738,7 @@ html.dark {
       }
 
       .page-title {
-        color: #ffffff !important;
+        color: var(--app-text-inverse) !important;
       }
 
       .page-description {

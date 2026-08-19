@@ -23,10 +23,10 @@
           </div>
           <div v-if="a.price != null || a.change_pct != null" class="alert-price-row">
             <span v-if="a.price != null" class="alert-price" :class="(a.change_pct ?? 0) >= 0 ? 'up' : 'down'">
-              现价 {{ a.price }}
+              现价 {{ fmtPrice(a.price) }}
             </span>
             <span v-if="a.change_pct != null" class="alert-pct" :class="a.change_pct >= 0 ? 'up' : 'down'">
-              {{ a.change_pct >= 0 ? '+' : '' }}{{ a.change_pct.toFixed(2) }}%
+              {{ fmtPct(a.change_pct) }}
             </span>
           </div>
           <div class="alert-message">{{ a.message || '命中监控规则' }}</div>
@@ -87,6 +87,7 @@ import { useWindowSize } from '@vueuse/core'
 import { ElMessage } from 'element-plus'
 import { monitorApi, type MonitorAlert } from '@/api/monitor'
 import { subscribeMonitorOrders, type PendingOrderEvent } from '@/utils/monitorOrdersSSE'
+import { fmtPct, fmtPrice } from '@/utils/format'
 import router from '@/router'
 
 // 响应式：判断是否为移动端

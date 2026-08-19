@@ -121,7 +121,7 @@
 
               <!-- 操作按钮 -->
               <div class="form-section">
-                <div class="action-buttons" style="display: flex; justify-content: center; align-items: center; width: 100%; text-align: center;">
+                <div class="action-buttons">
                   <el-button
                     type="primary"
                     size="large"
@@ -621,7 +621,7 @@ const submitBatchAnalysis = async () => {
             line-height: 1.6;
 
             &:focus {
-              border-color: #2b6cb0;
+              border-color: var(--el-color-primary);
               box-shadow: 0 0 0 3px rgba(43, 108, 176, 0.1);
             }
           }
@@ -695,12 +695,12 @@ const submitBatchAnalysis = async () => {
               }
 
               :deep(.el-checkbox__input.is-checked .el-checkbox__inner) {
-                background-color: #2b6cb0;
-                border-color: #2b6cb0;
+                background-color: var(--el-color-primary);
+                border-color: var(--el-color-primary);
               }
 
               :deep(.el-checkbox__input.is-checked + .el-checkbox__label) {
-                color: #2b6cb0;
+                color: var(--el-color-primary);
               }
 
               .analyst-info {
@@ -724,49 +724,8 @@ const submitBatchAnalysis = async () => {
       }
     }
 
-    .action-section {
-      margin-top: 24px !important;
-      display: flex !important;
-      justify-content: center !important;
-      align-items: center !important;
-      width: 100% !important;
-      text-align: center !important;
-
-      .submit-btn.el-button {
-        width: 320px !important;
-        height: 56px !important;
-        font-size: 18px !important;
-        font-weight: 700 !important;
-        background: linear-gradient(135deg, #2b6cb0 0%, #22568d 100%) !important;
-        border: none !important;
-        border-radius: 16px !important;
-        transition: all 0.3s ease !important;
-        box-shadow: 0 4px 15px rgba(43, 108, 176, 0.2) !important;
-        min-width: 320px !important;
-        max-width: 320px !important;
-
-        &:hover {
-          transform: translateY(-3px) !important;
-          box-shadow: 0 12px 30px rgba(43, 108, 176, 0.4) !important;
-          background: linear-gradient(135deg, #2b6cb0 0%, #22568d 100%) !important;
-        }
-
-        &:disabled {
-          opacity: 0.6 !important;
-          transform: none !important;
-          box-shadow: 0 4px 15px rgba(43, 108, 176, 0.1) !important;
-        }
-
-        .el-icon {
-          margin-right: 8px !important;
-          font-size: 20px !important;
-        }
-
-        span {
-          font-size: 18px !important;
-          font-weight: 700 !important;
-        }
-      }
+    .action-buttons {
+      margin-top: 24px;
     }
   }
 }
@@ -774,47 +733,48 @@ const submitBatchAnalysis = async () => {
 
 <style>
 /* 全局样式确保按钮样式生效 */
-.action-section {
-  display: flex !important;
-  justify-content: center !important;
-  align-items: center !important;
-  width: 100% !important;
-  text-align: center !important;
+.action-buttons {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-top: 24px;
+  width: 100%;
+  text-align: center;
 }
 
 .large-batch-btn.el-button {
-  width: 320px !important;
-  height: 56px !important;
-  font-size: 18px !important;
-  font-weight: 700 !important;
-  background: linear-gradient(135deg, #2b6cb0 0%, #22568d 100%) !important;
-  border: none !important;
-  border-radius: 16px !important;
-  transition: all 0.3s ease !important;
-  box-shadow: 0 4px 15px rgba(43, 108, 176, 0.2) !important;
-  min-width: 320px !important;
-  max-width: 320px !important;
+  width: 320px;
+  height: 56px;
+  font-size: 18px;
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--el-color-primary) 0%, var(--el-color-primary-dark-2) 100%);
+  border: none;
+  border-radius: 16px;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 15px rgba(43, 108, 176, 0.2);
+  min-width: 320px;
+  max-width: 320px;
 }
 
 .large-batch-btn.el-button:hover {
-  transform: translateY(-3px) !important;
-  box-shadow: 0 12px 30px rgba(43, 108, 176, 0.4) !important;
-  background: linear-gradient(135deg, #2b6cb0 0%, #22568d 100%) !important;
+  transform: translateY(-3px);
+  box-shadow: 0 12px 30px rgba(43, 108, 176, 0.4);
+  background: linear-gradient(135deg, var(--el-color-primary) 0%, var(--el-color-primary-dark-2) 100%);
 }
 
 .large-batch-btn.el-button:disabled {
-  opacity: 0.6 !important;
-  transform: none !important;
-  box-shadow: 0 4px 15px rgba(43, 108, 176, 0.1) !important;
+  opacity: 0.6;
+  transform: none;
+  box-shadow: 0 4px 15px rgba(43, 108, 176, 0.1);
 }
 
 .large-batch-btn.el-button .el-icon {
-  margin-right: 8px !important;
-  font-size: 20px !important;
+  margin-right: 8px;
+  font-size: 20px;
 }
 
 .large-batch-btn.el-button span {
-  font-size: 18px !important;
-  font-weight: 700 !important;
+  font-size: 18px;
+  font-weight: 700;
 }
 </style>

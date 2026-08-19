@@ -584,22 +584,22 @@ watch(articleId, (id) => {
 // 暗黑模式样式
 :global(html.dark) {
   .learning-article-wrapper {
-    background: #000000 !important;
+    background: #000000;
     :deep(.el-page-header) {
-      background: #000000 !important;
+      background: #000000;
       border-bottom-color: var(--el-border-color-light);
     }
     :deep(.el-page-header__content),
     :deep(.el-page-header__title) {
-      color: var(--el-text-color-primary) !important;
+      color: var(--el-text-color-primary);
       opacity: 1;
     }
   }
 
   .learning-article {
-    background: #000000 !important;
+    background: #000000;
     .article-container {
-      background: #000000 !important;
+      background: #000000;
       box-shadow: 0 2px 12px rgba(0, 0, 0, 0.6);
 
       .article-meta {
@@ -611,70 +611,70 @@ watch(articleId, (id) => {
       }
 
       .article-content {
-        color: var(--el-text-color-primary) !important;
+        color: var(--el-text-color-primary);
 
         :deep(.article-heading) {
-          color: var(--el-text-color-primary) !important;
+          color: var(--el-text-color-primary);
         }
 
         :deep(h1) {
-          color: var(--el-text-color-primary) !important;
-          border-bottom-color: var(--el-border-color) !important;
-          font-weight: 800 !important;
+          color: var(--el-text-color-primary);
+          border-bottom-color: var(--el-border-color);
+          font-weight: 800;
         }
 
         :deep(h2) {
-          color: var(--el-text-color-primary) !important;
-          border-bottom-color: var(--el-border-color) !important;
-          font-weight: 700 !important;
+          color: var(--el-text-color-primary);
+          border-bottom-color: var(--el-border-color);
+          font-weight: 700;
         }
 
         :deep(h3) {
-          color: var(--el-text-color-primary) !important;
-          font-weight: 700 !important;
+          color: var(--el-text-color-primary);
+          font-weight: 700;
         }
 
         :deep(h4) {
-          color: var(--el-text-color-primary) !important;
-          font-weight: 700 !important;
+          color: var(--el-text-color-primary);
+          font-weight: 700;
         }
 
         :deep(p) {
-          color: var(--el-text-color-primary) !important;
+          color: var(--el-text-color-primary);
         }
 
         :deep(li) {
-          color: var(--el-text-color-primary) !important;
+          color: var(--el-text-color-primary);
         }
 
         :deep(code) {
-          background: var(--el-fill-color-light) !important;
-          color: var(--el-text-color-primary) !important;
+          background: var(--el-fill-color-light);
+          color: var(--el-text-color-primary);
         }
 
         :deep(blockquote) {
-          background: var(--el-fill-color-light) !important;
-          color: var(--el-text-color-secondary) !important;
-          border-left-color: var(--el-color-primary) !important;
+          background: var(--el-fill-color-light);
+          color: var(--el-text-color-secondary);
+          border-left-color: var(--el-color-primary);
         }
       }
     }
 
     .article-toc {
-      background: #000000 !important;
+      background: #000000;
       box-shadow: 0 2px 12px rgba(0, 0, 0, 0.6);
 
       .toc-title {
-        color: var(--el-text-color-primary) !important;
+        color: var(--el-text-color-primary);
       }
 
       .toc-list {
         .toc-item {
-          color: var(--el-text-color-regular) !important;
+          color: var(--el-text-color-regular);
 
           &:hover {
-            color: var(--el-color-primary) !important;
-            border-left-color: var(--el-color-primary) !important;
+            color: var(--el-color-primary);
+            border-left-color: var(--el-color-primary);
           }
         }
       }

@@ -62,7 +62,7 @@
         </el-table-column>
         <el-table-column prop="size_mb" label="大小 (MB)" width="120" sortable align="right">
           <template #default="{ row }">
-            {{ row.size_mb.toFixed(2) }}
+            {{ fmtNum(row.size_mb) }}
           </template>
         </el-table-column>
         <el-table-column prop="modified_at" label="修改时间" width="180" sortable>
@@ -197,6 +197,7 @@ import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, Download, Search, View, Delete } from '@element-plus/icons-vue'
 import { LogsApi, type LogFileInfo, type LogContentResponse, type LogStatistics } from '@/api/logs'
+import { fmtNum } from '@/utils/format'
 
 type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
 

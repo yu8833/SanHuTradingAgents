@@ -208,7 +208,7 @@ onUnmounted(() => {
   flex-direction: column;
 
   &.collapsed:not(.is-mobile) {
-    width: 64px !important;
+    width: 64px;
   }
 
   .sidebar-header {
@@ -318,7 +318,7 @@ onUnmounted(() => {
   }
 
   .main-container {
-    margin-left: 0 !important;
+    margin-left: 0;
     width: 100%;
   }
 

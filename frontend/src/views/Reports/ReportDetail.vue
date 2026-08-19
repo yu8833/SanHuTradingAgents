@@ -146,8 +146,8 @@
                 <el-descriptions :column="2" border size="small">
                   <el-descriptions-item label="建议股数">{{ report['仓位建议'].suggested_shares }} 股</el-descriptions-item>
                   <el-descriptions-item label="建议金额">{{ report['仓位建议'].suggested_amount.toLocaleString() }} 元</el-descriptions-item>
-                  <el-descriptions-item label="目标仓位">{{ (report['仓位建议'].target_position_ratio * 100).toFixed(2) }}%</el-descriptions-item>
-                  <el-descriptions-item label="买入后总仓位">{{ (report['仓位建议'].total_position_ratio_after * 100).toFixed(2) }}%</el-descriptions-item>
+                  <el-descriptions-item label="目标仓位">{{ fmtPctFromFraction(report['仓位建议'].target_position_ratio, 2) }}</el-descriptions-item>
+                  <el-descriptions-item label="买入后总仓位">{{ fmtPctFromFraction(report['仓位建议'].total_position_ratio_after, 2) }}</el-descriptions-item>
                 </el-descriptions>
               </div>
               <div v-if="report['仓位建议'].warnings && report['仓位建议'].warnings.length" style="padding: 8px 20px;">
@@ -691,6 +691,7 @@ import { marked } from 'marked'
 import { sanitizeHtml } from '@/utils/sanitize'
 import { getMarketByStockCode } from '@/utils/market'
 import type { CurrencyAmount } from '@/api/paper'
+import { fmtNum, fmtPctFromFraction } from '@/utils/format'
 
 type ReportModuleContent = string | Record<string, unknown>
 
@@ -1489,7 +1490,7 @@ const applyToTrading = async () => {
       setup() {
         // 计算预计金额
         const estimatedAmount = computed(() => {
-          return (tradeForm.price * tradeForm.quantity).toFixed(2)
+          return fmtNum(tradeForm.price * tradeForm.quantity, 2)
         })
 
         return () => h('div', { style: 'line-height: 2;' }, [
@@ -1518,12 +1519,12 @@ const applyToTrading = async () => {
           ]),
           recommendation.targetPrice ? h('p', [
             h('strong', '目标价格：'),
-            h('span', { style: 'color: #E6A23C;' }, `${recommendation.targetPrice.toFixed(2)}元`),
+            h('span', { style: 'color: #E6A23C;' }, `${fmtNum(recommendation.targetPrice, 2)}元`),
             h('span', { style: 'color: #909399; font-size: 12px; margin-left: 8px;' }, '(仅供参考)')
           ]) : null,
           h('p', [
             h('strong', '当前价格：'),
-            h('span', `${currentPrice.toFixed(2)}元`)
+            h('span', `${fmtNum(currentPrice, 2)}元`)
           ]),
           h('div', { style: 'margin: 16px 0;' }, [
             h('p', { style: 'margin-bottom: 8px;' }, [
@@ -1562,7 +1563,7 @@ const applyToTrading = async () => {
           ]),
           h('p', [
             h('strong', '模型置信度：'),
-            h('span', `${(recommendation.confidence * 100).toFixed(1)}%`),
+            h('span', `${fmtPctFromFraction(recommendation.confidence, 1)}`),
             h('span', { style: 'color: #909399; font-size: 12px; margin-left: 8px;' }, '(不代表实际成功率)')
           ]),
           h('p', [
@@ -1571,7 +1572,7 @@ const applyToTrading = async () => {
             h('span', { style: 'color: #909399; font-size: 12px; margin-left: 8px;' }, '(实际风险可能更高)')
           ]),
           recommendation.action === 'buy' ? h('p', { style: 'color: #909399; font-size: 12px; margin-top: 12px;' },
-            `可用资金：${availableCash.toFixed(2)}元，最大可买：${maxQuantity}股`
+            `可用资金：${fmtNum(availableCash, 2)}元，最大可买：${maxQuantity}股`
           ) : null,
           recommendation.action === 'sell' ? h('p', { style: 'color: #909399; font-size: 12px; margin-top: 12px;' },
             `当前持仓：${maxQuantity}股`
@@ -2307,7 +2308,7 @@ const formatPriceValue = (report: any, candidates: string[]): string => {
   }
   
   if (num !== null && !isNaN(num)) {
-    return num.toFixed(2)
+    return fmtNum(num, 2)
   }
   return '--'
 }
@@ -3676,7 +3677,7 @@ onBeforeUnmount(() => {
           }
 
           .detail-item-bar-fill {
-            background: linear-gradient(90deg, #10b981, #34d399) !important;
+            background: linear-gradient(90deg, #10b981, #34d399);
           }
 
           &:hover {
@@ -4539,85 +4540,85 @@ onBeforeUnmount(() => {
 
         // 多维度评分卡片
         .section--scores .dimension-grid .dimension-card {
-          background: #1e293b !important;
-          border-color: #334155 !important;
+          background: #1e293b;
+          border-color: #334155;
           
           .dimension-name {
-            color: #f1f5f9 !important;
+            color: #f1f5f9;
           }
           .score-unit {
-            color: #94a3b8 !important;
+            color: #94a3b8;
           }
           .score-bar {
-            background: rgba(15, 23, 42, 0.8) !important;
+            background: rgba(15, 23, 42, 0.8);
           }
           .dimension-analyst {
-            color: #64748b !important;
-            border-top-color: rgba(71, 85, 105, 0.5) !important;
+            color: #64748b;
+            border-top-color: rgba(71, 85, 105, 0.5);
           }
           .dimension-icon {
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3) !important;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
           }
 
           &:hover {
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4), 0 4px 12px rgba(0, 0, 0, 0.2) !important;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4), 0 4px 12px rgba(0, 0, 0, 0.2);
           }
 
           &.dimension--technical {
-            background: linear-gradient(135deg, #422006 0%, #1e293b 100%) !important;
-            border-color: #d97706 !important;
-            .score-value { color: #fbbf24 !important; }
-            .dimension-icon { background: linear-gradient(135deg, rgba(217, 119, 6, 0.25), rgba(251, 191, 36, 0.15)) !important; }
-            .score-bar-fill { background: linear-gradient(90deg, #d97706, #fbbf24) !important; }
-            &::before { background: #f59e0b !important; }
+            background: linear-gradient(135deg, #422006 0%, #1e293b 100%);
+            border-color: #d97706;
+            .score-value { color: #fbbf24; }
+            .dimension-icon { background: linear-gradient(135deg, rgba(217, 119, 6, 0.25), rgba(251, 191, 36, 0.15)); }
+            .score-bar-fill { background: linear-gradient(90deg, #d97706, #fbbf24); }
+            &::before { background: #f59e0b; }
           }
           &.dimension--fundamental {
-            background: linear-gradient(135deg, #1e1b4b 0%, #1e293b 100%) !important;
-            border-color: #6366f1 !important;
-            .score-value { color: #a5b4fc !important; }
-            .dimension-icon { background: linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(165, 180, 252, 0.15)) !important; }
-            .score-bar-fill { background: linear-gradient(90deg, #4f46e5, #818cf8) !important; }
-            &::before { background: #6366f1 !important; }
+            background: linear-gradient(135deg, #1e1b4b 0%, #1e293b 100%);
+            border-color: #6366f1;
+            .score-value { color: #a5b4fc; }
+            .dimension-icon { background: linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(165, 180, 252, 0.15)); }
+            .score-bar-fill { background: linear-gradient(90deg, #4f46e5, #818cf8); }
+            &::before { background: #6366f1; }
           }
           &.dimension--sentiment {
-            background: linear-gradient(135deg, #500724 0%, #1e293b 100%) !important;
-            border-color: #ec4899 !important;
-            .score-value { color: #f9a8d4 !important; }
-            .dimension-icon { background: linear-gradient(135deg, rgba(236, 72, 153, 0.25), rgba(249, 168, 212, 0.15)) !important; }
-            .score-bar-fill { background: linear-gradient(90deg, #db2777, #f472b6) !important; }
-            &::before { background: #ec4899 !important; }
+            background: linear-gradient(135deg, #500724 0%, #1e293b 100%);
+            border-color: #ec4899;
+            .score-value { color: #f9a8d4; }
+            .dimension-icon { background: linear-gradient(135deg, rgba(236, 72, 153, 0.25), rgba(249, 168, 212, 0.15)); }
+            .score-bar-fill { background: linear-gradient(90deg, #db2777, #f472b6); }
+            &::before { background: #ec4899; }
           }
           &.dimension--news {
-            background: linear-gradient(135deg, #422006 0%, #1e293b 100%) !important;
-            border-color: #eab308 !important;
-            .score-value { color: #fde047 !important; }
-            .dimension-icon { background: linear-gradient(135deg, rgba(234, 179, 8, 0.25), rgba(253, 224, 71, 0.15)) !important; }
-            .score-bar-fill { background: linear-gradient(90deg, #ca8a04, #facc15) !important; }
-            &::before { background: #eab308 !important; }
+            background: linear-gradient(135deg, #422006 0%, #1e293b 100%);
+            border-color: #eab308;
+            .score-value { color: #fde047; }
+            .dimension-icon { background: linear-gradient(135deg, rgba(234, 179, 8, 0.25), rgba(253, 224, 71, 0.15)); }
+            .score-bar-fill { background: linear-gradient(90deg, #ca8a04, #facc15); }
+            &::before { background: #eab308; }
           }
           &.dimension--capital {
-            background: linear-gradient(135deg, #052e16 0%, #1e293b 100%) !important;
-            border-color: #22c55e !important;
-            .score-value { color: #86efac !important; }
-            .dimension-icon { background: linear-gradient(135deg, rgba(34, 197, 94, 0.25), rgba(134, 239, 172, 0.15)) !important; }
-            .score-bar-fill { background: linear-gradient(90deg, #16a34a, #4ade80) !important; }
-            &::before { background: #22c55e !important; }
+            background: linear-gradient(135deg, #052e16 0%, #1e293b 100%);
+            border-color: #22c55e;
+            .score-value { color: #86efac; }
+            .dimension-icon { background: linear-gradient(135deg, rgba(34, 197, 94, 0.25), rgba(134, 239, 172, 0.15)); }
+            .score-bar-fill { background: linear-gradient(90deg, #16a34a, #4ade80); }
+            &::before { background: #22c55e; }
           }
           &.dimension--policy {
-            background: linear-gradient(135deg, #042f2e 0%, #1e293b 100%) !important;
-            border-color: #14b8a6 !important;
-            .score-value { color: #5eead4 !important; }
-            .dimension-icon { background: linear-gradient(135deg, rgba(20, 184, 166, 0.25), rgba(94, 234, 212, 0.15)) !important; }
-            .score-bar-fill { background: linear-gradient(90deg, #0d9488, #2dd4bf) !important; }
-            &::before { background: #14b8a6 !important; }
+            background: linear-gradient(135deg, #042f2e 0%, #1e293b 100%);
+            border-color: #14b8a6;
+            .score-value { color: #5eead4; }
+            .dimension-icon { background: linear-gradient(135deg, rgba(20, 184, 166, 0.25), rgba(94, 234, 212, 0.15)); }
+            .score-bar-fill { background: linear-gradient(90deg, #0d9488, #2dd4bf); }
+            &::before { background: #14b8a6; }
           }
           &.dimension--lockup {
-            background: linear-gradient(135deg, #2e1065 0%, #1e293b 100%) !important;
-            border-color: #a855f7 !important;
-            .score-value { color: #d8b4fe !important; }
-            .dimension-icon { background: linear-gradient(135deg, rgba(168, 85, 247, 0.25), rgba(216, 180, 254, 0.15)) !important; }
-            .score-bar-fill { background: linear-gradient(90deg, #9333ea, #c084fc) !important; }
-            &::before { background: #a855f7 !important; }
+            background: linear-gradient(135deg, #2e1065 0%, #1e293b 100%);
+            border-color: #a855f7;
+            .score-value { color: #d8b4fe; }
+            .dimension-icon { background: linear-gradient(135deg, rgba(168, 85, 247, 0.25), rgba(216, 180, 254, 0.15)); }
+            .score-bar-fill { background: linear-gradient(90deg, #9333ea, #c084fc); }
+            &::before { background: #a855f7; }
           }
         }
 
@@ -4760,12 +4761,12 @@ onBeforeUnmount(() => {
         }
 
         .risk-constraint {
-          background: linear-gradient(135deg, #1e3a5f 0%, #1c1917 100%) !important;
-          border-color: #22568d !important;
+          background: linear-gradient(135deg, #1e3a5f 0%, #1c1917 100%);
+          border-color: #22568d;
           .node-name { color: #dbeafe; }
           .node-desc { color: #93c5fd; }
-          .node-icon { background: linear-gradient(135deg, rgba(43, 108, 176, 0.2), rgba(96, 165, 250, 0.1)) !important; }
-          &::before { background: linear-gradient(135deg, #2b6cb0, #60a5fa) !important; }
+          .node-icon { background: linear-gradient(135deg, rgba(43, 108, 176, 0.2), rgba(96, 165, 250, 0.1)); }
+          &::before { background: linear-gradient(135deg, #2b6cb0, #60a5fa); }
         }
 
         // 最终决策卡片

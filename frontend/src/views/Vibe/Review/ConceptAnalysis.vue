@@ -39,7 +39,7 @@
         </div>
         <div class="kpi-cell">
           <div class="kpi-label">平均涨幅</div>
-          <div class="kpi-value accent" :class="pctClass(data?.breadth?.avg_pct)">{{ sign(data?.breadth?.avg_pct) }}{{ formatPct(data?.breadth?.avg_pct) }}%</div>
+          <div class="kpi-value accent" :class="clsByVal(data?.breadth?.avg_pct, '')">{{ fmtPct(data?.breadth?.avg_pct) }}</div>
           <div class="kpi-sub">全概念均值</div>
         </div>
       </div>
@@ -60,7 +60,7 @@
               <router-link v-if="c.lead_code" :to="`/stocks/${c.lead_code}`" class="stock-name">{{ c.lead_name }}</router-link>
               <template v-else>{{ c.lead_name }}</template>
             </span>
-            <span class="rank-pct up">{{ sign(c.pct_chg) }}{{ formatPct(c.pct_chg) }}%</span>
+            <span class="rank-pct up">{{ fmtPct(c.pct_chg) }}</span>
           </div>
           <el-empty v-if="!data?.gainers?.length" :image-size="48" description="暂无数据" />
         </el-card>
@@ -74,7 +74,7 @@
               <router-link v-if="c.lead_code" :to="`/stocks/${c.lead_code}`" class="stock-name">{{ c.lead_name }}</router-link>
               <template v-else>{{ c.lead_name }}</template>
             </span>
-            <span class="rank-pct down">{{ sign(c.pct_chg) }}{{ formatPct(c.pct_chg) }}%</span>
+            <span class="rank-pct down">{{ fmtPct(c.pct_chg) }}</span>
           </div>
           <el-empty v-if="!data?.losers?.length" :image-size="48" description="暂无数据" />
         </el-card>
@@ -88,7 +88,7 @@
               <router-link v-if="c.lead_code" :to="`/stocks/${c.lead_code}`" class="stock-name">{{ c.lead_name }}</router-link>
               <template v-else>{{ c.lead_name }}</template>
             </span>
-            <span class="rank-pct up">{{ sign(c.money_flow) }}{{ fmtNum(c.money_flow) }}亿</span>
+            <span class="rank-pct up">{{ fmtSigned(c.money_flow) }}亿</span>
           </div>
           <el-empty v-if="!data?.money_leaders?.length" :image-size="48" description="暂无数据" />
         </el-card>
@@ -122,7 +122,7 @@
         </el-table-column>
         <el-table-column label="涨跌幅" width="110" align="right" sortable :sort-method="sortPct">
           <template #default="{ row }">
-            <span :class="pctClass(row.pct_chg)">{{ sign(row.pct_chg) }}{{ formatPct(row.pct_chg) }}%</span>
+            <span :class="clsByVal(row.pct_chg, '')">{{ fmtPct(row.pct_chg) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="领涨股" min-width="120">
@@ -133,7 +133,7 @@
         </el-table-column>
         <el-table-column label="资金净流入" width="130" align="right" sortable :sort-method="sortMoney">
           <template #default="{ row }">
-            <span :class="pctClass(row.money_flow)">{{ sign(row.money_flow) }}{{ fmtNum(row.money_flow) }}亿</span>
+            <span :class="clsByVal(row.money_flow, '')">{{ fmtSigned(row.money_flow) }}亿</span>
           </template>
         </el-table-column>
         <el-table-column label="换手" width="90" align="right" sortable>
@@ -178,7 +178,7 @@
         </el-table-column>
         <el-table-column label="今日" width="90" align="right" sortable>
           <template #default="{ row }">
-            <span :class="pctClass(row.pct_chg)">{{ sign(row.pct_chg) }}{{ formatPct(row.pct_chg) }}%</span>
+            <span :class="clsByVal(row.pct_chg, '')">{{ fmtPct(row.pct_chg) }}</span>
           </template>
         </el-table-column>
         <el-table-column
@@ -190,7 +190,7 @@
           sortable
         >
           <template #default="{ row }">
-            <span v-if="row.returns?.[w] != null" :class="pctClass(row.returns[w])">{{ sign(row.returns[w]) }}{{ formatPct(row.returns[w]) }}%</span>
+            <span v-if="row.returns?.[w] != null" :class="clsByVal(row.returns[w], '')">{{ fmtPct(row.returns[w]) }}</span>
             <span v-else class="muted">—</span>
           </template>
         </el-table-column>
@@ -205,7 +205,7 @@ import { ref, computed, onMounted } from 'vue'
 import { Refresh, DataAnalysis, TrendCharts, Odometer, Grid, Histogram } from '@element-plus/icons-vue'
 import { vibeApi } from '@/api/vibe'
 import type { ConceptAnalysis, ConceptRotation } from '@/api/vibe'
-import { fmtNum } from '@/utils/format'
+import { fmtPct, fmtSigned, clsByVal } from '@/utils/format'
 
 const today = new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' })
 const loading = ref(false)
@@ -213,21 +213,6 @@ const rotationLoading = ref(false)
 const data = ref<ConceptAnalysis | null>(null)
 const rotation = ref<ConceptRotation | null>(null)
 const keyword = ref('')
-
-function sign(v: number | null | undefined): string {
-  if (v == null) return ''
-  return v > 0 ? '+' : ''
-}
-
-function formatPct(v: number | null | undefined): string {
-  if (v == null) return '—'
-  return v.toFixed(2)
-}
-
-function pctClass(v: number | null | undefined): string {
-  if (v == null) return ''
-  return v > 0 ? 'up' : v < 0 ? 'down' : ''
-}
 
 function sortPct(a: any, b: any): number {
   return (a.pct_chg ?? 0) - (b.pct_chg ?? 0)

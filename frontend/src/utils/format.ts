@@ -56,6 +56,24 @@ export function fmtSigned(v: unknown, digits = 2): string {
   return `${n >= 0 ? '+' : ''}${n.toFixed(digits)}`
 }
 
+/** 数值绝对值 → 固定小数位（用于"涨跌分别着色、无需正负号"的展示）：如 fmtAbsPct(-1.23) => '1.23' */
+export function fmtAbs(v: unknown, digits = 2): string {
+  if (isInvalid(v)) return EMPTY
+  return Math.abs(toNum(v)).toFixed(digits)
+}
+
+/** 百分数数值的绝对值 → '1.23%'（不带正负号）；无效 → '-'。如 fmtAbsPct(-1.23) => '1.23%' */
+export function fmtAbsPct(v: unknown, digits = 2): string {
+  if (isInvalid(v)) return EMPTY
+  return `${Math.abs(toNum(v)).toFixed(digits)}%`
+}
+
+/** 涨跌着色类：正→'up'、负→'down'、零/空→emptyClass（默认 'flat'，可传 '' 表示不加类） */
+export function clsByVal(v: unknown, emptyClass = 'flat'): string {
+  if (isInvalid(v) || toNum(v) === 0) return emptyClass
+  return toNum(v) > 0 ? 'up' : 'down'
+}
+
 /** 元 → 亿（固定单位，2 位小数）；无效 → '-'。如 fmtYi(150000000) => '1.50' */
 export function fmtYi(v: unknown, digits = 2): string {
   if (isInvalid(v)) return EMPTY

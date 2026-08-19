@@ -32,7 +32,7 @@ html:not(.dark) {
 
 // 优化标题样式（浅色主题）
 h1, h2, h3, h4, h5, h6 {
-  color: #1a202c;
+  color: var(--app-text-heading);
   font-weight: 600;
 }
 
@@ -63,7 +63,7 @@ h6 {
 // 优化卡片标题
 .el-card__header {
   h1, h2, h3, h4, h5, h6 {
-    color: #1a202c;
+    color: var(--app-text-heading);
     font-weight: 600;
     margin: 0;
   }
@@ -73,7 +73,7 @@ h6 {
 .page-title,
 .section-title,
 .card-title {
-  color: #1a202c !important;
+  color: var(--app-text-heading) !important;
   font-weight: 600 !important;
 }
 
@@ -757,43 +757,27 @@ html.dark {
   justify-content: space-between;
 }
 
-// —— 全局移动端强制适配（解决 Element Plus 栅格在移动端横向溢出的问题）——
+// —— 移动端适配（<768px）——
+// 说明：以下为全局兜底规则，防止 Element Plus 栅格/表格/弹层在移动端溢出。
+// 组件自身应优先在各自 <style> 中按 768px/480px 断点实现响应式布局，
+// 仅在组件未覆盖时才由以下全局规则兜底接管。
 @media (max-width: 768px) {
-  // 强制所有 el-col 在移动端占满 100% 宽度
+  // 移动端工具类：强制隐藏/显示
+  .mobile-hidden {
+    display: none !important;
+  }
+
+  // 兜底：强制 el-col 在移动端占满 100% 宽度
   .el-col {
     max-width: 100% !important;
     flex: 0 0 100% !important;
     margin-bottom: 12px;
   }
-  // 强制 el-row 允许换行
+  // 兜底：强制 el-row 允许换行
   .el-row {
     row-gap: 12px;
   }
-  // 全局表格允许横向滚动
-  .el-table {
-    display: block;
-    overflow-x: auto;
-    white-space: nowrap;
-  }
-  // 全局对话框适配
-  .el-dialog {
-    width: 95% !important;
-    margin: 10px auto !important;
-  }
-  // 全局卡片内边距适配
-  .el-card .el-card__body {
-    padding: 12px !important;
-  }
-}
-
-// 响应式工具类
-@media (max-width: 768px) {
-  .mobile-hidden {
-    display: none !important;
-  }
-
-  // 🔥 修复：禁用 el-table fixed 列在移动端的固定定位，改为横向滚动
-  // Element Plus 的 fixed 列通过创建独立的固定表格覆盖实现，移动端会遮挡内容
+  // 兜底：移动端表格横向滚动，禁用 fixed 列固定定位（避免遮挡内容）
   .el-table .el-table__fixed,
   .el-table .el-table__fixed-right,
   .el-table .el-table__fixed-left {
@@ -802,19 +786,14 @@ html.dark {
   .el-table {
     padding-right: 0 !important;
     padding-left: 0 !important;
-  }
-  .el-table .el-table__body-wrapper {
-    overflow-x: auto !important;
-  }
-  .el-table .el-table__header-wrapper {
-    overflow-x: auto !important;
-  }
-  // 允许整个表格横向滚动
-  .el-table {
     display: block !important;
     overflow-x: auto !important;
     white-space: nowrap;
     -webkit-overflow-scrolling: touch;
+  }
+  .el-table .el-table__body-wrapper,
+  .el-table .el-table__header-wrapper {
+    overflow-x: auto !important;
   }
   // 固定列的单元格改为普通单元格样式
   .el-table td.el-table-fixed-column--right,
@@ -830,6 +809,14 @@ html.dark {
   // 固定列分组也取消固定
   .el-table .el-table-fixed-column {
     position: relative !important;
+  }
+  // 兜底：对话框与卡片适配
+  .el-dialog {
+    width: 95% !important;
+    margin: 10px auto !important;
+  }
+  .el-card .el-card__body {
+    padding: 12px !important;
   }
 }
 

@@ -292,10 +292,10 @@ const openArticle = (articleId: string) => {
 // 暗黑模式样式
 :global(html.dark) {
   .learning-center {
-    background: #000000 !important;
+    background: #000000;
 
     .learning-header {
-      background: #000000 !important;
+      background: #000000;
       border: 1px solid var(--el-border-color-light);
       color: var(--el-text-color-primary);
       h1 { color: var(--el-text-color-primary); }
@@ -304,8 +304,8 @@ const openArticle = (articleId: string) => {
 
     .learning-categories .category-card,
     .recommended-section .article-card {
-      background: #000000 !important;
-      border-color: var(--el-border-color) !important;
+      background: #000000;
+      border-color: var(--el-border-color);
     }
 
     .learning-categories .category-card h3,
@@ -313,13 +313,13 @@ const openArticle = (articleId: string) => {
     .recommended-section .article-card h4,
     .recommended-section .article-card p,
     .recommended-section .article-card .read-time {
-      color: var(--el-text-color-primary) !important;
+      color: var(--el-text-color-primary);
     }
 
     .recommended-section .article-card p,
     .learning-categories .category-card p,
     .recommended-section .article-card .read-time {
-      color: var(--el-text-color-regular) !important;
+      color: var(--el-text-color-regular);
     }
   }
 }

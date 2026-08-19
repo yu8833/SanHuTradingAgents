@@ -20,20 +20,20 @@
       <el-col :span="5">
         <el-card shadow="never" class="stat-card">
           <div class="stat-label">胜率</div>
-          <div class="stat-value">{{ (stats.win_rate * 100).toFixed(1) }}%</div>
+          <div class="stat-value">{{ fmtPctFromFraction(stats.win_rate, 1) }}</div>
         </el-card>
       </el-col>
       <el-col :span="5">
         <el-card shadow="never" class="stat-card">
           <div class="stat-label">盈亏比</div>
-          <div class="stat-value">{{ stats.profit_loss_ratio.toFixed(2) }}</div>
+          <div class="stat-value">{{ fmtNum(stats.profit_loss_ratio) }}</div>
         </el-card>
       </el-col>
       <el-col :span="5">
         <el-card shadow="never" class="stat-card">
           <div class="stat-label">累计盈亏</div>
           <div class="stat-value" :class="stats.total_pnl >= 0 ? 'up' : 'down'">
-            {{ stats.total_pnl >= 0 ? '+' : '' }}{{ stats.total_pnl.toFixed(2) }}
+            {{ fmtSigned(stats.total_pnl) }}
           </div>
         </el-card>
       </el-col>
@@ -111,7 +111,7 @@
                   <div class="return-hero">
                     <div class="return-hero-label">累计收益率</div>
                     <div class="return-hero-value" :class="s.total_return >= 0 ? 'up' : 'down'">
-                      {{ s.total_return >= 0 ? '+' : '' }}{{ s.total_return.toFixed(2) }}%
+                      {{ fmtPct(s.total_return) }}
                     </div>
                   </div>
                   <div class="return-stats">
@@ -121,27 +121,27 @@
                     </div>
                     <div class="return-stat">
                       <span class="rs-label">胜率</span>
-                      <span class="rs-value" :class="s.win_rate >= 50 ? 'up' : 'down'">{{ s.win_rate.toFixed(1) }}%</span>
+                      <span class="rs-value" :class="s.win_rate >= 50 ? 'up' : 'down'">{{ fmtPct(s.win_rate, 1) }}</span>
                     </div>
                     <div class="return-stat">
                       <span class="rs-label">累计盈亏</span>
                       <span class="rs-value" :class="s.total_pnl >= 0 ? 'up' : 'down'">
-                        {{ s.total_pnl >= 0 ? '+' : '' }}{{ s.total_pnl.toFixed(2) }}
+                        {{ fmtSigned(s.total_pnl) }}
                       </span>
                     </div>
                     <div class="return-stat">
                       <span class="rs-label">平均收益</span>
                       <span class="rs-value" :class="s.avg_return >= 0 ? 'up' : 'down'">
-                        {{ s.avg_return >= 0 ? '+' : '' }}{{ s.avg_return.toFixed(2) }}%
+                        {{ fmtPct(s.avg_return) }}
                       </span>
                     </div>
                     <div class="return-stat">
                       <span class="rs-label">最大盈利</span>
-                      <span class="rs-value up">+{{ s.max_win.toFixed(2) }}%</span>
+                      <span class="rs-value up">{{ fmtPct(s.max_win) }}</span>
                     </div>
                     <div class="return-stat">
                       <span class="rs-label">最大亏损</span>
-                      <span class="rs-value down">{{ s.max_loss.toFixed(2) }}%</span>
+                      <span class="rs-value down">{{ fmtPct(s.max_loss) }}</span>
                     </div>
                   </div>
                   <div class="return-bar" v-if="s.count > 0">
@@ -232,6 +232,7 @@ import { onMounted, reactive, ref, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { reviewApi, type ReviewCycleItem, type ReviewNoteItem, type ReviewStats } from '@/api/paper'
 import { getStrategyNameMap, strategyNameSync } from '@/utils/strategyName'
+import { fmtPct, fmtPctFromFraction, fmtNum, fmtSigned } from '@/utils/format'
 
 defineOptions({ name: 'PaperReview' })
 

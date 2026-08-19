@@ -116,7 +116,7 @@
 
         <el-table-column prop="current_price" label="当前价格" min-width="100" sortable align="right">
           <template #default="{ row }">
-            <span v-if="row.current_price !== null && row.current_price !== undefined">¥{{ formatPrice(row.current_price) }}</span>
+            <span v-if="row.current_price !== null && row.current_price !== undefined">¥{{ fmtPrice(row.current_price) }}</span>
             <span v-else>-</span>
           </template>
         </el-table-column>
@@ -127,7 +127,7 @@
               v-if="row.change_percent !== null && row.change_percent !== undefined"
               :class="getChangeClass(row.change_percent)"
             >
-              {{ formatPercent(row.change_percent) }}
+              {{ fmtPct(row.change_percent) }}
             </span>
             <span v-else>-</span>
           </template>
@@ -498,6 +498,7 @@ import { tagsApi } from '@/api/tags'
 import { stockSyncApi } from '@/api/stockSync'
 import { normalizeMarketForAnalysis } from '@/utils/market'
 import { ApiClient } from '@/api/request'
+import { fmtPrice, fmtPct } from '@/utils/format'
 
 import type { FavoriteItem } from '@/api/favorites'
 import { useAuthStore } from '@/stores/auth'
@@ -1168,18 +1169,6 @@ const getChangeClass = (changePercent: number) => {
 }
 
 
-const formatPrice = (value: any): string => {
-  const n = Number(value)
-  return Number.isFinite(n) ? n.toFixed(2) : '-'
-}
-
-const formatPercent = (value: any): string => {
-  const n = Number(value)
-  if (!Number.isFinite(n)) return '-'
-  const sign = n > 0 ? '+' : ''
-  return `${sign}${n.toFixed(2)}%`
-}
-
 const formatDate = (dateStr: string) => {
   return new Date(dateStr).toLocaleDateString('zh-CN')
 }
@@ -1267,8 +1256,8 @@ onMounted(() => {
   .favorites {
     .action-card {
       :deep(.el-col) {
-        flex: 0 0 100% !important;
-        max-width: 100% !important;
+        flex: 0 0 100%;
+        max-width: 100%;
         margin-bottom: 8px;
       }
       .action-buttons {

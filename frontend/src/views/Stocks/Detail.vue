@@ -141,7 +141,7 @@
               </el-tooltip>
             </span>
             <b>
-              {{ Number.isFinite(quote.amplitude) ? quote.amplitude.toFixed(2) + '%' : '-' }}
+              {{ Number.isFinite(quote.amplitude) ? fmtNum(quote.amplitude, 2) + '%' : '-' }}
               <el-tooltip v-if="quote.amplitudeDate && !isToday(quote.amplitudeDate)" :content="getDataExpiredWarning(quote.amplitudeDate)" placement="top">
                 <el-tag size="small" :type="getDataExpiredType(quote.amplitudeDate)" style="margin-left: 4px;">{{ formatDateTag(quote.amplitudeDate) }}</el-tag>
               </el-tooltip>
@@ -738,12 +738,12 @@
                 </template>
               </el-table-column>
               <el-table-column label="最新价" prop="price" min-width="120" align="right" sortable>
-                <template #default="{ row }">{{ row.price?.toFixed(2) || '-' }}</template>
+                <template #default="{ row }">{{ fmtNum(row.price, 2) }}</template>
               </el-table-column>
               <el-table-column label="涨跌幅" prop="change_pct" min-width="130" align="right" sortable>
                 <template #default="{ row }">
                   <span :style="{color: row.change_pct >= 0 ? 'var(--app-up)' : 'var(--app-down)', fontWeight: 'bold'}">
-                    {{ row.change_pct >= 0 ? '+' : '' }}{{ row.change_pct?.toFixed(2) || '0.00' }}%
+                    {{ fmtPercent(row.change_pct, 2) }}
                   </span>
                 </template>
               </el-table-column>
@@ -795,7 +795,7 @@
               </el-descriptions-item>
               <el-descriptions-item label="主力净占比">
                 <span :style="{color: moneyFlowData.realtime.main_net_inflow >= 0 ? 'var(--app-up)' : 'var(--app-down)'}">
-                  {{ moneyFlowData.realtime.main_net_inflow_pct?.toFixed(2) || '0.00' }}%
+                  {{ fmtNum(moneyFlowData.realtime.main_net_inflow_pct, 2) }}%
                 </span>
               </el-descriptions-item>
               <el-descriptions-item label="超大单净流入">
@@ -827,7 +827,7 @@
                 <el-table-column label="主力净占比" min-width="140" align="right">
                   <template #default="{ row: h }">
                     <span :style="{color: h.main_net_inflow_pct >= 0 ? 'var(--app-up)' : 'var(--app-down)', fontWeight: 'bold'}">
-                      {{ h.main_net_inflow_pct >= 0 ? '+' : '' }}{{ h.main_net_inflow_pct?.toFixed(2) || '0.00' }}%
+                      {{ fmtPercent(h.main_net_inflow_pct, 2) }}
                     </span>
                   </template>
                 </el-table-column>
@@ -856,18 +856,18 @@
             <div class="fact">
               <span>PE(TTM)</span>
               <b>
-                {{ Number.isFinite(basics.pe) ? basics.pe.toFixed(2) : '-' }}
+                {{ Number.isFinite(basics.pe) ? fmtNum(basics.pe, 2) : '-' }}
                 <el-tag v-if="basics.peIsRealtime" type="success" size="small" style="margin-left: 4px">实时</el-tag>
               </b>
             </div>
             <div class="fact">
               <span>PB(市净率)</span>
               <b>
-                {{ Number.isFinite(basics.pb) ? basics.pb.toFixed(2) : '-' }}
+                {{ Number.isFinite(basics.pb) ? fmtNum(basics.pb, 2) : '-' }}
                 <el-tag v-if="basics.peIsRealtime" type="success" size="small" style="margin-left: 4px">实时</el-tag>
               </b>
             </div>
-            <div class="fact"><span>PS(TTM)</span><b>{{ Number.isFinite(basics.ps) ? basics.ps.toFixed(2) : '-' }}</b></div>
+            <div class="fact"><span>PS(TTM)</span><b>{{ Number.isFinite(basics.ps) ? fmtNum(basics.ps, 2) : '-' }}</b></div>
             <div class="fact"><span>ROE</span><b>{{ fmtPercent(basics.roe) }}</b></div>
             <div class="fact"><span>负债率</span><b>{{ fmtPercent(basics.debtRatio) }}</b></div>
           </div>
@@ -895,14 +895,14 @@
               <div class="fin-grid">
                 <div class="fin-item">
                   <span class="fin-label">营业收入</span>
-                  <span class="fin-value">{{ fmtFinAmount(financialDetail.revenue_ttm || financialDetail.revenue) }}</span>
+                  <span class="fin-value">{{ fmtAmount(financialDetail.revenue_ttm || financialDetail.revenue) }}</span>
                   <span v-if="financialDetail.revenue_yoy !== undefined && financialDetail.revenue_yoy !== null" class="fin-change" :class="getChangeClass(financialDetail.revenue_yoy)">
                     {{ fmtPercent(financialDetail.revenue_yoy) }}
                   </span>
                 </div>
                 <div class="fin-item">
                   <span class="fin-label">净利润</span>
-                  <span class="fin-value">{{ fmtFinAmount(financialDetail.net_profit_ttm || financialDetail.net_profit) }}</span>
+                  <span class="fin-value">{{ fmtAmount(financialDetail.net_profit_ttm || financialDetail.net_profit) }}</span>
                   <span v-if="financialDetail.net_profit_yoy !== undefined && financialDetail.net_profit_yoy !== null" class="fin-change" :class="getChangeClass(financialDetail.net_profit_yoy)">
                     {{ fmtPercent(financialDetail.net_profit_yoy) }}
                   </span>
@@ -931,11 +931,11 @@
                 </div>
                 <div class="fin-item">
                   <span class="fin-label">每股收益</span>
-                  <span class="fin-value">{{ financialDetail.eps !== undefined && financialDetail.eps !== null ? financialDetail.eps.toFixed(2) + '元' : '-' }}</span>
+                  <span class="fin-value">{{ financialDetail.eps !== undefined && financialDetail.eps !== null ? fmtNum(financialDetail.eps, 2) + '元' : '-' }}</span>
                 </div>
                 <div class="fin-item">
                   <span class="fin-label">每股净资产</span>
-                  <span class="fin-value">{{ financialDetail.bps !== undefined && financialDetail.bps !== null ? financialDetail.bps.toFixed(2) + '元' : '-' }}</span>
+                  <span class="fin-value">{{ financialDetail.bps !== undefined && financialDetail.bps !== null ? fmtNum(financialDetail.bps, 2) + '元' : '-' }}</span>
                 </div>
               </div>
             </div>
@@ -949,11 +949,11 @@
                 </div>
                 <div class="fin-item">
                   <span class="fin-label">流动比率</span>
-                  <span class="fin-value">{{ financialDetail.current_ratio !== undefined && financialDetail.current_ratio !== null ? financialDetail.current_ratio.toFixed(2) : '-' }}</span>
+                  <span class="fin-value">{{ financialDetail.current_ratio !== undefined && financialDetail.current_ratio !== null ? fmtNum(financialDetail.current_ratio, 2) : '-' }}</span>
                 </div>
                 <div class="fin-item">
                   <span class="fin-label">速动比率</span>
-                  <span class="fin-value">{{ financialDetail.quick_ratio !== undefined && financialDetail.quick_ratio !== null ? financialDetail.quick_ratio.toFixed(2) : '-' }}</span>
+                  <span class="fin-value">{{ financialDetail.quick_ratio !== undefined && financialDetail.quick_ratio !== null ? fmtNum(financialDetail.quick_ratio, 2) : '-' }}</span>
                 </div>
               </div>
             </div>
@@ -1108,7 +1108,7 @@
         <div class="exp-section">
           <div class="exp-title">⚡ 执行元信息</div>
           <div class="exp-content">
-            <div>执行耗时: {{ lastAnalysis.explanation.execution_metadata?.execution_time?.toFixed(2) || 'N/A' }} 秒</div>
+            <div>执行耗时: {{ lastAnalysis.explanation.execution_metadata?.execution_time != null ? fmtNum(lastAnalysis.explanation.execution_metadata?.execution_time, 2) : 'N/A' }} 秒</div>
             <div>Token 消耗: {{ lastAnalysis.explanation.execution_metadata?.tokens_used || 0 }}</div>
           </div>
         </div>
@@ -2174,21 +2174,6 @@ async function fetchLatestAnalysis() {
 }
 
 // 格式化（fmtPrice/fmtPercent/fmtVolume/fmtAmount/fmtNum/fmtVol 均由 utils/format.ts 提供）
-
-// 财务金额格式化（后端可能为元，也可能为亿元，统一做友好显示）
-function fmtFinAmount(v: any) {
-  const n = Number(v)
-  if (!Number.isFinite(n)) return '-'
-  // 如果数值很大（大于1万），认为单位是元
-  if (Math.abs(n) >= 10000) {
-    if (Math.abs(n) >= 1e12) return (n/1e12).toFixed(2) + '万亿'
-    if (Math.abs(n) >= 1e8) return (n/1e8).toFixed(2) + '亿'
-    if (Math.abs(n) >= 1e4) return (n/1e4).toFixed(2) + '万'
-    return n.toFixed(0)
-  }
-  // 数值较小，可能已经是亿元或其他单位，直接保留两位小数
-  return n.toFixed(2)
-}
 
 // 获取涨跌幅颜色类
 function getChangeClass(v: any): string {

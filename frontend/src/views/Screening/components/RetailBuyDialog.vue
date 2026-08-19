@@ -13,14 +13,14 @@
         <router-link :to="`/stocks/${form.code}`" class="stock-name">{{ form.stock_name }}</router-link>
       </el-form-item>
       <el-form-item label="当前价">
-        <span style="font-weight:600;color:#2b6cb0;">¥{{ form.price?.toFixed(2) }}</span>
+        <span style="font-weight:600;color:#2b6cb0;">¥{{ fmtNum(form.price) }}</span>
         <el-tag v-if="form.strategy" size="small" style="margin-left:12px;">{{ strategyLabel(form.strategy) }}</el-tag>
       </el-form-item>
       <el-form-item label="建议仓位">
         <span v-if="advice" style="color:#67C23A;font-weight:600;">
-          {{ advice.suggested_shares }} 股 ≈ ¥{{ advice.suggested_amount?.toFixed(2) }}
+          {{ advice.suggested_shares }} 股 ≈ ¥{{ fmtNum(advice.suggested_amount) }}
           <span style="color:#909399;font-size:12px;margin-left:8px;">
-            (目标仓位 {{ (advice.target_position_ratio * 100).toFixed(1) }}%)
+            (目标仓位 {{ fmtPctFromFraction(advice.target_position_ratio, 1) }})
           </span>
         </span>
         <el-button v-else size="small" type="primary" link :loading="calcLoading" @click="calcPosition">
@@ -29,18 +29,18 @@
       </el-form-item>
       <el-form-item label="买入数量">
         <el-input-number v-model="form.quantity" :min="100" :step="100" style="width:200px" />
-        <span style="color:#909399;font-size:12px;margin-left:8px;">金额: ¥{{ buyAmount.toFixed(2) }}</span>
+        <span style="color:#909399;font-size:12px;margin-left:8px;">金额: ¥{{ fmtNum(buyAmount) }}</span>
       </el-form-item>
       <el-form-item label="止损价">
         <el-input-number v-model="form.stop_loss_price" :precision="2" :step="0.1" :min="0" style="width:200px" />
         <span v-if="stopLossPct !== null" :style="{color: stopLossPct < -5 ? '#F56C6C' : '#909399', fontSize:'12px', marginLeft:'8px'}">
-          ({{ stopLossPct.toFixed(1) }}%)
+          ({{ fmtPct(stopLossPct, 1) }})
         </span>
       </el-form-item>
       <el-form-item label="止盈价">
         <el-input-number v-model="form.take_profit_price" :precision="2" :step="0.1" :min="0" style="width:200px" />
         <span v-if="takeProfitPct !== null" style="color:#67C23A;font-size:12px;margin-left:8px;">
-          ({{ takeProfitPct.toFixed(1) }}%)
+          ({{ fmtPct(takeProfitPct, 1) }})
         </span>
       </el-form-item>
       <el-form-item label="投资逻辑">
@@ -83,6 +83,7 @@ import { ref, reactive, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { paperApi } from '@/api/paper'
 import { retailApi, type PositionAdvice } from '@/api/retail'
+import { fmtNum, fmtPct, fmtPctFromFraction } from '@/utils/format'
 
 defineOptions({ name: 'RetailBuyDialog' })
 

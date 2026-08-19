@@ -177,27 +177,27 @@
         </el-table-column>
         <el-table-column prop="close" label="收盘价" min-width="110" align="right" sortable>
           <template #default="{ row }">
-            <span v-if="row.close != null">{{ row.close.toFixed(2) }}</span>
+            <span v-if="row.close != null">{{ fmtPrice(row.close) }}</span>
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
         <el-table-column prop="change_pct" label="涨跌幅" min-width="110" align="right" sortable>
           <template #default="{ row }">
             <el-tag v-if="row.change_pct != null" size="small" :type="row.change_pct >= 0 ? 'danger' : 'success'" effect="plain" round class="pct-tag">
-              {{ row.change_pct >= 0 ? '+' : '' }}{{ (row.change_pct * 100).toFixed(2) }}%
+              {{ fmtPctFromFraction(row.change_pct) }}
             </el-tag>
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
         <el-table-column prop="vol_ratio" label="量比" min-width="100" align="right" sortable>
           <template #default="{ row }">
-            <span v-if="row.vol_ratio != null">{{ row.vol_ratio.toFixed(2) }}</span>
+            <span v-if="row.vol_ratio != null">{{ fmtNum(row.vol_ratio) }}</span>
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
         <el-table-column prop="score" label="评分" min-width="110" align="right" sortable>
           <template #default="{ row }">
-            <span class="score-badge" :style="{ '--sc': scoreColor(row.score) }">{{ (row.score ?? 0).toFixed(1) }}</span>
+            <span class="score-badge" :style="{ '--sc': scoreColor(row.score) }">{{ fmtNum(row.score, 1) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="120" fixed="right">
@@ -230,6 +230,7 @@ import {
 } from '@/utils/marketFit'
 import { favoritesApi } from '@/api/favorites'
 import { monitorApi } from '@/api/monitor'
+import { fmtPrice, fmtPctFromFraction, fmtNum } from '@/utils/format'
 import { useAuthStore } from '@/stores/auth'
 
 defineOptions({ name: 'StrategyScreener' })

@@ -343,22 +343,22 @@ const openArticle = (articleId: string) => {
 // 暗黑模式覆盖
 :global(html.dark) {
   .learning-category {
-    background: #000000 !important;
+    background: #000000;
 
     :deep(.el-page-header) {
-      background: #000000 !important;
+      background: #000000;
       border-bottom-color: var(--el-border-color);
     }
 
     .category-content {
       .category-description {
-        background: #000000 !important;
+        background: #000000;
         border: 1px solid var(--el-border-color);
       }
 
       .article-card {
-        background: #000000 !important;
-        border-color: var(--el-border-color) !important;
+        background: #000000;
+        border-color: var(--el-border-color);
       }
     }
 

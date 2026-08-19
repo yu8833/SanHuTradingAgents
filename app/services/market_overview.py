@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from app.services import vibe_astock as astock
 from app.services import vibe_gstock as gstock
 from app.services.cache_layer import cached
+from app.services.data_sources.akshare_adapter import _parse_cn_amount, _parse_pct_str
 
 BEIJING = timezone(timedelta(hours=8))
 
@@ -56,21 +57,52 @@ def _sentiment() -> dict:
     }
 
 
+def _fund_amount(v) -> float:
+    """行业资金流金额 → 数值（单位：元）。
+
+    AKShare stock_fund_flow_industry 的金额列可能返回「X.XX亿/万」字符串，
+    也可能是纯数字（该接口纯数字以「亿」为单位）。统一归一为「元」，
+    便于下游 _industry_rank 再除以 1e8 转为「亿」。
+    """
+    if isinstance(v, (int, float)):
+        return float(v) * 1e8  # 该接口纯数字以「亿」为单位
+    val = _parse_cn_amount(v)
+    return float(val) if val is not None else 0.0
+
+
 def _sectors() -> list[dict]:
-    """行业资金流（按净额降序）。不含领涨股等个股字段。"""
+    """行业资金流（按净额降序）。不含领涨股等个股字段。
+
+    AKShare stock_fund_flow_industry 金额列返回「X.XX亿/万」字符串或纯数字（亿），
+    统一用 _fund_amount 规范化为数值（单位：元），
+    _industry_rank 再除以 1e8 转为「亿」。
+    """
     try:
         f = astock._akshare().stock_fund_flow_industry(symbol="即时")
+        # 规范化金额列（「亿/万」字符串或纯数字「亿」）为数值（单位：元）
+        for col in ("净额", "流入资金", "流出资金"):
+            if col in f.columns:
+                f[col] = f[col].map(_fund_amount)
+        # 涨跌幅为「21.43%」字符串 → 数值（%）
+        for col in ("行业-涨跌幅",):
+            if col in f.columns:
+                f[col] = f[col].map(_parse_pct_str)
         f = f.sort_values("净额", ascending=False)
     except Exception:
         return []
     out = []
     for _, row in f.iterrows():
+        # 金额列已在上面 map(_fund_amount) 归一为「元」，此处仅安全取数值，不再重复换算
+        net_val = float(row.get("净额", 0) or 0)
+        inflow_val = float(row.get("流入资金", 0) or 0)
+        outflow_val = float(row.get("流出资金", 0) or 0)
+        pct_val = _parse_pct_str(row.get("行业-涨跌幅", 0)) or 0
         out.append({
             "name": str(row["行业"]),
-            "pct": round(float(row.get("行业-涨跌幅", 0) or 0), 2),
-            "net": round(float(row.get("净额", 0) or 0), 2),
-            "inflow": round(float(row.get("流入资金", 0) or 0), 2),
-            "outflow": round(float(row.get("流出资金", 0) or 0), 2),
+            "pct": round(float(pct_val), 2),
+            "net": round(float(net_val), 2),
+            "inflow": round(float(inflow_val), 2),
+            "outflow": round(float(outflow_val), 2),
             "firms": _num(row.get("公司家数")),
         })
     return out

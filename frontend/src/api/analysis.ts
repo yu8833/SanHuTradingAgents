@@ -114,6 +114,34 @@ export interface AnalysisHistory {
   analyses: AnalysisResult[]
 }
 
+// 提交单股分析任务的响应数据（POST /api/analysis/single）
+export interface SingleAnalysisStartResult {
+  task_id: string
+  status: string
+  message?: string
+}
+
+// 任务状态查询的响应数据（GET /api/analysis/tasks/{taskId}/status）
+export interface AnalysisTaskStatus {
+  task_id: string
+  status: string  // pending | running | completed | failed | cancelled
+  progress: number
+  message?: string
+  current_step?: string
+  start_time?: string
+  end_time?: string
+  elapsed_time?: number
+  remaining_time?: number
+  estimated_total_time?: number
+  symbol?: string
+  stock_code?: string
+  stock_symbol?: string
+  analysts?: string[]
+  source?: string
+  error_message?: string
+  [key: string]: any  // 后端可能携带扩展字段
+}
+
 // 股票分析API
 export const analysisApi = {
   // 开始分析
@@ -122,12 +150,12 @@ export const analysisApi = {
   },
 
   // 开始单股分析（使用后端期望的格式）
-  startSingleAnalysis(analysisRequest: SingleAnalysisRequest): Promise<ApiResponse<any>> {
+  startSingleAnalysis(analysisRequest: SingleAnalysisRequest): Promise<ApiResponse<SingleAnalysisStartResult>> {
     return request.post('/api/analysis/single', analysisRequest)
   },
 
   // 获取任务状态
-  getTaskStatus(taskId: string): Promise<ApiResponse<any>> {
+  getTaskStatus(taskId: string): Promise<ApiResponse<AnalysisTaskStatus>> {
     return request.get(`/api/analysis/tasks/${taskId}/status`)
   },
 

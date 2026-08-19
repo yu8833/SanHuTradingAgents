@@ -99,7 +99,7 @@
 
               <!-- 操作按钮 -->
               <div class="form-section">
-                <div class="action-buttons" style="display: flex; justify-content: center; align-items: center; width: 100%; text-align: center;">
+                <div class="action-buttons">
                   <el-button
                     v-if="analysisStatus === 'idle'"
                     type="primary"
@@ -132,8 +132,7 @@
                       size="large"
                       @click="goToReportDetail"
                       class="submit-btn"
-                      style="width: 180px; height: 56px; font-size: 16px; font-weight: 700; border-radius: 16px;"
-                    >
+                  >
                       <el-icon><Document /></el-icon>
                       查看完整报告
                     </el-button>
@@ -143,8 +142,7 @@
                       size="large"
                       @click="restartAnalysis"
                       class="submit-btn"
-                      style="width: 180px; height: 56px; font-size: 16px; font-weight: 700; border-radius: 16px;"
-                    >
+                  >
                       <el-icon><Refresh /></el-icon>
                       重新分析
                     </el-button>
@@ -195,7 +193,7 @@
                         <!--
                         <div class="stat-item">
                           <div class="stat-label">整体进度</div>
-                          <div class="stat-value">{{ progressInfo.progress.toFixed(1) }}%</div>
+                          <div class="stat-value">{{ fmtNum(progressInfo.progress, 1) }}%</div>
                         </div>
                         -->
                         <div class="stat-item">
@@ -460,6 +458,7 @@ import { convertAnalystNamesToIds } from '@/constants/analysts'
 import { marked } from 'marked'
 import { validateStockCode, getStockCodeFormatHelp } from '@/utils/stockValidator'
 import { normalizeMarketForAnalysis, getMarketByStockCode } from '@/utils/market'
+import { fmtNum, fmtPctFromFraction } from '@/utils/format'
 
 // 配置marked选项
 marked.setOptions({
@@ -1367,7 +1366,7 @@ const goSimOrder = async () => {
       setup() {
         // 计算预计金额
         const estimatedAmount = computed(() => {
-          return (tradeForm.price * tradeForm.quantity).toFixed(2)
+          return fmtNum(tradeForm.price * tradeForm.quantity, 2)
         })
 
         return () => h('div', { style: 'line-height: 2;' }, [
@@ -1381,7 +1380,7 @@ const goSimOrder = async () => {
           ]),
           h('p', [
             h('strong', '当前价格：'),
-            h('span', `${currentPrice.toFixed(2)}元`)
+            h('span', `${fmtNum(currentPrice, 2)}元`)
           ]),
           h('div', { style: 'margin: 16px 0;' }, [
             h('p', { style: 'margin-bottom: 8px;' }, [
@@ -1420,14 +1419,14 @@ const goSimOrder = async () => {
           ]),
           h('p', [
             h('strong', '置信度：'),
-            h('span', `${(recommendation.confidence * 100).toFixed(1)}%`)
+            h('span', `${fmtPctFromFraction(recommendation.confidence, 1)}`)
           ]),
           h('p', [
             h('strong', '风险等级：'),
             h('span', recommendation.riskLevel)
           ]),
           recommendation.action === 'buy' ? h('p', { style: 'color: #909399; font-size: 12px; margin-top: 12px;' },
-            `可用资金：${typeof account.cash === 'number' ? account.cash.toFixed(2) : account.cash}元，最大可买：${maxQuantity}股`
+            `可用资金：${typeof account.cash === 'number' ? fmtNum(account.cash, 2) : account.cash}元，最大可买：${maxQuantity}股`
           ) : null,
           recommendation.action === 'sell' ? h('p', { style: 'color: #909399; font-size: 12px; margin-top: 12px;' },
             `当前持仓：${maxQuantity}股`
@@ -2648,48 +2647,7 @@ onMounted(async () => {
           }
 
           .action-buttons {
-            display: flex !important;
-            justify-content: center !important;
-            align-items: center !important;
-            margin-top: 24px !important;
-            width: 100% !important;
-            text-align: center !important;
-
-            .submit-btn.el-button {
-              width: 280px !important;
-              height: 56px !important;
-              font-size: 18px !important;
-              font-weight: 700 !important;
-              background: linear-gradient(135deg, #2b6cb0 0%, #22568d 100%) !important;
-              border: none !important;
-              border-radius: 16px !important;
-              transition: all 0.3s ease !important;
-              box-shadow: 0 4px 15px rgba(43, 108, 176, 0.2) !important;
-              min-width: 280px !important;
-              max-width: 280px !important;
-
-              &:hover {
-                transform: translateY(-3px) !important;
-                box-shadow: 0 12px 30px rgba(43, 108, 176, 0.4) !important;
-                background: linear-gradient(135deg, #2b6cb0 0%, #22568d 100%) !important;
-              }
-
-              &:disabled {
-                opacity: 0.6 !important;
-                transform: none !important;
-                box-shadow: 0 4px 15px rgba(43, 108, 176, 0.1) !important;
-              }
-
-              .el-icon {
-                margin-right: 8px !important;
-                font-size: 20px !important;
-              }
-
-              span {
-                font-size: 18px !important;
-                font-weight: 700 !important;
-              }
-            }
+            margin-top: 24px;
           }
         }
       }
@@ -2705,7 +2663,7 @@ onMounted(async () => {
         height: 48px;
         font-size: 16px;
         font-weight: 600;
-        background: linear-gradient(135deg, #2b6cb0 0%, #22568d 100%);
+        background: linear-gradient(135deg, #2b6cb0 0%, var(--el-color-primary-dark-2) 100%);
         border: none;
         border-radius: 12px;
         transition: all 0.3s ease;
@@ -2774,7 +2732,7 @@ onMounted(async () => {
     background: linear-gradient(90deg, rgba(43, 108, 176, 0.05) 0%, transparent 100%);
 
     .step-icon {
-      background: linear-gradient(135deg, #2b6cb0 0%, #22568d 100%);
+      background: linear-gradient(135deg, #2b6cb0 0%, var(--el-color-primary-dark-2) 100%);
       color: white;
       box-shadow: 0 2px 12px rgba(43, 108, 176, 0.4);
     }
@@ -2785,7 +2743,7 @@ onMounted(async () => {
     }
 
     .step-description {
-      color: #22568d;
+      color: var(--el-color-primary-dark-2);
       font-weight: 500;
     }
   }
@@ -2874,47 +2832,57 @@ onMounted(async () => {
 <style>
 /* 全局样式确保按钮样式生效 */
 .action-buttons {
-  display: flex !important;
-  justify-content: center !important;
-  align-items: center !important;
-  width: 100% !important;
-  text-align: center !important;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-top: 24px;
+  width: 100%;
+  text-align: center;
 }
 
 .large-analysis-btn.el-button {
-  width: 280px !important;
-  height: 56px !important;
-  font-size: 18px !important;
-  font-weight: 700 !important;
-  background: linear-gradient(135deg, #2b6cb0 0%, #22568d 100%) !important;
-  border: none !important;
-  border-radius: 16px !important;
-  transition: all 0.3s ease !important;
-  box-shadow: 0 4px 15px rgba(43, 108, 176, 0.2) !important;
-  min-width: 280px !important;
-  max-width: 280px !important;
+  width: 280px;
+  height: 56px;
+  font-size: 18px;
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--el-color-primary) 0%, var(--el-color-primary-dark-2) 100%);
+  border: none;
+  border-radius: 16px;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 15px rgba(43, 108, 176, 0.2);
+  min-width: 280px;
+  max-width: 280px;
 }
 
 .large-analysis-btn.el-button:hover {
-  transform: translateY(-3px) !important;
-  box-shadow: 0 12px 30px rgba(43, 108, 176, 0.4) !important;
-  background: linear-gradient(135deg, #2b6cb0 0%, #22568d 100%) !important;
+  transform: translateY(-3px);
+  box-shadow: 0 12px 30px rgba(43, 108, 176, 0.4);
+  background: linear-gradient(135deg, var(--el-color-primary) 0%, var(--el-color-primary-dark-2) 100%);
 }
 
 .large-analysis-btn.el-button:disabled {
-  opacity: 0.6 !important;
-  transform: none !important;
-  box-shadow: 0 4px 15px rgba(43, 108, 176, 0.1) !important;
+  opacity: 0.6;
+  transform: none;
+  box-shadow: 0 4px 15px rgba(43, 108, 176, 0.1);
 }
 
 .large-analysis-btn.el-button .el-icon {
-  margin-right: 8px !important;
-  font-size: 20px !important;
+  margin-right: 8px;
+  font-size: 20px;
 }
 
 .large-analysis-btn.el-button span {
-  font-size: 18px !important;
-  font-weight: 700 !important;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+/* 完成/重试等中型按钮（无 large-analysis-btn 类的 submit-btn） */
+.submit-btn.el-button:not(.large-analysis-btn) {
+  width: 180px;
+  height: 56px;
+  font-size: 16px;
+  font-weight: 700;
+  border-radius: 16px;
 }
 
 /* 进度显示样式 */
@@ -2995,7 +2963,7 @@ onMounted(async () => {
   }
 
   :deep(.el-progress-bar__inner) {
-    background: linear-gradient(90deg, #2b6cb0 0%, #22568d 100%);
+    background: linear-gradient(90deg, #2b6cb0 0%, var(--el-color-primary-dark-2) 100%);
     border-radius: 8px;
     transition: width 0.6s ease;
   }
@@ -3270,35 +3238,35 @@ onMounted(async () => {
 
   /* 单个标签页样式 */
   :deep(.el-tabs__item) {
-    height: 55px !important;
-    line-height: 55px !important;
-    padding: 0 20px !important;
-    margin-right: 8px !important;
-    background: var(--el-bg-color) !important;
-    border: 2px solid var(--el-border-color) !important;
-    border-radius: 12px !important;
-    color: var(--el-text-color-regular) !important;
-    font-weight: 600 !important;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important;
-    position: relative !important;
-    overflow: hidden !important;
-    border-bottom: 2px solid var(--el-border-color) !important; /* 确保底部边框存在 */
+    height: 55px;
+    line-height: 55px;
+    padding: 0 20px;
+    margin-right: 8px;
+    background: var(--el-bg-color);
+    border: 2px solid var(--el-border-color);
+    border-radius: 12px;
+    color: var(--el-text-color-regular);
+    font-weight: 600;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    position: relative;
+    overflow: hidden;
+    border-bottom: 2px solid var(--el-border-color); /* 确保底部边框存在 */
 
     &:hover {
-      background: var(--el-fill-color-light) !important;
-      border-color: #2196f3 !important;
-      transform: translateY(-2px) scale(1.02) !important;
-      box-shadow: 0 4px 15px rgba(33,150,243,0.3) !important;
-      color: #1976d2 !important;
+      background: var(--el-fill-color-light);
+      border-color: #2196f3;
+      transform: translateY(-2px) scale(1.02);
+      box-shadow: 0 4px 15px rgba(33,150,243,0.3);
+      color: #1976d2;
     }
 
     &.is-active {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
-      color: white !important;
-      border-color: #667eea !important;
-      box-shadow: 0 6px 20px rgba(102,126,234,0.4) !important;
-      transform: translateY(-3px) scale(1.05) !important;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border-color: #667eea;
+      box-shadow: 0 6px 20px rgba(102,126,234,0.4);
+      transform: translateY(-3px) scale(1.05);
 
       &::before {
         content: '';
@@ -3380,65 +3348,64 @@ onMounted(async () => {
 
   /* 标题样式 */
   h1, h2, h3, h4, h5, h6 {
-    color: var(--el-text-color-primary) !important;
-    margin: 20px 0 12px 0 !important;
-    font-weight: 600 !important;
+    color: var(--el-text-color-primary);
+    margin: 20px 0 12px 0;
+    font-weight: 600;
   }
 
-  h1 { font-size: 24px !important; }
-  h2 { font-size: 20px !important; }
-  h3 { font-size: 18px !important; }
-  h4 { font-size: 16px !important; }
+  h1 { font-size: 24px; }
+  h2 { font-size: 20px; }
+  h3 { font-size: 18px; }
+  h4 { font-size: 16px; }
 
   /* 段落样式 */
   p {
-    margin: 12px 0 !important;
-    line-height: 1.7 !important;
+    margin: 12px 0;
+    line-height: 1.7;
   }
 
   /* 强调文本 */
   strong, b {
-    color: var(--el-text-color-primary) !important;
-    font-weight: 600 !important;
+    color: var(--el-text-color-primary);
+    font-weight: 600;
   }
 
   /* 斜体文本 */
   em, i {
-    color: var(--el-text-color-secondary) !important;
-    font-style: italic !important;
+    color: var(--el-text-color-secondary);
+    font-style: italic;
   }
 
   /* 列表样式 */
   ul, ol {
-    margin: 12px 0 !important;
-    padding-left: 24px !important;
+    margin: 12px 0;
+    padding-left: 24px;
 
     li {
-      margin: 6px 0 !important;
-      line-height: 1.6 !important;
+      margin: 6px 0;
+      line-height: 1.6;
     }
   }
 
   /* 代码样式 */
   code {
-    background: var(--el-fill-color-light) !important;
-    padding: 2px 6px !important;
-    border-radius: 4px !important;
-    font-family: var(--app-font-mono) !important;
-    font-size: 14px !important;
-    color: #e11d48 !important;
+    background: var(--el-fill-color-light);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: var(--app-font-mono);
+    font-size: 14px;
+    color: #e11d48;
   }
 
   /* 引用样式 */
   blockquote {
-    border-left: 4px solid #2b6cb0 !important;
-    padding-left: 16px !important;
-    margin: 16px 0 !important;
-    background: var(--el-fill-color-light) !important;
-    padding: 12px 16px !important;
-    border-radius: 0 8px 8px 0 !important;
-    font-style: italic !important;
-    color: var(--el-text-color-regular) !important;
+    border-left: 4px solid #2b6cb0;
+    padding: 12px 16px;
+    margin: 16px 0;
+    background: var(--el-fill-color-light);
+    border-radius: 0 8px 8px 0;
+    font-style: italic;
+    color: var(--el-text-color-regular);
   }
 }
 

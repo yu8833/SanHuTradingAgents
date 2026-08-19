@@ -260,6 +260,7 @@ import {
   Money
 } from '@element-plus/icons-vue'
 import { screeningApi, type RetailBacktestResp, type LimitUpPullbackBacktestResp, type ThreeBuysThreeSellsBacktestResp } from '@/api/screening'
+import { fmtNum, fmtPct } from '@/utils/format'
 
 type StrategyKey = 'extreme_reversal' | 'small_cap_value' | 'turnaround' | 'convertible_arbitrage' | 'limit_up_pullback' | 'three_buys_three_sells' | 'ma_crossover' | 'macd_divergence' | 'volume_price'
 type BacktestResult = RetailBacktestResp | LimitUpPullbackBacktestResp | ThreeBuysThreeSellsBacktestResp
@@ -370,10 +371,10 @@ function formatValue(metricLabel: string, value: any): string {
   const metric = metricDefinitions.find(m => m.label === metricLabel)
   if (!metric) return String(value)
   if (metric.isPercent) {
-    return (value >= 0 ? '+' : '') + value.toFixed(2) + '%'
+    return fmtPct(value)
   }
   if (typeof value === 'number') {
-    return value.toFixed(2)
+    return fmtNum(value)
   }
   return String(value)
 }
@@ -426,7 +427,7 @@ const chartOption = computed(() => {
       formatter: (params: any) => {
         let result = params[0].axisValueLabel + '<br/>'
         params.forEach((item: any) => {
-          result += `${item.marker} ${item.seriesName}: ${item.value >= 0 ? '+' : ''}${item.value.toFixed(2)}%<br/>`
+          result += `${item.marker} ${item.seriesName}: ${fmtPct(item.value)}<br/>`
         })
         return result
       }
