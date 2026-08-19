@@ -119,7 +119,7 @@
           <span class="block-hint">共 {{ emotion.lianban_stocks.length }} 只</span>
         </div>
         <el-card shadow="never" class="table-card">
-          <el-table :data="emotion.lianban_stocks" stripe size="default">
+          <el-table :data="emotion.lianban_stocks" stripe size="default" class="app-table app-table--ranking">
             <el-table-column label="名称 / 代码" min-width="170">
               <template #default="{ row }">
                 <div class="stock-cell">
@@ -128,23 +128,23 @@
                 </div>
               </template>
             </el-table-column>
-            <el-table-column label="连板数" width="90" align="center">
+            <el-table-column label="连板数" width="90" align="right" sortable>
               <template #default="{ row }">
                 <el-tag type="danger" effect="plain">{{ row.boards }}板</el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="现价" width="100" align="right">
+            <el-table-column label="现价" width="100" align="right" sortable>
               <template #default="{ row }">{{ row.price.toFixed(2) }}</template>
             </el-table-column>
-            <el-table-column label="涨停%" width="100" align="right">
+            <el-table-column label="涨停%" width="100" align="right" sortable>
               <template #default="{ row }">
                 <span class="up">{{ row.pct.toFixed(2) }}%</span>
               </template>
             </el-table-column>
-            <el-table-column label="成交额(亿)" width="120" align="right">
+            <el-table-column label="成交额(亿)" width="120" align="right" sortable>
               <template #default="{ row }">{{ formatYi(row.amount) }}</template>
             </el-table-column>
-            <el-table-column label="流通市值(亿)" width="130" align="right">
+            <el-table-column label="流通市值(亿)" width="130" align="right" sortable>
               <template #default="{ row }">{{ formatYi(row.float_cap) }}</template>
             </el-table-column>
             <el-table-column label="概念" min-width="120" prop="industry" />
@@ -340,16 +340,6 @@ onMounted(() => {
   line-height: 1.8;
   color: var(--el-text-color-primary);
   letter-spacing: 0.3px;
-}
-
-.table-card {
-  border-radius: 8px;
-}
-
-.stock-cell {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.3;
 }
 
 .empty {

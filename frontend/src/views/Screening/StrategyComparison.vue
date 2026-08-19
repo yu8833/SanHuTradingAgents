@@ -161,13 +161,14 @@
           </div>
         </template>
 
-        <el-table :data="metricRows" stripe border style="width: 100%">
+        <el-table :data="metricRows" stripe style="width: 100%" class="app-table app-table--compact">
           <el-table-column prop="metric" label="指标" width="140" fixed="left" />
           <el-table-column
             v-for="strategyKey in selectedStrategies"
             :key="strategyKey"
             :label="getStrategyName(strategyKey)"
             align="right"
+            sortable
           >
             <template #default="{ row }">
               <span :class="getValueClass(row.metric, row[strategyKey])">

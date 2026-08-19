@@ -90,6 +90,7 @@
     <!-- 自选股列表 -->
     <el-card class="favorites-list-card" shadow="never">
       <el-table
+        class="app-table app-table--trades"
         :data="filteredFavorites"
         v-loading="loading"
         style="width: 100%"
@@ -113,14 +114,14 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="current_price" label="当前价格" min-width="100">
+        <el-table-column prop="current_price" label="当前价格" min-width="100" sortable align="right">
           <template #default="{ row }">
             <span v-if="row.current_price !== null && row.current_price !== undefined">¥{{ formatPrice(row.current_price) }}</span>
             <span v-else>-</span>
           </template>
         </el-table-column>
 
-        <el-table-column prop="change_percent" label="涨跌幅" min-width="100">
+        <el-table-column prop="change_percent" label="涨跌幅" min-width="100" sortable align="right">
           <template #default="{ row }">
             <span
               v-if="row.change_percent !== null && row.change_percent !== undefined"
@@ -305,7 +306,7 @@
 
     <!-- 标签管理对话框 -->
     <el-dialog v-model="tagDialogVisible" title="标签管理" width="560px">
-      <el-table :data="tagList" v-loading="tagLoading" size="small" style="width: 100%; margin-bottom: 12px;">
+      <el-table class="app-table app-table--compact" :data="tagList" v-loading="tagLoading" size="small" style="width: 100%; margin-bottom: 12px;">
         <el-table-column label="名称" min-width="220">
           <template #default="{ row }">
             <template v-if="row._editing">

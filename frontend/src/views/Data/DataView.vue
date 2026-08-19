@@ -69,7 +69,7 @@
           </div>
         </div>
       </template>
-      <el-table :data="sources" v-loading="loadingSources" style="width: 100%">
+      <el-table :data="sources" v-loading="loadingSources" style="width: 100%" class="app-table app-table--compact">
         <el-table-column label="数据源" width="140">
           <template #default="{ row }">
             <span class="source-name">{{ row.name }}</span>
@@ -215,7 +215,7 @@
           </el-button>
         </div>
       </template>
-      <el-table :data="history" v-loading="loadingHistory" style="width: 100%" size="small">
+      <el-table :data="history" v-loading="loadingHistory" style="width: 100%" size="small" class="app-table app-table--compact">
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
             <el-tag :type="getHistoryStatusType(row.status)" size="small">{{ getHistoryStatusText(row.status) }}</el-tag>

@@ -726,7 +726,7 @@
               </el-descriptions-item>
             </el-descriptions>
             <!-- 同板块股票 -->
-            <el-table :data="sectorData.sector_stocks" size="small" border style="width: 100%" max-height="240">
+            <el-table class="app-table app-table--compact" :data="sectorData.sector_stocks" size="small" style="width: 100%" max-height="240">
               <el-table-column label="代码" prop="code" min-width="120">
                 <template #default="{ row }">
                   <router-link :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
@@ -737,10 +737,10 @@
                   <router-link :to="`/stocks/${row.code}`" class="stock-name">{{ row.name }}</router-link>
                 </template>
               </el-table-column>
-              <el-table-column label="最新价" prop="price" min-width="120" align="right">
+              <el-table-column label="最新价" prop="price" min-width="120" align="right" sortable>
                 <template #default="{ row }">{{ row.price?.toFixed(2) || '-' }}</template>
               </el-table-column>
-              <el-table-column label="涨跌幅" prop="change_pct" min-width="130" align="right">
+              <el-table-column label="涨跌幅" prop="change_pct" min-width="130" align="right" sortable>
                 <template #default="{ row }">
                   <span :style="{color: row.change_pct >= 0 ? 'var(--app-up)' : 'var(--app-down)', fontWeight: 'bold'}">
                     {{ row.change_pct >= 0 ? '+' : '' }}{{ row.change_pct?.toFixed(2) || '0.00' }}%

@@ -132,22 +132,22 @@
                 <el-descriptions-item label="平均亏损">{{ (perfData.overall.avg_loss * 100).toFixed(2) }}%</el-descriptions-item>
               </el-descriptions>
 
-              <el-table :data="perfTableData" size="small" border>
+              <el-table :data="perfTableData" size="small" class="app-table app-table--compact">
                 <el-table-column label="策略" width="140">
                   <template #default="{ row }">{{ getStrategyLabel(row.strategy) }}</template>
                 </el-table-column>
-                <el-table-column label="交易次数" prop="total_trades" width="100" sortable />
-                <el-table-column label="胜率" width="100" sortable :sort-by="'win_rate'">
+                <el-table-column label="交易次数" prop="total_trades" width="100" sortable align="right" />
+                <el-table-column label="胜率" width="100" sortable align="right">
                   <template #default="{ row }">
                     <span :style="{color: row.win_rate >= 0.5 ? 'var(--app-up)' : 'var(--app-down)', fontWeight:'bold'}">
                       {{ (row.win_rate * 100).toFixed(1) }}%
                     </span>
                   </template>
                 </el-table-column>
-                <el-table-column label="盈亏比" width="100" sortable :sort-by="'profit_loss_ratio'">
+                <el-table-column label="盈亏比" width="100" sortable align="right">
                   <template #default="{ row }">{{ row.profit_loss_ratio.toFixed(2) }}</template>
                 </el-table-column>
-                <el-table-column label="平均收益" width="120" sortable :sort-by="'avg_return'">
+                <el-table-column label="平均收益" width="120" sortable align="right">
                   <template #default="{ row }">
                     <span :style="{color: row.avg_return >= 0 ? 'var(--app-up)' : 'var(--app-down)'}">
                       {{ (row.avg_return * 100).toFixed(2) }}%
@@ -291,17 +291,17 @@
 
             <!-- 当前持仓（简化） -->
             <el-divider content-position="left">当前持仓（用于风控计算，可留空）</el-divider>
-            <el-table :data="posForm.holdings" size="small" border style="margin-bottom:12px;">
+            <el-table :data="posForm.holdings" size="small" class="app-table app-table--compact" style="margin-bottom:12px;">
               <el-table-column label="代码" width="140">
                 <template #default="{ row }"><el-input v-model="row.symbol" size="small" /></template>
               </el-table-column>
               <el-table-column label="行业" width="120">
                 <template #default="{ row }"><el-input v-model="row.industry" size="small" /></template>
               </el-table-column>
-              <el-table-column label="市值(元)" width="140">
+              <el-table-column label="市值(元)" width="140" align="right">
                 <template #default="{ row }"><el-input-number v-model="row.market_value" :min="0" size="small" style="width:100%" /></template>
               </el-table-column>
-              <el-table-column label="仓位占比" width="120">
+              <el-table-column label="仓位占比" width="120" align="right">
                 <template #default="{ row }"><el-input-number v-model="row.position_ratio" :min="0" :max="1" :step="0.01" :precision="2" size="small" style="width:100%" /></template>
               </el-table-column>
               <el-table-column label="操作" width="80">
@@ -355,7 +355,7 @@
             </div>
           </template>
 
-          <el-table :data="exitHoldings" size="small" border style="margin-bottom:12px;">
+          <el-table :data="exitHoldings" size="small" class="app-table app-table--compact" style="margin-bottom:12px;">
             <el-table-column label="代码" width="130">
               <template #default="{ row }"><el-input v-model="row.symbol" size="small" :disabled="row._real" /></template>
             </el-table-column>
@@ -370,16 +370,16 @@
                 </el-select>
               </template>
             </el-table-column>
-            <el-table-column label="买入价" width="100">
+            <el-table-column label="买入价" width="100" align="right">
               <template #default="{ row }"><el-input-number v-model="row.buy_price" :min="0" :step="0.1" :precision="2" size="small" style="width:100%" :disabled="row._real" /></template>
             </el-table-column>
             <el-table-column label="买入日期" width="140">
               <template #default="{ row }"><el-date-picker v-model="row.buy_date" type="date" value-format="YYYY-MM-DD" size="small" style="width:100%" :disabled="row._real" /></template>
             </el-table-column>
-            <el-table-column label="当前价" width="100">
+            <el-table-column label="当前价" width="100" align="right">
               <template #default="{ row }"><el-input-number v-model="row.current_price" :min="0" :step="0.1" :precision="2" size="small" style="width:100%" /></template>
             </el-table-column>
-            <el-table-column label="当前MA(可选)" width="110">
+            <el-table-column label="当前MA(可选)" width="110" align="right">
               <template #default="{ row }"><el-input-number v-model="row.current_ma" :min="0" :step="0.1" :precision="2" size="small" style="width:100%" /></template>
             </el-table-column>
             <el-table-column label="逻辑证伪" width="80">
@@ -407,7 +407,7 @@
               <el-badge :value="`${exitResult.exits_count} 个触发`" :type="exitResult.exits_count > 0 ? 'danger' : 'info'" />
             </div>
           </template>
-          <el-table :data="exitResult.signals" size="small" border>
+          <el-table :data="exitResult.signals" size="small" class="app-table app-table--compact">
             <el-table-column label="代码" prop="symbol" width="120">
               <template #default="{ row }">
                 <router-link :to="`/stocks/${row.symbol}`" class="stock-code">{{ row.symbol }}</router-link>
@@ -423,15 +423,15 @@
                 <el-tag :type="getExitReasonType(row.reason)" size="small">{{ getExitReasonLabel(row.reason) }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="当前盈亏" width="100">
+            <el-table-column label="当前盈亏" width="100" align="right" sortable>
               <template #default="{ row }">
                 <span :style="{color: row.current_pnl_pct >= 0 ? 'var(--app-up)' : 'var(--app-down)', fontWeight:'bold'}">
                   {{ (row.current_pnl_pct * 100).toFixed(2) }}%
                 </span>
               </template>
             </el-table-column>
-            <el-table-column label="持仓天数" prop="holding_days" width="90" />
-            <el-table-column label="建议卖出比例" width="120">
+            <el-table-column label="持仓天数" prop="holding_days" width="90" align="right" sortable />
+            <el-table-column label="建议卖出比例" width="120" align="right" sortable>
               <template #default="{ row }">{{ (row.suggested_sell_ratio * 100).toFixed(0) }}%</template>
             </el-table-column>
             <el-table-column label="详情" prop="detail" min-width="200" />

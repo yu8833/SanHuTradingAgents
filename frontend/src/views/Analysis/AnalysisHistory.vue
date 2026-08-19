@@ -191,6 +191,7 @@
         :data="historyList" 
         v-loading="loading" 
         style="width: 100%"
+        class="app-table app-table--compact"
         @selection-change="handleSelectionChange"
       >
         <el-table-column type="selection" width="55" />
@@ -222,13 +223,13 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="created_at" label="创建时间" width="180">
+        <el-table-column prop="created_at" label="创建时间" width="180" sortable>
           <template #default="{ row }">
             {{ formatTime(row.created_at) }}
           </template>
         </el-table-column>
 
-        <el-table-column prop="execution_time" label="执行时长" width="120">
+        <el-table-column prop="execution_time" label="执行时长" width="120" align="right" sortable>
           <template #default="{ row }">
             {{ row.execution_time ? `${row.execution_time}s` : '-' }}
           </template>

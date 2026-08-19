@@ -112,7 +112,7 @@
         :data="filteredConcepts"
         stripe
         size="small"
-        class="concept-table"
+        class="app-table app-table--compact"
         :max-height="560"
       >
         <el-table-column label="概念" min-width="160">
@@ -136,7 +136,7 @@
             <span :class="pctClass(row.money_flow)">{{ sign(row.money_flow) }}{{ fmtNum(row.money_flow) }}亿</span>
           </template>
         </el-table-column>
-        <el-table-column label="换手" width="90" align="right">
+        <el-table-column label="换手" width="90" align="right" sortable>
           <template #default="{ row }">{{ row.turnover }}%</template>
         </el-table-column>
       </el-table>
@@ -168,7 +168,7 @@
         :data="rotation?.rows || []"
         stripe
         size="small"
-        class="rotation-table"
+        class="app-table app-table--compact"
         :max-height="460"
       >
         <el-table-column label="概念" min-width="150">
@@ -176,7 +176,7 @@
             <span class="col-name">{{ row.name }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="今日" width="90" align="right">
+        <el-table-column label="今日" width="90" align="right" sortable>
           <template #default="{ row }">
             <span :class="pctClass(row.pct_chg)">{{ sign(row.pct_chg) }}{{ formatPct(row.pct_chg) }}%</span>
           </template>
@@ -187,6 +187,7 @@
           :label="w + '日'"
           width="90"
           align="right"
+          sortable
         >
           <template #default="{ row }">
             <span v-if="row.returns?.[w] != null" :class="pctClass(row.returns[w])">{{ sign(row.returns[w]) }}{{ formatPct(row.returns[w]) }}%</span>
@@ -405,20 +406,17 @@ onMounted(() => {
     }
   }
 
-  .concept-table,
-  .rotation-table {
-    .col-name {
-      font-weight: 500;
-    }
+  .col-name {
+    font-weight: 500;
+  }
 
-    .col-lead {
-      color: var(--el-text-color-secondary);
-      font-size: 12px;
-    }
+  .col-lead {
+    color: var(--el-text-color-secondary);
+    font-size: 12px;
+  }
 
-    .muted {
-      color: var(--el-text-color-placeholder);
-    }
+  .muted {
+    color: var(--el-text-color-placeholder);
   }
 
   .up {

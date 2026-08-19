@@ -49,9 +49,17 @@
     <el-tabs v-model="activeTab" class="review-tabs">
       <!-- 交易记录面板 -->
       <el-tab-pane label="交易记录" name="trades">
-        <el-table :data="cycles" v-loading="loading" stripe empty-text="暂无已平仓交易">
-          <el-table-column prop="code" label="代码" width="100" />
-          <el-table-column prop="name" label="名称" min-width="120" />
+        <el-table :data="cycles" v-loading="loading" stripe empty-text="暂无已平仓交易" class="app-table app-table--trades">
+          <el-table-column label="代码" width="100">
+            <template #default="{ row }">
+              <router-link :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
+            </template>
+          </el-table-column>
+          <el-table-column label="名称" min-width="120">
+            <template #default="{ row }">
+              <router-link :to="`/stocks/${row.code}`" class="stock-name">{{ row.name || '-' }}</router-link>
+            </template>
+          </el-table-column>
           <el-table-column prop="strategy" label="策略" width="110">
             <template #default="{ row }">
               <el-tag size="small" v-if="row.strategy">{{ strategyLabel(row.strategy) }}</el-tag>
@@ -63,15 +71,15 @@
               <span class="reason-text">{{ row.reason || '-' }}</span>
             </template>
           </el-table-column>
-          <el-table-column prop="buy_price" label="建仓价" width="100" align="right" />
-          <el-table-column prop="sell_price" label="平仓价" width="100" align="right" />
-          <el-table-column prop="quantity" label="数量" width="90" align="right" />
-          <el-table-column prop="pnl" label="盈亏" width="110" align="right">
+          <el-table-column prop="buy_price" label="建仓价" width="100" align="right" sortable />
+          <el-table-column prop="sell_price" label="平仓价" width="100" align="right" sortable />
+          <el-table-column prop="quantity" label="数量" width="90" align="right" sortable />
+          <el-table-column prop="pnl" label="盈亏" width="110" align="right" sortable>
             <template #default="{ row }">
               <span :class="row.pnl >= 0 ? 'up' : 'down'">{{ row.pnl >= 0 ? '+' : '' }}{{ row.pnl }}</span>
             </template>
           </el-table-column>
-          <el-table-column prop="pnl_pct" label="盈亏率" width="100" align="right">
+          <el-table-column prop="pnl_pct" label="盈亏率" width="100" align="right" sortable>
             <template #default="{ row }">
               <span :class="row.pnl >= 0 ? 'up' : 'down'">{{ row.pnl_pct }}%</span>
             </template>

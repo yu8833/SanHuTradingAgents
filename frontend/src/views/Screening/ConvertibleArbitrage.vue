@@ -189,30 +189,35 @@
             :height="tableHeight"
             row-key="bond_code"
             style="width: 100%"
+            class="app-table app-table--ranking"
           >
-            <el-table-column prop="bond_code" label="转债代码" width="100" fixed="left">
+            <el-table-column label="转债代码" width="100" fixed="left">
               <template #default="{ row }">
-                <span class="stock-code">{{ row.bond_code }}</span>
+                <router-link :to="`/stocks/${row.bond_code}`" class="stock-code">{{ row.bond_code }}</router-link>
               </template>
             </el-table-column>
-            <el-table-column prop="bond_name" label="转债名称" width="120" fixed="left">
+            <el-table-column label="转债名称" width="120" fixed="left">
               <template #default="{ row }">
-                <span class="stock-name">{{ row.bond_name }}</span>
+                <router-link :to="`/stocks/${row.bond_code}`" class="stock-name">{{ row.bond_name }}</router-link>
               </template>
             </el-table-column>
-            <el-table-column prop="stock_name" label="正股" width="100" />
-            <el-table-column prop="bond_price" label="转债现价" width="100" sortable>
+            <el-table-column label="正股" width="100">
+              <template #default="{ row }">
+                <router-link :to="`/stocks/${row.stock_code || row.code}`" class="stock-name">{{ row.stock_name || '-' }}</router-link>
+              </template>
+            </el-table-column>
+            <el-table-column prop="bond_price" label="转债现价" width="100" sortable align="right">
               <template #default="{ row }">
                 <span class="price">{{ formatNum(row.bond_price) }}</span>
               </template>
             </el-table-column>
-            <el-table-column prop="stock_price" label="正股价" width="90" sortable>
+            <el-table-column prop="stock_price" label="正股价" width="90" sortable align="right">
               <template #default="{ row }">{{ formatNum(row.stock_price) }}</template>
             </el-table-column>
-            <el-table-column prop="conversion_price" label="转股价" width="90" sortable>
+            <el-table-column prop="conversion_price" label="转股价" width="90" sortable align="right">
               <template #default="{ row }">{{ formatNum(row.conversion_price) }}</template>
             </el-table-column>
-            <el-table-column prop="stock_vs_conversion" label="正股/转股价" width="120" sortable>
+            <el-table-column prop="stock_vs_conversion" label="正股/转股价" width="120" sortable align="right">
               <template #default="{ row }">
                 <span :class="['pct', row.stock_vs_conversion <= 0.5 ? 'down' : '']">
                   {{ (row.stock_vs_conversion * 100).toFixed(1) }}%
@@ -220,14 +225,14 @@
                 <div class="param-hint" style="font-size:11px;">{{ row.down_revision_motivation }}</div>
               </template>
             </el-table-column>
-            <el-table-column prop="conversion_premium" label="转股溢价率" width="120" sortable>
+            <el-table-column prop="conversion_premium" label="转股溢价率" width="120" sortable align="right">
               <template #default="{ row }">
                 <span :class="['pct', row.conversion_premium >= 0.5 ? 'up' : '']">
                   {{ (row.conversion_premium * 100).toFixed(1) }}%
                 </span>
               </template>
             </el-table-column>
-            <el-table-column prop="double_low" label="双低值" width="100" sortable>
+            <el-table-column prop="double_low" label="双低值" width="100" sortable align="right">
               <template #default="{ row }">{{ formatNum(row.double_low) }}</template>
             </el-table-column>
             <el-table-column prop="rating" label="评级" width="80">
@@ -235,10 +240,10 @@
                 <el-tag size="small" :type="getRatingTagType(row.rating)">{{ row.rating || '-' }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="issue_size" label="发行规模(亿)" width="110" sortable>
+            <el-table-column prop="issue_size" label="发行规模(亿)" width="110" sortable align="right">
               <template #default="{ row }">{{ formatNum(row.issue_size) }}</template>
             </el-table-column>
-            <el-table-column prop="years_to_maturity" label="剩余年限(年)" width="120" sortable>
+            <el-table-column prop="years_to_maturity" label="剩余年限(年)" width="120" sortable align="right">
               <template #default="{ row }">
                 {{ row.years_to_maturity ? row.years_to_maturity.toFixed(1) : '-' }}
                 <el-tag v-if="row.in_put_period" size="small" type="warning" style="margin-left:4px;">回售期</el-tag>
@@ -251,7 +256,7 @@
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="score" label="综合评分" width="130" sortable fixed="right">
+            <el-table-column prop="score" label="综合评分" width="130" sortable align="right" fixed="right">
               <template #default="{ row }">
                 <el-popover placement="left" :width="400" trigger="click">
                   <template #reference>
@@ -294,7 +299,7 @@
                 <span class="panel-title">评分明细（前5名）</span>
               </div>
             </template>
-            <el-table :data="results.slice(0, 5)" size="small" border>
+            <el-table :data="results.slice(0, 5)" size="small" class="app-table app-table--compact">
               <el-table-column prop="bond_name" label="转债" width="120" />
               <el-table-column label="下修动力" min-width="180">
                 <template #default="{ row }">{{ row.score_details?.['下修动力'] || '-' }}</template>
@@ -421,15 +426,15 @@
 
           <el-card shadow="never" style="margin-top: 16px;">
             <template #header><div class="card-header"><span>卖出原因统计</span></div></template>
-            <el-table :data="sellReasonStatsList" stripe style="width: 100%">
+            <el-table :data="sellReasonStatsList" stripe style="width: 100%" class="app-table app-table--compact">
               <el-table-column prop="sell_reason" label="卖出原因" width="180" />
-              <el-table-column prop="count" label="交易次数" width="120" />
-              <el-table-column prop="win_rate" label="胜率" width="120">
+              <el-table-column prop="count" label="交易次数" width="120" align="right" sortable />
+              <el-table-column prop="win_rate" label="胜率" width="120" align="right" sortable>
                 <template #default="{ row }">
                   <span :class="['pct', row.win_rate >= 0.5 ? 'up' : 'down']">{{ (row.win_rate * 100).toFixed(2) }}%</span>
                 </template>
               </el-table-column>
-              <el-table-column prop="avg_return" label="平均收益">
+              <el-table-column prop="avg_return" label="平均收益" align="right" sortable>
                 <template #default="{ row }">
                   <span :class="['pct', row.avg_return >= 0 ? 'up' : 'down']">{{ row.avg_return >= 0 ? '+' : '' }}{{ (row.avg_return * 100).toFixed(2) }}%</span>
                 </template>
@@ -439,18 +444,26 @@
 
           <el-card shadow="never" style="margin-top: 16px;">
             <template #header><div class="card-header"><span>盈利最多交易</span></div></template>
-            <el-table :data="backtestResult.top_trades" stripe style="width: 100%">
-              <el-table-column prop="code" label="转债代码" width="110" />
-              <el-table-column prop="name" label="转债名称" width="140" />
+            <el-table :data="backtestResult.top_trades" stripe style="width: 100%" class="app-table app-table--compact">
+              <el-table-column label="转债代码" width="110">
+                <template #default="{ row }">
+                  <router-link :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
+                </template>
+              </el-table-column>
+              <el-table-column label="转债名称" width="140">
+                <template #default="{ row }">
+                  <router-link :to="`/stocks/${row.code}`" class="stock-name">{{ row.name || '-' }}</router-link>
+                </template>
+              </el-table-column>
               <el-table-column prop="buy_date" label="买入日期" width="110" />
               <el-table-column prop="sell_date" label="卖出日期" width="110" />
-              <el-table-column prop="buy_price" label="买入价" width="90">
+              <el-table-column prop="buy_price" label="买入价" width="90" align="right" sortable>
                 <template #default="{ row }">{{ formatNum(row.buy_price) }}</template>
               </el-table-column>
-              <el-table-column prop="sell_price" label="卖出价" width="90">
+              <el-table-column prop="sell_price" label="卖出价" width="90" align="right" sortable>
                 <template #default="{ row }">{{ formatNum(row.sell_price) }}</template>
               </el-table-column>
-              <el-table-column prop="return_pct" label="收益率" width="110" sortable>
+              <el-table-column prop="return_pct" label="收益率" width="110" sortable align="right">
                 <template #default="{ row }">
                   <span :class="['pct', row.return_pct >= 0 ? 'up' : 'down']">{{ row.return_pct >= 0 ? '+' : '' }}{{ (row.return_pct * 100).toFixed(2) }}%</span>
                 </template>
@@ -461,18 +474,26 @@
 
           <el-card shadow="never" style="margin-top: 16px;">
             <template #header><div class="card-header"><span>亏损最多交易</span></div></template>
-            <el-table :data="backtestResult.worst_trades" stripe style="width: 100%">
-              <el-table-column prop="code" label="转债代码" width="110" />
-              <el-table-column prop="name" label="转债名称" width="140" />
+            <el-table :data="backtestResult.worst_trades" stripe style="width: 100%" class="app-table app-table--compact">
+              <el-table-column label="转债代码" width="110">
+                <template #default="{ row }">
+                  <router-link :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
+                </template>
+              </el-table-column>
+              <el-table-column label="转债名称" width="140">
+                <template #default="{ row }">
+                  <router-link :to="`/stocks/${row.code}`" class="stock-name">{{ row.name || '-' }}</router-link>
+                </template>
+              </el-table-column>
               <el-table-column prop="buy_date" label="买入日期" width="110" />
               <el-table-column prop="sell_date" label="卖出日期" width="110" />
-              <el-table-column prop="buy_price" label="买入价" width="90">
+              <el-table-column prop="buy_price" label="买入价" width="90" align="right" sortable>
                 <template #default="{ row }">{{ formatNum(row.buy_price) }}</template>
               </el-table-column>
-              <el-table-column prop="sell_price" label="卖出价" width="90">
+              <el-table-column prop="sell_price" label="卖出价" width="90" align="right" sortable>
                 <template #default="{ row }">{{ formatNum(row.sell_price) }}</template>
               </el-table-column>
-              <el-table-column prop="return_pct" label="收益率" width="110" sortable>
+              <el-table-column prop="return_pct" label="收益率" width="110" sortable align="right">
                 <template #default="{ row }">
                   <span :class="['pct', row.return_pct >= 0 ? 'up' : 'down']">{{ row.return_pct >= 0 ? '+' : '' }}{{ (row.return_pct * 100).toFixed(2) }}%</span>
                 </template>
@@ -913,16 +934,6 @@ onUnmounted(() => { window.removeEventListener('resize', handleResize) })
 .result-panel {
   .empty-state { padding: 40px 0; }
   .data-source-tip { padding: 20px 0; }
-  .stock-code, .stock-name {
-    color: var(--el-color-primary);
-    font-size: 13px;
-  }
-  .price { font-family: var(--app-font-mono); font-weight: 500; }
-  .pct {
-    font-family: var(--app-font-mono); font-weight: 500;
-    &.up { color: var(--el-color-danger); }
-    &.down { color: var(--el-color-success); }
-  }
 }
 
 .metric-card {

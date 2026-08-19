@@ -193,6 +193,7 @@
         :data="filteredRecords"
         v-loading="loading"
         style="width: 100%"
+        class="app-table app-table--compact"
         :default-sort="{ prop: 'timestamp', order: 'descending' }"
       >
         <el-table-column prop="timestamp" label="时间" width="180" sortable>
@@ -211,15 +212,15 @@
             <router-link :to="`/stocks/${row.stock_symbol}`" class="stock-code">{{ row.stock_symbol }}</router-link>
           </template>
         </el-table-column>
-        <el-table-column prop="input_tokens" label="输入Token" width="100" sortable />
-        <el-table-column prop="output_tokens" label="输出Token" width="100" sortable />
-        <el-table-column prop="total_tokens" label="总Token" width="100" sortable />
-        <el-table-column prop="cost" label="成本(¥)" width="100" sortable>
+        <el-table-column prop="input_tokens" label="输入Token" width="100" align="right" sortable />
+        <el-table-column prop="output_tokens" label="输出Token" width="100" align="right" sortable />
+        <el-table-column prop="total_tokens" label="总Token" width="100" align="right" sortable />
+        <el-table-column prop="cost" label="成本(¥)" width="100" align="right" sortable>
           <template #default="{ row }">
             ¥{{ formatNumber(row.cost) }}
           </template>
         </el-table-column>
-        <el-table-column prop="duration" label="耗时(ms)" width="100" sortable />
+        <el-table-column prop="duration" label="耗时(ms)" width="100" align="right" sortable />
         <el-table-column label="操作" width="100">
           <template #default="{ row }">
             <el-button size="small" @click="viewDetails(row)">

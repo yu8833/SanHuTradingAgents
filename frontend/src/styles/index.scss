@@ -497,13 +497,69 @@ html, body {
 .app-table .cell-down { color: var(--app-down) !important; font-weight: 500; }
 .app-table .cell-flat { color: var(--app-flat) !important; }
 
-// 响应式：表格在移动端的行为
+// —— 股票链接样式 ——
+.app-table .stock-code,
+.app-table .stock-name {
+  color: var(--el-color-primary);
+  text-decoration: none;
+  font-weight: 500;
+  transition: color .15s ease, text-decoration-color .15s ease;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--el-color-primary-dark-2, #2563eb);
+    text-decoration: underline;
+    text-decoration-color: currentColor;
+  }
+}
+
+.app-table .stock-code {
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-size: 13px;
+  letter-spacing: 0.5px;
+}
+
+// 股票代码 + 名称组合
+.app-table .stock-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.3;
+
+  .stock-code { font-size: 12px; opacity: 0.75; }
+  .stock-name { font-size: 14px; }
+}
+
+// —— 可排序列样式 ——
+.app-table .el-table__sort-caret {
+  color: var(--el-text-color-placeholder);
+}
+
+.app-table .ascending .el-table__sort-caret.ascending,
+.app-table .descending .el-table__sort-caret.descending {
+  color: var(--el-color-primary);
+}
+
+// 数值列右对齐 + tabular-nums
+.app-table .el-table__cell.align-right {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+// —— 响应式：表格在移动端的行为 ——
 @media (max-width: 768px) {
   .app-table {
+    font-size: 13px;
+
     .el-table__header th.el-table__cell,
     .el-table__body td.el-table__cell {
-      padding: 10px 0;
+      padding: 10px 8px;
       font-size: 13px;
+    }
+
+    // 移动端隐藏次要列
+    .col-hide-mobile {
+      display: none;
     }
   }
 
@@ -511,11 +567,41 @@ html, body {
     flex-direction: column;
     align-items: flex-start;
     gap: 10px;
+    padding: 12px 14px;
 
     .toolbar-actions {
       width: 100%;
       flex-wrap: wrap;
     }
+  }
+
+  // 移动端表格横向滚动优化
+  .app-table .el-table__body-wrapper {
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+@media (max-width: 480px) {
+  .app-table {
+    // 极紧凑模式
+    .el-table__header th.el-table__cell {
+      padding: 8px 4px;
+      font-size: 12px;
+    }
+
+    .el-table__body td.el-table__cell {
+      padding: 8px 4px;
+      font-size: 12px;
+    }
+
+    // 极窄屏隐藏更多列
+    .col-hide-mobile-sm {
+      display: none;
+    }
+  }
+
+  .app-table-toolbar {
+    padding: 10px 12px;
   }
 }
 
@@ -576,6 +662,16 @@ html.dark {
     transition: background-color .15s;
     &:hover { background: #f0f7ff; }
   }
+
+  // 通用股票链接（即使没加 .app-table 类也生效）
+  .stock-code, .stock-name {
+    color: var(--el-color-primary);
+    text-decoration: none;
+    font-weight: 500;
+    cursor: pointer;
+    &:hover { color: var(--el-color-primary-dark-2, #2563eb); text-decoration: underline; }
+  }
+  .stock-code { font-family: 'SF Mono', 'Monaco', 'Consolas', monospace; font-size: 13px; letter-spacing: 0.5px; }
 }
 
 // —— 统一标签页 ——

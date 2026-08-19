@@ -74,6 +74,7 @@
         @selection-change="handleSelectionChange"
         v-loading="loading"
         style="width: 100%"
+        class="app-table app-table--compact"
       >
         <el-table-column type="selection" width="55" />
         
@@ -97,7 +98,7 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="created_at" label="创建时间" width="180">
+        <el-table-column prop="created_at" label="创建时间" width="180" sortable>
           <template #default="{ row }">
             {{ formatTime(row.created_at) }}
           </template>

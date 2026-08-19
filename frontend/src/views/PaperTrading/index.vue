@@ -85,10 +85,10 @@
               </span>
             </div>
           </template>
-          <el-table :data="filteredPositions" size="small" v-loading="loading.positions">
+          <el-table :data="filteredPositions" size="small" v-loading="loading.positions" class="app-table app-table--trades">
             <el-table-column label="代码" width="100">
               <template #default="{ row }">
-                <el-link type="primary" @click="viewStockDetail(row.code)">{{ row.code }}</el-link>
+                <router-link :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
               </template>
             </el-table-column>
             <el-table-column label="名称" width="100">
@@ -104,7 +104,7 @@
                 <el-tag v-else size="small">{{ row.market || 'CN' }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="数量" width="80">
+            <el-table-column label="数量" width="80" align="right" sortable>
               <template #default="{ row }">
                 {{ row.quantity }}
                 <span v-if="row.available_qty !== undefined && row.available_qty < row.quantity" style="color: #909399; font-size: 11px">
@@ -112,13 +112,13 @@
                 </span>
               </template>
             </el-table-column>
-            <el-table-column label="均价" width="100">
+            <el-table-column label="均价" width="100" align="right" sortable>
               <template #default="{ row }">{{ getCurrencySymbol(row.currency) }}{{ fmtPrice(row.avg_cost) }}</template>
             </el-table-column>
-            <el-table-column label="最新价" width="100">
+            <el-table-column label="最新价" width="100" align="right" sortable>
               <template #default="{ row }">{{ getCurrencySymbol(row.currency) }}{{ fmtPrice(row.last_price) }}</template>
             </el-table-column>
-            <el-table-column label="浮盈" width="120">
+            <el-table-column label="浮盈" width="120" align="right" sortable>
               <template #default="{ row }">
                 <span :style="{ color: (Number(row.last_price || 0) - Number(row.avg_cost || 0)) >= 0 ? 'var(--app-up)' : 'var(--app-down)' }">
                   {{ getCurrencySymbol(row.currency) }}{{ fmtAmount((Number(row.last_price || 0) - Number(row.avg_cost || 0)) * Number(row.quantity || 0)) }}
@@ -144,7 +144,7 @@
               </span>
             </div>
           </template>
-          <el-table :data="filteredOrders" size="small" v-loading="loading.orders">
+          <el-table :data="filteredOrders" size="small" v-loading="loading.orders" class="app-table app-table--trades">
             <el-table-column label="时间" width="160">
               <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
             </el-table-column>
@@ -157,7 +157,7 @@
             </el-table-column>
             <el-table-column label="代码" width="100">
               <template #default="{ row }">
-                <el-link type="primary" @click="viewStockDetail(row.code)">{{ row.code }}</el-link>
+                <router-link :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
               </template>
             </el-table-column>
             <el-table-column label="名称" width="100">
@@ -165,10 +165,10 @@
                 <router-link :to="`/stocks/${row.code}`" class="stock-name">{{ row.name || '-' }}</router-link>
               </template>
             </el-table-column>
-            <el-table-column prop="price" label="成交价" width="100">
+            <el-table-column prop="price" label="成交价" width="100" align="right" sortable>
               <template #default="{ row }">{{ fmtPrice(row.price) }}</template>
             </el-table-column>
-            <el-table-column prop="quantity" label="数量" width="100" />
+            <el-table-column prop="quantity" label="数量" width="100" align="right" sortable />
             <el-table-column label="状态" width="100">
               <template #default="{ row }">
                 <el-tag :type="row.status === 'filled' ? 'success' : 'info'" size="small">
@@ -609,8 +609,6 @@ onUnmounted(() => {
     max-width: 100% !important;
     margin-bottom: 12px;
   }
-  .paper-trading .el-table {
-    font-size: 13px;
-  }
+  
 }
 </style>

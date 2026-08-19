@@ -186,7 +186,7 @@
                   <span>关键环节</span>
                   <span class="section-sub">环节 / 核心作用 / 当前产业焦点 / 卡脖子等级</span>
                 </div>
-                <el-table :data="flatLinks" class="links-table" stripe>
+                <el-table :data="flatLinks" class="app-table app-table--compact" stripe>
                   <el-table-column prop="layer" label="所属层" width="140" />
                   <el-table-column prop="name" label="环节" width="120" />
                   <el-table-column prop="role" label="核心作用" min-width="200" />
@@ -1169,11 +1169,6 @@ onMounted(() => {
         color: var(--el-text-color-regular);
       }
     }
-  }
-
-  .links-table {
-    border-radius: 6px;
-    overflow: hidden;
   }
 
   .bn-pill {

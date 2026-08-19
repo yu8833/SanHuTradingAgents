@@ -164,7 +164,7 @@
         </div>
       </template>
 
-      <el-table :data="displayRows" stripe border size="default" style="width: 100%" class="hit-table">
+      <el-table :data="displayRows" stripe size="default" style="width: 100%" class="hit-table app-table app-table--ranking">
         <el-table-column prop="code" label="代码" min-width="110">
           <template #default="{ row }">
             <router-link class="stock-code" :to="`/stocks/${row.code}`">{{ row.code }}</router-link>
@@ -175,13 +175,13 @@
             <router-link class="stock-name" :to="`/stocks/${row.code}`">{{ row.name || row.code }}</router-link>
           </template>
         </el-table-column>
-        <el-table-column prop="close" label="收盘价" min-width="110" align="right">
+        <el-table-column prop="close" label="收盘价" min-width="110" align="right" sortable>
           <template #default="{ row }">
             <span v-if="row.close != null">{{ row.close.toFixed(2) }}</span>
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="change_pct" label="涨跌幅" min-width="110" align="right">
+        <el-table-column prop="change_pct" label="涨跌幅" min-width="110" align="right" sortable>
           <template #default="{ row }">
             <el-tag v-if="row.change_pct != null" size="small" :type="row.change_pct >= 0 ? 'danger' : 'success'" effect="plain" round class="pct-tag">
               {{ row.change_pct >= 0 ? '+' : '' }}{{ (row.change_pct * 100).toFixed(2) }}%
@@ -1029,20 +1029,6 @@ let realtimeTimer: number | undefined
 
   /* ===== 结果表格 ===== */
   .result-panel {
-    .hit-table {
-      --el-table-header-bg-color: var(--el-fill-color-light);
-      --el-table-header-text-color: var(--el-text-color-primary);
-
-      :deep(.el-table__header th) {
-        font-weight: 600;
-        font-size: 13px;
-      }
-
-      :deep(.el-table__row) {
-        transition: background 0.2s ease;
-      }
-    }
-
     .pct-tag {
       font-weight: 600;
       min-width: 64px;

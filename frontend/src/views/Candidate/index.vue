@@ -40,12 +40,13 @@
 
         <!-- 全排名表 -->
         <div class="section-title">行业资金流排名（{{ screenRankings.length }}）</div>
+        <div class="table-scroll">
         <el-table
           :data="screenRankings"
           v-loading="screenLoading"
           stripe
           empty-text="暂无排名数据"
-          class="rank-table"
+          class="rank-table app-table app-table--ranking"
           @row-click="goToStockScreening"
         >
           <el-table-column label="排名" width="70" align="center">
@@ -70,12 +71,12 @@
               <span class="muted">({{ fmtYi(row.fund_net_inflow) }}亿)</span>
             </template>
           </el-table-column>
-          <el-table-column label="涨跌幅" prop="pct_chg" width="90" align="right" sortable>
+          <el-table-column label="涨跌幅" prop="pct_chg" width="90" align="right" sortable :sort-method="(a, b) => (a.pct_chg||0) - (b.pct_chg||0)">
             <template #default="{ row }">
               <span :class="(row.pct_chg || 0) >= 0 ? 'up' : 'down'">{{ fmtSign(row.pct_chg) }}%</span>
             </template>
           </el-table-column>
-          <el-table-column label="行业净流入(亿)" prop="sector_net_inflow" min-width="120" align="right" sortable>
+          <el-table-column label="行业净流入(亿)" prop="sector_net_inflow" min-width="120" align="right" sortable :sort-method="(a, b) => (a.sector_net_inflow||0) - (b.sector_net_inflow||0)">
             <template #default="{ row }">
               <span :class="(row.sector_net_inflow || 0) >= 0 ? 'up' : 'down'">{{ fmtNum(row.sector_net_inflow) }}</span>
             </template>
@@ -86,6 +87,7 @@
             </template>
           </el-table-column>
         </el-table>
+        </div>
       </el-tab-pane>
 
       <!-- Tab2 个股筛选（行业成分股多因子打分 + ΔG 象限 + 择时预览） -->
@@ -119,12 +121,13 @@
           <span class="stocks-hint">{{ selectedIndustry ? `行业 ${selectedIndustry} · top ${limit}` : `前10行业 · 每行业top3 · 共${signalStats.all}只` }} · 显示 {{ filteredCandidates.length }} 只</span>
         </div>
 
+        <div class="table-scroll">
         <el-table
           :data="filteredCandidates"
           v-loading="stockLoading"
           stripe
           empty-text="请选择行业后计算候选个股"
-          class="candidate-table"
+          class="candidate-table app-table app-table--trades"
         >
           <el-table-column prop="code" label="代码" width="90">
             <template #default="{ row }">
@@ -141,7 +144,7 @@
               <span class="muted">{{ row.industry || '-' }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="涨跌幅" prop="pct_chg" width="90" align="right" sortable>
+          <el-table-column label="涨跌幅" prop="pct_chg" width="90" align="right" sortable :sort-method="(a, b) => (a.pct_chg||0) - (b.pct_chg||0)">
             <template #default="{ row }">
               <span :class="(row.pct_chg || 0) >= 0 ? 'up' : 'down'">{{ fmtPct(row.pct_chg) }}</span>
             </template>
@@ -179,21 +182,21 @@
               <span v-else class="muted">-</span>
             </template>
           </el-table-column>
-          <el-table-column label="20日动量" prop="momentum_20d" width="100" align="right" sortable>
+          <el-table-column label="20日动量" prop="momentum_20d" width="100" align="right" sortable :sort-method="(a, b) => (a.momentum_20d||0) - (b.momentum_20d||0)">
             <template #default="{ row }">
               <span :class="(row.momentum_20d || 0) >= 0 ? 'up' : 'down'">{{ fmtPct(row.momentum_20d) }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="ROE" prop="roe" width="80" align="right" sortable>
+          <el-table-column label="ROE" prop="roe" width="80" align="right" sortable :sort-method="(a, b) => (a.roe||0) - (b.roe||0)">
             <template #default="{ row }">{{ fmtNum(row.roe) }}%</template>
           </el-table-column>
-          <el-table-column label="营收YOY" prop="or_yoy" width="90" align="right" sortable>
+          <el-table-column label="营收YOY" prop="or_yoy" width="90" align="right" sortable :sort-method="(a, b) => (a.or_yoy||0) - (b.or_yoy||0)">
             <template #default="{ row }">{{ fmtPct(row.or_yoy, 0) }}</template>
           </el-table-column>
-          <el-table-column label="PE(TTM)" prop="pe_ttm" width="90" align="right" sortable>
+          <el-table-column label="PE(TTM)" prop="pe_ttm" width="90" align="right" sortable :sort-method="(a, b) => (a.pe_ttm||0) - (b.pe_ttm||0)">
             <template #default="{ row }">{{ fmtNum(row.pe_ttm) }}</template>
           </el-table-column>
-          <el-table-column label="市值(亿)" prop="total_mv" width="100" align="right" sortable>
+          <el-table-column label="市值(亿)" prop="total_mv" width="100" align="right" sortable :sort-method="(a, b) => (a.total_mv||0) - (b.total_mv||0)">
             <template #default="{ row }">{{ fmtNum(row.total_mv) }}</template>
           </el-table-column>
           <el-table-column label="操作" width="110" fixed="right" align="center">
@@ -202,6 +205,7 @@
             </template>
           </el-table-column>
         </el-table>
+        </div>
       </el-tab-pane>
     </el-tabs>
   </div>
@@ -433,20 +437,6 @@ onMounted(() => {
   box-shadow: var(--el-box-shadow-light);
   border: 1px solid var(--el-border-color-light);
 }
-.rank-table :deep(.el-table__header th),
-.candidate-table :deep(.el-table__header th) {
-  background: #f4f7fb;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
-}
-.rank-table :deep(.el-table__row),
-.candidate-table :deep(.el-table__row) {
-  transition: background-color .15s;
-}
-.rank-table :deep(.el-table__row:hover),
-.candidate-table :deep(.el-table__row:hover) {
-  background: #f0f7ff;
-}
 .top-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -672,6 +662,17 @@ onMounted(() => {
 .rank-table {
   cursor: pointer;
 }
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.table-scroll::-webkit-scrollbar {
+  height: 6px;
+}
+.table-scroll::-webkit-scrollbar-thumb {
+  background: var(--el-border-color);
+  border-radius: 3px;
+}
 
 /* ============ 响应式：手机端适配 ============ */
 @media (max-width: 768px) {
@@ -712,6 +713,10 @@ onMounted(() => {
   }
   .rank-table, .candidate-table {
     font-size: 13px;
+  }
+  .table-scroll {
+    margin: 0 -16px;
+    padding: 0 16px;
   }
 }
 
