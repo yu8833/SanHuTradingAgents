@@ -33,7 +33,7 @@
         </div>
       </template>
 
-      <el-table :data="queueTasks" v-loading="loading" style="width: 100%" @mouseenter="isInteracting = true" @mouseleave="isInteracting = false">
+      <el-table :data="queueTasks" v-loading="loading" class="app-table app-table--compact" @mouseenter="isInteracting = true" @mouseleave="isInteracting = false">
         <el-table-column prop="task_id" label="任务ID" width="200">
           <template #default="{ row }">
             <el-link type="primary" @click="viewTaskDetail(row)">
@@ -61,7 +61,7 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="progress" label="进度" width="150">
+        <el-table-column prop="progress" label="进度" width="150" align="right">
           <template #default="{ row }">
             <el-progress
               :percentage="row.progress"
@@ -71,7 +71,7 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="priority" label="优先级" width="100" align="center">
+        <el-table-column prop="priority" label="优先级" width="100" align="right">
           <template #default="{ row }">
             <el-tag v-if="row.priority > 0" type="warning" size="small">
               高 ({{ row.priority }})
@@ -80,7 +80,7 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="created_at" label="创建时间" width="180">
+        <el-table-column prop="created_at" label="创建时间" width="180" sortable>
           <template #default="{ row }">
             {{ formatTime(row.created_at) }}
           </template>

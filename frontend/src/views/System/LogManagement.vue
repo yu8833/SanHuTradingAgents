@@ -50,8 +50,7 @@
       <el-table
         :data="filteredLogFiles"
         v-loading="loading"
-        stripe
-        style="width: 100%"
+        class="app-table app-table--compact"
       >
         <el-table-column prop="name" label="文件名" min-width="200">
           <template #default="{ row }">
@@ -61,7 +60,7 @@
             {{ row.name }}
           </template>
         </el-table-column>
-        <el-table-column prop="size_mb" label="大小 (MB)" width="120" sortable>
+        <el-table-column prop="size_mb" label="大小 (MB)" width="120" sortable align="right">
           <template #default="{ row }">
             {{ row.size_mb.toFixed(2) }}
           </template>

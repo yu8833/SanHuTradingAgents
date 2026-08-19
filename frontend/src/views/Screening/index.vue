@@ -895,9 +895,7 @@
         :data="paginatedResults"
         row-key="code"
         @selection-change="handleSelectionChange"
-        stripe
-        border
-        style="width: 100%"
+        class="app-table"
         :default-sort="{ prop: sortField, order: sortOrder }"
         @sort-change="handleSortChange"
       >
@@ -2475,24 +2473,6 @@ onMounted(() => {
       border-bottom: 1px solid var(--el-border-color-lighter);
     }
 
-    :deep(.el-table) {
-      font-size: 14px;
-
-      th {
-        background-color: var(--el-fill-color-light) !important;
-        color: var(--el-text-color-primary);
-        font-weight: 600;
-      }
-
-      td {
-        padding: 12px 0;
-      }
-
-      .el-table__row:hover {
-        background-color: var(--el-fill-color-light);
-      }
-    }
-
     .pagination-wrapper {
       display: flex;
       justify-content: center;
@@ -2650,20 +2630,6 @@ html.dark {
             color: var(--el-color-primary);
             border-bottom-color: var(--el-color-primary);
           }
-        }
-      }
-    }
-
-    /* 结果面板 */
-    .results-panel {
-      :deep(.el-table) {
-        th {
-          background-color: var(--el-fill-color-darker) !important;
-          color: var(--el-text-color-primary);
-        }
-
-        .el-table__row:hover {
-          background-color: var(--el-fill-color-dark);
         }
       }
     }

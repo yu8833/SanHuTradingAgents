@@ -10,10 +10,10 @@
     <el-table
       v-loading="loading"
       :data="categories"
-      style="width: 100%"
+      class="app-table app-table--compact"
       row-key="id"
     >
-      <el-table-column prop="sort_order" label="排序" width="80" sortable />
+      <el-table-column prop="sort_order" label="排序" width="80" sortable align="right" />
       
       <el-table-column prop="id" label="分类ID" width="120" />
       
@@ -37,7 +37,7 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="创建时间" width="180">
+      <el-table-column label="创建时间" width="180" sortable>
         <template #default="{ row }">
           {{ formatDate(row.created_at) }}
         </template>

@@ -91,7 +91,7 @@
       <el-table
         :data="filteredUsers"
         v-loading="loading"
-        style="width: 100%"
+        class="app-table app-table--compact"
         :default-sort="{ prop: 'created_at', order: 'descending' }"
       >
         <el-table-column prop="username" label="用户名" min-width="120" sortable>
@@ -114,15 +114,15 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="total_analyses" label="分析次数" width="100" align="center" sortable>
+        <el-table-column prop="total_analyses" label="分析次数" width="100" align="right" sortable>
           <template #default="{ row }">
             {{ row.total_analyses || 0 }}
           </template>
         </el-table-column>
 
-        <el-table-column prop="daily_quota" label="每日配额" width="100" align="center" />
+        <el-table-column prop="daily_quota" label="每日配额" width="100" align="right" />
 
-        <el-table-column prop="concurrent_limit" label="并发限制" width="100" align="center" />
+        <el-table-column prop="concurrent_limit" label="并发限制" width="100" align="right" />
 
         <el-table-column prop="last_login" label="最后登录" width="170" sortable>
           <template #default="{ row }">

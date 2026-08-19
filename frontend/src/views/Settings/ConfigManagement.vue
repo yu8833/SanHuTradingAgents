@@ -97,8 +97,7 @@
           <div v-loading="providersLoading">
             <el-table
               :data="providers"
-              style="width: 100%"
-              class="provider-table"
+              class="app-table app-table--compact"
               table-layout="auto"
             >
               <el-table-column label="厂家信息" min-width="180">
@@ -263,7 +262,7 @@
                 </div>
 
                 <!-- 模型列表 - 表格式布局 -->
-                <el-table :data="group.models" style="width: 100%" stripe>
+                <el-table :data="group.models" class="app-table app-table--compact">
                   <!-- 模型名称 -->
                   <el-table-column label="模型名称" width="200">
                     <template #default="{ row }">
@@ -478,11 +477,11 @@
           </template>
 
           <div v-loading="databaseLoading">
-            <el-table :data="databaseConfigs" style="width: 100%">
+            <el-table :data="databaseConfigs" class="app-table app-table--compact">
               <el-table-column prop="name" label="名称" width="150" />
               <el-table-column prop="type" label="类型" width="120" />
               <el-table-column prop="host" label="主机" width="150" />
-              <el-table-column prop="port" label="端口" width="100" />
+              <el-table-column prop="port" label="端口" width="100" align="right" sortable />
               <el-table-column label="状态" width="100">
                 <template #default="{ row }">
                   <el-tag :type="row.enabled ? 'success' : 'danger'">
@@ -2433,17 +2432,6 @@ onMounted(async () => {
 
     .gap-1 {
       gap: 4px;
-    }
-  }
-
-  // 厂家管理样式
-  .provider-table {
-    :deep(.el-table__cell) {
-      vertical-align: top;
-    }
-
-    :deep(.provider-description-column .cell) {
-      white-space: normal;
     }
   }
 

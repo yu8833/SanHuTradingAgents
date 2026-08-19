@@ -158,7 +158,7 @@
       <el-table
         :data="logs"
         v-loading="loading"
-        style="width: 100%"
+        class="app-table app-table--compact"
         :default-sort="{ prop: 'timestamp', order: 'descending' }"
         @row-click="viewLogDetails"
       >
@@ -195,7 +195,7 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="duration_ms" label="耗时" width="100">
+        <el-table-column prop="duration_ms" label="耗时" width="100" align="right" sortable>
           <template #default="{ row }">
             <span v-if="row.duration_ms">{{ row.duration_ms }}ms</span>
             <span v-else>-</span>

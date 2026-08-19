@@ -28,7 +28,7 @@
         </div>
       </template>
 
-      <el-table :data="jobs" v-loading="jobsLoading" style="width: 100%" :default-sort="{ prop: 'category' }">
+      <el-table :data="jobs" v-loading="jobsLoading" class="app-table app-table--compact" :default-sort="{ prop: 'category' }">
         <el-table-column label="任务名称" min-width="200">
           <template #default="{ row }">
             <div class="job-name-cell">
@@ -49,7 +49,7 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="下次执行" width="180">
+        <el-table-column label="下次执行" width="180" sortable>
           <template #default="{ row }">
             <span v-if="row.next_run_time">{{ formatTime(row.next_run_time) }}</span>
             <span v-else class="text-muted">—</span>
@@ -104,7 +104,7 @@
         </div>
       </template>
 
-      <el-table :data="executions" v-loading="execLoading" style="width: 100%">
+      <el-table :data="executions" v-loading="execLoading" class="app-table app-table--compact">
         <el-table-column label="任务" min-width="180">
           <template #default="{ row }">
             <span>{{ row.job_name || row.job_id }}</span>
@@ -122,7 +122,7 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="进度" width="140">
+        <el-table-column label="进度" width="140" align="right">
           <template #default="{ row }">
             <el-progress
               v-if="row.status === 'running'"
@@ -133,7 +133,7 @@
             <span v-else class="text-muted">{{ row.progress != null ? row.progress + '%' : '—' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="耗时" width="100">
+        <el-table-column label="耗时" width="100" align="right" sortable>
           <template #default="{ row }">
             <span v-if="row.execution_time != null">{{ formatDuration(row.execution_time) }}</span>
             <span v-else-if="row.status === 'running' && row.timestamp" class="text-muted">
@@ -142,7 +142,7 @@
             <span v-else class="text-muted">—</span>
           </template>
         </el-table-column>
-        <el-table-column label="开始时间" width="180">
+        <el-table-column label="开始时间" width="180" sortable>
           <template #default="{ row }">
             {{ formatTime(row.timestamp) }}
           </template>

@@ -23,8 +23,7 @@
       <el-table
         :data="catalogs"
         v-loading="loading"
-        border
-        style="width: 100%"
+        class="app-table app-table--compact"
       >
         <el-table-column prop="provider" label="厂家标识" width="150" />
         <el-table-column prop="provider_name" label="厂家名称" width="150" />
@@ -48,7 +47,7 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="更新时间" width="180">
+        <el-table-column label="更新时间" width="180" sortable>
           <template #default="{ row }">
             {{ formatDate(row.updated_at) }}
           </template>
@@ -172,7 +171,7 @@
             </ul>
           </el-alert>
 
-          <el-table :data="formData.models" border max-height="400">
+          <el-table :data="formData.models" border max-height="400" class="app-table app-table--compact">
             <el-table-column label="模型名称" width="200">
               <template #default="{ row }">
                 <el-input
@@ -335,7 +334,7 @@
       <el-table
         ref="fetchedModelsTableRef"
         :data="fetchedModels"
-        border
+        class="app-table app-table--compact"
         max-height="420"
         @selection-change="handleFetchedModelsSelectionChange"
       >

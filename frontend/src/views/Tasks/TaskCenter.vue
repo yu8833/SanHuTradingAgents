@@ -90,7 +90,7 @@
         </div>
       </div>
 
-      <el-table :data="filteredList" v-loading="loading" style="width: 100%" @selection-change="onSelectionChange">
+      <el-table :data="filteredList" v-loading="loading" class="app-table app-table--compact" @selection-change="onSelectionChange">
         <el-table-column type="selection" width="50" />
         <el-table-column prop="task_id" label="任务ID" width="220" />
         <el-table-column prop="stock_code" label="股票代码" width="120">
@@ -108,12 +108,12 @@
             <el-tag :type="getStatusType(row.status)">{{ getStatusText(row.status) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="progress" label="进度" width="120">
+        <el-table-column prop="progress" label="进度" width="120" align="right">
           <template #default="{ row }">
             <el-progress :percentage="row.progress || 0" :status="row.status==='failed'?'exception':(row.status==='completed'?'success':undefined)"/>
           </template>
         </el-table-column>
-        <el-table-column prop="start_time" label="开始时间" width="180">
+        <el-table-column prop="start_time" label="开始时间" width="180" sortable>
           <template #default="{ row }">
             {{ formatTime(row.start_time || row.created_at) }}
           </template>

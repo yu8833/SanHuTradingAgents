@@ -7,7 +7,7 @@
           <el-button type="primary" @click="openCreate">新建标签</el-button>
         </div>
       </template>
-      <el-table :data="tags" v-loading="loading" style="width: 100%" empty-text="暂无标签">
+      <el-table :data="tags" v-loading="loading" class="app-table app-table--compact" empty-text="暂无标签">
         <el-table-column label="标签名" prop="name" width="200">
           <template #default="{ row }">
             <el-tag :color="row.color" effect="dark" size="small">{{ row.name }}</el-tag>
@@ -21,8 +21,8 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="排序" prop="sort_order" width="80" />
-        <el-table-column label="创建时间" width="180">
+        <el-table-column label="排序" prop="sort_order" width="80" align="right" sortable />
+        <el-table-column label="创建时间" width="180" sortable>
           <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
         </el-table-column>
         <el-table-column label="操作" width="150">
