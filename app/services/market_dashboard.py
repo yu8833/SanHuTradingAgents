@@ -95,27 +95,54 @@ def _load_market_rows() -> list[dict]:
         return []
 
 
-def _pct_band_rows(values: list[float]) -> list[dict]:
+def _pct_band_rows(rows: list[dict]) -> list[dict]:
     """按涨跌幅区间归类。dir: -1=跌 0=平 1=涨。
 
-    涨区间严格只统计 v>0，平盘(v==0)单独归为 "0%"，避免平盘被计入涨导致
-    涨柱总数与 breadth.up 不一致。
+    涨跌两端的 "5~7% / >7% / 涨停" 与 "跌停" 为新增档位：涨停/跌停按代码前缀的
+    涨跌幅限制判定（复用 vibe_astock._get_limit_pct，主板≈10%、创业板/科创板≈20%、
+    北交所≈30%，另含 0.5% 容差），与相邻区间互不重叠；涨区间严格只统计 v>0，
+    平盘(v==0)单独归为 "0%"，避免平盘被计入涨导致涨柱总数与 breadth.up 不一致。
     """
-    bands = [
-        ("<-5%", lambda v: v < -5.0, -1),
-        ("-5~-3%", lambda v: -5.0 <= v < -3.0, -1),
-        ("-3~-1%", lambda v: -3.0 <= v < -1.0, -1),
-        ("-1~0%", lambda v: -1.0 <= v < 0.0, -1),
-        ("0%", lambda v: v == 0.0, 0),
-        ("0~1%", lambda v: 0.0 < v < 1.0, 1),
-        ("1~3%", lambda v: 1.0 <= v < 3.0, 1),
-        ("3~5%", lambda v: 3.0 <= v < 5.0, 1),
-        (">5%", lambda v: v >= 5.0, 1),
+    band_order = [
+        "跌停", "<-5%", "-5~-3%", "-3~-1%", "-1~0%", "0%",
+        "0~1%", "1~3%", "3~5%", ">5%", "涨停",
     ]
-    total = len(values) or 1
+    dir_map = {"0%": 0, "跌停": -1, "涨停": 1}
+
+    def classify(pct: float, lim: float) -> str:
+        if pct <= -lim:
+            return "跌停"
+        if pct < -5.0:
+            return "<-5%"
+        if pct < -3.0:
+            return "-5~-3%"
+        if pct < -1.0:
+            return "-3~-1%"
+        if pct < 0.0:
+            return "-1~0%"
+        if pct == 0.0:
+            return "0%"
+        if pct < 1.0:
+            return "0~1%"
+        if pct < 3.0:
+            return "1~3%"
+        if pct < 5.0:
+            return "3~5%"
+        if pct < lim:
+            return ">5%"
+        return "涨停"
+
+    counts = {label: 0 for label in band_order}
+    total = len(rows) or 1
+    for r in rows:
+        pct = _num(r.get("pct_chg"))
+        # 涨停/跌停阈值：板块涨跌幅限制 - 0.5% 容差（实际涨停价存在四舍五入）
+        lim = astock._get_limit_pct(r.get("code", "")) - 0.5
+        counts[classify(pct, lim)] += 1
     out = []
-    for label, cond, dir_ in bands:
-        count = sum(1 for v in values if cond(v))
+    for label in band_order:
+        count = counts[label]
+        dir_ = dir_map.get(label, -1 if label.startswith(("-", "<")) else 1)
         out.append({"label": label, "count": count, "pct": round(count / total * 100, 1), "dir": dir_})
     return out
 
@@ -257,7 +284,7 @@ def _build() -> dict:
             "strong_up": strong_up, "strong_down": strong_down,
         },
         "amount": {"total": round(total_amount, 2), "avg": round(avg_amount, 2)},
-        "distribution": _pct_band_rows(pct_values),
+        "distribution": _pct_band_rows(rows),
         "limit": {
             "limit_up": zt_count, "limit_down": dt_count,
             "seal_rate": seal_rate, "max_boards": max_boards,

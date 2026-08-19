@@ -324,7 +324,7 @@ import {
   type GlobalStock,
   type MarketDashboard,
 } from '@/api/vibe'
-import { fmtPrice, fmtAbsPct, fmtAmount, fmtSigned, clsByVal } from '@/utils/format'
+import { fmtPrice, fmtPct, fmtAbsPct, fmtAmount, fmtSigned, clsByVal } from '@/utils/format'
 
 const loading = ref(false)
 const activeTab = ref('ashare')
@@ -755,9 +755,9 @@ onMounted(() => {
 .dist-bars {
   display: flex;
   align-items: flex-end;
-  gap: 6px;
-  height: 150px;
-  padding: 0 4px;
+  gap: 3px;
+  height: 152px;
+  padding: 0 2px;
 }
 
 .dist-col {
@@ -770,14 +770,14 @@ onMounted(() => {
 }
 
 .dist-count {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--el-text-color-secondary);
   margin-bottom: 4px;
 }
 
 .dist-bar {
   width: 100%;
-  max-width: 26px;
+  max-width: 24px;
   border-radius: 3px 3px 0 0;
   min-height: 4px;
 }
@@ -787,10 +787,13 @@ onMounted(() => {
 .dist-down { background: #67c23a; }
 
 .dist-label {
-  font-size: 10px;
+  font-size: 9px;
+  line-height: 1.15;
+  text-align: center;
+  word-break: break-word;
   color: var(--el-text-color-placeholder);
-  margin-top: 6px;
-  white-space: nowrap;
+  margin-top: 5px;
+  white-space: normal;
 }
 
 .breadth-bar {
