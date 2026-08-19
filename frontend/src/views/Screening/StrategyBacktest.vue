@@ -1,17 +1,22 @@
 <template>
   <div class="strategy-backtest">
     <div class="page-hero">
-      <div class="page-hero-main">
-        <div class="page-hero-icon">
-          <el-icon :size="26"><Histogram /></el-icon>
+      <div class="page-hero-top">
+        <div class="page-hero-main">
+          <div class="page-hero-icon">
+            <el-icon :size="26"><Histogram /></el-icon>
+          </div>
+          <div class="page-hero-text">
+            <h2 class="page-hero-title">回测工作台</h2>
+            <p class="page-hero-sub">{{ activeMode.hint }}</p>
+          </div>
         </div>
-        <div class="page-hero-text">
-          <h2 class="page-hero-title">回测工作台</h2>
-          <p class="page-hero-sub">{{ activeMode.hint }}</p>
+        <div class="page-hero-meta">
+          <el-tag size="small" effect="light" type="warning">{{ activeMode.title }}</el-tag>
         </div>
       </div>
-      <div class="page-hero-meta">
-        <el-radio-group v-model="activeTab" size="small">
+      <div class="page-hero-tabs">
+        <el-radio-group v-model="activeTab" size="default">
           <el-radio-button v-for="m in MODES" :key="m.key" :value="m.key">
             {{ m.title }}
           </el-radio-button>
@@ -1649,6 +1654,110 @@ html.dark {
     .stats-panel {
       :deep(.el-card__header) {
         background: linear-gradient(135deg, var(--el-bg-color-overlay) 0%, var(--el-fill-color-darker) 100%);
+      }
+    }
+  }
+}
+
+.strategy-backtest {
+  :deep(.page-hero) {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 16px;
+  }
+
+  :deep(.page-hero-top) {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    width: 100%;
+  }
+
+  :deep(.page-hero-meta) {
+    flex-shrink: 0;
+  }
+
+  :deep(.page-hero-tabs) {
+    width: 100%;
+    position: relative;
+    z-index: 1;
+
+    .el-radio-group {
+      display: flex;
+      flex-wrap: nowrap;
+      width: 100%;
+
+      .el-radio-button {
+        flex: 1 1 0;
+        text-align: center;
+        white-space: nowrap;
+
+        &__inner {
+          display: block;
+          width: 100%;
+          padding: 8px 12px;
+          font-size: 13px;
+          font-weight: 500;
+          color: rgba(255, 255, 255, 0.75);
+          background: rgba(255, 255, 255, 0.08);
+          border: 1px solid rgba(255, 255, 255, 0.2);
+          border-radius: 0;
+          transition: all 0.2s ease;
+        }
+
+        &:first-child .el-radio-button__inner {
+          border-radius: 8px 0 0 8px;
+        }
+
+        &:last-child .el-radio-button__inner {
+          border-radius: 0 8px 8px 0;
+        }
+
+        &:only-child .el-radio-button__inner {
+          border-radius: 8px;
+        }
+
+        &__original {
+          display: none;
+        }
+
+        &.is-active .el-radio-button__inner {
+          color: #1e3a5f;
+          background: #fff;
+          border-color: #fff;
+          font-weight: 600;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+        }
+
+        &:hover:not(.is-active) .el-radio-button__inner {
+          color: #fff;
+          background: rgba(255, 255, 255, 0.15);
+          border-color: rgba(255, 255, 255, 0.35);
+        }
+      }
+    }
+  }
+
+  @media (max-width: 768px) {
+    :deep(.page-hero-top) {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
+    :deep(.page-hero-tabs .el-radio-group) {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      flex-wrap: nowrap;
+
+      .el-radio-button {
+        flex: 0 0 auto;
+        min-width: auto;
+
+        &__inner {
+          padding: 6px 10px;
+          font-size: 12px;
+        }
       }
     }
   }

@@ -45,7 +45,7 @@
       </el-col>
     </el-row>
 
-    <!-- 两个面板 -->
+    <!-- 三个面板 -->
     <el-tabs v-model="activeTab" class="review-tabs">
       <!-- 交易记录面板 -->
       <el-tab-pane label="交易记录" name="trades">
@@ -85,6 +85,69 @@
             </template>
           </el-table-column>
         </el-table>
+      </el-tab-pane>
+
+      <!-- 策略收益率分析 -->
+      <el-tab-pane label="策略收益率" name="strategy">
+        <div class="strategy-returns" v-if="strategyReturns.length > 0">
+          <el-row :gutter="16">
+            <el-col :span="8" v-for="s in strategyReturns" :key="s.strategy" style="margin-bottom: 16px;">
+              <el-card shadow="hover" class="strategy-card">
+                <template #header>
+                  <div class="strategy-card-header">
+                    <span class="strategy-name">{{ s.label }}</span>
+                    <el-tag size="small" :type="getStrategyTagType(s.strategy)">{{ s.strategy || '默认' }}</el-tag>
+                  </div>
+                </template>
+                <div class="strategy-card-body">
+                  <div class="return-hero">
+                    <div class="return-hero-label">累计收益率</div>
+                    <div class="return-hero-value" :class="s.total_return >= 0 ? 'up' : 'down'">
+                      {{ s.total_return >= 0 ? '+' : '' }}{{ s.total_return.toFixed(2) }}%
+                    </div>
+                  </div>
+                  <div class="return-stats">
+                    <div class="return-stat">
+                      <span class="rs-label">交易次数</span>
+                      <span class="rs-value">{{ s.count }}</span>
+                    </div>
+                    <div class="return-stat">
+                      <span class="rs-label">胜率</span>
+                      <span class="rs-value" :class="s.win_rate >= 50 ? 'up' : 'down'">{{ s.win_rate.toFixed(1) }}%</span>
+                    </div>
+                    <div class="return-stat">
+                      <span class="rs-label">累计盈亏</span>
+                      <span class="rs-value" :class="s.total_pnl >= 0 ? 'up' : 'down'">
+                        {{ s.total_pnl >= 0 ? '+' : '' }}{{ s.total_pnl.toFixed(2) }}
+                      </span>
+                    </div>
+                    <div class="return-stat">
+                      <span class="rs-label">平均收益</span>
+                      <span class="rs-value" :class="s.avg_return >= 0 ? 'up' : 'down'">
+                        {{ s.avg_return >= 0 ? '+' : '' }}{{ s.avg_return.toFixed(2) }}%
+                      </span>
+                    </div>
+                    <div class="return-stat">
+                      <span class="rs-label">最大盈利</span>
+                      <span class="rs-value up">+{{ s.max_win.toFixed(2) }}%</span>
+                    </div>
+                    <div class="return-stat">
+                      <span class="rs-label">最大亏损</span>
+                      <span class="rs-value down">{{ s.max_loss.toFixed(2) }}%</span>
+                    </div>
+                  </div>
+                  <div class="return-bar" v-if="s.count > 0">
+                    <div class="bar-track">
+                      <div class="bar-fill up" :style="{ width: Math.min(s.win_rate, 100) + '%' }"></div>
+                    </div>
+                    <div class="bar-label">盈亏分布</div>
+                  </div>
+                </div>
+              </el-card>
+            </el-col>
+          </el-row>
+        </div>
+        <el-empty v-else description="暂无策略收益数据" />
       </el-tab-pane>
 
       <!-- 复盘笔记面板 -->
@@ -157,7 +220,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { onMounted, reactive, ref, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { reviewApi, type ReviewCycleItem, type ReviewNoteItem, type ReviewStats } from '@/api/paper'
 import { getStrategyNameMap, strategyNameSync } from '@/utils/strategyName'
@@ -286,6 +349,75 @@ async function removeNote(n: ReviewNoteItem) {
 }
 
 onMounted(loadAll)
+
+interface StrategyReturnStat {
+  strategy: string
+  label: string
+  count: number
+  win_rate: number
+  total_pnl: number
+  total_return: number
+  avg_return: number
+  max_win: number
+  max_loss: number
+}
+
+const strategyReturns = computed<StrategyReturnStat[]>(() => {
+  if (!cycles.value.length) return []
+
+  const byStrategy = new Map<string, { pnls: number[]; pcts: number[]; wins: number }>()
+
+  for (const c of cycles.value) {
+    const key = c.strategy || 'default'
+    if (!byStrategy.has(key)) {
+      byStrategy.set(key, { pnls: [], pcts: [], wins: 0 })
+    }
+    const entry = byStrategy.get(key)!
+    const pnl = Number(c.pnl) || 0
+    const pct = Number(c.pnl_pct) || 0
+    entry.pnls.push(pnl)
+    entry.pcts.push(pct)
+    if (pnl > 0) entry.wins++
+  }
+
+  const results: StrategyReturnStat[] = []
+  for (const [strategy, data] of byStrategy) {
+    const count = data.pnls.length
+    const total_pnl = data.pnls.reduce((a, b) => a + b, 0)
+    const total_return = data.pcts.reduce((a, b) => a + b, 0)
+    const avg_return = count > 0 ? total_return / count : 0
+    const win_rate = count > 0 ? (data.wins / count) * 100 : 0
+    const max_win = count > 0 ? Math.max(...data.pcts, 0) : 0
+    const max_loss = count > 0 ? Math.min(...data.pcts, 0) : 0
+
+    results.push({
+      strategy,
+      label: strategyLabel(strategy),
+      count,
+      win_rate,
+      total_pnl,
+      total_return,
+      avg_return,
+      max_win,
+      max_loss,
+    })
+  }
+
+  return results.sort((a, b) => b.total_return - a.total_return)
+})
+
+function getStrategyTagType(s: string) {
+  const map: Record<string, string> = {
+    extreme_reversal: 'danger',
+    turnaround: 'warning',
+    small_cap_value: 'success',
+    convertible_arbitrage: 'info',
+    ma_golden_cross: 'success',
+    tbs: 'success',
+    default: '',
+  }
+  return map[s] || ''
+}
 </script>
 
 <style scoped>
@@ -352,5 +484,122 @@ onMounted(loadAll)
   margin-top: 8px;
   font-size: 12px;
   color: var(--el-text-color-secondary);
+}
+
+.strategy-returns {
+  .strategy-card {
+    height: 100%;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    &:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+    }
+  }
+
+  .strategy-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .strategy-name {
+    font-weight: 600;
+    font-size: 14px;
+  }
+
+  .strategy-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .return-hero {
+    text-align: center;
+    padding: 14px 10px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, rgba(43, 108, 176, 0.08) 0%, rgba(43, 108, 176, 0.02) 100%);
+    border: 1px solid var(--el-border-color-lighter);
+
+    .return-hero-label {
+      font-size: 12px;
+      color: var(--el-text-color-secondary);
+      margin-bottom: 4px;
+    }
+
+    .return-hero-value {
+      font-size: 32px;
+      font-weight: 700;
+      font-family: 'Menlo', 'Monaco', 'Consolas', monospace;
+      letter-spacing: -0.5px;
+
+      &.up { color: var(--el-color-danger); }
+      &.down { color: var(--el-color-success); }
+    }
+  }
+
+  .return-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+
+    .return-stat {
+      display: flex;
+      flex-direction: column;
+      padding: 8px;
+      background: var(--el-fill-color-lighter);
+      border-radius: 6px;
+
+      .rs-label {
+        font-size: 11px;
+        color: var(--el-text-color-secondary);
+        margin-bottom: 2px;
+      }
+
+      .rs-value {
+        font-size: 14px;
+        font-weight: 600;
+        font-family: 'Menlo', 'Monaco', monospace;
+
+        &.up { color: var(--el-color-danger); }
+        &.down { color: var(--el-color-success); }
+      }
+    }
+  }
+
+  .return-bar {
+    .bar-track {
+      height: 6px;
+      background: var(--el-fill-color-lighter);
+      border-radius: 3px;
+      overflow: hidden;
+
+      .bar-fill {
+        height: 100%;
+        border-radius: 3px;
+        transition: width 0.4s ease;
+
+        &.up { background: var(--el-color-danger); }
+        &.down { background: var(--el-color-success); }
+      }
+    }
+
+    .bar-label {
+      font-size: 11px;
+      color: var(--el-text-color-secondary);
+      margin-top: 4px;
+    }
+  }
+}
+
+@media (max-width: 768px) {
+  .strategy-returns {
+    .return-stats {
+      grid-template-columns: repeat(2, 1fr);
+    }
+
+    .return-hero .return-hero-value {
+      font-size: 26px;
+    }
+  }
 }
 </style>
