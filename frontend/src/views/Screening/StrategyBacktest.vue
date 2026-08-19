@@ -148,8 +148,8 @@
           </el-card>
           <el-card class="chart-panel" shadow="never">
             <template #header><span class="panel-title">交易明细 ({{ strategyResult.trades?.length }})</span></template>
-            <el-table :data="strategyResult.trades" size="small" stripe border max-height="480"
-                      :default-sort="{ prop: 'entry_date', order: 'ascending' }" class="trade-table">
+            <el-table :data="strategyResult.trades" size="small" stripe max-height="480"
+                      :default-sort="{ prop: 'entry_date', order: 'ascending' }" class="app-table app-table--trades trade-table">
               <el-table-column prop="symbol" label="代码" width="90">
                 <template #default="{ row }">
                   <router-link :to="`/stocks/${row.symbol}`" class="stock-code">{{ row.symbol }}</router-link>
@@ -223,7 +223,7 @@
           </el-card>
           <el-card class="chart-panel" shadow="never">
             <template #header><span class="panel-title">分组收益</span></template>
-            <el-table :data="factorResult.group_returns" size="small" stripe border>
+            <el-table :data="factorResult.group_returns" size="small" stripe class="app-table app-table--compact">
               <el-table-column prop="group" label="分组" width="120" />
               <el-table-column prop="avg_return" label="平均收益" align="right">
                 <template #default="{ row }"><span :class="row.avg_return >= 0 ? 'text-red' : 'text-green'">{{ (row.avg_return * 100).toFixed(2) }}%</span></template>
@@ -276,7 +276,7 @@
         <template v-else>
           <el-card class="chart-panel" shadow="never">
             <template #header><span class="panel-title">参数组合结果 ({{ optResult.n_trials }})</span></template>
-            <el-table :data="optResult.results" size="small" stripe border>
+            <el-table :data="optResult.results" size="small" stripe class="app-table app-table--compact">
               <el-table-column type="index" label="#" width="50" />
               <el-table-column label="参数" min-width="220">
                 <template #default="{ row }">
@@ -342,7 +342,7 @@
               <span class="panel-title">各折样本外表现 · 平均测试收益</span>
               <el-tag size="small" type="success" style="margin-left: 8px">{{ (wfResult.avg_test_return * 100).toFixed(2) }}%</el-tag>
             </template>
-            <el-table :data="wfResult.folds" size="small" stripe border>
+            <el-table :data="wfResult.folds" size="small" stripe class="app-table app-table--compact">
               <el-table-column type="index" label="#" width="50" />
               <el-table-column label="训练区间" width="190">
                 <template #default="{ row }">{{ row.train.start }} ~ {{ row.train.end }}</template>
@@ -524,7 +524,7 @@
           <!-- 再平衡各期候选变化 -->
           <el-card class="chart-panel" shadow="never">
             <template #header><span class="panel-title">再平衡候选变化 ({{ pipelineResult.rebalance_schedule?.length }})</span></template>
-            <el-table :data="pipelineResult.rebalance_schedule" size="small" stripe border max-height="360">
+            <el-table :data="pipelineResult.rebalance_schedule" size="small" stripe class="app-table app-table--compact" max-height="360">
               <el-table-column type="index" label="#" width="50" />
               <el-table-column label="周期" min-width="190">
                 <template #default="{ row }">{{ row.start }} ~ {{ row.end }}</template>
@@ -548,8 +548,8 @@
           <!-- 交易明细 -->
           <el-card class="chart-panel" shadow="never">
             <template #header><span class="panel-title">交易明细 ({{ pipelineResult.trades?.length }})</span></template>
-            <el-table :data="pipelineResult.trades" size="small" stripe border max-height="480"
-                      :default-sort="{ prop: 'buy_date', order: 'ascending' }" class="trade-table">
+            <el-table :data="pipelineResult.trades" size="small" stripe max-height="480"
+                      :default-sort="{ prop: 'buy_date', order: 'ascending' }" class="app-table app-table--trades trade-table">
               <el-table-column prop="symbol" label="代码" width="90">
                 <template #default="{ row }">
                   <router-link :to="`/stocks/${row.symbol || row.code}`" class="stock-code">{{ row.symbol || row.code }}</router-link>
@@ -598,7 +598,7 @@
               策略回测结果对比（{{ compareResults.length }} 条记录）
             </span>
           </template>
-          <el-table :data="compareResults" size="small" stripe border class="compare-table" :row-key="(row: any) => row.id">
+          <el-table :data="compareResults" size="small" stripe class="app-table app-table--metrics compare-table" :row-key="(row: any) => row.id">
             <el-table-column prop="strategy_name" label="策略名称" min-width="150">
               <template #default="{ row }">
                 <span class="compare-strategy">{{ row.strategy_name }}</span>
@@ -1520,18 +1520,8 @@ onBeforeUnmount(() => {
   }
 
   .trade-table {
-    border-radius: 8px;
-    overflow: hidden;
-
-    :deep(.el-table__header th) {
-      background: var(--el-fill-color-light);
-      color: var(--el-text-color-primary);
-      font-weight: 600;
-    }
-
-    :deep(.el-table__row:hover) {
-      background: var(--el-color-primary-light-9) !important;
-    }
+    // 已迁移至全局统一表格设计系统 (.app-table, .app-table--trades)
+    // 保留类名兼容现有模板，样式由全局 CSS 提供
   }
 
   .stat-row {
@@ -1575,16 +1565,8 @@ onBeforeUnmount(() => {
 
     .compare-table {
       .compare-strategy { font-weight: 600; color: var(--el-text-color-primary); }
-
-      :deep(.el-table__header th) {
-        background: var(--el-fill-color-light);
-        color: var(--el-text-color-primary);
-        font-weight: 600;
-      }
-
-      :deep(.el-table__row:hover) {
-        background: var(--el-color-primary-light-9) !important;
-      }
+      // 已迁移至全局统一表格设计系统 (.app-table, .app-table--metrics)
+      // 保留类名兼容现有模板，样式由全局 CSS 提供
     }
 
     .compare-charts {

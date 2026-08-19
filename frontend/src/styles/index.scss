@@ -298,6 +298,269 @@ html, body {
   .el-card__body { padding: 16px 18px; }
 }
 
+// —— 统一表格设计系统 ——
+// 设计令牌
+:root {
+  --app-table-radius: var(--app-radius);
+  --app-table-border: var(--el-border-color-light);
+  --app-table-header-bg: #f4f7fb;
+  --app-table-header-bg-hover: #e8eef5;
+  --app-table-header-text: var(--el-text-color-primary);
+  --app-table-row-hover: #eaf0f7;
+  --app-table-row-hover-striped: #e4ecf5;
+  --app-table-stripe: #fafbfc;
+  --app-table-cell-padding: 12px 0;
+  --app-table-font-size: 14px;
+  --app-table-header-font-size: 13px;
+  --app-table-header-font-weight: 600;
+  --app-table-row-transition: background-color .15s ease;
+  --app-table-empty-padding: 32px;
+}
+
+.app-table {
+  border-radius: var(--app-table-radius);
+  border: 1px solid var(--app-table-border);
+  box-shadow: var(--app-shadow);
+  overflow: hidden;
+
+  .el-table__inner-wrapper::before {
+    display: none;
+  }
+
+  .el-table__header {
+    background: var(--app-table-header-bg);
+    th.el-table__cell {
+      background: var(--app-table-header-bg);
+      color: var(--app-table-header-text);
+      font-weight: var(--app-table-header-font-weight);
+      font-size: var(--app-table-header-font-size);
+      padding: var(--app-table-cell-padding);
+      border-bottom: 1px solid var(--app-table-border);
+    }
+  }
+
+  .el-table__body {
+    tr {
+      transition: var(--app-table-row-transition);
+
+      &.el-table__row--striped td.el-table__cell {
+        background: var(--app-table-stripe);
+      }
+
+      td.el-table__cell {
+        padding: var(--app-table-cell-padding);
+        font-size: var(--app-table-font-size);
+        border-bottom: 1px solid var(--el-border-color-lighter);
+      }
+
+      &:hover > td.el-table__cell {
+        background: var(--app-table-row-hover) !important;
+      }
+
+      &:hover.el-table__row--striped > td.el-table__cell {
+        background: var(--app-table-row-hover-striped) !important;
+      }
+    }
+  }
+
+  .el-table__empty-block {
+    padding: var(--app-table-empty-padding);
+  }
+
+  // 分页
+  .el-pagination {
+    margin-top: 12px;
+    justify-content: flex-end;
+  }
+
+  // 加载态
+  .el-table__loading-mask {
+    background: rgba(255, 255, 255, 0.6);
+    backdrop-filter: blur(2px);
+  }
+
+  // 底部汇总行
+  .el-table__footer {
+    background: var(--app-table-header-bg);
+    td.el-table__cell {
+      background: var(--app-table-header-bg);
+      font-weight: 600;
+      font-size: var(--app-table-header-font-size);
+      padding: var(--app-table-cell-padding);
+    }
+  }
+}
+
+// —— 表格变体 ——
+// 紧凑版：用于回测结果、配置列表等信息密度高的场景
+.app-table--compact {
+  --app-table-cell-padding: 8px 0;
+  --app-table-font-size: 13px;
+  --app-table-header-font-size: 12px;
+}
+
+// 指标对比版：用于策略指标、因子对比等
+.app-table--metrics {
+  --app-table-header-bg: #edf2f7;
+  --app-table-row-hover: #e2e8f0;
+  border: 1px solid var(--el-border-color);
+
+  .el-table__body td.el-table__cell {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+// 交易明细版：用于交易记录、持仓列表等
+.app-table--trades {
+  .el-table__body td.el-table__cell {
+    font-variant-numeric: tabular-nums;
+  }
+
+  // 买卖标记
+  .trade-buy {
+    color: var(--app-up) !important;
+    font-weight: 600;
+  }
+  .trade-sell {
+    color: var(--app-down) !important;
+    font-weight: 600;
+  }
+}
+
+// 排行榜版：候选股、排名列表
+.app-table--ranking {
+  --app-table-header-bg: linear-gradient(180deg, #f0f4f8 0%, #e8eef5 100%);
+  .rank-cell {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    font-weight: 600;
+    font-size: 13px;
+    background: var(--el-fill-color);
+    color: var(--el-text-color-secondary);
+
+    &.rank-1 { background: linear-gradient(135deg, #ffd700, #ffb700); color: #fff; }
+    &.rank-2 { background: linear-gradient(135deg, #c0c0c0, #a0a0a0); color: #fff; }
+    &.rank-3 { background: linear-gradient(135deg, #cd7f32, #b87333); color: #fff; }
+  }
+}
+
+// 工具栏：表格顶部的操作区域
+.app-table-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  background: linear-gradient(180deg, var(--el-fill-color-lighter) 0%, var(--el-bg-color) 100%);
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--app-table-radius) var(--app-table-radius) 0 0;
+
+  .toolbar-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .toolbar-count {
+    font-size: 14px;
+    color: var(--el-text-color-primary);
+
+    strong {
+      font-size: 16px;
+      color: var(--el-color-primary);
+      font-weight: 600;
+    }
+  }
+
+  .toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+}
+
+// 卡片容器表格：不需要额外包裹 el-card
+.app-table-card {
+  background: var(--el-bg-color);
+  border: 1px solid var(--app-table-border);
+  border-radius: var(--app-radius);
+  box-shadow: var(--app-shadow);
+  overflow: hidden;
+}
+
+// 涨跌颜色在表格单元格中的统一表达
+.app-table .cell-up { color: var(--app-up) !important; font-weight: 500; }
+.app-table .cell-down { color: var(--app-down) !important; font-weight: 500; }
+.app-table .cell-flat { color: var(--app-flat) !important; }
+
+// 响应式：表格在移动端的行为
+@media (max-width: 768px) {
+  .app-table {
+    .el-table__header th.el-table__cell,
+    .el-table__body td.el-table__cell {
+      padding: 10px 0;
+      font-size: 13px;
+    }
+  }
+
+  .app-table-toolbar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+
+    .toolbar-actions {
+      width: 100%;
+      flex-wrap: wrap;
+    }
+  }
+}
+
+// 暗色模式
+html.dark {
+  .app-table {
+    --app-table-header-bg: #1e293b;
+    --app-table-header-bg-hover: #2d3a4a;
+    --app-table-row-hover: rgba(43, 108, 176, 0.15);
+    --app-table-row-hover-striped: rgba(43, 108, 176, 0.2);
+    --app-table-stripe: rgba(255, 255, 255, 0.03);
+    --app-table-border: var(--el-border-color);
+
+    .el-table__header th.el-table__cell {
+      background: var(--app-table-header-bg);
+      color: #e2e8f0;
+    }
+
+    .el-table__body tr:hover > td.el-table__cell {
+      background: var(--app-table-row-hover) !important;
+    }
+
+    .el-table__footer td.el-table__cell {
+      background: var(--app-table-header-bg);
+    }
+
+    .el-table__loading-mask {
+      background: rgba(15, 23, 42, 0.6);
+    }
+  }
+
+  .app-table--metrics {
+    --app-table-header-bg: #1a2332;
+    --app-table-row-hover: rgba(100, 150, 200, 0.15);
+  }
+
+  .app-table-toolbar {
+    background: linear-gradient(180deg, var(--el-fill-color) 0%, var(--el-bg-color) 100%);
+  }
+
+  .app-table-card {
+    background: var(--el-bg-color);
+  }
+}
+
 // —— 统一表格 ——
 .el-table {
   --el-table-header-bg-color: #f4f7fb;

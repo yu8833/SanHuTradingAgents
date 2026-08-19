@@ -67,8 +67,8 @@
     </el-row>
 
     <!-- 持仓列表 -->
-    <div class="positions-panel">
-      <div class="positions-toolbar">
+    <div class="app-table-card">
+      <div class="app-table-toolbar">
         <div class="toolbar-left">
           <span class="toolbar-count">共 <strong>{{ positions.length }}</strong> 只持仓</span>
           <el-tag v-if="loading" size="small" type="info" effect="plain">加载中...</el-tag>
@@ -89,7 +89,7 @@
         </div>
       </div>
 
-      <el-table :data="positions" v-loading="loading" stripe class="positions-table">
+      <el-table :data="positions" v-loading="loading" stripe class="app-table app-table--trades">
         <el-table-column label="代码" width="100" prop="symbol">
           <template #default="{ row }">
             <router-link :to="`/stocks/${row.symbol}`" class="stock-code">{{ row.symbol }}</router-link>
@@ -126,13 +126,13 @@
         </el-table-column>
         <el-table-column label="止损价" width="90" align="right">
           <template #default="{ row }">
-            <span v-if="row.stop_loss_price" class="price-down">{{ formatNum(row.stop_loss_price) }}</span>
+            <span v-if="row.stop_loss_price" class="cell-down">{{ formatNum(row.stop_loss_price) }}</span>
             <span v-else class="text-muted">未设置</span>
           </template>
         </el-table-column>
         <el-table-column label="止盈价" width="90" align="right">
           <template #default="{ row }">
-            <span v-if="row.take_profit_price" class="price-up">{{ formatNum(row.take_profit_price) }}</span>
+            <span v-if="row.take_profit_price" class="cell-up">{{ formatNum(row.take_profit_price) }}</span>
             <span v-else class="text-muted">未设置</span>
           </template>
         </el-table-column>
@@ -722,62 +722,9 @@ const getExitReasonTagType = (r?: string | null) => {
 .up { color: var(--el-color-danger); }
 .down { color: var(--el-color-success); }
 
-// ============ 持仓面板 ============
-.positions-panel {
-  background: var(--el-bg-color);
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 14px;
-  overflow: hidden;
-}
-
-.positions-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 20px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
-  background: linear-gradient(135deg, var(--el-fill-color-lighter) 0%, var(--el-bg-color) 100%);
-
-  .toolbar-left {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .toolbar-count {
-    font-size: 14px;
-    color: var(--el-text-color-primary);
-
-    strong {
-      font-size: 18px;
-      color: var(--el-color-primary);
-      margin: 0 2px;
-    }
-  }
-
-  .toolbar-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-}
-
-.positions-table {
-  :deep(.el-table__header th) {
-    background: var(--el-fill-color-lighter);
-    color: var(--el-text-color-primary);
-    font-weight: 600;
-    font-size: 13px;
-  }
-
-  :deep(.el-table__row td) {
-    padding: 10px 0;
-  }
-
-  :deep(.el-table__row:hover) {
-    background: var(--el-color-primary-light-9) !important;
-  }
-}
+// ============ 持仓表格 ============
+// 表格样式已迁移至全局设计系统 (.app-table, .app-table--trades, .app-table-toolbar, .app-table-card)
+// 此处仅保留页面特定的工具栏微调和响应式
 
 .stock-code {
   color: var(--el-color-primary);
@@ -797,16 +744,6 @@ const getExitReasonTagType = (r?: string | null) => {
     color: var(--el-color-primary);
     text-decoration: underline;
   }
-}
-
-.price-down {
-  color: var(--el-color-danger);
-  font-weight: 500;
-}
-
-.price-up {
-  color: var(--el-color-success);
-  font-weight: 500;
 }
 
 .text-muted {
@@ -844,23 +781,6 @@ const getExitReasonTagType = (r?: string | null) => {
       font-size: 18px;
     }
   }
-
-  .positions-toolbar {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 10px;
-
-    .toolbar-actions {
-      width: 100%;
-      flex-wrap: wrap;
-    }
-  }
-
-  .positions-table {
-    :deep(.el-table) {
-      font-size: 13px;
-    }
-  }
 }
 
 @media (max-width: 480px) {
@@ -879,10 +799,6 @@ html.dark {
     &--down {
       background: linear-gradient(135deg, var(--el-bg-color) 0%, rgba(103, 194, 58, 0.08) 100%);
     }
-  }
-
-  .positions-toolbar {
-    background: linear-gradient(135deg, var(--el-fill-color) 0%, var(--el-bg-color) 100%);
   }
 }
 </style>
