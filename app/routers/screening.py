@@ -1,6 +1,6 @@
 import logging
 from typing import Any
-from app.utils.timezone import now_tz
+from app.utils.timezone import now_tz, to_config_tz
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -966,6 +966,8 @@ async def check_data_freshness(user: dict = Depends(get_current_user)):
                 basics_dt = datetime.strptime(basics_updated_at[:19], "%Y-%m-%d %H:%M:%S")
             else:
                 basics_dt = basics_updated_at
+            # 🔥 bug-xxx：读回的是 naive UTC 墙钟时间，先转北京时区，避免早晨同步的日期比北京晚一天导致误报“过期1天”
+            basics_dt = to_config_tz(basics_dt)
             # 🔥 bug-018：自然日差 → 交易日差（周末/节假日不应当作过期天数）
             basics_stale_days = count_trading_days_between(
                 basics_dt.strftime("%Y-%m-%d"), expected_date.strftime("%Y-%m-%d")
@@ -1023,6 +1025,8 @@ async def check_data_freshness(user: dict = Depends(get_current_user)):
                 fin_dt = datetime.strptime(fin_updated_at[:19], "%Y-%m-%d %H:%M:%S")
             else:
                 fin_dt = fin_updated_at
+            # 🔥 bug-xxx：读回的是 naive UTC 墙钟时间，先转北京时区
+            fin_dt = to_config_tz(fin_dt)
             # 🔥 bug-018：自然日差 → 交易日差（周末/节假日不应当作过期天数）
             fin_stale_days = count_trading_days_between(
                 fin_dt.strftime("%Y-%m-%d"), expected_date.strftime("%Y-%m-%d")
@@ -1049,6 +1053,8 @@ async def check_data_freshness(user: dict = Depends(get_current_user)):
                 news_dt = datetime.strptime(str(news_updated_at)[:19], "%Y-%m-%d %H:%M:%S")
             else:
                 news_dt = news_updated_at
+            # 🔥 bug-xxx：读回的是 naive UTC 墙钟时间，先转北京时区
+            news_dt = to_config_tz(news_dt)
             # 🔥 bug-018：自然日差 → 交易日差（周末/节假日不应当作过期天数）
             news_stale_days = count_trading_days_between(
                 news_dt.strftime("%Y-%m-%d"), expected_date.strftime("%Y-%m-%d")

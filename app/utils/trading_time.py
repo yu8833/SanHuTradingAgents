@@ -8,9 +8,8 @@
 import logging
 from datetime import date, datetime, timedelta
 from datetime import time as dtime
-from zoneinfo import ZoneInfo
 
-from app.core.config import settings
+from app.utils.timezone import now_tz
 
 logger = logging.getLogger(__name__)
 
@@ -77,8 +76,7 @@ def get_latest_trade_day(now: datetime | None = None) -> datetime:
     Returns:
         datetime: 最近的交易日
     """
-    tz = ZoneInfo(settings.TIMEZONE)
-    now = now or datetime.now(tz)
+    now = now or now_tz()
 
     # 今天是交易日且已收盘
     if is_trading_day(now) and now.time() >= dtime(15, 0):
@@ -175,8 +173,7 @@ def is_trading_time(now: datetime | None = None) -> bool:
     Returns:
         bool: 是否在交易时间内
     """
-    tz = ZoneInfo(settings.TIMEZONE)
-    now = now or datetime.now(tz)
+    now = now or now_tz()
     
     # 交易日（排除周末和节假日）
     if not is_trading_day(now):
@@ -208,8 +205,7 @@ def is_strict_trading_time(now: datetime | None = None) -> bool:
     Returns:
         bool: 是否在严格交易时间内
     """
-    tz = ZoneInfo(settings.TIMEZONE)
-    now = now or datetime.now(tz)
+    now = now or now_tz()
 
     # 交易日（排除周末和节假日）
     if not is_trading_day(now):
@@ -236,8 +232,7 @@ def is_pre_market_time(now: datetime | None = None) -> bool:
     Returns:
         bool: 是否在盘前时间
     """
-    tz = ZoneInfo(settings.TIMEZONE)
-    now = now or datetime.now(tz)
+    now = now or now_tz()
 
     # 交易日（排除周末和节假日）
     if not is_trading_day(now):
@@ -260,8 +255,7 @@ def is_after_market_time(now: datetime | None = None) -> bool:
     Returns:
         bool: 是否在盘后时间
     """
-    tz = ZoneInfo(settings.TIMEZONE)
-    now = now or datetime.now(tz)
+    now = now or now_tz()
 
     # 交易日（排除周末和节假日）
     if not is_trading_day(now):
@@ -290,8 +284,7 @@ def get_trading_status(now: datetime | None = None) -> str:
             - "after_market": 盘后缓冲期
             - "closed": 休市
     """
-    tz = ZoneInfo(settings.TIMEZONE)
-    now = now or datetime.now(tz)
+    now = now or now_tz()
     
     # 非交易日（周末/节假日）
     if not is_trading_day(now):

@@ -8,7 +8,8 @@
 🔥 新增：每个行情数据都附带时间戳和数据源信息
 """
 import logging
-from datetime import datetime
+
+from app.utils.timezone import now_tz
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ def _merge_quotes(akshare_quotes: dict[str, dict], tencent_quotes: dict[str, dic
 
     🔥 新增元信息：每个行情数据附带 fetched_at, source, age_seconds
     """
-    now = datetime.now()
+    now = now_tz()
     now_iso = now.isoformat()
 
     result = {}

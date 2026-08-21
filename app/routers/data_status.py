@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException
 from pymongo import ASCENDING
 
 from app.core.database import get_mongo_db
+from app.utils.timezone import now_tz
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +84,7 @@ async def _check_historical_data_status() -> dict:
         coverage_count = coverage[0]["count"] if coverage else 0
 
         # 判断数据新鲜度
-        now = datetime.now()
+        now = now_tz()
         if latest_date:
             try:
                 latest_dt = None
@@ -219,7 +220,7 @@ async def get_data_status():
                 "overall": {
                     "status": overall_status,
                     "message": overall_message,
-                    "checked_at": datetime.now().isoformat(),
+                    "checked_at": now_tz().isoformat(),
                 },
                 "realtime_quotes": realtime_status,
                 "historical_daily": historical_status,

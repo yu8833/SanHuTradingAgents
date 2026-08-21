@@ -351,12 +351,17 @@ async def lifespan(app: FastAPI):
 
         asyncio.create_task(run_sync_with_sources())
 
+        # 🔥 bug-fix：APScheduler 不 await 普通 lambda 返回的协程（函数体从不执行，却记录 success）。
+        # 必须用 async 函数注册，调度才会真正运行 run_full_sync。
+        async def _run_basics_sync():
+            await multi_source_service.run_full_sync(force=False, preferred_sources=preferred_sources)
+
         # 配置调度：优先使用 CRON，其次使用 HH:MM
         if settings.SYNC_STOCK_BASICS_ENABLED:
             if settings.SYNC_STOCK_BASICS_CRON:
                 # 如果提供了cron表达式
                 scheduler.add_job(
-                    lambda: multi_source_service.run_full_sync(force=False, preferred_sources=preferred_sources),
+                    _run_basics_sync,
                     cron_trigger(settings.SYNC_STOCK_BASICS_CRON, timezone=settings.TIMEZONE),
                     id="basics_sync_service",
                     name="股票基础信息同步（多数据源）"
@@ -365,7 +370,7 @@ async def lifespan(app: FastAPI):
             else:
                 hh, mm = (settings.SYNC_STOCK_BASICS_TIME or "06:30").split(":")
                 scheduler.add_job(
-                    lambda: multi_source_service.run_full_sync(force=False, preferred_sources=preferred_sources),
+                    _run_basics_sync,
                     CronTrigger(hour=int(hh), minute=int(mm), timezone=settings.TIMEZONE),
                     id="basics_sync_service",
                     name="股票基础信息同步（多数据源）"
@@ -867,6 +872,18 @@ async def lifespan(app: FastAPI):
                     ("baostock_historical_sync_catchup", settings.BAOSTOCK_HISTORICAL_SYNC_CRON,
                      run_baostock_historical_sync, {"incremental": True})
                 )
+            # 🔥 basics（股票基础信息）同步：每日早晨注册（CRON 或 HH:MM 默认 06:30），
+            # 但启动/重启若发生在当日 cron 时间之后会被跳过，导致当日基础信息延迟到次日拉取、
+            # Dashboard 误报"基础信息过期 1 天"。故纳入启动补跑。每日任务 cron 统一为 `MM HH * * *`。
+            if settings.SYNC_STOCK_BASICS_ENABLED:
+                if settings.SYNC_STOCK_BASICS_CRON:
+                    _basics_cron = settings.SYNC_STOCK_BASICS_CRON
+                else:
+                    _bhh, _bmm = (settings.SYNC_STOCK_BASICS_TIME or "06:30").split(":")
+                    _basics_cron = f"{int(_bmm):02d} {int(_bhh):02d} * * *"
+                _catchup_candidates.append(
+                    ("basics_sync_service_catchup", _basics_cron, _run_basics_sync, {})
+                )
 
             _catchup_jobs_added = 0
 
@@ -880,6 +897,18 @@ async def lifespan(app: FastAPI):
                     _db = get_mongo_db()
                     _today_s = _now.strftime('%Y-%m-%d')
                     for _jid2 in _job_ids:
+                        # basics 同步把记录写到 sync_status 集合（job=stock_basics_multi_source），
+                        # 与写在 scheduler_executions 的其它任务不同，需分别判断。
+                        if _jid2 == "basics_sync_service":
+                            _hit = await _db["sync_status"].find_one(
+                                {"job": "stock_basics_multi_source", "status": "success"},
+                                sort=[("finished_at", -1)],
+                            )
+                            if _hit:
+                                _f = _hit.get("finished_at")
+                                if _f and str(_f).startswith(_today_s):
+                                    return True
+                            continue
                         _hit = await _db["scheduler_executions"].find_one(
                             {"job_id": _jid2, "status": "success"},
                             sort=[("timestamp", -1)],

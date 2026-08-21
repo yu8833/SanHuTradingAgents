@@ -10,6 +10,8 @@ import asyncio
 import logging
 from datetime import datetime
 
+from app.utils.timezone import now_tz
+
 logger = logging.getLogger(__name__)
 
 
@@ -33,7 +35,7 @@ class QuotesService:
                 return {}
 
             # 计算数据龄（秒）
-            now = datetime.now()
+            now = now_tz()
 
             result: dict[str, dict[str, float | None]] = {}
             for code, q in raw.items():

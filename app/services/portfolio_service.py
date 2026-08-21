@@ -19,7 +19,7 @@
 import logging
 from datetime import datetime
 from typing import Any
-from app.utils.timezone import now_tz
+from app.utils.timezone import now_tz, to_config_tz, to_display_iso
 
 from bson import ObjectId
 from pydantic import BaseModel
@@ -110,17 +110,18 @@ class PortfolioService:
         if not result.get("buy_date"):
             ts = result.get("updated_at")
             if isinstance(ts, datetime):
-                result["buy_date"] = ts.strftime("%Y-%m-%d")
+                # MongoDB 存 UTC 时区剥离，读回 naive UTC，先转北京时区再取日期
+                result["buy_date"] = to_config_tz(ts).strftime("%Y-%m-%d")
             elif isinstance(ts, str):
                 result["buy_date"] = ts[:10]
             else:
                 result["buy_date"] = now_tz().strftime("%Y-%m-%d")
 
-        # 时间格式化
+        # 时间格式化（统一转北京 +08:00）
         if "created_at" in result and isinstance(result["created_at"], datetime):
-            result["created_at"] = result["created_at"].isoformat()
+            result["created_at"] = to_display_iso(result["created_at"])
         if "updated_at" in result and isinstance(result["updated_at"], datetime):
-            result["updated_at"] = result["updated_at"].isoformat()
+            result["updated_at"] = to_display_iso(result["updated_at"])
 
         # paper_positions 没有 status 字段，用 quantity>0 推断
         if not result.get("status"):
