@@ -9,6 +9,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from app.utils.timezone import to_display_iso
 from app.services.data_sources.manager import DataSourceManager
 from app.services.multi_source_basics_sync_service import get_multi_source_sync_service
 
@@ -442,9 +443,12 @@ async def get_sync_history(
         # 获取总数
         total = await db.sync_status.count_documents(query)
 
-        # 清理记录中的 _id 字段
+        # 清理记录中的 _id 字段，并将时间字段统一为带时区偏移的展示格式（+08:00，与其它接口口径一致）
         for record in history_records:
             record.pop("_id", None)
+            for _tk in ("started_at", "finished_at", "updated_at", "created_at"):
+                if record.get(_tk) is not None:
+                    record[_tk] = to_display_iso(record[_tk])
 
         return SyncResponse(
             success=True,

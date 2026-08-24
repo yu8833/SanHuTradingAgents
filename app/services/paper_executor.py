@@ -24,6 +24,37 @@ INITIAL_CASH_BY_MARKET = {
     "USD": 100_000.0      # 美股：10万美元
 }
 
+# 每个市场的内置默认规则（数据库中 paper_market_rules 文档不存在时回退）。
+# 避免部署遗漏 seed 导致 T+1/T+0 判断失效、或手续费始终为 0。
+DEFAULT_MARKET_RULES: dict[str, dict[str, Any]] = {
+    "CN": {
+        "t_plus": 1,
+        "commission": {
+            "rate": 0.00025,      # 券商佣金率 0.025%
+            "min": 5.0,           # 最低 5 元
+            "stamp_duty_rate": 0.001,  # 印花税 0.1%（仅卖出，卖出侧单独判断）
+            "transfer_fee_rate": 0.00001,
+        }
+    },
+    "HK": {
+        "t_plus": 0,
+        "commission": {
+            "rate": 0.001,
+            "min": 0.0,
+            "transaction_levy_rate": 0.000027,
+            "trading_fee_rate": 0.00005,
+            "settlement_fee_rate": 0.00002,
+        }
+    },
+    "US": {
+        "t_plus": 0,
+        "commission": {
+            "rate": 0.0005,
+            "sec_fee_rate": 0.000008,
+        }
+    }
+}
+
 
 def detect_market_and_code(code: str) -> tuple[str, str]:
     """检测股票代码的市场类型并标准化代码。
@@ -68,7 +99,7 @@ async def get_or_create_account(user_id: str) -> dict[str, Any]:
     db = get_mongo_db()
     acc = await db["paper_accounts"].find_one({"user_id": user_id})
     if not acc:
-        now = now_tz().isoformat()
+        now = now_tz()
         acc = {
             "user_id": user_id,
             "cash": {
@@ -88,7 +119,8 @@ async def get_or_create_account(user_id: str) -> dict[str, Any]:
         }
         await db["paper_accounts"].insert_one(acc)
     else:
-        # 兼容旧账户结构：如果 cash 或 realized_pnl 仍为标量，迁移为多货币对象
+        # 兼容旧账户结构：如果 cash 或 realized_pnl 仍为标量，迁移为多货币对象；
+        # 同时把存量 created_at/updated_at 的 ISO 字符串统一修正为 BSON datetime。
         updates: dict[str, Any] = {}
         try:
             cash_val = acc.get("cash")
@@ -101,8 +133,29 @@ async def get_or_create_account(user_id: str) -> dict[str, Any]:
                 base_pnl = float(pnl_val or 0.0)
                 updates["realized_pnl"] = {"CNY": base_pnl, "HKD": 0.0, "USD": 0.0}
 
+            def _as_dt(v):
+                if isinstance(v, datetime):
+                    return v
+                if isinstance(v, str):
+                    try:
+                        d = datetime.fromisoformat(v)
+                    except Exception:
+                        return None
+                    if d.tzinfo is None:
+                        from app.utils.timezone import get_tz
+                        d = d.replace(tzinfo=get_tz())
+                    return d
+                return None
+
+            ca = _as_dt(acc.get("created_at"))
+            if ca and not isinstance(acc.get("created_at"), datetime):
+                updates["created_at"] = ca
+            ua = _as_dt(acc.get("updated_at"))
+            if ua and not isinstance(acc.get("updated_at"), datetime):
+                updates["updated_at"] = ua
+
             if updates:
-                updates["updated_at"] = now_tz().isoformat()
+                updates["updated_at"] = now_tz()
                 await db["paper_accounts"].update_one({"user_id": user_id}, {"$set": updates})
                 # 重新读取迁移后的账户
                 acc = await db["paper_accounts"].find_one({"user_id": user_id})
@@ -112,12 +165,19 @@ async def get_or_create_account(user_id: str) -> dict[str, Any]:
 
 
 async def _get_market_rules(market: str) -> dict[str, Any] | None:
-    """获取市场规则配置"""
+    """获取市场规则配置；数据库无记录时回退到 DEFAULT_MARKET_RULES 内置默认值（双保险）。
+
+    数据库文档结构：{market: "CN", rules: DEFAULT_MARKET_RULES["CN"]}
+    返回：rules dict（保证至少含 t_plus 与 commission 入口）。若 market 未知则返回 None。
+    """
     db = get_mongo_db()
     rules_doc = await db["paper_market_rules"].find_one({"market": market})
-    if rules_doc:
-        return rules_doc.get("rules", {})
-    return None
+    if rules_doc and isinstance(rules_doc.get("rules"), dict):
+        return rules_doc["rules"]
+    fallback = DEFAULT_MARKET_RULES.get(market)
+    if fallback:
+        logger.info(f"📋 [paper_executor] paper_market_rules 未配置 {market}，使用内置默认规则")
+    return fallback
 
 
 def _calculate_commission(market: str, side: str, amount: float, rules: dict[str, Any]) -> float:
@@ -169,13 +229,14 @@ async def _get_available_quantity(user_id: str, code: str, market: str) -> int:
         rules = await _get_market_rules(market)
         if rules and rules.get("t_plus", 0) > 0:
             # 查询今天的买入数量
-            today = now_tz().date().isoformat()
+            # 北京当天零点（tz-aware 真实时刻），与 paper_trades.timestamp（BSON datetime）做范围比较
+            today_start = now_tz().replace(hour=0, minute=0, second=0, microsecond=0)
             pipeline = [
                 {"$match": {
                     "user_id": user_id,
                     "code": code,
                     "side": "buy",
-                    "timestamp": {"$gte": today}
+                    "timestamp": {"$gte": today_start}
                 }},
                 {"$group": {"_id": None, "total": {"$sum": "$quantity"}}}
             ]
@@ -217,19 +278,6 @@ async def get_last_price(code: str, market: str) -> float | None:
                     return price
             except Exception as e:
                 logger.warning(f"⚠️ market_quotes 价格转换失败 {code}: {e}")
-
-        # 2. 回退到 stock_basic_info 的 current_price
-        basic_info = await db["stock_basic_info"].find_one(
-            {"$or": [{"code": code}, {"symbol": code}]},
-            {"_id": 0, "current_price": 1}
-        )
-        if basic_info and basic_info.get("current_price") is not None:
-            try:
-                price = float(basic_info["current_price"])
-                if price > 0:
-                    return price
-            except Exception as e:
-                logger.warning(f"⚠️ stock_basic_info 价格转换失败 {code}: {e}")
 
         logger.error(f"❌ 无法获取A股价格: {code}")
         return None
@@ -298,7 +346,7 @@ async def _rollback_execution(
                 "$set": {
                     f"cash.{currency}": float(cash_before.get(currency, 0.0) or 0.0),
                     f"realized_pnl.{currency}": float(pnl_before.get(currency, 0.0) or 0.0),
-                    "updated_at": now_tz().isoformat(),
+                    "updated_at": now_tz(),
                 }
             }
         )
@@ -308,7 +356,7 @@ async def _rollback_execution(
         else:
             snap = dict(pos_before)
             snap.pop("_id", None)
-            snap["updated_at"] = now_tz().isoformat()
+            snap["updated_at"] = now_tz()
             await db["paper_positions"].replace_one(
                 {"user_id": user_id, "code": code},
                 snap,
@@ -373,7 +421,7 @@ async def execute_market_order(
     # 7. 获取持仓
     pos = await db["paper_positions"].find_one({"user_id": user_id, "code": normalized_code})
 
-    now_iso = now_tz().isoformat()
+    now = now_tz()
     realized_pnl_delta = 0.0
 
     # —— 一致性保护：记录变更前快照 + 幂等 request_id，失败时补偿回滚 ——
@@ -403,7 +451,7 @@ async def execute_market_order(
             new_cash = round(available_cash - total_cost, 2)
             await db["paper_accounts"].update_one(
                 {"user_id": user_id},
-                {"$set": {f"cash.{currency}": new_cash, "updated_at": now_iso}}
+                {"$set": {f"cash.{currency}": new_cash, "updated_at": now}}
             )
 
             if not pos:
@@ -416,7 +464,8 @@ async def execute_market_order(
                     "available_qty": qty if market != "CN" else 0,  # A股T+1，今天买入不可用
                     "frozen_qty": 0,
                     "avg_cost": price,
-                    "updated_at": now_iso,
+                    "created_at": now,
+                    "updated_at": now,
                     "strategy": strategy or "default",
                     "stop_loss_price": stop_loss_price,
                     "take_profit_price": take_profit_price,
@@ -440,7 +489,7 @@ async def execute_market_order(
                     "quantity": new_qty,
                     "available_qty": new_available,
                     "avg_cost": new_avg,
-                    "updated_at": now_iso,
+                    "updated_at": now,
                 }
                 if strategy:
                     update_set["strategy"] = strategy
@@ -477,7 +526,7 @@ async def execute_market_order(
                         f"cash.{currency}": net_proceeds,
                         f"realized_pnl.{currency}": realized_pnl_delta
                     },
-                    "$set": {"updated_at": now_iso}
+                    "$set": {"updated_at": now}
                 }
             )
 
@@ -493,7 +542,7 @@ async def execute_market_order(
                         "exit_date": now_tz().strftime("%Y-%m-%d"),
                         "exit_reason": "sell_order",
                         "realized_pnl": pnl,
-                        "updated_at": now_iso,
+                        "updated_at": now,
                     }}
                 )
             else:
@@ -503,7 +552,7 @@ async def execute_market_order(
                     {"$set": {
                         "quantity": new_qty,
                         "available_qty": new_available,
-                        "updated_at": now_iso
+                        "updated_at": now
                     }}
                 )
 
@@ -520,8 +569,8 @@ async def execute_market_order(
             "commission": commission,
             "status": "filled",
             "request_id": request_id,
-            "created_at": now_iso,
-            "filled_at": now_iso,
+            "created_at": now,
+            "filled_at": now,
         }
         if analysis_id:
             order_doc["analysis_id"] = analysis_id
@@ -539,7 +588,7 @@ async def execute_market_order(
             "commission": commission,
             "pnl": realized_pnl_delta if side == "sell" else 0.0,
             "request_id": request_id,
-            "timestamp": now_iso,
+            "timestamp": now,
         }
         if thesis:
             trade_doc["thesis"] = thesis

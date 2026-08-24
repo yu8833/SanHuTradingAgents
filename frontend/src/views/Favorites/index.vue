@@ -499,6 +499,7 @@ import { stockSyncApi } from '@/api/stockSync'
 import { normalizeMarketForAnalysis } from '@/utils/market'
 import { ApiClient } from '@/api/request'
 import { fmtPrice, fmtPct } from '@/utils/format'
+import { formatDate as formatDateDisplay } from '@/utils/datetime'
 
 import type { FavoriteItem } from '@/api/favorites'
 import { useAuthStore } from '@/stores/auth'
@@ -1169,9 +1170,7 @@ const getChangeClass = (changePercent: number) => {
 }
 
 
-const formatDate = (dateStr: string) => {
-  return new Date(dateStr).toLocaleDateString('zh-CN')
-}
+const formatDate = (dateStr: string) => formatDateDisplay(dateStr)
 
 // 生命周期
 onMounted(() => {

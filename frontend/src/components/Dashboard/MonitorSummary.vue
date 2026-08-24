@@ -54,6 +54,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { Odometer, ArrowRight } from '@element-plus/icons-vue'
 import { monitorApi, type MonitorAlert, type MonitorRule } from '@/api/monitor'
+import { todayStartEpoch } from '@/utils/datetime'
 
 defineOptions({ name: 'MonitorSummary' })
 
@@ -65,11 +66,8 @@ const rules = ref<MonitorRule[]>([])
 
 let pollTimer: number | null = null
 
-// 今日触发（ts 为毫秒时间戳）
-const todayStart = () => {
-  const now = new Date()
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
-}
+// 今日触发（ts 为毫秒时间戳）；今日边界按北京时间零点
+const todayStart = () => todayStartEpoch()
 
 const todayCount = computed(() =>
   alerts.value.filter(a => a.ts >= todayStart()).length

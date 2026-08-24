@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.utils.timezone import now_tz
 
@@ -50,6 +50,9 @@ class QuotesService:
                 fetched_at = q.get("fetched_at", now.isoformat())
                 try:
                     fetched_time = datetime.fromisoformat(fetched_at)
+                    # 防御：部分数据源写入的 fetched_at 无偏移（naive），按 UTC 解释后再与 now_tz() 相减，避免 TypeError
+                    if fetched_time.tzinfo is None:
+                        fetched_time = fetched_time.replace(tzinfo=timezone.utc)
                     age_seconds = (now - fetched_time).total_seconds()
                 except (ValueError, TypeError):
                     age_seconds = 0

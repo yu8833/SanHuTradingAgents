@@ -313,6 +313,7 @@ import {
 } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 import { sanitizeHtml } from '@/utils/sanitize'
+import { toTimestamp } from '@/utils/datetime'
 import { vibeApi } from '@/api/vibe'
 import type { RadarData, Industry, RadarItem, SectorNode, SectorLink, BottleneckLevel } from '@/api/vibe'
 
@@ -346,8 +347,8 @@ watch([currentKey, radarData], ([key]) => {
     return
   }
   currentItems.value = [...industry.items].sort((a, b) => {
-    const ta = a.ts ?? new Date(a.time).getTime()
-    const tb = b.ts ?? new Date(b.time).getTime()
+    const ta = a.ts ?? toTimestamp(a.time)
+    const tb = b.ts ?? toTimestamp(b.time)
     return (tb || 0) - (ta || 0)
   })
 }, { immediate: true })
@@ -360,8 +361,8 @@ const summaryCache = ref<Record<string, string>>({})
 
 const sortByTime = (items: RadarItem[]): RadarItem[] =>
   [...items].sort((a, b) => {
-    const ta = a.ts ?? new Date(a.time).getTime()
-    const tb = b.ts ?? new Date(b.time).getTime()
+    const ta = a.ts ?? toTimestamp(a.time)
+    const tb = b.ts ?? toTimestamp(b.time)
     return (tb || 0) - (ta || 0)
   })
 

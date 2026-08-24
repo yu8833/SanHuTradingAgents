@@ -10,7 +10,7 @@
 """
 
 from __future__ import annotations
-from app.utils.timezone import now_tz
+from app.utils.timezone import now_tz, get_tz
 
 import contextlib
 import math
@@ -983,7 +983,7 @@ def investor_qa(code: str, page_size: int = 30) -> list[dict]:
             "company": it.get("companyShortName"),
             "question": it.get("mainContent"), "answer": it.get("attachedContent"),
             "answerer": it.get("attachedAuthor"),
-            "ask_time": datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d %H:%M") if ts else "",
+            "ask_time": datetime.fromtimestamp(ts / 1000, get_tz()).strftime("%Y-%m-%d %H:%M") if ts else "",
         })
     return out
 

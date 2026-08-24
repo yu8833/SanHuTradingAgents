@@ -594,6 +594,7 @@ import {
 import { retailApi, type PositionAdvice, type ExitResp, type MarketRegime, type RegimeRawData, type StrategiesResp, type StrategiesPerformanceResp, type StrategyPerformance } from '@/api/retail'
 import { paperApi } from '@/api/paper'
 import { fmtNum, fmtPct, fmtPctFromFraction } from '@/utils/format'
+import { todayDateInBeijing, toDateStr } from '@/utils/datetime'
 
 const router = useRouter()
 
@@ -741,7 +742,7 @@ const addExitHolding = () => {
     symbol: '',
     strategy: 'default',
     buy_price: 0,
-    buy_date: new Date().toISOString().slice(0, 10),
+    buy_date: todayDateInBeijing(),
     current_price: 0,
     current_ma: null,
     thesis_invalid: false,
@@ -763,7 +764,7 @@ const loadRealPositions = async () => {
       symbol: p.code || p.symbol || '',
       strategy: p.strategy || 'default',
       buy_price: p.avg_cost || p.cost_price || 0,
-      buy_date: p.buy_date || (p.updated_at ? String(p.updated_at).slice(0, 10) : new Date().toISOString().slice(0, 10)),
+      buy_date: p.buy_date || toDateStr(p.updated_at) || todayDateInBeijing(),
       current_price: p.last_price || 0,
       current_ma: null,
       thesis_invalid: false,

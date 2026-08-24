@@ -309,6 +309,7 @@ import { portfolioApi, type PositionItem, type PositionSummary, type AddPosition
 import { vibeApi } from '@/api/vibe'
 import { getStrategyNameMap, strategyNameSync } from '@/utils/strategyName'
 import { fmtNum, fmtPct } from '@/utils/format'
+import { todayDateInBeijing } from '@/utils/datetime'
 
 defineOptions({ name: 'PortfolioView' })
 
@@ -340,7 +341,7 @@ const editForm = reactive<AddPositionPayload & UpdatePositionPayload>({
   quantity: 100,
   cost_price: 0,
   position_ratio: 0,
-  buy_date: new Date().toISOString().slice(0, 10),
+  buy_date: todayDateInBeijing(),
   strategy: 'default',
   stop_loss_price: null,
   take_profit_price: null,
@@ -433,14 +434,14 @@ const closeTarget = ref<PositionItem | null>(null)
 const closing = ref(false)
 const closeForm = reactive({
   exit_price: 0,
-  exit_date: new Date().toISOString().slice(0, 10),
+  exit_date: todayDateInBeijing(),
   exit_reason: 'manual',
 })
 
 const openCloseDialog = (row: PositionItem) => {
   closeTarget.value = row
   closeForm.exit_price = row.current_price || row.cost_price
-  closeForm.exit_date = new Date().toISOString().slice(0, 10)
+  closeForm.exit_date = todayDateInBeijing()
   closeForm.exit_reason = 'manual'
   closeDialogVisible.value = true
 }

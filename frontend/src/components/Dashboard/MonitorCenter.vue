@@ -536,6 +536,7 @@ import { paperApi } from '@/api/paper'
 import { favoritesApi } from '@/api/favorites'
 import { strategyApi } from '@/api/strategy'
 import { fmtPct, fmtPrice } from '@/utils/format'
+import { todayStartEpoch } from '@/utils/datetime'
 
 // ── 状态 ────────────────────────────────────────────────
 const checking = ref(false)
@@ -718,10 +719,8 @@ const dismissOrder = async (o: TbsOrder) => {
 }
 
 // ── 汇总指标 ──────────────────────────────────────────
-const todayStart = () => {
-  const now = new Date()
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
-}
+// 今日边界按北京时间（Asia/Shanghai）零点，避免非北京浏览器时区错判
+const todayStart = () => todayStartEpoch()
 const todayCount = computed(() => alerts.value.filter(a => a.ts >= todayStart()).length)
 const criticalCount = computed(() => alerts.value.filter(a => a.severity === 'critical').length)
 const enabledRules = computed(() => rules.value.filter(r => r.enabled).length)
