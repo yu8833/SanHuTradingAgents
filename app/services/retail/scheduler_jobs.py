@@ -9,7 +9,7 @@
 
 import logging
 from datetime import datetime
-from app.utils.timezone import now_tz
+from app.utils.timezone import get_tz, now_tz
 
 from app.core.database import get_mongo_db
 from app.models.notification import NotificationCreate
@@ -276,11 +276,12 @@ def register_retail_jobs(scheduler, settings):
 
     Args:
         scheduler: APScheduler 调度器实例
-        settings: 应用配置（取 TIMEZONE）
+        settings: 应用配置（保留入参与调用方一致；时区统一走 get_tz()）
     """
     from app.utils.scheduler_utils import cron_trigger
 
-    tz = settings.TIMEZONE
+    # 时区统一走 get_tz()（DB 可能动态覆盖），禁 settings.TIMEZONE 直引分叉。
+    tz = get_tz()
 
     # 1. 盘中统一扫描（合并个股预警 + 持仓退出信号）：工作日 9:30-15:00 每15分钟
     #    原为两个独立任务（预警每10分钟、退出每30分钟），合并后减少调度条目与重复行情拉取。

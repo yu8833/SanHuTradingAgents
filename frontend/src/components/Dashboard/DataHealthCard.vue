@@ -127,6 +127,7 @@ import {
 import { screeningApi } from '@/api/screening'
 import { getDataSourcesStatus, getSyncStatus, type DataSourceStatus, type SyncStatus } from '@/api/sync'
 import { subscribeQuotesUpdate } from '@/utils/quotesSSE'
+import { formatDateTime, toTimestamp } from '@/utils/datetime'
 
 defineOptions({ name: 'DataHealthCard' })
 defineEmits<{ (e: 'open-sync'): void }>()
@@ -262,22 +263,25 @@ const statusLabel = (status: string) => {
 
 const formatCheckedAt = (timeStr: string) => {
   if (!timeStr) return ''
-  try {
-    const d = new Date(timeStr)
-    return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-  } catch {
-    return timeStr
-  }
+  return formatDateTime(timeStr, {
+    timeZone: 'Asia/Shanghai',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  })
 }
 
 const goToSyncPage = () => router.push('/settings/sync')
 
 const formatLastSync = (timeStr: string) => {
-  const diff = Date.now() - new Date(timeStr).getTime()
+  const ts = toTimestamp(timeStr)
+  if (ts == null) return ''
+  const diff = Date.now() - ts
   if (diff < 60000) return '刚刚'
   if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`
   if (diff < 86400000) return `${Math.floor(diff / 3600000)}小时前`
-  return new Date(timeStr).toLocaleDateString('zh-CN')
+  return new Date(ts).toLocaleDateString('zh-CN')
 }
 
 // 格式化数据条数（万/亿）

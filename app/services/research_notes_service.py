@@ -4,9 +4,8 @@
 """
 
 import logging
-from datetime import datetime
 from typing import Any
-from app.utils.timezone import now_tz
+from app.utils.timezone import now_tz, to_display_iso
 
 from bson import ObjectId
 
@@ -33,13 +32,9 @@ class ResearchNotesService:
         if isinstance(note_id, ObjectId):
             note_id = str(note_id)
 
-        created_at = note.get("created_at")
-        if isinstance(created_at, datetime):
-            created_at = created_at.isoformat()
+        created_at = to_display_iso(note.get("created_at"))
 
-        updated_at = note.get("updated_at")
-        if isinstance(updated_at, datetime):
-            updated_at = updated_at.isoformat()
+        updated_at = to_display_iso(note.get("updated_at"))
 
         return {
             "id": note_id,

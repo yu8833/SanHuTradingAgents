@@ -71,12 +71,12 @@ def _compact_date(d: str) -> str:
 
 def get_utc8_now():
     """
-    获取 UTC+8 当前时间（naive datetime）
+    获取当前时间（时区感知，配置时区，通常为 Asia/Shanghai）
 
-    注意：返回 naive datetime（不带时区信息），MongoDB 会按原样存储本地时间值
-    这样前端可以直接添加 +08:00 后缀显示
+    统一契约：时刻字段一律写 aware datetime（now_tz），由 MongoDB driver 归一化为 UTC 入库。
+    禁止 strip tzinfo，避免 +8h 偏差。
     """
-    return now_tz().replace(tzinfo=None)
+    return now_tz()
 
 
 class TushareSyncService:
@@ -1459,7 +1459,7 @@ class TushareSyncService:
                     f"正在同步每日估值 {td} ({i + 1}/{len(trade_days)})…",
                 )
 
-        stats["finished_at"] = now_tz().isoformat()
+        stats["finished_at"] = now_tz()
         logger.info(f"✅ 每日估值数据同步完成: 交易日={stats['total_processed']}, "
                     f"入库={stats['success_count']}, 跳过={stats['skipped_count']}, "
                     f"记录={stats['total_records']}, 失败={stats['error_count']}")

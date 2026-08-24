@@ -2494,8 +2494,8 @@ class SimpleAnalysisService:
                     "stock_code": doc.get("stock_code"),
                     "stock_name": doc.get("stock_name"),
                     "status": doc.get("status"),
-                    "created_at": doc.get("created_at").isoformat() if doc.get("created_at") else None,
-                    "started_at": doc.get("started_at").isoformat() if doc.get("started_at") else None,
+                    "created_at": to_display_iso(doc.get("created_at")),
+                    "started_at": to_display_iso(doc.get("started_at")),
                     "running_hours": None
                 }
 

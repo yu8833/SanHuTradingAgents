@@ -45,8 +45,8 @@ JOB_KEY = "stock_basics"
 
 @dataclass
 class SyncStats:
-    started_at: str | None = None
-    finished_at: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
     status: str = "idle"  # idle|running|success|failed
     total: int = 0
     inserted: int = 0
@@ -193,7 +193,7 @@ class BasicsSyncService:
         await self._ensure_indexes(db)
 
         stats = SyncStats()
-        stats.started_at = now_tz().isoformat()
+        stats.started_at = now_tz()
         stats.status = "running"
         await self._persist_status(db, stats.__dict__.copy())
 
@@ -225,7 +225,7 @@ class BasicsSyncService:
 
             # Step 3: Upsert into MongoDB (batched bulk writes)
             ops: list[UpdateOne] = []
-            now_iso = now_tz().isoformat()
+            now = now_tz()
             for _, row in stock_df.iterrows():  # type: ignore
                 name = row.get("name") or ""
                 area = row.get("area") or ""
@@ -286,7 +286,7 @@ class BasicsSyncService:
                     "sse": sse,
                     "sec": category,
                     "source": "tushare",  # 🔥 数据源标识
-                    "updated_at": now_iso,
+                    "updated_at": now,
                     "full_symbol": full_symbol,  # 添加完整标准化代码
                 }
 
@@ -342,7 +342,7 @@ class BasicsSyncService:
             stats.updated = updated
             stats.errors = errors
             stats.status = "success" if errors == 0 else "success_with_errors"
-            stats.finished_at = now_tz().isoformat()
+            stats.finished_at = now_tz()
             await self._persist_status(db, stats.__dict__.copy())
             logger.info(
                 f"Stock basics sync finished: total={stats.total} inserted={inserted} updated={updated} errors={errors} trade_date={latest_trade_date}"
@@ -352,7 +352,7 @@ class BasicsSyncService:
         except Exception as e:
             stats.status = "failed"
             stats.message = str(e)
-            stats.finished_at = now_tz().isoformat()
+            stats.finished_at = now_tz()
             await self._persist_status(db, stats.__dict__.copy())
             logger.exception(f"Stock basics sync failed: {e}")
             return stats.__dict__

@@ -10,7 +10,7 @@ from bson import ObjectId
 
 from app.core.database import get_mongo_db
 from app.models.notification import NotificationCreate, NotificationList, NotificationOut
-from app.utils.timezone import now_tz, to_config_tz
+from app.utils.timezone import now_tz, to_config_tz, to_display_iso
 
 logger = logging.getLogger("webapi.notifications")
 
@@ -56,7 +56,7 @@ class NotificationsService:
             "link": doc.get("link"),
             "source": doc.get("source"),
             "status": doc.get("status", "unread"),
-            "created_at": doc["created_at"].isoformat(),
+            "created_at": to_display_iso(doc["created_at"]),
         }
 
         # 🔥 使用 WebSocket 发送通知

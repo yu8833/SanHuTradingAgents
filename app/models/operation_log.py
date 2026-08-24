@@ -7,6 +7,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_serializer
 
+from app.utils.timezone import to_display_iso
+
 
 class OperationLogCreate(BaseModel):
     """创建操作日志请求"""
@@ -42,7 +44,7 @@ class OperationLogResponse(BaseModel):
     def serialize_datetime(self, dt: datetime, _info) -> str | None:
         """序列化 datetime 为 ISO 8601 格式，保留时区信息"""
         if dt:
-            return dt.isoformat()
+            return to_display_iso(dt)
         return None
 
 

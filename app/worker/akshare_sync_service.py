@@ -217,12 +217,12 @@ class AKShareSyncService:
             else:
                 return False
             
-            # 转换为UTC时间进行比较
+            # 统一为 aware 后比较绝对瞬时：MongoDB 未开 tz_aware 时 naive 表示 UTC，
+            # 补挂 UTC 时区，再与 now_tz()（aware +08:00）做绝对时间差。
             if updated_at.tzinfo is None:
-                updated_at = updated_at.replace(tzinfo=None)
-            else:
-                updated_at = updated_at.replace(tzinfo=None)
-            
+                updated_at = updated_at.replace(tzinfo=datetime.timezone.utc)
+            updated_at = updated_at.astimezone(datetime.timezone.utc)
+
             now = now_tz()
             time_diff = now - updated_at
             

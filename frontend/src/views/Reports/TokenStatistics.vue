@@ -284,6 +284,7 @@ import {
   type UsageStatistics
 } from '@/api/usage'
 import { fmtVol, fmtAmount, fmtPct } from '@/utils/format'
+import { formatDateTime as appFormatDateTime } from '@/utils/datetime'
 
 type TokenRecord = {
   timestamp: string
@@ -354,7 +355,7 @@ const getChangeClass = (change: number): string => {
 }
 
 const formatDateTime = (timestamp: string): string => {
-  return new Date(timestamp).toLocaleString('zh-CN')
+  return appFormatDateTime(timestamp)
 }
 
 const getProviderName = (provider: string): string => {

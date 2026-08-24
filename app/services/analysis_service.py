@@ -11,7 +11,7 @@ from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-from app.utils.timezone import now_tz
+from app.utils.timezone import now_tz, to_display_iso
 
 # 添加项目根目录到路径
 project_root = Path(__file__).parent.parent.parent
@@ -600,7 +600,7 @@ class AnalysisService:
                     "stock_code": task.symbol,  # 兼容字段
                     "user_id": str(task.user_id),
                     "batch_id": task.batch_id,
-                    "created_at": task.created_at.isoformat() if task.created_at else None
+                    "created_at": to_display_iso(task.created_at),
                 })
 
                 # 调用队列服务
@@ -873,8 +873,8 @@ class AnalysisService:
                     "elapsed_time": elapsed_time,
                     "remaining_time": remaining_time,
                     "estimated_total_time": estimated_total_time,
-                    "start_time": task.get("started_at").isoformat() if task.get("started_at") else None,
-                    "updated_at": task.get("updated_at", "").isoformat() if task.get("updated_at") else None,
+                    "start_time": to_display_iso(task.get("started_at")),
+                    "updated_at": to_display_iso(task.get("updated_at")),
                     "result_data": task.get("result")
                 }
 

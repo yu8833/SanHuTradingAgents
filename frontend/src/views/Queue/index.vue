@@ -221,6 +221,7 @@ import {
   Refresh,
   Delete
 } from '@element-plus/icons-vue'
+import { formatDateTime } from '@/utils/datetime'
 
 // 路由
 const router = useRouter()
@@ -430,7 +431,7 @@ const getProgressStatus = (status: string) => {
 }
 
 const formatTime = (time: string) => {
-  return new Date(time).toLocaleString('zh-CN')
+  return formatDateTime(time)
 }
 
 const handleSizeChange = (size: number) => {

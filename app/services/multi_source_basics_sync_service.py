@@ -7,7 +7,7 @@ Multi-source stock basics synchronization service
 - Provides unified interface for different data sources
 """
 from __future__ import annotations
-from app.utils.timezone import now_tz
+from app.utils.timezone import now_tz, to_config_tz
 
 import asyncio
 import logging
@@ -43,8 +43,8 @@ class SyncStats:
     job: str = JOB_KEY
     data_type: str = "stock_basics"  # 添加data_type字段以符合数据库索引要求
     status: str = "idle"
-    started_at: str | None = None
-    finished_at: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
     total: int = 0
     inserted: int = 0
     updated: int = 0
@@ -82,18 +82,15 @@ class MultiSourceBasicsSyncService:
             # 或者: running 状态但所有计数器都是0（同步还没开始更新计数器）
             if doc.get("status") == "running":
                 try:
-                    from datetime import datetime as _dt
-
                     # 获取数据库中的实际数据量
                     actual_total = await db[COLLECTION_NAME].count_documents({})
 
-                    # 检查 started_at 时间
-                    started = None
+                    # 检查 started_at 时间（兼容存量字符串与新 datetime 双形态）
+                    started = to_config_tz(doc.get("started_at"))
                     elapsed = 0
-                    if doc.get("started_at") and isinstance(doc["started_at"], str):
+                    if started is not None:
                         try:
-                            started = _dt.fromisoformat(doc["started_at"].replace('Z', '+00:00'))
-                            elapsed = (_dt.now() - started).total_seconds()
+                            elapsed = (now_tz() - started).total_seconds()
                         except Exception:
                             elapsed = 0
 
@@ -129,7 +126,7 @@ class MultiSourceBasicsSyncService:
                         if elapsed > STALE_THRESHOLD:
                             doc["status"] = "success" if actual_total > 0 else "never_run"
                             if not doc.get("finished_at"):
-                                doc["finished_at"] = _dt.now().isoformat()
+                                doc["finished_at"] = now_tz()
 
                         # 填充实际数据统计
                         doc["total"] = actual_total
@@ -179,7 +176,7 @@ class MultiSourceBasicsSyncService:
             existing_status.errors = 0
             existing_status.data_sources_used = sources_present
             existing_status.message = f"已存在 {actual_total} 条股票基础信息（来自数据源: {', '.join(sources_present) if sources_present else 'unknown'}）"
-            existing_status.finished_at = now_tz().isoformat()
+            existing_status.finished_at = now_tz()
             existing_status.started_at = existing_status.finished_at
 
             status_dict = existing_status.__dict__
@@ -271,7 +268,7 @@ class MultiSourceBasicsSyncService:
 
         db = get_mongo_db()
         stats = SyncStats()
-        stats.started_at = now_tz().isoformat()
+        stats.started_at = now_tz()
         stats.status = "running"
         await self._persist_status(db, stats.__dict__.copy())
 
@@ -426,7 +423,7 @@ class MultiSourceBasicsSyncService:
             stats.updated = updated
             stats.errors = errors
             stats.status = "success" if errors == 0 else "success_with_errors"
-            stats.finished_at = now_tz().isoformat()
+            stats.finished_at = now_tz()
 
             await self._persist_status(db, stats.__dict__.copy())
             logger.info(
@@ -438,7 +435,7 @@ class MultiSourceBasicsSyncService:
         except Exception as e:
             stats.status = "failed"
             stats.message = str(e)
-            stats.finished_at = now_tz().isoformat()
+            stats.finished_at = now_tz()
             await self._persist_status(db, stats.__dict__.copy())
             logger.exception(f"Multi-source sync failed: {e}")
             return stats.__dict__

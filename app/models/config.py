@@ -8,7 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
-from app.utils.timezone import now_tz
+from app.utils.timezone import now_tz, to_display_iso
 
 from .user import PyObjectId
 
@@ -500,7 +500,7 @@ class SystemConfigResponse(BaseModel):
     def serialize_datetime(self, dt: datetime | None, _info) -> str | None:
         """序列化 datetime 为 ISO 8601 格式，保留时区信息"""
         if dt:
-            return dt.isoformat()
+            return to_display_iso(dt)
         return None
 
 

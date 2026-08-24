@@ -2,7 +2,7 @@
 用户自定义标签服务
 """
 from __future__ import annotations
-from app.utils.timezone import now_tz
+from app.utils.timezone import now_tz, to_display_iso
 
 from datetime import datetime
 from typing import Any
@@ -41,8 +41,8 @@ class TagsService:
             "name": doc.get("name"),
             "color": doc.get("color") or "#409EFF",
             "sort_order": doc.get("sort_order", 0),
-            "created_at": (doc.get("created_at") or now_tz()).isoformat(),
-            "updated_at": (doc.get("updated_at") or now_tz()).isoformat(),
+            "created_at": to_display_iso(doc.get("created_at")) or now_tz().isoformat(),
+            "updated_at": to_display_iso(doc.get("updated_at")) or now_tz().isoformat(),
         }
 
     async def list_tags(self, user_id: str) -> list[dict[str, Any]]:

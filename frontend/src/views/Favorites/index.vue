@@ -75,6 +75,15 @@
               <el-icon><Download /></el-icon>
               批量同步数据
             </el-button>
+            <el-button
+              v-if="selectedStocks.length > 0"
+              type="danger"
+              :loading="batchDeleting"
+              @click="deleteFavoritesBatch"
+            >
+              <el-icon><Delete /></el-icon>
+              删除选中（{{ selectedStocks.length }}）
+            </el-button>
             <el-button @click="openTagManager">
               标签管理
             </el-button>
@@ -82,6 +91,9 @@
               <el-icon><Plus /></el-icon>
               添加自选股
             </el-button>
+          </div>
+          <div v-if="selectedStocks.length > 0" class="selection-hint">
+            已选择 {{ selectedStocks.length }} 只股票，可点击「删除选中」批量操作
           </div>
         </el-col>
       </el-row>
@@ -187,7 +199,7 @@
                 @click="removeFavorite(row)"
                 style="color: #f56c6c;"
               >
-                移除
+                删除
               </el-button>
             </div>
           </template>
@@ -491,7 +503,8 @@ import {
   Search,
   Refresh,
   Plus,
-  Download
+  Download,
+  Delete
 } from '@element-plus/icons-vue'
 import { favoritesApi } from '@/api/favorites'
 import { tagsApi } from '@/api/tags'
@@ -525,6 +538,7 @@ const getTagColor = (name: string) => tagColorMap.value[name] || ''
 const searchKeyword = ref('')
 const selectedTag = ref('')
 const selectedBoard = ref('')
+const batchDeleting = ref(false)
 
 // 批量选择
 const selectedStocks = ref<FavoriteItem[]>([])
@@ -993,8 +1007,8 @@ const analyzeFavorite = (row: any) => {
 const removeFavorite = async (row: any) => {
   try {
     await ElMessageBox.confirm(
-      `确定要从自选股中移除 ${row.stock_name} 吗？`,
-      '确认移除',
+      `确定要从自选股中删除 ${row.stock_name} 吗？`,
+      '确认删除',
       {
         confirmButtonText: '确定',
         cancelButtonText: '取消',
@@ -1002,11 +1016,46 @@ const removeFavorite = async (row: any) => {
       }
     )
     const res = await favoritesApi.remove(row.stock_code)
-    if ((res as any)?.success === false) throw new Error((res as any)?.message || '移除失败')
-    ElMessage.success('移除成功')
+    if ((res as any)?.success === false) throw new Error((res as any)?.message || '删除失败')
+    ElMessage.success('删除成功')
     await loadFavorites()
   } catch (e) {
     // 用户取消或失败
+  }
+}
+
+const deleteFavoritesBatch = async () => {
+  if (selectedStocks.value.length === 0) {
+    ElMessage.warning('请先选择要删除的股票')
+    return
+  }
+  const names = selectedStocks.value.map(s => `${s.stock_code}（${s.stock_name}）`).join('、')
+  try {
+    await ElMessageBox.confirm(
+      `确定从自选股中删除以下 ${selectedStocks.value.length} 只股票吗？\n${names}`,
+      '批量删除',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning',
+        distinguishCancelAndClose: true
+      }
+    )
+    const codes = selectedStocks.value
+      .map(s => s.stock_code)
+      .filter((c): c is string => Boolean(c))
+    batchDeleting.value = true
+    const res = await favoritesApi.removeBatch(codes)
+    if ((res as any)?.success === false) throw new Error((res as any)?.message || '批量删除失败')
+    const deleted = ((res as any)?.data?.deleted) ?? codes.length
+    ElMessage.success(`已删除 ${deleted} 只自选股`)
+    await loadFavorites()
+  } catch (e: any) {
+    if (e === 'cancel' || e?.message === 'cancel') return
+    if (typeof e === 'string' || !e?.message) return
+    ElMessage.error(e?.message || '批量删除失败')
+  } finally {
+    batchDeleting.value = false
   }
 }
 
@@ -1191,6 +1240,16 @@ onMounted(() => {
       display: flex;
       gap: 8px;
       justify-content: flex-end;
+      flex-wrap: wrap;
+    }
+    .selection-hint {
+      margin-top: 10px;
+      font-size: 13px;
+      color: #e6a23c;
+      background: #fdf6ec;
+      border: 1px solid #faecd8;
+      padding: 8px 12px;
+      border-radius: 6px;
     }
   }
 

@@ -667,6 +667,7 @@ import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
 import { strategyApi, FACTOR_OPTIONS, type StrategyMeta, type BacktestResult, type BacktestStats, type CompareResultItem, type FactorBacktestResult, type OptimizeResult, type WalkForwardResult, type PipelineBacktestResult } from '@/api/strategy'
 import { fmtNum, fmtPct, fmtPctFromFraction } from '@/utils/format'
+import { formatDateTime } from '@/utils/datetime'
 
 echartsUse([LineChart, BarChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent, CanvasRenderer])
 
@@ -884,7 +885,7 @@ async function loadStrategyResults() {
         label: r.strategy_name || r.strategy_id,
         range: `${r.config?.start ?? '-'} ~ ${r.config?.end ?? '-'}`,
         savedAt: r.saved_at,
-        savedAtText: new Date(r.saved_at * 1000).toLocaleString('zh-CN', { hour12: false }),
+        savedAtText: formatDateTime(r.saved_at),
         stats: r.stats,
         equity_curve: r.equity_curve ?? [],
       })

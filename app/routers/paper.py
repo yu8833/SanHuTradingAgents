@@ -9,7 +9,11 @@ from pydantic import BaseModel, Field
 from app.core.database import get_mongo_db
 from app.core.response import ok
 from app.routers.auth_db import get_current_user
-from app.services.paper_executor import INITIAL_CASH_BY_MARKET, execute_market_order
+from app.services.paper_executor import (
+    INITIAL_CASH_BY_MARKET,
+    _fetch_live_price,
+    execute_market_order,
+)
 
 router = APIRouter(prefix="/paper", tags=["paper"])
 logger = logging.getLogger("webapi")
@@ -172,9 +176,15 @@ async def _get_last_price(code: str, market: str) -> float | None:
     """
     db = get_mongo_db()
 
-    # A股：从数据库获取
+    # A股
     if market == "CN":
-        # 1. 尝试从 market_quotes 获取
+        # 0. 实时行情优先（腾讯/AKShare），避免停牌或无成交时 DB 快照 close=0 导致取价失效
+        live_price = await _fetch_live_price(code)
+        if live_price:
+            logger.debug(f"✅ 从实时行情获取价格: {code} = {live_price}")
+            return live_price
+
+        # 1. 尝试从 market_quotes 获取（仅接受有效正价）
         q = await db["market_quotes"].find_one(
             {"$or": [{"code": code}, {"symbol": code}]},
             {"_id": 0, "close": 1}
@@ -188,21 +198,7 @@ async def _get_last_price(code: str, market: str) -> float | None:
             except Exception as e:
                 logger.warning(f"⚠️ market_quotes 价格转换失败 {code}: {e}")
 
-        # 2. 回退到 stock_basic_info 的 current_price
-        basic_info = await db["stock_basic_info"].find_one(
-            {"$or": [{"code": code}, {"symbol": code}]},
-            {"_id": 0, "current_price": 1}
-        )
-        if basic_info and basic_info.get("current_price") is not None:
-            try:
-                price = float(basic_info["current_price"])
-                if price > 0:
-                    logger.debug(f"✅ 从 stock_basic_info 获取价格: {code} = {price}")
-                    return price
-            except Exception as e:
-                logger.warning(f"⚠️ stock_basic_info 价格转换失败 {code}: {e}")
-
-        logger.error(f"❌ 无法从数据库获取A股价格: {code}")
+        logger.error(f"❌ 无法获取A股价格: {code}")
         return None
 
     # 港股/美股：使用 ForeignStockService

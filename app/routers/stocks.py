@@ -485,23 +485,44 @@ async def get_quote(
 
     # 🔥 修复：昨收价兜底。market_quotes 中 pre_close 可能为 null（收盘后外部接口不返回昨收），
     #    且历史版本残留的 prev_close 字段可能是陈旧脏值，导致涨跌幅误算。
-    #    以 stock_daily_quotes 最近交易日收盘作为权威昨收兜底，始终用权威昨收重算涨跌幅。
+    #    以 stock_daily_quotes 最近交易日的 **前一个** 交易日收盘作为权威昨收兜底（最新一日为
+    #    今日/当日 close，不能当作昨收）。只有当 market_quotes 已提供有效的 pre_close 时才跳过。
     try:
-        latest_dq = await db["stock_daily_quotes"].find_one(
-            {"$or": [{"code": code6}, {"symbol": code6}], "period": "daily"},
-            {"_id": 0, "trade_date": 1, "close": 1},
-            sort=[("trade_date", -1)],
-        )
-        if latest_dq and latest_dq.get("close") is not None:
-            dq_close = float(latest_dq["close"])
-            if dq_close > 0:
-                # 始终以权威昨收价为准，确保涨跌幅计算正确
+        def _str_days_key(v):
+            return (v or "").replace("-", "")
+
+        saved_key = _str_days_key((q or {}).get("trade_date")) if q else ""
+        if pre_close_saved in (None, 0):
+            # 需要兜底：取 stock_daily_quotes 最近两条，用“上一交易日”的 close 作为昨收
+            latest_dq_cursor = db["stock_daily_quotes"].find(
+                {"$or": [{"code": code6}, {"symbol": code6}], "period": "daily"},
+                {"_id": 0, "trade_date": 1, "close": 1},
+            ).sort("trade_date", -1).limit(2)
+            latest_dq_list = await latest_dq_cursor.to_list(length=2)
+            # 若最新 daily 就是当日行情（trade_date == 当前 market_quotes 的 trade_date），
+            # 则昨收必须是上一条记录（prev 交易日）
+            prev_dq = None
+            if len(latest_dq_list) >= 2:
+                first_key = _str_days_key(latest_dq_list[0].get("trade_date"))
+                if saved_key and first_key == saved_key:
+                    prev_dq = latest_dq_list[1]
+                else:
+                    prev_dq = latest_dq_list[0]
+            elif len(latest_dq_list) == 1:
+                # 仅有一条：不能把它当昨收（可能就是今天/当日），除非明确不是当前交易日
+                first_key = _str_days_key(latest_dq_list[0].get("trade_date"))
+                if saved_key and first_key != saved_key:
+                    prev_dq = latest_dq_list[0]
+
+            if prev_dq and prev_dq.get("close") not in (None, 0):
+                dq_close = float(prev_dq["close"])
                 old_prev, old_pct = prev_close, pct
                 prev_close = dq_close
                 if close is not None:
                     pct = round((float(close) / dq_close - 1.0) * 100.0, 2)
                     logger.info(
-                        f"🔧 昨收修正: {code6} prev_close {old_prev} -> {dq_close}（stock_daily_quotes {latest_dq.get('trade_date')}），"
+                        f"🔧 昨收兜底: {code6} prev_close {old_prev} -> {dq_close} "
+                        f"(stock_daily_quotes trade_date={prev_dq.get('trade_date')})，"
                         f"pct_chg {old_pct} -> {pct}"
                     )
     except Exception as e:
@@ -900,7 +921,6 @@ async def get_kline(
     """
     import logging
     from datetime import datetime, timedelta
-    from zoneinfo import ZoneInfo
     import asyncio
     logger = logging.getLogger(__name__)
 
@@ -964,9 +984,9 @@ async def get_kline(
     }
     mongodb_period = period_map.get(period, "daily")
 
-    # 获取当前时间（北京时间）
-    from app.core.config import settings
-    tz = ZoneInfo(settings.TIMEZONE)
+    # 获取当前时间（配置时区，统一经 get_tz）
+    from app.utils.timezone import get_tz
+    tz = get_tz()
     now = datetime.now(tz)
     today_str_yyyymmdd = now.strftime("%Y%m%d")  # 格式：20251028（用于查询）
     today_str_formatted = now.strftime("%Y-%m-%d")  # 格式：2025-10-28（用于返回）

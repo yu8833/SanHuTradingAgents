@@ -4,6 +4,7 @@
 
 import { ApiClient } from './request'
 import { useAuthStore } from '@/stores/auth'
+import { formatDateTime as utilFormatDateTime } from '@/utils/datetime'
 
 // 数据库状态接口
 export interface DatabaseStatus {
@@ -221,7 +222,7 @@ export const formatBytes = (bytes: number): string => {
 }
 
 export const formatDateTime = (dateTime: string): string => {
-  return new Date(dateTime).toLocaleString('zh-CN')
+  return utilFormatDateTime(dateTime)
 }
 
 export const formatUptime = (seconds: number): string => {

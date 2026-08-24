@@ -11,6 +11,7 @@ from pymongo import UpdateOne
 
 from app.core.config import settings
 from app.core.database import get_mongo_db
+from app.utils.timezone import get_tz
 from app.core.numeric_sanitizer import (
     sanitize_amount as _s_amount,
 )
@@ -47,7 +48,7 @@ class QuotesIngestionService:
 
         self.collection_name = collection_name
         self.status_collection_name = "quotes_ingestion_status"  # 状态记录集合
-        self.tz = ZoneInfo(settings.TIMEZONE)
+        self.tz = get_tz()
 
         # Tushare 权限检测相关属性
         self._tushare_permission_checked = False  # 是否已检测过权限
@@ -147,7 +148,7 @@ class QuotesIngestionService:
             status_doc = {
                 "job": "quotes_ingestion",
                 "last_sync_time": now,
-                "last_sync_time_iso": now.isoformat(),
+                "last_sync_time_iso": now,
                 "success": success,
                 "data_source": source,
                 "records_count": records_count,
@@ -424,23 +425,35 @@ class QuotesIngestionService:
             set_fields = {
                 "code": code6,
                 "symbol": code6,  # 添加 symbol 字段，与 code 保持一致
-                "close": _s_price(q.get("close")),
                 "pct_chg": _s_pct(q.get("pct_chg")),
                 "amount": _s_amount(q.get("amount")),
                 "volume": _s_volume(volume),
-                "open": _s_price(q.get("open")),
-                "high": _s_price(q.get("high")),
-                "low": _s_price(q.get("low")),
-                "pre_close": _s_price(q.get("pre_close")),
                 "trade_date": trade_date,
                 "updated_at": updated_at,
             }
+            # 价格类字段（close/open/high/low/pre_close）：仅当本次返回了有效正价时才 $set，
+            # 避免停牌/无行情时写入 0，覆盖掉上一交易日已入库的有效收盘价，导致取价返回 0/未知；
+            # 无效或缺省则仅对新文档插入时兜底写入 None（不覆盖已有有效值）。
+            set_on_insert: dict[str, float | str | None] = {}
+
+            def _price_field(key: str) -> None:
+                v = _s_price(q.get(key))
+                if v is not None and v > 0:
+                    set_fields[key] = v
+                else:
+                    set_on_insert[key] = None
+
+            _price_field("close")
+            _price_field("open")
+            _price_field("high")
+            _price_field("low")
+            _price_field("pre_close")
+
             # 补充字段：换手率/量比/名称（供情绪雷达量能维度、榜单与名称解析使用）。
             # 仅当本次数据源提供了有效值时才用 $set 写入；缺失时改用 $setOnInsert 兜底
             # （仅新文档插入时写入 None），避免用 None 覆盖掉其他数据源已入库的实时值
             # （修复：Tushare rt_k 不返回换手率，此前会把 AKShare 已写入的换手率覆盖成 None，
             #   导致看板「活跃换手」为空、平均/高换手恒为 0）。
-            set_on_insert: dict[str, float | str | None] = {}
             if turnover_rate is not None:
                 set_fields["turnover_rate"] = turnover_rate
             else:

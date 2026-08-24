@@ -2,7 +2,7 @@
 Backup, import, and export routines extracted from DatabaseService.
 """
 from __future__ import annotations
-from app.utils.timezone import now_tz
+from app.utils.timezone import now_tz, to_display_iso
 
 import asyncio
 import gzip
@@ -131,7 +131,7 @@ async def create_backup_native(name: str, backup_dir: str, collections: list[str
         "file_path": backup_path,
         "size": file_size,
         "collections": collections,
-        "created_at": backup_meta["created_at"].isoformat(),
+        "created_at": to_display_iso(backup_meta["created_at"]),
         "backup_type": "mongodump",
     }
 
@@ -198,7 +198,7 @@ async def create_backup(name: str, backup_dir: str, collections: list[str] | Non
         "file_path": backup_path,
         "size": file_size,
         "collections": collections,
-        "created_at": backup_meta["created_at"].isoformat(),
+        "created_at": to_display_iso(backup_meta["created_at"]),
     }
 
 
@@ -212,7 +212,7 @@ async def list_backups() -> list[dict[str, Any]]:
             "filename": backup["filename"],
             "size": backup["size"],
             "collections": backup["collections"],
-            "created_at": backup["created_at"].isoformat(),
+            "created_at": to_display_iso(backup["created_at"]),
             "created_by": backup.get("created_by"),
         })
     return backups

@@ -205,6 +205,7 @@ import * as schedulerApi from '@/api/scheduler'
 import { screeningApi } from '@/api/screening'
 import { subscribeQuotesUpdate } from '@/utils/quotesSSE'
 import { fmtPct, fmtMoney } from '@/utils/format'
+import { toTimestamp } from '@/utils/datetime'
 
 const router = useRouter()
 
@@ -322,8 +323,8 @@ const checkJobCompleted = async (jobId: string, sinceTs: number): Promise<{ done
       if (item.status === 'success' || item.status === 'failed') {
         const timeStr = item.updated_at || item.timestamp
         if (timeStr) {
-          const ts = new Date(timeStr).getTime()
-          if (ts >= threshold) {
+          const ts = toTimestamp(timeStr)
+          if (ts !== null && ts >= threshold) {
             return { done: true, failed: item.status === 'failed' }
           }
         }
@@ -482,7 +483,7 @@ const doSync = async () => {
           syncDone.value = (status.inserted || 0) + (status.updated || 0)
 
           // 判断新同步是否已启动（started_at 在 syncStartTime 之后，含10秒容差）
-          const startedAtTs = status.started_at ? new Date(status.started_at).getTime() : 0
+          const startedAtTs = status.started_at ? (toTimestamp(status.started_at) ?? 0) : 0
           const syncStarted = startedAtTs >= syncStartTime - 10000
 
           if (status.status === 'running') {

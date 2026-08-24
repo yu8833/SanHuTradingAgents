@@ -41,6 +41,11 @@ class UpdateFavoriteRequest(BaseModel):
     alert_price_low: float | None = None
 
 
+class BatchRemoveRequest(BaseModel):
+    """批量删除自选股请求"""
+    stock_codes: list[str]
+
+
 class FavoriteStockResponse(BaseModel):
     """自选股响应"""
     stock_code: str
@@ -59,11 +64,26 @@ class FavoriteStockResponse(BaseModel):
 
 @router.get("/", response_model=dict)
 async def get_favorites(
+    tag: str | None = None,
+    board: str | None = None,
+    keyword: str | None = None,
     current_user: dict = Depends(get_current_user)
 ):
-    """获取用户自选股列表"""
+    """获取用户自选股列表（支持服务端按标签/板块/关键词筛选）。"""
     try:
         favorites = await favorites_service.get_user_favorites(current_user["id"])
+        if tag:
+            favorites = [f for f in favorites if tag in (f.get("tags") or [])]
+        if board:
+            favorites = [f for f in favorites if (f.get("board") or "") == board]
+        if keyword:
+            kw = keyword.strip().lower()
+            if kw:
+                favorites = [
+                    f for f in favorites
+                    if kw in str(f.get("stock_code") or "").lower()
+                    or kw in str(f.get("stock_name") or "").lower()
+                ]
         return ok(favorites)
     except Exception as e:
         raise HTTPException(
@@ -174,12 +194,12 @@ async def remove_favorite(
     stock_code: str,
     current_user: dict = Depends(get_current_user)
 ):
-    """从自选股中移除股票"""
+    """从自选股中删除股票"""
     try:
         success = await favorites_service.remove_favorite(current_user["id"], stock_code)
 
         if success:
-            return ok({"stock_code": stock_code}, "移除成功")
+            return ok({"stock_code": stock_code}, "删除成功")
         else:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -191,7 +211,34 @@ async def remove_favorite(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"移除自选股失败: {str(e)}"
+            detail=f"删除自选股失败: {str(e)}"
+        )
+
+
+@router.post("/batch-remove", response_model=dict)
+async def batch_remove_favorites(
+    request: BatchRemoveRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """批量删除自选股"""
+    try:
+        codes = [c for c in (request.stock_codes or []) if c]
+        if not codes:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="请选择要删除的股票"
+            )
+        deleted = await favorites_service.remove_favorites_batch(current_user["id"], codes)
+        return ok(
+            {"stock_codes": codes, "deleted": deleted},
+            f"已删除 {deleted} 只自选股"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"批量删除自选股失败: {str(e)}"
         )
 
 

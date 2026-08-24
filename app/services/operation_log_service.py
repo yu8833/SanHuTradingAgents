@@ -40,8 +40,9 @@ class OperationLogService:
             db = get_mongo_db()
 
             # 构建日志文档
-            # 🔥 使用 naive datetime（不带时区信息），MongoDB 会按原样存储，不会转换为 UTC
-            current_time = now_tz().replace(tzinfo=None)  # 移除时区信息，保留本地时间值
+            # 🔥 统一写入 aware datetime（now_tz()），driver 归一化为 UTC 瞬时入库；
+            # 不要再 strip tzinfo——naive 京时墙钟会被 driver 当 UTC 原样存，导致 +8h 偏差。
+            current_time = now_tz()
             log_doc = {
                 "user_id": user_id,
                 "username": username,

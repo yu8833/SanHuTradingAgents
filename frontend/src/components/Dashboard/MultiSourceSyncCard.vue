@@ -131,6 +131,7 @@ import {
   type SyncStatus, 
   type DataSourceStatus 
 } from '@/api/sync'
+import { toTimestamp } from '@/utils/datetime'
 
 // 路由
 const router = useRouter()
@@ -263,9 +264,9 @@ const getProgress = () => {
 
 // 格式化最后同步时间
 const formatLastSyncTime = (timeStr: string) => {
-  const date = new Date(timeStr)
-  const now = new Date()
-  const diff = now.getTime() - date.getTime()
+  const ts = toTimestamp(timeStr)
+  if (ts == null) return ''
+  const diff = Date.now() - ts
   
   if (diff < 60000) {
     return '刚刚完成'
@@ -274,7 +275,7 @@ const formatLastSyncTime = (timeStr: string) => {
   } else if (diff < 86400000) {
     return `${Math.floor(diff / 3600000)}小时前`
   } else {
-    return date.toLocaleDateString('zh-CN')
+    return new Date(ts).toLocaleDateString('zh-CN')
   }
 }
 

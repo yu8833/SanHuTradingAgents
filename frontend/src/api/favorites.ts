@@ -55,6 +55,15 @@ export const favoritesApi = {
   remove: (symbol: string) => ApiClient.delete<{ message: string; symbol?: string; stock_code?: string }>(`/api/favorites/${symbol}`),
 
   /**
+   * 批量删除收藏
+   * @param symbols 股票代码列表
+   */
+  removeBatch: (symbols: string[]) =>
+    ApiClient.post<{ stock_codes: string[]; deleted: number; message: string }>('/api/favorites/batch-remove', {
+      stock_codes: symbols
+    }),
+
+  /**
    * 检查是否已收藏
    * @param symbol 股票代码（6位）
    */

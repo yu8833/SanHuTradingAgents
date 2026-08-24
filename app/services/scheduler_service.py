@@ -27,22 +27,18 @@ except ImportError:
     import logging
     def get_logger(name: str) -> logging.Logger:
         return logging.getLogger(name)
-from app.utils.timezone import now_tz
+from app.utils.timezone import get_tz, now_tz, to_display_iso
 
 logger = get_logger(__name__)
 
-# UTC+8 时区
-UTC_8 = timezone(timedelta(hours=8))
-
-
 def get_utc8_now():
     """
-    获取 UTC+8 当前时间（naive datetime）
+    获取当前时间（时区感知，配置时区，通常为 Asia/Shanghai）
 
-    注意：返回 naive datetime（不带时区信息），MongoDB 会按原样存储本地时间值
-    这样前端可以直接添加 +08:00 后缀显示
+    统一契约：时刻字段一律写 aware datetime（now_tz），由 MongoDB driver 归一化为 UTC 入库。
+    禁止 strip tzinfo，避免 +8h 偏差。
     """
-    return now_tz().replace(tzinfo=None)
+    return now_tz()
 
 
 # 长时间运行任务的僵尸检测阈值（小时）
@@ -447,14 +443,12 @@ class SchedulerService:
                 if "_id" in doc:
                     doc["_id"] = str(doc["_id"])
 
-                # 格式化时间（MongoDB 存储的是 naive datetime，表示本地时间）
-                # 直接序列化为 ISO 格式字符串，前端会自动添加 +08:00 后缀
+                # 格式化时间：统一走 to_display_iso，保证 API 出参恒定带 +08:00。
+                # 🔥 tz_aware 下读回为 aware UTC，裸 isoformat() 会输出 +00:00，
+                # 违反"无时区/非 +08:00 字符串不过 API 边界"契约，故必须用 to_display_iso 归一。
                 for time_field in ["scheduled_time", "timestamp", "updated_at"]:
                     if doc.get(time_field):
-                        dt = doc[time_field]
-                        # 如果是 datetime 对象，转换为 ISO 格式字符串
-                        if hasattr(dt, 'isoformat'):
-                            doc[time_field] = dt.isoformat()
+                        doc[time_field] = to_display_iso(doc[time_field])
 
                 executions.append(doc)
 
@@ -680,7 +674,7 @@ class SchedulerService:
             if last_execution:
                 stats["last_execution"] = {
                     "status": last_execution.get("status"),
-                    "timestamp": last_execution.get("timestamp").isoformat() if last_execution.get("timestamp") else None,
+                    "timestamp": to_display_iso(last_execution.get("timestamp")) if last_execution.get("timestamp") else None,
                     "execution_time": last_execution.get("execution_time")
                 }
 
@@ -738,7 +732,7 @@ class SchedulerService:
         result = {
             "id": job.id,
             "name": job.name or job.id,
-            "next_run_time": job.next_run_time.isoformat() if job.next_run_time else None,
+            "next_run_time": to_display_iso(job.next_run_time) if job.next_run_time else None,
             "paused": job.next_run_time is None,
             "trigger": str(job.trigger),
         }
@@ -1002,14 +996,15 @@ class SchedulerService:
             job = self.scheduler.get_job(job_id)
             job_name = job.name if job else job_id
 
-            # 统一把 scheduled_time 转为 naive 本地时间（北京时间），
-            # 作为"同一次调度"的关联键，供 running / 终态记录互相匹配。
+            # 统一把 scheduled_time 转为带时区的 UTC 时间，作为"同一次调度"的关联键，
+            # 供 running / 终态记录互相匹配。
+            # 🔥 禁止 strip tzinfo 存 naive：tz_aware 读回会按 UTC 解释，导致 8h 偏移。
             scheduled_naive = None
             if scheduled_time:
                 if scheduled_time.tzinfo is not None:
-                    scheduled_naive = scheduled_time.astimezone(UTC_8).replace(tzinfo=None)
+                    scheduled_naive = scheduled_time.astimezone(get_tz())
                 else:
-                    scheduled_naive = scheduled_time
+                    scheduled_naive = scheduled_time.replace(tzinfo=timezone.utc)
 
             # 如果是 running 状态，检查是否已有近期的 running 记录（1 分钟内）
             # 避免手动触发的 trigger_job 和 SUBMITTED 事件重复创建 running 记录
@@ -1345,8 +1340,7 @@ class SchedulerService:
                 if cron_expression:
                     from app.utils.scheduler_utils import cron_trigger
 
-                    from app.core.config import settings
-                    trigger = cron_trigger(cron_expression, timezone=settings.TIMEZONE)
+                    trigger = cron_trigger(cron_expression, timezone=get_tz())
                     self.scheduler.reschedule_job(job_id, trigger=trigger)
                     await self._update_job_metadata_field(job_id, "cron_expression", cron_expression)
                     await self._record_job_action(job_id, "batch_update", "success", f"更新cron表达式: {cron_expression}")

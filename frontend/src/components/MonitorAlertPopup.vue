@@ -88,6 +88,7 @@ import { ElMessage } from 'element-plus'
 import { monitorApi, type MonitorAlert } from '@/api/monitor'
 import { subscribeMonitorOrders, type PendingOrderEvent } from '@/utils/monitorOrdersSSE'
 import { fmtPct, fmtPrice } from '@/utils/format'
+import { formatDateTime } from '@/utils/datetime'
 import router from '@/router'
 
 // 响应式：判断是否为移动端
@@ -190,9 +191,7 @@ let orderUnsub: (() => void) | null = null
 
 const formatTsStr = (iso?: string) => {
   if (!iso) return ''
-  const d = new Date(iso)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+  return formatDateTime(iso)
 }
 
 // 收到新实时指令：去重后加入队列并弹出确认页

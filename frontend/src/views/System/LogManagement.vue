@@ -198,6 +198,7 @@ import { ElMessage } from 'element-plus'
 import { Refresh, Download, Search, View, Delete } from '@element-plus/icons-vue'
 import { LogsApi, type LogFileInfo, type LogContentResponse, type LogStatistics } from '@/api/logs'
 import { fmtNum } from '@/utils/format'
+import { formatDateTime as appFormatDateTime } from '@/utils/datetime'
 
 type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
 
@@ -366,7 +367,7 @@ const getLogTypeColor = (type: string): TagType | undefined => {
 }
 
 const formatDate = (dateStr: string) => {
-  return new Date(dateStr).toLocaleString('zh-CN')
+  return appFormatDateTime(dateStr)
 }
 
 // 生命周期

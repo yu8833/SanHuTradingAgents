@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException
 from pymongo import ASCENDING
 
 from app.core.database import get_mongo_db
-from app.utils.timezone import now_tz
+from app.utils.timezone import get_tz, now_tz, to_display_iso
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,8 @@ async def _check_historical_data_status() -> dict:
                 latest_dt = None
                 for fmt in ("%Y%m%d", "%Y-%m-%d"):
                     try:
-                        latest_dt = datetime.strptime(str(latest_date), fmt)
+                        # 解析出的日期为 naive，需挂上配置时区后再与 now_tz() 相减，避免偏移/异常
+                        latest_dt = datetime.strptime(str(latest_date), fmt).replace(tzinfo=get_tz())
                         break
                     except ValueError:
                         continue
@@ -163,7 +164,7 @@ async def _check_scheduler_status() -> dict:
                 {
                     "job_id": ex.get("job_id"),
                     "status": ex.get("status"),
-                    "started_at": ex.get("started_at").isoformat() if ex.get("started_at") else None,
+                    "started_at": to_display_iso(ex.get("started_at")),
                     "duration_seconds": ex.get("duration_seconds"),
                     "error": ex.get("error"),
                 }

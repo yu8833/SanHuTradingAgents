@@ -42,6 +42,8 @@ class DatabaseManager:
             logger.info("🔄 正在初始化MongoDB连接...")
 
             # 创建MongoDB客户端，配置连接池
+            # tz_aware=True：BSON datetime 读回即带 UTC 偏移（aware），从源头消灭 naive 二义性。
+            # 所有读路径统一经 to_display_iso()/to_config_tz() 归一为配置时区（+08:00）。
             self.mongo_client = AsyncIOMotorClient(
                 settings.MONGO_URI,
                 maxPoolSize=settings.MONGO_MAX_CONNECTIONS,
@@ -50,6 +52,7 @@ class DatabaseManager:
                 serverSelectionTimeoutMS=settings.MONGO_SERVER_SELECTION_TIMEOUT_MS,  # 服务器选择超时
                 connectTimeoutMS=settings.MONGO_CONNECT_TIMEOUT_MS,  # 连接超时
                 socketTimeoutMS=settings.MONGO_SOCKET_TIMEOUT_MS,  # 套接字超时
+                tz_aware=True,
             )
 
             # 获取数据库实例
@@ -628,7 +631,8 @@ def get_mongo_db_sync() -> Database:
             maxPoolSize=settings.MONGO_MAX_CONNECTIONS,
             minPoolSize=settings.MONGO_MIN_CONNECTIONS,
             maxIdleTimeMS=30000,
-            serverSelectionTimeoutMS=5000
+            serverSelectionTimeoutMS=5000,
+            tz_aware=True,
         )
 
     _sync_mongo_db = _sync_mongo_client[settings.MONGO_DB]

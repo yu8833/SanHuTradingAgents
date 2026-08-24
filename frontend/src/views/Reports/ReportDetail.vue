@@ -692,6 +692,7 @@ import { sanitizeHtml } from '@/utils/sanitize'
 import { getMarketByStockCode } from '@/utils/market'
 import type { CurrencyAmount } from '@/api/paper'
 import { fmtNum, fmtPctFromFraction } from '@/utils/format'
+import { formatDateTime as appFormatDateTime } from '@/utils/datetime'
 
 type ReportModuleContent = string | Record<string, unknown>
 
@@ -1662,7 +1663,7 @@ const getStatusText = (status: string) => {
 }
 
 const formatTime = (time: string) => {
-  return new Date(time).toLocaleString('zh-CN')
+  return appFormatDateTime(time)
 }
 
 const formatDuration = (seconds: number) => {

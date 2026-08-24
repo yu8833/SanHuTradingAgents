@@ -8,7 +8,7 @@ from typing import Annotated, Any
 from bson import ObjectId
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, PlainSerializer, field_serializer
 
-from app.utils.timezone import now_tz
+from app.utils.timezone import now_tz, to_display_iso
 
 
 def validate_object_id(v: Any) -> ObjectId:
@@ -132,7 +132,7 @@ class UserResponse(BaseModel):
     def serialize_datetime(self, dt: datetime | None, _info) -> str | None:
         """序列化 datetime 为 ISO 8601 格式，保留时区信息"""
         if dt:
-            return dt.isoformat()
+            return to_display_iso(dt)
         return None
 
 
@@ -156,7 +156,7 @@ class UserSession(BaseModel):
     def serialize_datetime(self, dt: datetime | None, _info) -> str | None:
         """序列化 datetime 为 ISO 8601 格式，保留时区信息"""
         if dt:
-            return dt.isoformat()
+            return to_display_iso(dt)
         return None
 
 

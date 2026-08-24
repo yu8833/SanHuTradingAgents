@@ -285,10 +285,8 @@ class BaoStockAdapter(DataSourceAdapter):
             adj_flag = adj_map.get(adj, "3") if adj else "3"
 
             # 4. 日期范围（最近2年足够覆盖limit条）
-            from zoneinfo import ZoneInfo
-
-            from app.core.config import settings
-            tz = ZoneInfo(settings.TIMEZONE)
+            from app.utils.timezone import get_tz
+            tz = get_tz()
             now = datetime.now(tz)
             end_date = now.strftime("%Y-%m-%d")
             start_date = (now - timedelta(days=limit * 3)).strftime("%Y-%m-%d")

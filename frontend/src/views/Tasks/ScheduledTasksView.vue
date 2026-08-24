@@ -137,7 +137,7 @@
           <template #default="{ row }">
             <span v-if="row.execution_time != null">{{ formatDuration(row.execution_time) }}</span>
             <span v-else-if="row.status === 'running' && row.timestamp" class="text-muted">
-              {{ formatDuration((Date.now() - new Date(row.timestamp).getTime()) / 1000) }}
+              {{ row.timestamp && formatDuration((Date.now() - (toTimestamp(row.timestamp) ?? 0)) / 1000) }}
             </span>
             <span v-else class="text-muted">—</span>
           </template>
@@ -177,7 +177,7 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import * as schedulerApi from '@/api/scheduler'
-import { formatDateTime } from '@/utils/datetime'
+import { formatDateTime, toTimestamp } from '@/utils/datetime'
 import { fmtNum } from '@/utils/format'
 
 // 任务友好名称映射

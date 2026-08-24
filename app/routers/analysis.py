@@ -22,6 +22,7 @@ from app.routers.reports import _calculate_confidence, extract_structured_fields
 from app.services.queue_service import QueueService, get_queue_service
 from app.services.simple_analysis_service import get_simple_analysis_service
 from app.services.websocket_manager import get_websocket_manager
+from app.utils.timezone import now_tz
 
 router = APIRouter()
 logger = logging.getLogger("webapi")
@@ -158,7 +159,7 @@ async def get_task_status_new(
             logger.info(f"📊 [STATUS] 内存中未找到，尝试从MongoDB查找: {task_id}")
 
             from app.core.database import get_mongo_db
-            from app.utils.timezone import now_tz, to_display_iso
+            from app.utils.timezone import now_tz, to_config_tz, to_display_iso
             db = get_mongo_db()
 
             # 首先从analysis_tasks集合中查找（正在进行的任务）
@@ -176,12 +177,12 @@ async def get_task_status_new(
                 current_time = now_tz()
                 elapsed_time = 0
                 if start_time:
-                    # MongoDB 读回为 naive UTC，需补齐 UTC 时区后再计算耗时
-                    start_aware = start_time.replace(tzinfo=timezone.utc) if start_time.tzinfo is None else start_time
+                    # MongoDB 读回为 naive UTC（或 aware），统一转配置时区后计算耗时
+                    start_aware = to_config_tz(start_time)
                     end_time = task_result.get("completed_at")
                     # 已完成/失败/取消的任务用 end-start 计算真实耗时；运行中才用 now-start
                     if end_time and status in ("completed", "failed", "cancelled"):
-                        end_aware = end_time.replace(tzinfo=timezone.utc) if end_time.tzinfo is None else end_time
+                        end_aware = to_config_tz(end_time)
                         elapsed_time = max(0, (end_aware - start_aware).total_seconds())
                     else:
                         elapsed_time = (current_time - start_aware).total_seconds()
@@ -221,9 +222,8 @@ async def get_task_status_new(
                 end_time = mongo_result.get("updated_at")
                 elapsed_time = 0
                 if start_time and end_time:
-                    def _aware(dt):
-                        return dt.replace(tzinfo=datetime.timezone.utc) if dt.tzinfo is None else dt
-                    elapsed_time = (_aware(end_time) - _aware(start_time)).total_seconds()
+                    # 统一经 to_config_tz：naive 按 UTC 解释，aware 直接转换到配置时区
+                    elapsed_time = (to_config_tz(end_time) - to_config_tz(start_time)).total_seconds()
 
                 status_data = {
                     "task_id": task_id,
@@ -1154,6 +1154,9 @@ async def get_user_analysis_history(
             conditions.append({"$or": [{"symbol": query_symbol}, {"stock_code": query_symbol}]})
 
         # 日期范围过滤（北京时间日期 -> UTC 区间；MongoDB 内部按 UTC 存储）
+        # ⚠️ 语义契约：start_date/end_date 是前端输入的"北京日历日"（API 边界，属用户意图），
+        # 故按配置时区把"当日 00:00"转为 UTC 区间再查询。这与数据库 naive=UTC 无关——
+        # 这里入参本身是"北京时间"语义，仅此一处刻意如此，勿与全局 naive=UTC 契约混淆。
         if start_date or end_date:
             tz_cn = get_tz()
             range_q: dict[str, Any] = {}

@@ -7,6 +7,8 @@ from datetime import datetime
 
 from bson import ObjectId
 
+from app.utils.timezone import to_display_iso
+
 
 def serialize_document(doc: dict) -> dict:
     """Serialize special MongoDB types to JSON-friendly primitives.
@@ -19,7 +21,7 @@ def serialize_document(doc: dict) -> dict:
         if isinstance(value, ObjectId):
             serialized[key] = str(value)
         elif isinstance(value, datetime):
-            serialized[key] = value.isoformat()
+            serialized[key] = to_display_iso(value)
         elif isinstance(value, dict):
             serialized[key] = serialize_document(value)
         elif isinstance(value, list):
@@ -30,7 +32,7 @@ def serialize_document(doc: dict) -> dict:
                 elif isinstance(item, ObjectId):
                     out_list.append(str(item))
                 elif isinstance(item, datetime):
-                    out_list.append(item.isoformat())
+                    out_list.append(to_display_iso(item))
                 else:
                     out_list.append(item)
             serialized[key] = out_list

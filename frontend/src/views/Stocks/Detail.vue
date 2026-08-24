@@ -2364,15 +2364,7 @@ function exportReport() {
 
   // 格式化分析时间用于报告
   const reportTime = lastTaskInfo.value?.end_time
-    ? new Date(lastTaskInfo.value.end_time).toLocaleString('zh-CN', {
-        timeZone: 'Asia/Shanghai',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false
-      })
+    ? formatDateTime(lastTaskInfo.value.end_time)
     : lastAnalysis.value?.analysis_date
 
   fullReport += `**分析时间**: ${reportTime}\n`

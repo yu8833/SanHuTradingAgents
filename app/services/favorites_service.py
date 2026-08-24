@@ -4,7 +4,7 @@
 
 from datetime import datetime
 from typing import Any
-from app.utils.timezone import now_tz
+from app.utils.timezone import now_tz, to_display_iso
 
 from bson import ObjectId
 
@@ -43,7 +43,7 @@ class FavoritesService:
 
         added_at = favorite.get("added_at")
         if isinstance(added_at, datetime):
-            added_at = added_at.isoformat()
+            added_at = to_display_iso(added_at)
 
         raw_market = favorite.get("market", "A股")
         code = str(favorite.get("stock_code", "")).strip().upper()
@@ -268,31 +268,70 @@ class FavoritesService:
             raise
 
     async def remove_favorite(self, user_id: str, stock_code: str) -> bool:
-        """从自选股中移除股票（兼容字符串ID与ObjectId）"""
-        db = await self._get_db()
+        """从自选股中删除股票（兼容字符串ID与ObjectId）"""
+        return (await self.remove_favorites_batch(user_id, [stock_code])) > 0
 
-        if self._is_valid_object_id(user_id):
-            # 先尝试使用 ObjectId 查询
-            result = await db.users.update_one(
+    async def remove_favorites_batch(self, user_id: str, stock_codes: list[str]) -> int:
+        """批量删除自选股，返回实际删除的条目数（兼容字符串ID与ObjectId）。"""
+        if not stock_codes:
+            return 0
+
+        db = await self._get_db()
+        codes = [str(c).strip() for c in stock_codes if c not in (None, "")]
+        if not codes:
+            return 0
+
+        is_oid = self._is_valid_object_id(user_id)
+        pull_cond = {"stock_code": {"$in": codes}}
+
+        if is_oid:
+            result1 = await db.users.update_one(
                 {"_id": ObjectId(user_id)},
-                {"$pull": {"favorite_stocks": {"stock_code": stock_code}}}
+                {"$pull": {"favorite_stocks": pull_cond}}
             )
-            # 如果 ObjectId 查询失败，尝试使用字符串查询
-            if result.matched_count == 0:
-                result = await db.users.update_one(
+            modified = result1.modified_count
+            if modified == 0:
+                result2 = await db.users.update_one(
                     {"_id": user_id},
-                    {"$pull": {"favorite_stocks": {"stock_code": stock_code}}}
+                    {"$pull": {"favorite_stocks": pull_cond}}
                 )
-            return result.modified_count > 0
-        else:
-            result = await db.user_favorites.update_one(
-                {"user_id": user_id},
-                {
-                    "$pull": {"favorites": {"stock_code": stock_code}},
-                    "$set": {"updated_at": now_tz()}
-                }
+                modified = result2.modified_count
+            # ObjectId 场景下 favorite_stocks 是嵌套数组，无法精确统计子文档删除数，兜底返回修改次数
+            return modified or (0 if result1.matched_count == 0 else len(codes))
+
+        # 先数匹配到的条目数（用于报告真实删除数量）
+        doc = await db.user_favorites.find_one(
+            {"user_id": user_id},
+            {"favorites": 1, "_id": 0}
+        )
+        before = 0
+        if doc:
+            before = sum(
+                1 for fav in doc.get("favorites", [])
+                if str(fav.get("stock_code") or fav.get("symbol") or "").strip() in set(codes)
             )
-            return result.modified_count > 0
+        result = await db.user_favorites.update_one(
+            {"user_id": user_id},
+            {
+                "$pull": {"favorites": pull_cond},
+                "$set": {"updated_at": now_tz()}
+            }
+        )
+        if result.modified_count == 0:
+            return 0
+        # 再次 count，得出实际删除量
+        doc_after = await db.user_favorites.find_one(
+            {"user_id": user_id},
+            {"favorites": 1, "_id": 0}
+        )
+        after = 0
+        if doc_after:
+            _codes = set(codes)
+            after = sum(
+                1 for fav in doc_after.get("favorites", [])
+                if str(fav.get("stock_code") or fav.get("symbol") or "").strip() in _codes
+            )
+        return max(0, before - after)
 
     async def update_favorite(
         self,
