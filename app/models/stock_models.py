@@ -2,11 +2,14 @@
 股票数据模型 - 基于现有集合扩展
 采用方案B: 在现有集合基础上扩展字段，保持向后兼容
 """
+import logging
 from datetime import datetime
 from typing import Any, Literal
 
 from bson import ObjectId
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+_model_logger = logging.getLogger(__name__)
 
 
 def to_str_id(v: Any) -> str:
@@ -219,6 +222,91 @@ class MarketQuotesExtended(BaseModel):
                 "volume": 125000000
             }
         }
+
+
+# ==================== P4-11：DB 写入白名单模型（extra=forbid） ====================
+# 对外/读取模型（StockBasicInfoExtended / MarketQuotesExtended）保持 extra="allow" 兼容；
+# 下面两个模型以 extra="forbid" 定义"允许写入 DB 的字段白名单"，用于在同步写入口
+# 暴露字段漂移（写入新增/拼错字段不再被静默落库）。运行时仅做比对告警，不阻断、不删字段，
+# 避免上游数据源新字段导致写入中断或数据丢失。
+
+class StockBasicInfoDB(BaseModel):
+    """stock_basic_info 写入白名单模型（P4-11）"""
+    code: str | None = None
+    symbol: str | None = None
+    name: str | None = None
+    area: str | None = None
+    industry: str | None = None
+    market: str | None = None
+    list_date: str | None = None
+    sse: str | None = None
+    sec: str | None = None
+    source: str | None = None
+    updated_at: datetime | None = None
+    full_symbol: str | None = None
+    category: str | None = None
+    total_mv: float | None = None
+    circ_mv: float | None = None
+    pe: float | None = None
+    pb: float | None = None
+    ps: float | None = None
+    pe_ttm: float | None = None
+    pb_mrq: float | None = None
+    ps_ttm: float | None = None
+    roe: float | None = None
+    turnover_rate: float | None = None
+    volume_ratio: float | None = None
+    total_share: float | None = None
+    float_share: float | None = None
+    board: str | None = None
+    industry_code: str | None = None
+    sector: str | None = None
+    status: str | None = None
+    is_hs: bool | None = None
+    delist_date: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class MarketQuotesDB(BaseModel):
+    """market_quotes 写入白名单模型（P4-11）"""
+    code: str | None = None
+    symbol: str | None = None
+    trade_date: str | None = None
+    updated_at: datetime | None = None
+    close: float | None = None
+    open: float | None = None
+    high: float | None = None
+    low: float | None = None
+    pre_close: float | None = None
+    pct_chg: float | None = None
+    turnover_rate: float | None = None
+    vol_ratio: float | None = None
+    name: str | None = None
+    amount: float | None = None
+    volume: float | None = None
+    data_source: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+def detect_db_extra_fields(model_cls, data: dict, context: str = "") -> list[str]:
+    """
+    比对写入字段与白名单模型，返回不在白名单（疑似漂移）的字段名列表。
+    仅记录 warning，不阻断、不删除数据——字段漂移检测是 P4-11 的核心价值。
+    """
+    if not data:
+        return []
+    allowed = set(getattr(model_cls, "model_fields", {}).keys())
+    extra = [k for k in data if k not in allowed]
+    if extra:
+        _model_logger.warning(
+            "DB 写入字段漂移 %s: 非白名单字段 %s%s",
+            getattr(model_cls, "__name__", str(model_cls)),
+            extra,
+            f"（context: {context}）" if context else "",
+        )
+    return extra
 
 
 # 数据库操作相关的响应模型

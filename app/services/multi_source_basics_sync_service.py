@@ -20,6 +20,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo import UpdateOne
 
 from app.core.database import get_mongo_db
+from app.models.stock_models import StockBasicInfoDB, detect_db_extra_fields
 from app.services.basics_sync import add_financial_metrics as _add_financial_metrics_util
 
 logger = logging.getLogger(__name__)
@@ -391,6 +392,9 @@ class MultiSourceBasicsSyncService:
 
                     # 添加财务指标
                     self._add_financial_metrics(doc, daily_metrics)
+
+                    # P4-11：写入前做字段白名单漂移检测（仅告警，不影响数据与写入）
+                    detect_db_extra_fields(StockBasicInfoDB, doc, context=f"stock_basic_info code={code}")
 
                     # 🔥 使用 (code, source) 联合查询条件
                     ops.append(UpdateOne({"code": code, "source": data_source}, {"$set": doc}, upsert=True))

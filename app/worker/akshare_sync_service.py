@@ -7,7 +7,7 @@ import logging
 from datetime import date, datetime, timedelta
 from typing import Any
 from app.utils.timezone import now_tz
-from app.utils.trading_time import get_latest_trade_day, is_trading_day
+from app.utils.trading_time import get_latest_trade_day, prev_trading_day
 
 from app.core.database import get_mongo_db
 from app.services.historical_data_service import get_historical_data_service
@@ -581,11 +581,8 @@ class AKShareSyncService:
                 ref = get_latest_trade_day().date()
 
             # 2) 从 reference 往前找上一个交易日（昨收归属日 = 严格早于 reference 的最近交易日）
-            probe = ref - timedelta(days=1)
-            while probe.weekday() >= 5 or not is_trading_day(probe):
-                probe -= timedelta(days=1)
-            prev_day = probe.strftime("%Y%m%d")
-            prev_day_dash = probe.strftime("%Y-%m-%d")
+            prev_day = prev_trading_day(ref).strftime("%Y%m%d")
+            prev_day_dash = prev_trading_day(ref).strftime("%Y-%m-%d")
 
             # 3) 只查该确切交易日的日线（兼容 YYYYMMDD / YYYY-MM-DD 两种库内存储）
             doc = await self.db.stock_daily_quotes.find_one(

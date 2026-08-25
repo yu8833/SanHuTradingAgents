@@ -27,7 +27,9 @@ from app.core.numeric_sanitizer import (
 from app.core.numeric_sanitizer import (
     sanitize_volume as _s_volume,
 )
+from app.utils.trading_time import prev_trading_day
 from app.services.data_sources.manager import DataSourceManager
+from app.models.stock_models import MarketQuotesDB, detect_db_extra_fields
 
 logger = logging.getLogger(__name__)
 
@@ -421,11 +423,60 @@ class QuotesIngestionService:
         except Exception:
             return True
 
+    async def _compute_missing_pct_batch(self, codes: list[str], trade_date: str) -> dict[str, float]:
+        """批量用上一交易日日线补算昨收价（P1-1）。
+
+        当本次采集的实时行情只有收盘价、却缺 pre_close/pct_chg（常见于日线未同步、
+        快照接口不返回昨收）时，批量去 stock_daily_quotes 取该行情归属交易日的
+        上一交易日（用交易日历精确判定）收盘价，作为昨收基准补算涨跌幅。
+
+        Args:
+            codes: 需要补算的 6 位股票代码列表
+            trade_date: 本次行情的归属交易日
+
+        Returns:
+            {code6: 上一交易日收盘价}，查不到/无效值不计入
+        """
+        if not codes:
+            return {}
+        try:
+            db = get_mongo_db()
+            prev_day = prev_trading_day(trade_date).strftime("%Y%m%d")
+            prev_day_dash = prev_trading_day(trade_date).strftime("%Y-%m-%d")
+            cursor = db["stock_daily_quotes"].find(
+                {
+                    "code": {"$in": codes},
+                    "period": "daily",
+                    "trade_date": {"$in": [prev_day, prev_day_dash]},
+                },
+                {"_id": 0, "code": 1, "close": 1},
+            )
+            result: dict[str, float] = {}
+            async for doc in cursor:
+                c = str(doc.get("code") or "")
+                if not c:
+                    continue
+                close = _s_price(doc.get("close"))
+                if close is not None and close > 0:
+                    result.setdefault(c, close)
+            return result
+        except Exception as e:
+            logger.warning(f"批量补算上一交易日收盘失败（忽略）: {e}")
+            return {}
+
     async def _bulk_upsert(self, quotes_map: dict[str, dict], trade_date: str, source: str | None = None) -> None:
         db = get_mongo_db()
         coll = db[self.collection_name]
         ops = []
         updated_at = datetime.now(self.tz)
+
+        # ------------------------------------------------------------------
+        # 第一遍：解析各字段。收盘价有效但昨收仍缺的股票，先登记待用
+        # 上一交易日日线批量补算涨跌幅（P1-1），统一在循环外一次批量查询。
+        # ------------------------------------------------------------------
+        prepared: dict[str, dict] = {}   # code6 -> {"set_fields", "set_on_insert"}
+        pending_prev_close: list[str] = []  # 需要昨收补算的 code6
+
         for code, q in quotes_map.items():
             if not code:
                 continue
@@ -478,6 +529,9 @@ class QuotesIngestionService:
                 _pr = _s_price(q.get("pre_close"))
                 if _cl is not None and _pr is not None:
                     _pct = round((_cl / _pr - 1.0) * 100.0, 3)
+                elif _cl is not None:
+                    # 收盘价有效但昨收缺 → 登记待用上一交易日日线批量补算（P1-1）
+                    pending_prev_close.append(code6)
             if _pct is not None:
                 set_fields["pct_chg"] = _pct
             else:
@@ -515,10 +569,36 @@ class QuotesIngestionService:
             else:
                 set_on_insert["volume"] = None
 
-            update_doc: dict = {"$set": set_fields}
-            if set_on_insert:
-                update_doc["$setOnInsert"] = set_on_insert
+            prepared[code6] = {
+                "set_fields": set_fields,
+                "set_on_insert": set_on_insert,
+            }
 
+        # ------------------------------------------------------------------
+        # 第二遍：批量补算昨收，补上能算出的涨跌幅（P1-1）
+        # ------------------------------------------------------------------
+        if pending_prev_close:
+            prev_close_map = await self._compute_missing_pct_batch(pending_prev_close, trade_date)
+            for code6 in pending_prev_close:
+                item = prepared.get(code6)
+                prev_close = (prev_close_map or {}).get(code6)
+                if not item or prev_close is None:
+                    continue
+                close = item["set_fields"].get("close")
+                if close:
+                    pct = round((float(close) / prev_close - 1.0) * 100.0, 3)
+                    item["set_fields"]["pct_chg"] = pct
+                    item["set_on_insert"].pop("pct_chg", None)
+
+        # ------------------------------------------------------------------
+        # 第三遍：构建写入操作
+        # ------------------------------------------------------------------
+        for code6, item in prepared.items():
+            # P4-11：写入前做字段白名单漂移检测（仅告警，不影响数据与写入）
+            detect_db_extra_fields(MarketQuotesDB, item["set_fields"], context=f"market_quotes code={code6}")
+            update_doc: dict = {"$set": item["set_fields"]}
+            if item["set_on_insert"]:
+                update_doc["$setOnInsert"] = item["set_on_insert"]
             ops.append(
                 UpdateOne(
                     {"code": code6},
@@ -540,8 +620,17 @@ class QuotesIngestionService:
         except Exception as cache_e:
             logger.warning(f"失效行情缓存失败（不影响主流程）: {cache_e}")
 
-        # 通知 SSE 订阅者行情已更新（前端通过 EventSource 接收信号后主动拉取最新行情）
-        await self._publish_quotes_update_signal(trade_date, source, len(ops))
+        # 通知 SSE 订阅者行情已更新（前端通过 EventSource 接收信号后主动拉取最新行情）。
+        # P3-6：携带本批已落库的 `{code: {close, pct_chg}}`（仅含非空 pct_chg 控制载荷），
+        # 前端可直接原地 patch 该股票价格，无需每个信号都全量回查，降低"信号比数据先到"的陈旧读取。
+        patch_quotes: dict[str, dict] = {}
+        for _code, item in prepared.items():
+            _sf = item["set_fields"]
+            _c = _sf.get("close")
+            _p = _sf.get("pct_chg")
+            if _p is not None and _c is not None:
+                patch_quotes[_code] = {"close": _c, "pct_chg": _p}
+        await self._publish_quotes_update_signal(trade_date, source, len(ops), quotes=patch_quotes)
 
     async def _invalidate_quotes_caches(self, quotes_map: dict[str, dict] | None = None) -> None:
         """
@@ -593,13 +682,15 @@ class QuotesIngestionService:
         except Exception as e:
             logger.warning(f"后台清理缓存线程异常: {e}")
 
-    async def _publish_quotes_update_signal(self, trade_date: str, source: str, count: int) -> None:
+    async def _publish_quotes_update_signal(self, trade_date: str, source: str, count: int, quotes: dict[str, dict] | None = None) -> None:
         """
         发布行情更新信号到 Redis 频道 quotes_update。
 
         前端通过 EventSource 订阅 /api/sse/quotes 接收信号，
         收到后主动调用 /api/stocks/{code}/quote 拉取最新行情。
         这样避免全量推送 5000 只股票数据，仅做"服务端 poke"。
+
+        P3-6：可选携带本批已落库的 {code: {close, pct_chg}}，前端可原地 patch。
         """
         try:
             import json
@@ -616,6 +707,8 @@ class QuotesIngestionService:
                 # 用 time.time() 而非事件循环时间，确保前端能正确解析为 Unix 时间戳
                 "timestamp": time.time(),
             }
+            if quotes:
+                payload["quotes"] = quotes
             await r.publish("quotes_update", json.dumps(payload, ensure_ascii=False))
         except Exception as e:
             logger.warning(f"发布行情更新信号失败（不影响主流程）: {e}")

@@ -183,6 +183,12 @@ class DataIntegrityService:
             # 7. 持久化检查结果
             await self._save_check_result(db, result)
 
+            # 8. 记录数据指标：计算「补数后仍无法自愈」的孤立记录数（P1-2）
+            result["needs_fix_count"] = needs_fix_count
+            orphan_count = max(0, needs_fix_count - result["remediated_count"])
+            result["orphan_count"] = orphan_count
+            await self._save_data_metrics(db, result, orphan_count)
+
             return result
 
         except Exception as e:
@@ -520,6 +526,34 @@ class DataIntegrityService:
                     )
 
         return result
+
+    async def _save_data_metrics(self, db, result: dict, orphan_count: int) -> None:
+        """把完整性检查结果落为一条可时序查询的指标（P1-2）。
+
+        落到 `data_metrics` 集合，用于观察「缺失/低质量/无法自愈孤立记录」的收敛趋势，
+        支撑告警与后续逐个核对；失败仅记日志，不影响主流程。
+        """
+        try:
+            expected = result.get("expected_count", 0)
+            metric = {
+                "metric": "data_integrity",
+                "date": result.get("trade_date"),
+                "check_time": result.get("check_time"),
+                "expected_count": expected,
+                "actual_count": result.get("actual_count", 0),
+                "missing_count": result.get("missing_count", 0),
+                "low_quality_count": result.get("low_quality_count", 0),
+                "orphan_count": orphan_count,
+                "remediated_count": result.get("remediated_count", 0),
+                "needs_fix_count": result.get("needs_fix_count", orphan_count + result.get("remediated_count", 0)),
+                "completeness_pct": round((result.get("actual_count", 0) / expected) * 100, 2) if expected else 0.0,
+                "status": result.get("status"),
+                "source_coverage": result.get("source_coverage", {}),
+                "recorded_at": now_tz(),
+            }
+            await db["data_metrics"].insert_one(metric)
+        except Exception as e:
+            logger.warning(f"保存数据指标失败（不影响主流程）: {e}")
 
     async def _save_check_result(self, db, result: dict):
         """保存检查结果到 MongoDB"""

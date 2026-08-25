@@ -23,6 +23,7 @@ from pymongo import UpdateOne
 
 from app.core.config import settings
 from app.core.database import get_mongo_db
+from app.models.stock_models import StockBasicInfoDB, detect_db_extra_fields
 from app.services.basics_sync import (
     fetch_daily_basic_mv_map as _fetch_daily_basic_mv_map_util,
 )
@@ -317,6 +318,8 @@ class BasicsSyncService:
                         doc[field] = daily_metrics[field]
 
                 # 🔥 使用 (code, source) 联合查询条件
+                # P4-11：写入前做字段白名单漂移检测（仅告警，不影响数据与写入）
+                detect_db_extra_fields(StockBasicInfoDB, doc, context=f"stock_basic_info code={code}")
                 ops.append(
                     UpdateOne({"code": code, "source": "tushare"}, {"$set": doc}, upsert=True)
                 )

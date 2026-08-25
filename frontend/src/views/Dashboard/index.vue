@@ -74,6 +74,17 @@
             </div>
           </template>
 
+          <!-- P5-12：SSE 断连降级提示（仍在定时刷新，但非实时） -->
+          <el-alert
+            v-if="quotesStale"
+            type="warning"
+            :closable="false"
+            show-icon
+            class="quotes-stale-alert"
+            title="行情实时中断，已切换定时刷新"
+            description="连接恢复后将自动切回实时更新"
+          />
+
           <div v-if="favoriteStocks.length === 0" class="empty-favorites">
             <el-empty description="暂无自选股" :image-size="60">
               <el-button type="primary" size="small" @click="goToFavorites">
@@ -99,7 +110,7 @@
                   class="change-percent"
                   :class="getPriceChangeClass(stock.change_percent)"
                 >
-                  {{ fmtPct(stock.change_percent) }}
+                  {{ stock.change_percent == null ? '——' : fmtPct(stock.change_percent) }}
                 </div>
               </div>
             </div>
@@ -211,6 +222,9 @@ const router = useRouter()
 
 // 自选股数据
 const favoriteStocks = ref<any[]>([])
+
+// P5-12：SSE 实时行情信号是否进入降级态（断连后依赖定时刷新兜底）
+const quotesStale = ref(false)
 
 // 模拟交易账户数据
 const paperAccount = ref<PaperAccountSummary | null>(null)
@@ -655,7 +669,7 @@ const loadFavoriteStocks = async () => {
         stock_code: item.stock_code || item.symbol,
         stock_name: item.stock_name,
         current_price: item.current_price || 0,
-        change_percent: item.change_percent || 0
+        change_percent: item.change_percent == null ? null : item.change_percent
       }))
     }
   } catch (error) {
@@ -683,9 +697,29 @@ let favSseUnsubscribe: (() => void) | null = null
 onMounted(async () => {
   await loadFavoriteStocks()
   await loadPaperAccount()
-  // 收到行情更新信号立即刷新自选股（延迟约 0-2 秒）
-  favSseUnsubscribe = subscribeQuotesUpdate(() => {
+  // 收到行情更新信号立即刷新自选股（延迟约 0-2 秒）。
+  // P3-6：信号若带值则原地 patch 对应股票，避免全量重拉与陈旧读取；未带值才兜底全量刷新。
+  favSseUnsubscribe = subscribeQuotesUpdate((signal) => {
+    const patch = signal?.quotes
+    if (patch && Object.keys(patch).length) {
+      let changed = false
+      favoriteStocks.value.forEach((s: any) => {
+        const q = patch[s.stock_code]
+        if (q) {
+          s.current_price = q.close
+          s.change_percent = q.pct_chg == null ? null : q.pct_chg
+          changed = true
+        }
+      })
+      if (changed) {
+        favoriteStocks.value = [...favoriteStocks.value]
+        return
+      }
+    }
     loadFavoriteStocks()
+  }, (status) => {
+    // P5-12：SSE 降级/恢复时同步 UI 提示
+    quotesStale.value = status === 'degraded'
   })
 })
 </script>
@@ -730,6 +764,10 @@ onMounted(async () => {
     .empty-favorites {
       text-align: center;
       padding: 20px 0;
+    }
+
+    .quotes-stale-alert {
+      margin-bottom: 12px;
     }
 
     .favorites-list {

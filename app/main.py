@@ -380,7 +380,11 @@ async def lifespan(app: FastAPI):
         # 实时行情入库任务（每N秒），内部自判交易时段
         if settings.QUOTES_INGEST_ENABLED:
             quotes_ingestion = QuotesIngestionService()
-            await quotes_ingestion.ensure_indexes()
+            # P4-10：启动期 DB 初始化失败不阻塞启动，降级为记严重日志（后续调度仍注册）
+            try:
+                await quotes_ingestion.ensure_indexes()
+            except Exception as e:
+                logger.critical(f"⛔ 启动期 quotes_ingestion 索引初始化失败（降级跳过，行情入库可能异常）: {e}")
 
             # 付费 Tushare 用户自动切换到高频采集，免费用户使用配置值
             ingest_interval = settings.QUOTES_INGEST_INTERVAL_SECONDS
@@ -412,14 +416,19 @@ async def lifespan(app: FastAPI):
         # 监控中心规则评估任务（每 N 秒，基于已入库行情）
         if settings.MONITOR_ENABLED:
             from app.services.monitor_service import monitor_service
-            await monitor_service.ensure_indexes()
-            scheduler.add_job(
-                monitor_service.run_evaluation,
-                IntervalTrigger(seconds=settings.MONITOR_INTERVAL_SECONDS, timezone=get_tz()),
-                id="monitor_rule_evaluation",
-                name="监控中心规则评估"
-            )
-            logger.info(f"⏱ 监控中心规则评估已启动: 每 {settings.MONITOR_INTERVAL_SECONDS}s")
+            # P4-10：启动期 DB 初始化失败不阻塞启动，降级跳过该任务的调度注册
+            try:
+                await monitor_service.ensure_indexes()
+            except Exception as e:
+                logger.critical(f"⛔ 启动期 monitor_service 索引初始化失败（降级跳过监控规则评估）: {e}")
+            else:
+                scheduler.add_job(
+                    monitor_service.run_evaluation,
+                    IntervalTrigger(seconds=settings.MONITOR_INTERVAL_SECONDS, timezone=get_tz()),
+                    id="monitor_rule_evaluation",
+                    name="监控中心规则评估"
+                )
+                logger.info(f"⏱ 监控中心规则评估已启动: 每 {settings.MONITOR_INTERVAL_SECONDS}s")
 
         # Tushare统一数据同步任务配置
         logger.info("🔄 配置Tushare统一数据同步任务...")

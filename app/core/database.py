@@ -405,6 +405,10 @@ async def create_database_indexes(db):
         market_quotes = db["market_quotes"]
         if await _safe_create_index(market_quotes, [("code", 1)], unique=True):
             index_count += 1
+        # P2-5：code 与 symbol 恒等（均为 6 位代码），主键保留 code；追加 symbol 冗余索引，
+        # 确保任何按 symbol 的读取路径也能命中索引，避免走 collectionscan。
+        if await _safe_create_index(market_quotes, [("symbol", 1)]):
+            index_count += 1
         if await _safe_create_index(market_quotes, [("pct_chg", -1)]):
             index_count += 1
         if await _safe_create_index(market_quotes, [("amount", -1)]):
@@ -500,6 +504,8 @@ async def create_database_indexes(db):
             index_count += 1
         if await _safe_create_index(daily_quotes, [("trade_date", 1), ("period", 1)], background=True):
             index_count += 1
+        # 唯一索引：以 (code, trade_date, period, data_source) 幂等去重，与写入端 ReplaceOne filter 对齐（P2-4）。
+        # 若历史脏数据重复导致创建失败，必须显式告警暴露问题，而非静默放任新重复写入。
         if await _safe_create_index(
             daily_quotes,
             [("code", 1), ("trade_date", 1), ("period", 1), ("data_source", 1)],
@@ -507,6 +513,12 @@ async def create_database_indexes(db):
             background=True,
         ):
             index_count += 1
+        else:
+            logger.warning(
+                "⚠️ stock_daily_quotes 唯一索引 (code, trade_date, period, data_source) 创建失败——"
+                "可能是历史脏数据存在重复。写入端已用 ReplaceOne(upsert=True) 幂等，但建议执行"
+                "一次性去重脚本归并历史重复后再确认索引。"
+            )
 
         # stock_daily_basic 的索引（每日估值/市值，回测按日对齐查询）
         daily_basic = db["stock_daily_basic"]

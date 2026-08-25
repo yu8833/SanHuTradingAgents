@@ -87,8 +87,9 @@ class StockDataService:
             return StockBasicInfoExtended(**standardized_doc)
 
         except Exception as e:
-            logger.error(f"获取股票基础信息失败 symbol={symbol}, source={source}: {e}")
-            return None
+            logger.error(f"获取股票基础信息异常 symbol={symbol}, source={source}: {e}")
+            # P4-9：实际异常抛给路由层转 5xx，与「查询无数据返回 None」区分
+            raise
 
     @staticmethod
     def _is_meaningful(value) -> bool:
@@ -162,8 +163,9 @@ class StockDataService:
             return MarketQuotesExtended(**standardized_doc)
 
         except Exception as e:
-            logger.error(f"获取实时行情失败 symbol={symbol}: {e}")
-            return None
+            logger.error(f"获取实时行情异常 symbol={symbol}: {e}")
+            # P4-9：实际异常抛给路由层转 5xx，与「查询无数据返回 None」区分
+            raise
     
     async def get_stock_list(
         self,
@@ -229,8 +231,9 @@ class StockDataService:
             return result
             
         except Exception as e:
-            logger.error(f"获取股票列表失败: {e}")
-            return []
+            logger.error(f"获取股票列表异常: {e}")
+            # P4-9：实际异常抛给路由层转 5xx，与「查询无数据返回 []」区分
+            raise
     
     async def get_stock_list_count(
         self,
@@ -278,8 +281,9 @@ class StockDataService:
             return count
             
         except Exception as e:
-            logger.error(f"获取股票列表总数失败: {e}")
-            return 0
+            logger.error(f"获取股票列表总数异常: {e}")
+            # P4-9：实际异常抛给路由层转 5xx，与「正常 count=0」区分
+            raise
     
     async def update_stock_basic_info(
         self,

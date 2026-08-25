@@ -61,6 +61,25 @@ def is_trading_day(date) -> bool:
         return True
 
 
+def prev_trading_day(ref) -> date:
+    """
+    获取给定日期之前的最近一个交易日（不含 ref 当日）。
+
+    用于「昨收价基准」的统一定位，所有需要取上一交易日的模块都应使用本函数，
+    禁止在各处自行往前 -1 天再判断。
+
+    Args:
+        ref: 参考日期（datetime / date / 字符串 YYYY-MM-DD 或 YYYYMMDD）
+
+    Returns:
+        date: 上一个交易日
+    """
+    probe = _parse_date_arg(ref) - timedelta(days=1)
+    while not is_trading_day(probe):
+        probe -= timedelta(days=1)
+    return probe
+
+
 def get_latest_trade_day(now: datetime | None = None) -> datetime:
     """
     获取最近已完成的交易日。
