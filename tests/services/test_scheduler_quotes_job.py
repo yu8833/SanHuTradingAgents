@@ -56,12 +56,15 @@ def test_scheduler_adds_quotes_job(monkeypatch):
         return None
 
     class _FakeBasicsService:
-        async def run_full_sync(self, force: bool = False):
+        async def run_full_sync(self, force: bool = False, preferred_sources=None):
             return None
 
+    # lifespan 现使用 MultiSourceBasicsSyncService（旧 get_basics_sync_service 已移除）
     monkeypatch.setattr(main_mod, "init_db", _noop_async, raising=True)
     monkeypatch.setattr(main_mod, "close_db", _noop_async, raising=True)
-    monkeypatch.setattr(main_mod, "get_basics_sync_service", lambda: _FakeBasicsService(), raising=True)
+    monkeypatch.setattr(main_mod, "MultiSourceBasicsSyncService", lambda *a, **k: _FakeBasicsService(), raising=True)
+    # 关闭监控中心：其 ensure_indexes 处于非 try/except 外层且依赖真实 DB，测试中不应触发
+    monkeypatch.setattr(main_mod.settings, "MONITOR_ENABLED", False, raising=True)
 
     # Patch scheduler, quotes service and asyncio.create_task
     monkeypatch.setattr(main_mod, "AsyncIOScheduler", lambda *args, **kwargs: fake_scheduler, raising=True)
@@ -89,9 +92,9 @@ def test_scheduler_adds_quotes_job(monkeypatch):
     # Ensure ensure_indexes called during startup
     assert state.ensure_indexes_called is True
 
-    # Simulate scheduler tick by invoking the stored func
+    # Simulate scheduler tick by invoking the stored async func
     job_func = job["func"]
-    job_func()  # should call asyncio.create_task(...) with our fake
+    _asyncio.run(job_func())  # quotes 任务是 async function，APScheduler 会 await 它
 
     assert state.create_task_called is True
 

@@ -20,6 +20,7 @@ from typing import Any
 from app.utils.timezone import now_tz
 from app.utils.trading_time import get_latest_trade_day
 
+from app.core.config import settings
 from app.core.database import get_mongo_db
 
 logger = logging.getLogger(__name__)
@@ -41,7 +42,7 @@ class DataIntegrityService:
         self,
         trade_date: str | None = None,
         auto_remediate: bool = True,
-        remediate_source: str = "akshare",
+        remediate_source: str | None = None,
         remediate_batch_size: int = 50,
         remediate_lookback_days: int = 30,
     ) -> dict[str, Any]:
@@ -51,7 +52,8 @@ class DataIntegrityService:
         Args:
             trade_date: 交易日期 (YYYY-MM-DD)，None则自动检测最新交易日
             auto_remediate: 是否自动补数
-            remediate_source: 补数数据源 ("akshare" / "tushare" / "baostock")
+            remediate_source: 补数数据源 ("akshare" / "tushare" / "baostock")，
+                              None 时使用配置 DATA_INTEGRITY_REMEDIATE_SOURCE（默认 tushare，最准；失败自动降级 akshare）
             remediate_batch_size: 补数批次大小
             remediate_lookback_days: 补数回看天数（默认30天，可配置）
 
@@ -66,6 +68,8 @@ class DataIntegrityService:
             "actual_count": 0,
             "missing_count": 0,
             "missing_codes": [],
+            "low_quality_count": 0,
+            "low_quality_codes": [],
             "remediated_count": 0,
             "remediation_errors": [],
             "source_coverage": {},
@@ -96,6 +100,11 @@ class DataIntegrityService:
                 trade_date = expected_latest
 
             result["trade_date"] = trade_date
+
+            # 补数源未指定时，使用配置（默认 tushare，付费源最准；失败自动降级 akshare）
+            if not remediate_source:
+                remediate_source = settings.DATA_INTEGRITY_REMEDIATE_SOURCE
+
             logger.info(f"🔍 开始检查 {trade_date} 的历史数据完整性...")
 
             # 2. 获取应同步的股票列表（与同步服务一致的过滤逻辑）
@@ -126,23 +135,32 @@ class DataIntegrityService:
                 source_stats[src] = src_count
             result["source_coverage"] = source_stats
 
-            # 4. 计算缺失
+            # 4. 计算缺失（值级校验：已存在但 pct_chg/pre_close 全为 null 的看作低质量，一并纳入补数）
             expected_set = set(expected_codes)
             missing_codes = list(expected_set - actual_codes)
             result["missing_count"] = len(missing_codes)
             result["missing_codes"] = missing_codes[:200]  # 最多记录200个
 
+            low_quality_codes = await self._find_low_quality_codes(db, trade_date, expected_set)
+            result["low_quality_count"] = len(low_quality_codes)
+            result["low_quality_codes"] = low_quality_codes[:200]
+
+            # 统一纳入补数的股票集合（缺失 + 低质量）
+            remediate_codes = sorted(set(missing_codes) | set(low_quality_codes))
+            needs_fix_count = len(remediate_codes)
+
             completeness = (len(actual_codes) / len(expected_codes)) * 100 if expected_codes else 0
             logger.info(
                 f"📊 完整性检查结果: {trade_date} - "
                 f"期望 {len(expected_codes)} 只, 实际 {len(actual_codes)} 只, "
-                f"缺失 {len(missing_codes)} 只, 完整度 {completeness:.1f}%"
+                f"缺失 {len(missing_codes)} 只, 低质量(涨跌字段缺失) {len(low_quality_codes)} 只, "
+                f"需补数 {needs_fix_count} 只, 完整度 {completeness:.1f}%"
             )
 
             # 5. 自动补数
-            if auto_remediate and missing_codes:
+            if auto_remediate and remediate_codes:
                 remediation_result = await self._remediate_missing(
-                    missing_codes,
+                    remediate_codes,
                     trade_date,
                     remediate_source,
                     remediate_batch_size,
@@ -150,15 +168,15 @@ class DataIntegrityService:
                 )
                 result["remediated_count"] = remediation_result["success_count"]
                 result["remediation_errors"] = remediation_result["errors"][:50]
-            elif missing_codes:
-                logger.info(f"ℹ️ 自动补数未启用，{len(missing_codes)} 只股票缺失数据")
+            elif remediate_codes:
+                logger.info(f"ℹ️ 自动补数未启用，{len(remediate_codes)} 只股票数据缺失或低质量")
 
             # 6. 确定状态
-            if result["missing_count"] == 0:
+            if needs_fix_count == 0:
                 result["status"] = "complete"
             elif result["remediated_count"] > 0:
-                remaining = result["missing_count"] - result["remediated_count"]
-                result["status"] = "remediated" if remaining == 0 else "partial"
+                remaining = needs_fix_count - result["remediated_count"]
+                result["status"] = "remediated" if remaining <= 0 else "partial"
             else:
                 result["status"] = "incomplete"
 
@@ -228,6 +246,52 @@ class DataIntegrityService:
                 unique_codes.add(c)
         return sorted(unique_codes)
 
+    async def _find_low_quality_codes(self, db, trade_date: str, expected_set: set) -> list[str]:
+        """值级校验：找出该交易日「有记录但 pct_chg/pre_close 全为 null」的股票。
+
+        存在记录但涨跌字段全缺失（如仅被 AKShare 兜底、而此前 AKShare 写入 null 涨跌字段）
+        的数据对下游展示无效，视为低质量，需一并补数修复（F4/F6）。
+        """
+        if not expected_set:
+            return []
+        try:
+            pipeline = [
+                {
+                    "$match": {
+                        "trade_date": trade_date,
+                        "period": "daily",
+                        "code": {"$in": list(expected_set)},
+                    }
+                },
+                {
+                    "$group": {
+                        "_id": "$code",
+                        # 该 code 在该日期有多少条「涨跌字段齐全（pct_chg 与 pre_close 均有效）」的记录
+                        "valid": {
+                            "$sum": {
+                                "$cond": [
+                                    {
+                                        "$and": [
+                                            {"$ne": [{"$ifNull": ["$pct_chg", None]}, None]},
+                                            {"$ne": [{"$ifNull": ["$pre_close", None]}, None]},
+                                        ]
+                                    },
+                                    1,
+                                    0,
+                                ]
+                            }
+                        },
+                    }
+                },
+                {"$match": {"valid": {"$lte": 0}}},
+            ]
+            cursor = db.stock_daily_quotes.aggregate(pipeline)
+            codes = [d["_id"] async for d in cursor if d.get("_id")]
+        except Exception as e:
+            logger.warning(f"⚠️ 值级校验查询失败（忽略，不影响主流程）: {e}")
+            return []
+        return sorted(codes)
+
     async def _remediate_missing(
         self,
         missing_codes: list[str],
@@ -270,8 +334,12 @@ class DataIntegrityService:
         start_date = (end_dt - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
 
         # 构建降级链：先尝试配置的源，失败则依次降级
+        # 配置默认为 tushare（付费源，字段最全/最准），失败降级到 akshare；
+        # akshare 失败再降级到 tushare（兜底链互斥，保证有源可用）。
         remediate_sources = [source]
-        if source == "akshare":
+        if source == "tushare":
+            remediate_sources.extend(["akshare"])  # tushare 失败降级到 akshare
+        elif source == "akshare":
             remediate_sources.extend(["tushare"])  # akshare 失败降级到 tushare
         elif source == "baostock":
             remediate_sources.extend(["akshare", "tushare"])  # baostock → akshare → tushare

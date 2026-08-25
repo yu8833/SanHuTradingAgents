@@ -79,13 +79,22 @@ def test_quotes_ingestion_run_once_writes_bulk(monkeypatch):
     import app.services.quotes_ingestion_service as qis_mod
     from app.services.quotes_ingestion_service import QuotesIngestionService
 
-    # Fake DataSourceManager to avoid external calls
+    # M1 起 run_once 内部按数据源定向取数（_fetch_quotes_from_source），
+    # 这里直接 mock 取数结果，返回两份行情给 bulk 入库。
+    def _fake_fetch(self, source_type, akshare_api=None):
+        return {
+            "000001": {"close": 10.1, "pct_chg": 0.1, "amount": 1.0e8},
+            "600000": {"close": 9.8, "pct_chg": -0.3, "amount": 7.5e7},
+        }, "fake"
+
+    monkeypatch.setattr(QuotesIngestionService, "_fetch_quotes_from_source", _fake_fetch, raising=True)
+    # 强制视为盘中（严格交易时段），走实时采集入库
+    monkeypatch.setattr(QuotesIngestionService, "_is_strict_trading_time", lambda self, now=None: True, raising=True)
+
+    # Fake DataSourceManager：仅提供交易日查询
     class _FakeManager:
-        def get_realtime_quotes_with_fallback(self):
-            return {
-                "000001": {"close": 10.1, "pct_chg": 0.1, "amount": 1.0e8},
-                "600000": {"close": 9.8, "pct_chg": -0.3, "amount": 7.5e7},
-            }, "fake"
+        def find_latest_trade_date_with_fallback(self):
+            return "20250102"
 
     monkeypatch.setattr(qis_mod, "DataSourceManager", _FakeManager, raising=True)
 
@@ -123,8 +132,6 @@ def test_quotes_ingestion_run_once_writes_bulk(monkeypatch):
 
     async def _run():
         svc = QuotesIngestionService()
-        # Force trading time to True
-        monkeypatch.setattr(QuotesIngestionService, "_is_trading_time", lambda self, now=None: True, raising=True)
         await svc.run_once()
         # Verify that two upsert operations were generated
         assert fake_db._coll.last_ops is not None

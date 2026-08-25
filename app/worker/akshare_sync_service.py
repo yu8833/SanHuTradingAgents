@@ -4,9 +4,10 @@ AKShare数据同步服务
 """
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 from app.utils.timezone import now_tz
+from app.utils.trading_time import get_latest_trade_day, is_trading_day
 
 from app.core.database import get_mongo_db
 from app.services.historical_data_service import get_historical_data_service
@@ -505,16 +506,40 @@ class AKShareSyncService:
                 if "symbol" not in quotes_data:
                     quotes_data["symbol"] = symbol
 
+                # 🔥 修复：单只快速查询接口不返回昨收/涨跌幅（get_realtime_quote_single
+                #    置 pct_chg/pre_close 为 None），这里用历史日线补算，避免覆盖写库成 null
+                #    导致收藏页/详情页涨跌幅为空。
+                close = quotes_data.get("close")
+                cur_pct = quotes_data.get("pct_chg") or quotes_data.get("change_percent")
+                cur_pre = quotes_data.get("pre_close")
+                trade_date = quotes_data.get("trade_date")
+                if (cur_pct is None or cur_pre is None) and close not in (None, 0):
+                    resolved_pre, resolved_pct = await self._compute_missing_pct(
+                        symbol, float(close), trade_date
+                    )
+                    if cur_pre is None and resolved_pre is not None:
+                        quotes_data["pre_close"] = resolved_pre
+                        cur_pre = resolved_pre
+                    if cur_pct is None and cur_pre not in (None, 0):
+                        quotes_data["pct_chg"] = round(
+                            (float(close) / float(cur_pre) - 1.0) * 100.0, 2
+                        )
+                        cur_pct = quotes_data["pct_chg"]
+                # 无法补算时不要把 null 覆盖到已有数据上
+                for _k in ("pct_chg", "pre_close", "change_percent"):
+                    if quotes_data.get(_k) is None:
+                        quotes_data.pop(_k, None)
+
                 # 🔥 打印即将保存到数据库的数据
                 logger.info(f"💾 准备保存 {symbol} 行情到数据库:")
                 logger.info(f"   - 最新价(price): {quotes_data.get('price')}")
                 logger.info(f"   - 最高价(high): {quotes_data.get('high')}")
                 logger.info(f"   - 最低价(low): {quotes_data.get('low')}")
                 logger.info(f"   - 开盘价(open): {quotes_data.get('open')}")
-                logger.info(f"   - 昨收价(pre_close): {quotes_data.get('pre_close')}")
+                logger.info(f"   - 昨收价(pre_close): {cur_pre}")
                 logger.info(f"   - 成交量(volume): {quotes_data.get('volume')}")
                 logger.info(f"   - 成交额(amount): {quotes_data.get('amount')}")
-                logger.info(f"   - 涨跌幅(change_percent): {quotes_data.get('change_percent')}%")
+                logger.info(f"   - 涨跌幅(pct_chg): {cur_pct}%")
 
                 # 更新到数据库
                 result = await self.db.market_quotes.update_one(
@@ -529,6 +554,60 @@ class AKShareSyncService:
         except Exception as e:
             logger.error(f"❌ 获取 {symbol} 行情失败: {e}", exc_info=True)
             return False
+
+    async def _compute_missing_pct(
+        self, symbol: str, close: float, current_trade_date: str | None
+    ) -> tuple[float | None, float | None]:
+        """用历史日线补算昨收价与涨跌幅。
+
+        单只快速查询接口不返回 pre_close/pct_chg，需用日线补齐。
+
+        修复要点（F2）：昨收严格取「当前行情归属交易日」的上一交易日（用交易日历判定），
+        只查该确切日期的日线，避免因当日/前日日线未同步或陈旧而误取到 2 天前的收盘，
+        写出错误的涨跌幅；取不到时不返回旧值，而是返回 (None, None)，保持既有正常值不被污染。
+
+        Returns:
+            (pre_close, pct_chg)，无法补算时为 (None, None)
+        """
+        try:
+            # 1) 确定行情归属交易日 reference（作业时作为计数依据）
+            raw = str(current_trade_date or "").strip().replace(" ", "")
+            ref: date | None = None
+            if len(raw) == 8 and raw.isdigit():
+                ref = date(int(raw[0:4]), int(raw[4:6]), int(raw[6:8]))
+            elif len(raw) == 10 and raw[4] == "-":
+                ref = date(int(raw[0:4]), int(raw[5:7]), int(raw[8:10]))
+            if ref is None:
+                ref = get_latest_trade_day().date()
+
+            # 2) 从 reference 往前找上一个交易日（昨收归属日 = 严格早于 reference 的最近交易日）
+            probe = ref - timedelta(days=1)
+            while probe.weekday() >= 5 or not is_trading_day(probe):
+                probe -= timedelta(days=1)
+            prev_day = probe.strftime("%Y%m%d")
+            prev_day_dash = probe.strftime("%Y-%m-%d")
+
+            # 3) 只查该确切交易日的日线（兼容 YYYYMMDD / YYYY-MM-DD 两种库内存储）
+            doc = await self.db.stock_daily_quotes.find_one(
+                {
+                    "$or": [
+                        {"code": symbol},
+                        {"symbol": symbol},
+                    ],
+                    "period": "daily",
+                    "trade_date": {"$in": [prev_day, prev_day_dash]},
+                },
+                {"_id": 0, "close": 1},
+            )
+            if not doc or doc.get("close") in (None, 0):
+                return None, None
+
+            pre = float(doc["close"])
+            pct = round((close / pre - 1.0) * 100.0, 2) if pre else None
+            return pre, pct
+        except Exception as e:
+            logger.warning(f"⚠️ 补算 {symbol} 昨收/涨跌幅失败（忽略）: {e}")
+            return None, None
 
     async def sync_historical_data(
         self,

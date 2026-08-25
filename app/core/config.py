@@ -275,7 +275,8 @@ class Settings(BaseSettings):
     # 工作日 00:30：历史同步（23:00）+估值同步（23:30）之后，凌晨执行完整检查与 AKShare 补数，避开用户活跃时段。
     DATA_INTEGRITY_CHECK_CRON: str = Field(default="30 0 * * 1-5", description="数据完整性检查CRON（工作日00:30）")
     DATA_INTEGRITY_AUTO_REMEDIATE: bool = Field(default=True, description="自动补数")
-    DATA_INTEGRITY_REMEDIATE_SOURCE: str = Field(default="akshare", description="补数数据源")
+    # 默认使用 tushare 作为首选补数源（付费源字段最全/最准），失败自动降级到 akshare
+    DATA_INTEGRITY_REMEDIATE_SOURCE: str = Field(default="tushare", description="补数首选数据源（失败自动降级 akshare）")
 
     # Tushare数据初始化配置
     TUSHARE_INIT_HISTORICAL_DAYS: int = Field(default=365, ge=1, le=3650, description="初始化历史数据天数")

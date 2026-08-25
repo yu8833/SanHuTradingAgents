@@ -127,6 +127,23 @@ class HistoricalDataService:
                 data['pre_close'] = data['close'].shift(1)
                 logger.debug(f"✅ {symbol} 添加 pre_close 字段（从前一天的 close 获取）")
 
+            # 🔥 CN 兜底回算（F4）：若上游源未提供 pre_close/pct_chg（如某些补数兜底源），
+            #    用相邻日线的 close 按前收回算，避免 stock_daily_quotes 写入 null 涨跌字段
+            #    （保证金 K线/涨跌幅展示准确）。正常源（Tushare / 已回算的 AKShare）不受影响。
+            if market == "CN" and period == "daily" and 'close' in data.columns:
+                _has_pre = 'pre_close' in data.columns and not data['pre_close'].isna().all()
+                _has_pct = 'pct_chg' in data.columns and not data['pct_chg'].isna().all()
+                if not (_has_pre and _has_pct):
+                    _prev = pd.to_numeric(data['close'], errors='coerce').shift(1)
+                    _denom = _prev.mask(_prev == 0)
+                    if not _has_pre:
+                        data['pre_close'] = _prev
+                    if not _has_pct:
+                        data['pct_chg'] = (
+                            (pd.to_numeric(data['close'], errors='coerce') - _prev) / _denom * 100.0
+                        ).round(2)
+                    logger.debug(f"✅ {symbol} CN 日线回算 pre_close/pct_chg（上游未提供）")
+
             convert_duration = (now_tz() - convert_start).total_seconds()
 
             # ⏱️ 性能监控：构建操作列表

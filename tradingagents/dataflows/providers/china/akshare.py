@@ -285,9 +285,37 @@ class AkshareProvider:
                     df[col] = None
 
             df["ts_code"] = ""
-            df["pre_close"] = None
-            df["change"] = None
-            df["pct_chg"] = None
+            # 🔥 修复（F4）：AKShare 日线本包含昨收/涨跌幅，但 adapter.get_kline 未透出，
+            #    这里按相邻日线用前一交易日 close 回算 pre_close/change/pct_chg，
+            #    避免 stock_daily_quotes 写入 null 涨跌字段，保证被 AKShare 兜底补数的
+            #    股票日线（K线/涨跌幅）展示准确。
+            df = df.sort_values("trade_date").reset_index(drop=True)
+            _closes = df["close"].tolist()
+            pre_closes: list = []
+            changes: list = []
+            pcts: list = []
+            prev_c = None
+            for c in _closes:
+                try:
+                    c = None if c is None else float(c)
+                except (TypeError, ValueError):
+                    c = None
+                if c is None:
+                    pre_closes.append(None)
+                    changes.append(None)
+                    pcts.append(None)
+                elif prev_c not in (None, 0):
+                    pre_closes.append(prev_c)
+                    changes.append(round(c - prev_c, 2))
+                    pcts.append(round((c / prev_c - 1.0) * 100.0, 2))
+                else:
+                    pre_closes.append(None)
+                    changes.append(None)
+                    pcts.append(None)
+                prev_c = c
+            df["pre_close"] = pre_closes
+            df["change"] = changes
+            df["pct_chg"] = pcts
 
             return df
 

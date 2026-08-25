@@ -350,6 +350,28 @@ class QuotesIngestionService:
         else:  # akshare_sina
             return "akshare", "sina"
 
+    def _build_source_attempt_order(self, first_type: str, first_api: str | None = None) -> list[tuple[str, str | None]]:
+        """
+        构建同一轮内的数据源尝试顺序（同轮兜底）。
+
+        以轮换选中的起始源为首，其余源按优先级依次兜底，保证某轮主源失败时
+        本轮仍能拿到行情，避免整轮空转（F1）。
+
+        Returns:
+            [(source_type, akshare_api), ...]，如 [("tushare", None), ("akshare", "eastmoney"), ("akshare", "sina")]
+        """
+        order: list[tuple[str, str | None]] = [
+            ("tushare", None),
+            ("akshare", "eastmoney"),
+            ("akshare", "sina"),
+        ]
+        start = 0
+        for i, (t, a) in enumerate(order):
+            if t == first_type and a == first_api:
+                start = i
+                break
+        return order[start:] + order[:start]
+
     def _is_trading_time(self, now: datetime | None = None) -> bool:
         """
         判断是否在交易时间或收盘后缓冲期
@@ -425,9 +447,6 @@ class QuotesIngestionService:
             set_fields = {
                 "code": code6,
                 "symbol": code6,  # 添加 symbol 字段，与 code 保持一致
-                "pct_chg": _s_pct(q.get("pct_chg")),
-                "amount": _s_amount(q.get("amount")),
-                "volume": _s_volume(volume),
                 "trade_date": trade_date,
                 "updated_at": updated_at,
             }
@@ -449,6 +468,21 @@ class QuotesIngestionService:
             _price_field("low")
             _price_field("pre_close")
 
+            # 🔥 涨跌幅：仅当来源提供了有效值才 $set；缺失时用 close/pre_close 回退计算，
+            #    仍无法得到（停牌/无行情）则用 $setOnInsert 兜底（不覆盖已有正常值）。
+            #    避免部分/异常来源返回 null 把全市场涨跌幅覆盖为空，导致「涨跌分布」等
+            #    统计只剩零头（修复：此前 pct_chg 被无条件 $set）。
+            _pct = _s_pct(q.get("pct_chg"))
+            if _pct is None:
+                _cl = _s_price(q.get("close"))
+                _pr = _s_price(q.get("pre_close"))
+                if _cl is not None and _pr is not None:
+                    _pct = round((_cl / _pr - 1.0) * 100.0, 3)
+            if _pct is not None:
+                set_fields["pct_chg"] = _pct
+            else:
+                set_on_insert["pct_chg"] = None
+
             # 补充字段：换手率/量比/名称（供情绪雷达量能维度、榜单与名称解析使用）。
             # 仅当本次数据源提供了有效值时才用 $set 写入；缺失时改用 $setOnInsert 兜底
             # （仅新文档插入时写入 None），避免用 None 覆盖掉其他数据源已入库的实时值
@@ -466,6 +500,20 @@ class QuotesIngestionService:
                 set_fields["name"] = name
             else:
                 set_on_insert["name"] = None
+
+            # 成交量/成交额：仅当本次数据源提供了有效值时才 $set，缺失时用 $setOnInsert
+            # 兜底（仅新文档插入时写入 None），避免部分/异常来源（如新浪 `--`、停牌、rt_k 缺量）
+            # 返回 None 用 null 覆盖掉其它数据源已入库的成交额/量（修复 F3，榜单成交额恒空）。
+            _amount = _s_amount(q.get("amount"))
+            _vol = _s_volume(volume)
+            if _amount is not None:
+                set_fields["amount"] = _amount
+            else:
+                set_on_insert["amount"] = None
+            if _vol is not None:
+                set_fields["volume"] = _vol
+            else:
+                set_on_insert["volume"] = None
 
             update_doc: dict = {"$set": set_fields}
             if set_on_insert:
@@ -878,24 +926,35 @@ class QuotesIngestionService:
                         f"当前采集间隔: {settings.QUOTES_INGEST_INTERVAL_SECONDS} 秒"
                     )
 
-            # 获取下一个数据源
+            # 获取本轮流换的起始源，并在同一轮内按优先级尝试其余源兜底（F1）
             source_type, akshare_api = self._get_next_source()
+            attempt_order = self._build_source_attempt_order(source_type, akshare_api)
 
             # 尝试获取行情：全市场抓取为同步阻塞调用（可能耗时数十秒），
             # 放入独立单线程执行器执行，避免阻塞事件循环，也不与筛查/回测争抢默认线程池。
             loop = asyncio.get_running_loop()
-            quotes_map, source_name = await loop.run_in_executor(
-                self._fetch_executor, self._fetch_quotes_from_source, source_type, akshare_api
-            )
+            quotes_map = None
+            source_name = None
+            for src_type, src_api in attempt_order:
+                try:
+                    quotes_map, source_name = await loop.run_in_executor(
+                        self._fetch_executor, self._fetch_quotes_from_source, src_type, src_api
+                    )
+                except Exception as e:
+                    logger.warning(f"⚠️ 源 {src_type}/{src_api} 采集中异常: {e}")
+                    quotes_map, source_name = None, None
+                if quotes_map:
+                    break
+                logger.warning(f"⚠️ 源 {src_type}/{src_api} 未获取到行情数据，同轮兜底尝试下一个数据源...")
 
             if not quotes_map:
-                logger.warning(f"⚠️ {source_name or source_type} 未获取到行情数据，跳过本次入库")
+                logger.warning("⚠️ 本轮所有数据源均未获取到行情数据，跳过本次入库")
                 # 记录失败状态
                 await self._record_sync_status(
                     success=False,
-                    source=source_name or source_type,
+                    source=source_name or source_type or "all",
                     records_count=0,
-                    error_msg="未获取到行情数据"
+                    error_msg="所有数据源均未获取到行情数据"
                 )
                 return
 
