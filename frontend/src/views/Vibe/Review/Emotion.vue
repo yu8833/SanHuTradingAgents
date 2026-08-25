@@ -142,10 +142,10 @@
               </template>
             </el-table-column>
             <el-table-column label="成交额(亿)" width="120" align="right" sortable>
-              <template #default="{ row }">{{ formatYi(row.amount) }}</template>
+              <template #default="{ row }">{{ fmtYi(row.amount) }}</template>
             </el-table-column>
             <el-table-column label="流通市值(亿)" width="130" align="right" sortable>
-              <template #default="{ row }">{{ formatYi(row.float_cap) }}</template>
+              <template #default="{ row }">{{ fmtYi(row.float_cap) }}</template>
             </el-table-column>
             <el-table-column label="概念" min-width="120" prop="industry" />
           </el-table>

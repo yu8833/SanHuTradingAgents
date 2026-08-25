@@ -224,6 +224,10 @@ def score_stocks(codes: list[str] | None = None, industry: str | None = None,
         # 个股双杀过滤依赖 dg_prosperity 批量查询，见 candidate_pool_service）
         dg = dg_factors.get(sym)
         q = _quality_score(r, ind_med, dg)
+        # 营收YOY：dg_prosperity 缺失时回退 enrichment 注入的 revenue_yoy。
+        # 两者均为百分数口径（6.538=+6.54%），响应需归一为小数以匹配前端 fmtPctFromFraction（×100）。
+        _or_yoy_raw = (dg.get("or_yoy") if dg and dg.get("or_yoy") is not None else r.get("revenue_yoy"))
+        _or_yoy = _round(_or_yoy_raw / 100.0) if _or_yoy_raw is not None else None
         items.append({
             "code": sym,
             "name": name,
@@ -238,7 +242,7 @@ def score_stocks(codes: list[str] | None = None, industry: str | None = None,
             "momentum_20d": _round(r.get("momentum_20d")),
             # ΔG 五因子（来自 dg_prosperity，百分数口径）
             "dg": _round(dg.get("dg") if dg else None),
-            "or_yoy": _round(dg.get("or_yoy") if dg else None),
+            "or_yoy": _or_yoy,
             "g": _round(dg.get("g") if dg else None),
             "d_or_yoy": _round(dg.get("d_or_yoy") if dg else None),
             "d_roe": _round(dg.get("d_roe") if dg else None),

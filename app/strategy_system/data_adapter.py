@@ -153,8 +153,10 @@ def load_daily_panel(
     df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")
     df = df.sort_values(["symbol", "date"]).reset_index(drop=True)
 
-    # 补充涨跌幅：源数据 stock_daily_quotes 未存 pct_chg，用收盘价环比补齐（缺失处填充，保留真实源值）。
-    # 约定与前端一致：pct_chg 为小数（0.052 = +5.2%）。
+    # 补充涨跌幅：统一为小数口径（0.0057 = +0.57%），与 screener/策略/前端 fmtPctFromFraction 约定一致。
+    # stock_daily_quotes 存的 pct_chg 是百分数（0.57 = +0.57%），先整体归一为小数；
+    # 缺失处再用收盘价环比补齐（pct_change 天然为小数），避免混合口径导致数值放大 100 倍。
+    df["pct_chg"] = df["pct_chg"] / 100.0
     if int(df["pct_chg"].notna().sum()) < len(df):
         computed = df.groupby("symbol")["close"].pct_change().astype("float32")
         df["pct_chg"] = df["pct_chg"].fillna(computed)

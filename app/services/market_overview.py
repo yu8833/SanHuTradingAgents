@@ -153,14 +153,19 @@ def _emotion() -> dict:
 
     # 连板股清单（2 板+，客观公开榜单数据；按连板数、成交额降序）。
     # 产品定位调整（2026-07-05）：从「零标的」→「展示客观榜单但不推荐/不预测/不评分」。
+    # 东财 pool 无流通市值字段、成交额可能为 '-'/字符串 → 用实时行情批量补全缺失值。
+    lianban_codes = [str(p.get("c", "")) for p in zt if (_num(p.get("lbc")) or 1) >= 2]
+    quote_map = astock.realtime_quote_map(lianban_codes) if lianban_codes else {}
     lianban_stocks = sorted(
         ({
             "code": str(p.get("c", "")), "name": p.get("n", ""),
             "boards": _num(p.get("lbc")) or 1,
             "price": round((astock._numf(p.get("p")) or 0) / 1000, 2),
             "pct": round(astock._numf(p.get("zdp")) or 0, 2),
-            "amount": astock._numf(p.get("amount")),      # 成交额,元（'-' 占位归一为 None，防排序对 str 取负崩溃）
-            "float_cap": astock._numf(p.get("ltsz")),     # 流通市值,元
+            "amount": astock._numf(p.get("amount"))
+            or (quote_map.get(str(p.get("c", ""))) or {}).get("amount"),  # 成交额,元
+            "float_cap": astock._numf(p.get("ltsz"))
+            or (quote_map.get(str(p.get("c", ""))) or {}).get("float_cap"),  # 流通市值,元
             "industry": p.get("hybk", ""),  # 概念/行业
         } for p in zt if (_num(p.get("lbc")) or 1) >= 2),
         key=lambda x: (-x["boards"], -(x["amount"] or 0)),

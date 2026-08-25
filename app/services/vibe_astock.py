@@ -748,6 +748,47 @@ def market_turnover_rank(n: int = 20) -> list[dict]:
     } for d in diff]
 
 
+def realtime_quote_map(codes: list[str]) -> dict[str, dict]:
+    """按代码批量拉取实时行情（东财 clist secid），返回 {code: {price,pct,amount,mcap,float_cap}}。
+
+    东财 secid 市场前缀：沪市(6/5/9 开头)=1，其余(深 0/3、京 8/4 开头)=0。
+    用于补全涨停板池缺失的成交额/流通市值（pool 无 ltsz、amount 可能为 '-'/字符串）。
+    不可达/无数据时返回 {}，调用方自行降级。amount/float_cap 单位为元。
+    """
+    codes = [str(c).zfill(6) for c in codes if c]
+    if not codes:
+        return {}
+
+    def _secid(c: str) -> str:
+        return f"{'1' if c[0] in '569' else '0'}.{c}"
+
+    params = {
+        "pn": 1, "pz": len(codes), "po": 1, "np": 1, "fltt": 2, "invt": 2,
+        "fid": "f12", "secids": ",".join(_secid(c) for c in codes),
+        "fields": "f12,f2,f3,f6,f20,f21",
+    }
+    diff: list[dict] = []
+    for host in ("push2.eastmoney.com", "push2delay.eastmoney.com"):
+        try:
+            r = em_get(f"https://{host}/api/qt/clist/get", params=params,
+                       headers={"User-Agent": UA}, timeout=12)
+            diff = (r.json().get("data") or {}).get("diff") or []
+            if diff:
+                break
+        except Exception:
+            continue
+    return {
+        str(d.get("f12", "")): {
+            "price": _numf(d.get("f2")),
+            "pct": _numf(d.get("f3")),
+            "amount": _numf(d.get("f6")),
+            "mcap": _numf(d.get("f20")),
+            "float_cap": _numf(d.get("f21")),
+        }
+        for d in diff if d.get("f12")
+    }
+
+
 def eastmoney_datacenter(report_name: str, columns: str = "ALL", filter_str: str = "",
                          page_size: int = 50, sort_columns: str = "", sort_types: str = "-1") -> list[dict]:
     """东财数据中心统一查询 —— 龙虎榜/解禁/融资融券/大宗交易/股东户数/分红 共用（已内置限流）。"""
