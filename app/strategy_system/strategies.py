@@ -234,7 +234,8 @@ def _small_cap_value(df: pd.DataFrame, params: dict) -> pd.Series:
 
 
 def _def(id_, name, description, tags, params, scoring, filter_fn,
-         entry_signals, exit_signals, order_by="score", descending=True, limit=100):
+         entry_signals, exit_signals, buy_desc=None, sell_desc=None,
+         order_by="score", descending=True, limit=100):
     return {
         "id": id_,
         "name": name,
@@ -245,6 +246,9 @@ def _def(id_, name, description, tags, params, scoring, filter_fn,
         "filter": filter_fn,
         "entry_signals": entry_signals,
         "exit_signals": exit_signals,
+        # 人类可读的买入 / 卖出指导（信号栏位可能为空，此时作为买卖规则兜底）
+        "buy_desc": buy_desc or [],
+        "sell_desc": sell_desc or [],
         "order_by": order_by,
         "descending": descending,
         "limit": limit,
@@ -266,6 +270,7 @@ BUILTIN_STRATEGIES: list[dict] = [
         {"momentum_20d": 0.5, "vol_ratio_5d": 0.3, "change_pct": 0.2},
         _ma_golden_cross,
         ["signal_ma_golden_5_20"], ["signal_ma_dead_5_20"],
+        ["MA5 上穿 MA20（金叉）且量能配合"], ["MA5 下穿 MA20（死叉）离场"],
     ),
     _def(
         "macd_golden", "MACD金叉", "MACD零轴上方金叉，趋势延续",
@@ -276,6 +281,7 @@ BUILTIN_STRATEGIES: list[dict] = [
         {"momentum_20d": 0.5, "macd_hist": 0.3, "change_pct": 0.2},
         _macd_golden,
         ["signal_macd_golden"], ["signal_macd_dead"],
+        ["MACD 零轴上方金叉（DIF 上穿 DEA）"], ["MACD 死叉（DIF 下穿 DEA）离场"],
     ),
     _def(
         "n_day_high_breakout", "创60日新高", "收盘创60日新高且放量突破",
@@ -287,6 +293,7 @@ BUILTIN_STRATEGIES: list[dict] = [
         {"momentum_20d": 0.5, "change_pct": 0.3, "vol_ratio_5d": 0.2},
         _n_day_high_breakout,
         ["signal_n_day_high"], [],
+        ["收盘创 60 日新高且放量突破"], ["跌破 20 日均线或冲高回落离场"],
     ),
     _def(
         "n_day_low_reversal", "N日低点反转", "创60日新低后收阳企稳",
@@ -298,6 +305,7 @@ BUILTIN_STRATEGIES: list[dict] = [
         {"rsi_14": 0.5, "momentum_5d": 0.3, "change_pct": 0.2},
         _n_day_low_reversal,
         ["signal_n_day_low"], [],
+        ["创 60 日新低后收阳企稳，RSI 低位"], ["跌破前低转弱离场"],
     ),
     _def(
         "oversold_bounce", "超跌反弹", "RSI超卖后MA5金叉反弹",
@@ -308,6 +316,7 @@ BUILTIN_STRATEGIES: list[dict] = [
         {"rsi_14": 0.5, "momentum_5d": 0.3, "change_pct": 0.2},
         _oversold_bounce,
         ["signal_ma5_breakout"], ["signal_ma5_breakdown"],
+        ["RSI 超卖后 MA5 向上突破反弹"], ["MA5 下穿（反弹乏力）离场"],
     ),
     _def(
         "trend_breakout", "趋势突破", "创60日新高且站上多均线，多头趋势",
@@ -316,6 +325,7 @@ BUILTIN_STRATEGIES: list[dict] = [
         {"momentum_20d": 0.5, "momentum_60d": 0.3, "change_pct": 0.2},
         _trend_breakout,
         ["signal_n_day_high"], ["signal_ma20_breakdown"],
+        ["创 60 日新高且站上多均线，多头趋势"], ["跌破 MA20，趋势转弱离场"],
     ),
     _def(
         "boll_breakout", "布林突破", "收盘突破布林上轨且收涨",
@@ -324,6 +334,7 @@ BUILTIN_STRATEGIES: list[dict] = [
         {"momentum_20d": 0.5, "change_pct": 0.3, "vol_ratio_5d": 0.2},
         _boll_breakout,
         ["signal_boll_breakout_upper"], [],
+        ["收盘突破布林上轨且收涨"], ["收盘跌破布林中轨（MA20）离场"],
     ),
     _def(
         "volume_price_surge", "量价齐升", "放量上涨，量比不低于2倍",
@@ -335,6 +346,7 @@ BUILTIN_STRATEGIES: list[dict] = [
         {"change_pct": 0.5, "vol_ratio_5d": 0.3, "momentum_5d": 0.2},
         _volume_price_surge,
         [], [],
+        ["放量上涨，量比 ≥2 倍且收涨"], ["缩量滞涨或跌破 5 日均线离场"],
     ),
     _def(
         "pullback_ma20_bounce", "回踩MA20反弹", "回踩MA20后重新站上，多头延续",
@@ -343,6 +355,7 @@ BUILTIN_STRATEGIES: list[dict] = [
         {"momentum_5d": 0.5, "momentum_20d": 0.3, "change_pct": 0.2},
         _pullback_ma20_bounce,
         ["signal_ma20_breakout"], ["signal_ma20_breakdown"],
+        ["回踩 MA20 后重新站上企稳"], ["跌破 MA20（回踩失败）离场"],
     ),
     _def(
         "strong_open", "强势高开", "高开2%以上且收阳、放量",
@@ -355,6 +368,7 @@ BUILTIN_STRATEGIES: list[dict] = [
         {"change_pct": 0.5, "vol_ratio_5d": 0.3, "momentum_5d": 0.2},
         _strong_open,
         [], [],
+        ["高开 ≥2% 且收阳、放量走强"], ["冲高回落或跌破开盘价离场"],
     ),
     _def(
         "low_volatility_leader", "低波动龙头", "低波动且持续走强，强势股",
@@ -366,6 +380,7 @@ BUILTIN_STRATEGIES: list[dict] = [
         {"momentum_20d": 0.5, "momentum_60d": 0.3, "annual_vol_20d": 0.2},
         _low_volatility_leader,
         [], [],
+        ["低波动（年化波动 ≤35%）、20 日动量走强"], ["放量下跌破位或动量转弱离场"],
     ),
     _def(
         "low_pe_high_div_leader", "低估值高股息龙头", "低估值(PE/PB)、高股息、近5年稳定分红且行业内市值Top3的行业龙头",
@@ -380,6 +395,7 @@ BUILTIN_STRATEGIES: list[dict] = [
         {"div_yield": 0.4, "total_mv": 0.3, "div_paying_years": 0.3},
         _low_pe_high_dividend_leader,
         [], [],
+        ["低估值（PE≤15/PB≤3）、股息率≥3%、行业市值 Top3"], ["估值修复到位或盈利/分红恶化离场"],
     ),
     _def(
         "turnaround", "困境反转", "基本面(营收/净利增速)由负转正、估值合理且价格企稳",
@@ -391,6 +407,7 @@ BUILTIN_STRATEGIES: list[dict] = [
         {"revenue_yoy": 0.4, "net_profit_yoy": 0.4, "momentum_20d": 0.2},
         _turnaround,
         [], [],
+        ["营收/净利增速由负转正、估值合理、价格企稳"], ["反转证伪（增速再转负）或跌破平台离场"],
     ),
     _def(
         "small_cap_value", "小盘价值", "中小市值(10~50亿) + 低估值(PE/PB) + 盈利为正",
@@ -404,6 +421,7 @@ BUILTIN_STRATEGIES: list[dict] = [
         {"total_mv": 0.3, "pe_ttm": 0.3, "pb": 0.2, "roe": 0.2},
         _small_cap_value,
         [], [],
+        ["中小市值（10~50亿）、低估值（PE≤25/PB≤3）、盈利为正"], ["盈利转负或脱离价值区间离场"],
     ),
 ]
 

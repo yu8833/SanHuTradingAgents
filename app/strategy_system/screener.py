@@ -36,6 +36,9 @@ SCREEN_MAX_WINDOW_DAYS = 70
 # run-all 筛选结果缓存集合：同一交易日结果幂等，缓存后再次打开页面可直接返回（含 computed_at）
 SCREEN_CACHE_COLLECTION = "strategy_screen_cache"
 
+# 缓存结构版本：新增命中原因/买卖规则后自增，用于剔除旧版（无 reason）失效缓存，避免读到脏结果
+SCREEN_CACHE_VERSION = 2
+
 # ──────────────────────────────────────────────────────────────
 # 进程内面板/目标日缓存（LRU + TTL）
 # 筛查最贵的两步是 load_daily_panel(全市场日线 ~7s) + compute_all(指标 ~17s) +
@@ -752,9 +755,7 @@ def run_strategy(
             "date": as_of_date,
             # 买卖指导：命中原因 + 对应策略的卖出（离场）规则
             "reason": entry_reasons.get(sym, ""),
-            "sell_rules": strategy.get("sell_rules")
-            if strategy.get("sell_rules")
-            else [_SIGNAL_LABELS.get(c, c) for c in (strategy.get("exit_signals") or [])],
+            "sell_rules": _strategy_sell_rules(strategy),
         })
 
     result = {
@@ -849,6 +850,21 @@ def _fmt3(v) -> str:
         return "-"
 
 
+def _price_bit(row: pd.Series) -> str:
+    """构建"现价 + 涨跌幅"信息片段。"""
+    try:
+        close = float(row["close"])
+    except Exception:
+        return ""
+    bit = f"现价 {close:.2f}"
+    try:
+        pct = float(row["pct_chg"]) * 100
+        bit += f"，较昨收 {pct:+.2f}%"
+    except Exception:
+        pass
+    return bit
+
+
 def _describe_hits(
     strategy: dict,
     target: pd.DataFrame,
@@ -868,8 +884,21 @@ def _describe_hits(
         if direction == "entry"
         else (strategy.get("exit_signals") or [])
     )
+    # 无信号栏位的策略（多为基本面/估值类筛选）：用语义化买卖指导作为命中说明
     if not sig_columns:
-        return {}
+        base = (strategy.get("buy_desc") or []) if direction == "entry" else (strategy.get("sell_desc") or [])
+        base_text = ("；".join(base)) if base else ("满足策略筛选条件")
+        out: dict[str, str] = {}
+        idx = target.set_index("symbol")
+        for code in hit_codes:
+            if code not in idx.index:
+                continue
+            parts = [base_text]
+            price_bit = _price_bit(idx.loc[code])
+            if price_bit:
+                parts.append(price_bit)
+            out[code] = "；".join(parts)
+        return out
 
     out: dict[str, str] = {}
     idx = target.set_index("symbol")
@@ -897,17 +926,8 @@ def _describe_hits(
                 if vc in row.index and row[vc] is not None and not pd.isna(row[vc]):
                     extra += f" {vc}={_fmt3(row[vc])}" if vc.startswith("macd") else f" {vc}={_fmt2(row[vc])}"
             parts.append(label + extra)
-        try:
-            close = float(row["close"])
-        except Exception:
-            close = None
-        if close is not None:
-            price_bit = f"现价 {close:.2f}"
-            try:
-                pct = float(row["pct_chg"]) * 100
-                price_bit += f"，较昨收 {pct:+.2f}%"
-            except Exception:
-                pass
+        price_bit = _price_bit(row)
+        if price_bit:
             parts.append(price_bit)
         if not parts:
             parts.append("触发信号")
@@ -1223,7 +1243,10 @@ def run_all_strategies(
             cached = db[SCREEN_CACHE_COLLECTION].find_one(
                 key, {"_id": 0, "result": 1, "computed_at": 1}
             )
-            if cached and cached.get("result"):
+            # 仅当缓存结构与当前版本一致才复用，否则视为失效重算（写回新结果）
+            if cached and cached.get("result") and (
+                cached["result"].get("schema_version", 0) == SCREEN_CACHE_VERSION
+            ):
                 result = cached["result"]
                 result["computed_at"] = cached.get("computed_at")
                 result["cached"] = True
@@ -1264,7 +1287,7 @@ def run_all_strategies(
                 entry_reasons = _describe_hits(
                     strategy, target, sub["symbol"].astype(str).tolist(), "entry"
                 )
-                sell_rules = [_SIGNAL_LABELS.get(c, c) for c in (strategy.get("exit_signals") or [])]
+                sell_rules = _strategy_sell_rules(strategy)
                 for _, row in sub.iterrows():
                     sym = str(row["symbol"])
                     top_items.append({
@@ -1309,6 +1332,7 @@ def run_all_strategies(
         "strategies": strategies,
         "elapsed_ms": round((time.perf_counter() - t0) * 1000, 1),
         "decision_window": in_close_decision_window(),
+        "schema_version": SCREEN_CACHE_VERSION,
     }
     result["realtime"] = is_intraday
     # 实时结果逐次多变，不做缓存；仅 EOD 结果按 (as_of, pool) 持久化
@@ -1350,12 +1374,28 @@ def _empty_result(as_of, strategy_id, msg):
     }
 
 
+def _strategy_buy_rules(m: dict) -> list[str]:
+    """策略买入规则：优先用语义化买入指导，其次从 entry 信号转译。"""
+    desc = m.get("buy_desc") or []
+    if desc:
+        return list(desc)
+    return [_SIGNAL_LABELS.get(c, c) for c in (m.get("entry_signals") or [])]
+
+
+def _strategy_sell_rules(m: dict) -> list[str]:
+    """策略卖出规则：优先用语义化卖出指导，其次从 exit 信号转译。"""
+    desc = m.get("sell_desc") or []
+    if desc:
+        return list(desc)
+    return [_SIGNAL_LABELS.get(c, c) for c in (m.get("exit_signals") or [])]
+
+
 def list_strategies() -> list[dict]:
     """返回策略元信息，并附带人类可读的买卖规则（指导用户何时买/何时卖）。"""
     metas = []
     for m in get_strategies():
         m = dict(m)
-        m["buy_rules"] = [_SIGNAL_LABELS.get(c, c) for c in (m.get("entry_signals") or [])]
-        m["sell_rules"] = [_SIGNAL_LABELS.get(c, c) for c in (m.get("exit_signals") or [])]
+        m["buy_rules"] = _strategy_buy_rules(m)
+        m["sell_rules"] = _strategy_sell_rules(m)
         metas.append(m)
     return metas
