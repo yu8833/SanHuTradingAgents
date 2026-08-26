@@ -14,6 +14,7 @@ export interface FavoriteItem {
   alert_price_low?: number | null
   current_price?: number | null
   change_percent?: number | null
+  return_pct?: number | null  // 加入自选后的收益率（百分数，如 8.34 = +8.34%）
   volume?: number | null
 }
 

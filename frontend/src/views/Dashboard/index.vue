@@ -7,7 +7,7 @@
           <el-icon :size="26"><Odometer /></el-icon>
         </div>
         <div class="page-hero-text">
-          <h2 class="page-hero-title">总览</h2>
+          <h2 class="page-hero-title">速览</h2>
           <p class="page-hero-sub">数据健康 · 模拟账户 · 自选行情 · 监控动态</p>
         </div>
       </div>

@@ -11,7 +11,9 @@
           <p class="page-hero-sub">
             基于本地行情数据 · 策略筛选与评分排序
             <template v-if="isRealtimeResult">
-              · <el-icon :size="13"><Connection /></el-icon> 盘中实时（自选+持仓合成K）
+              ·
+              <el-icon :size="13"><Connection /></el-icon>
+              {{ decisionWindow ? '收盘定格（可成交窗口）' : '盘中预警（暂定，15:00 定格确认）' }}
             </template>
             <template v-else-if="computedAt"> · <el-icon :size="13"><Clock /></el-icon> 数据更新于 {{ computedAt }}</template>
           </p>
@@ -22,7 +24,7 @@
           <el-option v-for="d in tradeDates" :key="d" :label="d" :value="d" />
         </el-select>
         <div class="realtime-switch" :title="realtimeNote">
-          <span class="rt-label">实时扫描</span>
+          <span class="rt-label">盘中预警</span>
           <el-switch :model-value="realtimeScan" size="default" @change="toggleRealtime" />
         </div>
         <el-button type="primary" size="default" :loading="runningAll" @click="runAll(true)">
@@ -30,6 +32,27 @@
           运行全部
         </el-button>
       </div>
+    </div>
+
+    <!-- 收盘定格窗口：15:00-15:30 数据已定格、可按收盘价成交的决策黄金期 -->
+    <div v-if="decisionWindow" class="close-window-banner">
+      <div class="cw-orbit">
+        <span class="cw-pulse"></span>
+        <el-icon :size="16"><Clock /></el-icon>
+      </div>
+      <div class="cw-body">
+        <span class="cw-title">收盘定格窗口 · 15:00–15:30</span>
+        <span class="cw-sub">行情数据已定格，今日可按收盘价成交，无需等次日开盘。当前结果为收盘级判断，可据此直接决策。</span>
+      </div>
+      <div class="cw-side">
+        <span class="cw-chip">可执行</span>
+      </div>
+    </div>
+
+    <!-- 盘中预警条：开启盘中预警时，标识结果仍为暂定信号 -->
+    <div v-else-if="isRealtimeResult" class="preview-banner">
+      <el-icon :size="15"><Warning /></el-icon>
+      <span>盘中预警 · 当前为暂定信号（盘中数据未完全定格），15:00 收盘定格后再做最终判断。</span>
     </div>
 
     <!-- 大盘行情上下文：直接告诉用户该用哪些策略 -->
@@ -104,6 +127,16 @@
             </div>
           </div>
           <div class="strategy-desc">{{ s.description }}</div>
+          <div class="strategy-rules" v-if="(s.buy_rules && s.buy_rules.length) || (s.sell_rules && s.sell_rules.length)">
+            <div v-if="s.buy_rules && s.buy_rules.length" class="rule-row">
+              <span class="rule-flag buy">买入</span>
+              <span class="rule-text">{{ s.buy_rules.join(' · ') }}</span>
+            </div>
+            <div v-if="s.sell_rules && s.sell_rules.length" class="rule-row">
+              <span class="rule-flag sell">卖出</span>
+              <span class="rule-text">{{ s.sell_rules.join(' · ') }}</span>
+            </div>
+          </div>
           <div class="strategy-tags">
             <el-tag v-for="t in s.tags" :key="t" size="small" effect="plain" class="strategy-tag">{{ t }}</el-tag>
           </div>
@@ -148,7 +181,10 @@
             <span class="panel-dot result-dot" />
             <span class="result-title">{{ showAll ? '全部策略' : (activeStrategyName || '') }}</span>
             <span class="result-hit">命中 <b>{{ displayRows.length }}</b> 只</span>
-            <span v-if="isRealtimeResult"><el-tag size="small" type="warning" effect="light" round>实时</el-tag></span>
+            <span v-if="isRealtimeResult">
+              <el-tag v-if="decisionWindow" size="small" type="success" effect="light" round>收盘定格</el-tag>
+              <el-tag v-else size="small" type="warning" effect="light" round>盘中预警</el-tag>
+            </span>
             <span v-else class="text-muted">· {{ asOf }}</span>
           </div>
           <div class="header-actions">
@@ -198,6 +234,23 @@
         <el-table-column prop="score" label="评分" min-width="110" align="right" sortable>
           <template #default="{ row }">
             <span class="score-badge" :style="{ '--sc': scoreColor(row.score) }">{{ fmtNum(row.score, 1) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作建议（买入依据 / 离场）" min-width="300" show-overflow-tooltip>
+          <template #default="{ row }">
+            <div class="action-advice">
+              <div class="advice-reason" :class="{ empty: !row.reason }">
+                <span class="advice-dot" />
+                <el-tooltip v-if="row.reason" :content="row.reason" placement="top" :show-after="160">
+                  <span class="advice-text">{{ row.reason }}</span>
+                </el-tooltip>
+                <span v-else class="advice-text muted">已触发筛选条件</span>
+              </div>
+              <div v-if="row.sell_rules && row.sell_rules.length" class="advice-exit">
+                <span class="exit-label">离场</span>
+                <span class="exit-text">{{ row.sell_rules.join(' · ') }}</span>
+              </div>
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="120" fixed="right">
@@ -356,9 +409,10 @@ const loadMarketContext = async () => {
 }
 
 // ── 盘中实时触发（仅自选+持仓池） ─────────────────────────
-const realtimeScan = ref(false)        // 是否开启实时扫描
+const realtimeScan = ref(false)        // 是否开启盘中预警（实时扫描）开关
 const isRealtimeResult = ref(false)    // 最近一次结果是否为实时合成面板
 const realtimeNote = ref('')           // 实时扫描说明/失效提示
+const decisionWindow = ref(false)      // 是否处于 15:00-15:30 收盘定格可成交窗口
 
 // 实时扫描中，结果即时来自『历史日K + 当日实时合成K』，不展示旧的 computed_at
 const dataFreshnessText = computed(() => {
@@ -369,13 +423,14 @@ const dataFreshnessText = computed(() => {
 const toggleRealtime = async (on: boolean) => {
   realtimeScan.value = on
   isRealtimeResult.value = false
+  decisionWindow.value = false
   if (on) {
     if (!currentUserId.value) {
-      ElMessage.warning('未获取到登录用户，无法实时扫描自选+持仓')
+      ElMessage.warning('未获取到登录用户，无法扫描自选+持仓')
       realtimeScan.value = false
       return
     }
-    ElMessage.info('实时扫描开启：基于自选+持仓池，历史日K + 当日实时K合成')
+    ElMessage.info('盘中预警开启：基于自选+持仓，历史日K + 当日实时K合成（盘中为暂定信号，15:00 收盘定格确认）')
     await runAll(true)
   } else {
     // 关闭实时扫描：重置交易日，避免残留“今天”导致 EOD 面板取到无数据的当日而一直无结果
@@ -477,6 +532,7 @@ const runAll = async (refresh = false) => {
     })
     const data = (res as any)?.data ?? res
     isRealtimeResult.value = !!data?.realtime
+    decisionWindow.value = !!data?.decision_window
     if (isRealtimeResult.value) {
       // 实时结果以当日为准，交易日下拉与 computed_at 不适用
       asOf.value = data.as_of || asOf.value
@@ -535,6 +591,7 @@ const runSingle = async (id: string) => {
     })
     const data = (res as any)?.data ?? res
     isRealtimeResult.value = !!data?.realtime
+    decisionWindow.value = !!data?.decision_window
     if (data?.as_of) asOf.value = data.as_of
     result.value = data
     if (data?.strategy_id) {
@@ -606,12 +663,12 @@ onMounted(() => {
   loadStrategies()
   loadMonitorStatus()
   loadMarketContext()
-  // 实时扫描开启时，交易时段内每 90s 自动刷新一次
+  // 盘中预警开启时，交易时段内每 5 分钟自动刷新一次（个人分析用，不需要秒级；15:00 后自动定格）
   realtimeTimer = window.setInterval(() => {
     if (realtimeScan.value && !runningAll.value) {
       runAll(true)
     }
-  }, 90_000)
+  }, 300_000)
 })
 
 onBeforeUnmount(() => {
@@ -641,6 +698,95 @@ let realtimeTimer: number | undefined
       font-size: 13px;
       color: var(--el-text-color-secondary);
     }
+  }
+
+  /* ===== 收盘定格窗口横幅（15:00-15:30 可成交决策黄金期） ===== */
+  .close-window-banner {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 20px;
+    margin-bottom: 16px;
+    border-radius: 14px;
+    border: 1px solid rgba(250, 173, 20, 0.45);
+    background:
+      radial-gradient(600px 120px at 12% 0%, rgba(250, 173, 20, 0.18), transparent 60%),
+      linear-gradient(120deg, color-mix(in srgb, #faad14 14%, transparent), var(--el-bg-color) 55%);
+    box-shadow: 0 2px 14px rgba(250, 173, 20, 0.12);
+
+    .cw-orbit {
+      position: relative;
+      display: grid;
+      place-items: center;
+      width: 38px;
+      height: 38px;
+      flex: none;
+      border-radius: 50%;
+      color: #b8860b;
+      background: rgba(250, 173, 20, 0.16);
+      border: 1px dashed rgba(250, 173, 20, 0.6);
+
+      .cw-pulse {
+        position: absolute;
+        inset: 6px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(250, 173, 20, 0.35), transparent 70%);
+        animation: cwPulse 1.8s ease-in-out infinite;
+      }
+    }
+
+    .cw-body {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+
+      .cw-title {
+        font-size: 15px;
+        font-weight: 700;
+        color: #8a6d1a;
+        letter-spacing: 0.2px;
+      }
+
+      .cw-sub {
+        font-size: 12.5px;
+        color: var(--el-text-color-secondary);
+        line-height: 1.5;
+      }
+    }
+
+    .cw-side {
+      flex: none;
+      .cw-chip {
+        padding: 4px 12px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 600;
+        color: #fff;
+        background: linear-gradient(135deg, #f5b93c, #b8860b);
+        box-shadow: 0 2px 8px rgba(184, 134, 11, 0.35);
+      }
+    }
+  }
+
+  @keyframes cwPulse {
+    0%, 100% { transform: scale(0.9); opacity: 0.45; }
+    50% { transform: scale(1.15); opacity: 1; }
+  }
+
+  /* ===== 盘中预警条（暂定信号提示） ===== */
+  .preview-banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    margin-bottom: 16px;
+    border-radius: 10px;
+    font-size: 12.5px;
+    color: var(--el-color-warning);
+    background: color-mix(in srgb, var(--el-color-warning) 10%, var(--el-bg-color));
+    border: 1px solid color-mix(in srgb, var(--el-color-warning) 30%, transparent);
   }
 
   /* ===== 大盘行情上下文条 ===== */
@@ -935,13 +1081,61 @@ let realtimeTimer: number | undefined
       .strategy-desc {
         font-size: 13px;
         color: var(--el-text-color-regular);
-        margin-bottom: 12px;
+        margin-bottom: 10px;
         line-height: 1.5;
         display: -webkit-box;
         -webkit-line-clamp: 2;
         -webkit-box-orient: vertical;
         overflow: hidden;
         min-height: 39px;
+      }
+
+      /* ===== 买卖规则：明确告诉用户何时买 / 何时卖 ===== */
+      .strategy-rules {
+        margin-bottom: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        padding: 9px 10px;
+        border-radius: 8px;
+        background: color-mix(in srgb, var(--el-fill-color) 55%, transparent);
+        border-left: 2px solid var(--sc);
+
+        .rule-row {
+          display: flex;
+          align-items: baseline;
+          gap: 8px;
+          min-width: 0;
+        }
+
+        .rule-flag {
+          flex: none;
+          font-size: 11px;
+          font-weight: 700;
+          padding: 1px 7px;
+          border-radius: 5px;
+          line-height: 1.7;
+
+          &.buy {
+            color: #fff;
+            background: var(--el-color-danger);
+          }
+          &.sell {
+            color: #fff;
+            background: var(--el-color-success);
+          }
+        }
+
+        .rule-text {
+          font-size: 12px;
+          color: var(--el-text-color-secondary);
+          line-height: 1.45;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+        }
       }
 
       .strategy-tags {
@@ -1048,6 +1242,67 @@ let realtimeTimer: number | undefined
       font-weight: 700;
       color: #fff;
       background: var(--sc);
+    }
+
+    /* ===== 操作建议列：买入依据 + 离场规则 ===== */
+    .action-advice {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      padding: 2px 0;
+
+      .advice-reason {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        min-width: 0;
+
+        .advice-dot {
+          flex: none;
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background: var(--el-color-primary);
+          box-shadow: 0 0 0 3px color-mix(in srgb, var(--el-color-primary) 18%, transparent);
+        }
+
+        .advice-text {
+          font-size: 12.5px;
+          color: var(--el-text-color-primary);
+          line-height: 1.4;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          max-width: 320px;
+
+          &.muted {
+            color: var(--el-text-color-secondary);
+          }
+        }
+      }
+
+      .advice-exit {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        min-width: 0;
+
+        .exit-label {
+          flex: none;
+          font-size: 11px;
+          font-weight: 600;
+          color: var(--el-color-success);
+        }
+
+        .exit-text {
+          font-size: 12px;
+          color: var(--el-text-color-secondary);
+          line-height: 1.4;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+      }
     }
 
     .text-muted { color: var(--el-text-color-secondary); }

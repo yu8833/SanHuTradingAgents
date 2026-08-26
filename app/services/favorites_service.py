@@ -165,7 +165,37 @@ class FavoritesService:
                 # 查询失败时保持占位 None，避免影响基础功能
                 pass
 
+        # 计算「加入自选后的收益率」：基准价 = 加入当日（及之前最近一个交易日）的日线收盘价
+        for it in items:
+            it["return_pct"] = await self._return_since_added(db, it)
+
         return items
+
+    async def _return_since_added(self, db, it: dict[str, Any]) -> float | None:
+        """计算自选股加入后的累计收益率（百分数口径，如 8.34 = +8.34%）。
+
+        仅 A 股参与计算；基准价取加入日期所在（或之前最近）交易日的日线收盘价。
+        缺少行情/基准/非叶数时返回 None，前端展示为 '-'.
+        """
+        if it.get("market") != "A股":
+            return None
+        cur = it.get("current_price")
+        added_at = it.get("added_at")
+        if cur is None or not added_at:
+            return None
+        date_str = str(added_at)[:10]
+        try:
+            doc = await db["stock_daily_quotes"].find_one(
+                {"symbol": str(it.get("stock_code", "")).zfill(6), "trade_date": {"$lte": date_str}},
+                {"close": 1, "_id": 0},
+                sort=[("trade_date", -1)],
+            )
+        except Exception:
+            return None
+        base = (doc or {}).get("close")
+        if not base or base <= 0:
+            return None
+        return round((cur / base - 1) * 100, 2)
 
     async def get_user_symbols(self, user_id: str) -> list[str]:
         """轻量获取用户自选股代码列表（不富集行情、不查基础信息）。

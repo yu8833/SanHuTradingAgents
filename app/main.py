@@ -808,6 +808,41 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"🚨 ETF Radar 盘中采集任务注册失败: {e}", exc_info=True)
 
+        # ==================== 常用策略收盘定格（15:00-15:30 可成交决策窗口） ====================
+        # 交易日 15:05 用最新已入库日K预计算全市场「常用策略」EOD 结果并写入缓存，
+        # 使得 15:00-15:30 收盘定格窗口内打开页面即可立即看到权威结果（指导以收盘价成交）。
+        # 用本地常量控制频率，不引入 .env 改动。
+        _CLOSE_TRIGGER_CRON = "5 15 * * 1-5"   # 周一至周五 15:05（北京时区，get_tz 已换算）
+        try:
+            from app.strategy_system import screener as _close_screener
+
+            async def run_close_trigger():
+                """收盘定格预计算：交易日收盘后跑一次全市场常用策略，缓存权威 EOD 结果。"""
+                try:
+                    from app.core.database import get_mongo_db_sync as _close_db_sync
+                    db = _close_db_sync()
+                    result = await asyncio.to_thread(
+                        _close_screener.run_all_strategies, db, None, 30, None, False, False
+                    )
+                    logger.info(
+                        f"🧭 [APScheduler] 常用策略收盘定格完成: as_of={result.get('as_of')}, "
+                        f"命中策略={len(result.get('strategies', []))}, "
+                        f"elapsed_ms={result.get('elapsed_ms')}"
+                    )
+                except Exception as e:
+                    logger.error(f"❌ [APScheduler] 常用策略收盘定格失败: {e}", exc_info=True)
+
+            scheduler.add_job(
+                run_close_trigger,
+                cron_trigger(_CLOSE_TRIGGER_CRON, timezone=get_tz()),
+                id="common_strategy_close_trigger",
+                name="常用策略收盘定格预计算",
+                replace_existing=True,
+            )
+            logger.info("✅ 常用策略收盘定格预计算已注册: 工作日 15:05")
+        except Exception as e:
+            logger.error(f"🚨 常用策略收盘定格预计算注册失败: {e}", exc_info=True)
+
         # ==================== ΔG 景气度数据季度刷新 ====================
         # 每月1日凌晨5:00从 Tushare fina_indicator 拉取全 A 股最近 8 个季度的财务指标，
         # 计算 ΔG（环比差值）用于戴维斯双杀象限判断。

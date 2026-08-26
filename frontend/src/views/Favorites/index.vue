@@ -120,12 +120,6 @@
             <router-link :to="`/stocks/${row.stock_code}`" class="stock-name">{{ row.stock_name }}</router-link>
           </template>
         </el-table-column>
-        <el-table-column prop="board" label="板块" min-width="100">
-          <template #default="{ row }">
-            {{ row.board || '-' }}
-          </template>
-        </el-table-column>
-
         <el-table-column prop="current_price" label="当前价格" min-width="100" sortable align="right">
           <template #default="{ row }">
             <span v-if="row.current_price !== null && row.current_price !== undefined">¥{{ fmtPrice(row.current_price) }}</span>
@@ -140,6 +134,18 @@
               :class="getChangeClass(row.change_percent)"
             >
               {{ fmtPct(row.change_percent) }}
+            </span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="return_pct" label="加入后收益率" min-width="120" sortable align="right">
+          <template #default="{ row }">
+            <span
+              v-if="row.return_pct !== null && row.return_pct !== undefined && Number.isFinite(row.return_pct)"
+              :class="getChangeClass(row.return_pct)"
+            >
+              {{ fmtPct(row.return_pct) }}
             </span>
             <span v-else>-</span>
           </template>
@@ -160,9 +166,9 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="added_at" label="添加时间" min-width="120">
+        <el-table-column prop="added_at" label="添加时间" min-width="170">
           <template #default="{ row }">
-            {{ formatDate(row.added_at) }}
+            {{ formatDateTime(row.added_at) }}
           </template>
         </el-table-column>
 
@@ -512,7 +518,7 @@ import { stockSyncApi } from '@/api/stockSync'
 import { normalizeMarketForAnalysis } from '@/utils/market'
 import { ApiClient } from '@/api/request'
 import { fmtPrice, fmtPct } from '@/utils/format'
-import { formatDate as formatDateDisplay } from '@/utils/datetime'
+import { formatDateTime } from '@/utils/datetime'
 
 import type { FavoriteItem } from '@/api/favorites'
 import { useAuthStore } from '@/stores/auth'
@@ -1218,8 +1224,6 @@ const getChangeClass = (changePercent: number) => {
   return ''
 }
 
-
-const formatDate = (dateStr: string) => formatDateDisplay(dateStr)
 
 // 生命周期
 onMounted(() => {

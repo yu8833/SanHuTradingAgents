@@ -22,6 +22,9 @@ export interface StrategyMeta {
   exit_signals: string[]
   source: string
   asset_types: string[]
+  // 买卖指导：人类可读的买入/卖出规则（由 entry/exit 信号转译）
+  buy_rules?: string[]
+  sell_rules?: string[]
 }
 
 export interface StrategyRunItem {
@@ -38,6 +41,9 @@ export interface StrategyRunItem {
   vol_ratio?: number
   score: number
   date: string
+  // 买卖指导：入选原因 + 卖出（离场）规则
+  reason?: string
+  sell_rules?: string[]
 }
 
 export interface StrategyRunResult {
@@ -48,6 +54,7 @@ export interface StrategyRunResult {
   items: StrategyRunItem[]
   elapsed_ms: number
   message?: string
+  decision_window?: boolean
 }
 
 export interface StrategyRunAllItem {
@@ -66,6 +73,8 @@ export interface StrategyRunAllResult {
   elapsed_ms: number
   computed_at?: string
   cached?: boolean
+  realtime?: boolean
+  decision_window?: boolean
 }
 
 // ===== 回测 =====

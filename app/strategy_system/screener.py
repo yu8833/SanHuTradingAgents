@@ -729,12 +729,17 @@ def run_strategy(
     candidates = candidates.sort_values("score", ascending=not descending)
 
     name_map = _stock_name_map(db)
+    # 为每只命中股构建人类可读的入选原因（复用信号描述逻辑）
+    entry_reasons = _describe_hits(
+        strategy, target, candidates["symbol"].astype(str).tolist(), "entry"
+    )
     items = []
     for _, row in candidates.iterrows():
+        sym = str(row["symbol"])
         items.append({
-            "symbol": row["symbol"],
-            "code": row["symbol"],
-            "name": name_map.get(str(row["symbol"]), ""),
+            "symbol": sym,
+            "code": sym,
+            "name": name_map.get(sym, ""),
             "close": _round(row.get("close")),
             "change_pct": _round(row.get("pct_chg")),
             "open": _round(row.get("open")),
@@ -745,6 +750,11 @@ def run_strategy(
             "vol_ratio": _round(row.get("vol_ratio_5d")),
             "score": round(float(row.get("score", 0)), 2),
             "date": as_of_date,
+            # 买卖指导：命中原因 + 对应策略的卖出（离场）规则
+            "reason": entry_reasons.get(sym, ""),
+            "sell_rules": strategy.get("sell_rules")
+            if strategy.get("sell_rules")
+            else [_SIGNAL_LABELS.get(c, c) for c in (strategy.get("exit_signals") or [])],
         })
 
     result = {
@@ -754,6 +764,7 @@ def run_strategy(
         "total": len(items),
         "items": items,
         "elapsed_ms": round((time.perf_counter() - t0) * 1000, 1),
+        "decision_window": in_close_decision_window(),
     }
     # 实时合成面板标记，供前端识别为盘中实时触发结果
     if is_intraday:
@@ -797,6 +808,31 @@ _SIGNAL_VALUE_COLS: dict[str, tuple[str, ...]] = {
     "signal_boll_breakout_upper": ("boll_upper",),
     "signal_boll_breakdown_lower": ("boll_lower",),
 }
+
+
+# 15:00-15:30：以当日收盘价仍可成交、且数据已定格的可执行决策窗口（北京时区）。
+_CLOSE_DECISION_WINDOW_START = "15:00"
+_CLOSE_DECISION_WINDOW_END = "15:30"
+
+
+def in_close_decision_window() -> bool:
+    """判断当前是否处于收盘定格可执行窗口（交易日 15:00-15:30，北京时间）。
+
+    该窗口内行情数据基本不再变化、且能以当日收盘价成交，是个人可同时兑现
+    「准确 + 可执行」的黄金时段。仅在工作日判定；严格判定交易日依赖日线数据，
+    这里用 workday 近似（非交易日即便命中也无实际意义，且窗口极短，可忽略）。
+    """
+    try:
+        now = now_tz()
+    except Exception:
+        return False
+    if now.weekday() >= 5:  # 周六/周日
+        return False
+    try:
+        cur = now.strftime("%H:%M")
+        return _CLOSE_DECISION_WINDOW_START <= cur < _CLOSE_DECISION_WINDOW_END
+    except Exception:
+        return False
 
 
 def _fmt2(v) -> str:
@@ -1225,11 +1261,16 @@ def run_all_strategies(
                 sub["score"] = scores[cand_idx]
                 # 返回全部命中，保证行数与命中数一致
                 sub = sub.sort_values("score", ascending=not strategy.get("descending", True))
+                entry_reasons = _describe_hits(
+                    strategy, target, sub["symbol"].astype(str).tolist(), "entry"
+                )
+                sell_rules = [_SIGNAL_LABELS.get(c, c) for c in (strategy.get("exit_signals") or [])]
                 for _, row in sub.iterrows():
+                    sym = str(row["symbol"])
                     top_items.append({
-                        "symbol": row["symbol"],
-                        "code": row["symbol"],
-                        "name": name_map.get(str(row["symbol"]), ""),
+                        "symbol": sym,
+                        "code": sym,
+                        "name": name_map.get(sym, ""),
                         "close": _round(row.get("close")),
                         "change_pct": _round(row.get("pct_chg")),
                         "open": _round(row.get("open")),
@@ -1240,6 +1281,8 @@ def run_all_strategies(
                         "vol_ratio": _round(row.get("vol_ratio_5d")),
                         "score": round(float(row.get("score", 0)), 2),
                         "date": as_of_date,
+                        "reason": entry_reasons.get(sym, ""),
+                        "sell_rules": sell_rules,
                     })
             strategies.append({
                 "id": sid,
@@ -1265,6 +1308,7 @@ def run_all_strategies(
         "as_of": as_of_date,
         "strategies": strategies,
         "elapsed_ms": round((time.perf_counter() - t0) * 1000, 1),
+        "decision_window": in_close_decision_window(),
     }
     result["realtime"] = is_intraday
     # 实时结果逐次多变，不做缓存；仅 EOD 结果按 (as_of, pool) 持久化
@@ -1307,4 +1351,11 @@ def _empty_result(as_of, strategy_id, msg):
 
 
 def list_strategies() -> list[dict]:
-    return get_strategies()
+    """返回策略元信息，并附带人类可读的买卖规则（指导用户何时买/何时卖）。"""
+    metas = []
+    for m in get_strategies():
+        m = dict(m)
+        m["buy_rules"] = [_SIGNAL_LABELS.get(c, c) for c in (m.get("entry_signals") or [])]
+        m["sell_rules"] = [_SIGNAL_LABELS.get(c, c) for c in (m.get("exit_signals") or [])]
+        metas.append(m)
+    return metas
