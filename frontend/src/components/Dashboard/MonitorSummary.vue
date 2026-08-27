@@ -37,9 +37,16 @@
         <div v-else class="summary-list">
           <div v-for="a in recentAlerts" :key="a.ts" class="summary-item">
             <span :class="['sev-dot', a.severity || 'info']" />
-            <span :class="['summary-symbol', (a.change_pct ?? 0) >= 0 ? 'up' : 'down']">
-              {{ a.symbol || '—' }}
-            </span>
+            <div class="summary-link">
+              <router-link
+                v-if="a.symbol"
+                :to="`/stocks/${a.symbol}`"
+                :class="['summary-symbol', (a.change_pct ?? 0) >= 0 ? 'up' : 'down']"
+              >{{ a.symbol }}</router-link>
+              <span v-else :class="['summary-symbol', (a.change_pct ?? 0) >= 0 ? 'up' : 'down']">{{ a.symbol || '—' }}</span>
+              <router-link v-if="a.name && a.symbol" :to="`/stocks/${a.symbol}`" class="summary-name">{{ a.name }}</router-link>
+              <span v-else-if="a.name" class="summary-name">{{ a.name }}</span>
+            </div>
             <span class="summary-msg">{{ a.message }}</span>
             <span class="summary-time">{{ formatTs(a.ts) }}</span>
           </div>
@@ -210,12 +217,34 @@ onBeforeUnmount(() => {
         &.critical { background: var(--el-color-danger); }
       }
 
+      .summary-link {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+      }
+
       .summary-symbol {
         font-family: monospace;
         font-weight: 600;
+        text-decoration: none;
 
         &.up { color: var(--el-color-danger); }
         &.down { color: var(--el-color-success); }
+
+        &:hover { text-decoration: underline; }
+      }
+
+      .summary-name {
+        font-size: 12px;
+        color: var(--el-text-color-secondary);
+        text-decoration: none;
+        max-width: 80px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+
+        &:hover { color: var(--el-color-primary); text-decoration: underline; }
       }
 
       .summary-msg {

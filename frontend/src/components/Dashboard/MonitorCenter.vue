@@ -153,8 +153,9 @@
                     <el-tag size="small" effect="plain" type="info">{{ statusLabel(o.status) }}</el-tag>
                   </div>
                   <div class="tbs-meta">
+                    <span>时间 {{ formatDateTime(o.created_at, { hour: '2-digit', minute: '2-digit' }) }}</span>
                     <span>参考价 {{ o.reference_price }}</span>
-                    <span>建议仓位 {{ pctLabel(o.position_pct) }}</span>
+                    <span>建议仓位 {{ pctLabel(o.position_pct, o.direction) }}</span>
                     <span>{{ o.rule_name }}</span>
                   </div>
                   <div v-if="o.reason" class="tbs-reason">{{ o.reason }}</div>
@@ -503,7 +504,7 @@
           <el-tag size="small" effect="plain" type="info" style="margin-left: 6px">{{ execOrder.rule_name }}</el-tag>
         </div>
         <div style="font-size: 12px; color: #909399; margin-bottom: 14px;">
-          参考价 {{ execOrder.reference_price }} · 建议仓位 {{ pctLabel(execOrder.position_pct) }}
+          参考价 {{ execOrder.reference_price }} · 建议仓位 {{ pctLabel(execOrder.position_pct, execOrder.direction) }}
         </div>
         <el-form label-width="80px">
           <el-form-item label="买入数量">
@@ -536,7 +537,7 @@ import { paperApi } from '@/api/paper'
 import { favoritesApi } from '@/api/favorites'
 import { strategyApi } from '@/api/strategy'
 import { fmtPct, fmtPrice } from '@/utils/format'
-import { todayStartEpoch } from '@/utils/datetime'
+import { todayStartEpoch, formatDateTime } from '@/utils/datetime'
 
 // ── 状态 ────────────────────────────────────────────────
 const checking = ref(false)
@@ -668,10 +669,11 @@ const goOrders = () => {
 const statusLabel = (status: string): string =>
   ({ pending: '待确认', executed: '已执行', cancelled: '已取消', dismissed: '已忽略' })[status] || status
 
-const pctLabel = (pct?: number): string => {
+const pctLabel = (pct?: number, direction?: string): string => {
   if (pct == null) return '—'
   const v = Math.round((pct || 0) * 100)
-  return pct >= 1 ? '清仓' : `${v}%`
+  if (v >= 100) return direction === 'buy' ? '满仓' : '清仓'
+  return `${v}%`
 }
 
 const executeOrder = async (o: TbsOrder) => {
