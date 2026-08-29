@@ -5,13 +5,12 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
 
 from fastapi import APIRouter, HTTPException
 from pymongo import ASCENDING
 
 from app.core.database import get_mongo_db
-from app.utils.timezone import get_tz, now_tz, to_display_iso
+from app.utils.timezone import now_tz, to_display_iso
 
 logger = logging.getLogger(__name__)
 
@@ -84,31 +83,36 @@ async def _check_historical_data_status() -> dict:
         coverage_count = coverage[0]["count"] if coverage else 0
 
         # 判断数据新鲜度
+        # 🔥 bug：原逻辑用「自然日差」，周末/节假日会把最新数据误报为"过期 N 天"。
+        # 改为「交易日差」（跳过周末/节假日），与 /api/screening/data-freshness 口径一致。
         now = now_tz()
         if latest_date:
             try:
-                latest_dt = None
-                for fmt in ("%Y%m%d", "%Y-%m-%d"):
-                    try:
-                        # 解析出的日期为 naive，需挂上配置时区后再与 now_tz() 相减，避免偏移/异常
-                        latest_dt = datetime.strptime(str(latest_date), fmt).replace(tzinfo=get_tz())
-                        break
-                    except ValueError:
-                        continue
-                if latest_dt:
-                    days_diff = (now - latest_dt).days
-                    if days_diff <= 1:
-                        status = "healthy"
-                        message = f"数据最新 ({latest_date})"
-                    elif days_diff <= 7:
-                        status = "stale"
-                        message = f"数据已过期 {days_diff} 天"
-                    else:
-                        status = "critical"
-                        message = f"数据严重过期 {days_diff} 天"
+                from app.utils.trading_time import (
+                    calc_stale_days,
+                    get_latest_trade_day,
+                    is_trading_day,
+                )
+                stale_days = calc_stale_days(str(latest_date))
+                latest_date_str = str(latest_date)
+                is_today_trading_day = is_trading_day(now)
+                if is_today_trading_day and now.hour < 16:
+                    # 盘中：日K更新到上一个交易日即为最新（今天日K尚未发布）
+                    last_trade_day = get_latest_trade_day(now)
+                    is_fresh = latest_date_str.replace("-", "") >= last_trade_day.strftime("%Y%m%d")
                 else:
-                    status = "unknown"
-                    message = "日期格式异常"
+                    # 收盘后/非交易日：落后 0 个交易日才算最新
+                    is_fresh = stale_days <= 0
+
+                if is_fresh:
+                    status = "healthy"
+                    message = f"数据最新 ({latest_date})"
+                elif stale_days <= 7:
+                    status = "stale"
+                    message = f"数据已过期 {stale_days} 天"
+                else:
+                    status = "critical"
+                    message = f"数据严重过期 {stale_days} 天"
             except Exception:
                 status = "unknown"
                 message = "日期解析失败"
