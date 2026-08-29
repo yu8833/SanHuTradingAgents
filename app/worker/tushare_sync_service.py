@@ -1145,6 +1145,17 @@ class TushareSyncService:
         """
         logger.info("🔄 开始同步分红送配数据...")
 
+        # 自愈保障：确保 (code, ann_date) 唯一索引存在，否则每次 upsert 全表扫描导致 MongoDB CPU 打满
+        try:
+            await self.db.stock_dividend.create_index(
+                [("code", 1), ("ann_date", 1)],
+                unique=True,
+                background=True,
+                name="uniq_code_ann_date",
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ stock_dividend 索引创建/校验失败（继续同步）: {e}")
+
         stats = {
             "total_processed": 0,
             "success_count": 0,

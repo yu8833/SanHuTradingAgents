@@ -40,6 +40,7 @@ db.createCollection('stock_basic_info');
 db.createCollection('stock_financial_data');
 db.createCollection('market_quotes');
 db.createCollection('stock_news');
+db.createCollection('stock_dividend');
 
 // 分析相关
 db.createCollection('analysis_tasks');
@@ -92,6 +93,9 @@ db.stock_basic_info.createIndex({ "updated_at": 1 });
 // 股票财务数据索引
 db.stock_financial_data.createIndex({ "code": 1, "report_date": 1 });
 db.stock_financial_data.createIndex({ "updated_at": 1 });
+
+// 分红送配索引（Tushare 同步按 code+ann_date 高频 upsert，缺失时全表扫描导致 MongoDB CPU 打满）
+db.stock_dividend.createIndex({ "code": 1, "ann_date": 1 }, { unique: true });
 
 // 实时行情索引
 db.market_quotes.createIndex({ "code": 1 }, { unique: true });
