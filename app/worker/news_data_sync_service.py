@@ -2,6 +2,7 @@
 新闻数据同步服务
 支持多数据源新闻数据同步和情绪分析
 """
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -269,8 +270,9 @@ class NewsDataSyncService:
         try:
             aggregator = await self._get_realtime_aggregator()
             
-            # 获取实时新闻
-            news_items = aggregator.get_realtime_stock_news(
+            # 获取实时新闻（内部为同步网络请求，放入线程池避免阻塞事件循环）
+            news_items = await asyncio.to_thread(
+                aggregator.get_realtime_stock_news,
                 symbol, hours_back, max_news
             )
             
@@ -492,8 +494,9 @@ class NewsDataSyncService:
                 try:
                     aggregator = await self._get_realtime_aggregator()
 
-                    # 获取市场新闻（不指定股票代码）
-                    news_items = aggregator.get_realtime_stock_news(
+                    # 获取市场新闻（不指定股票代码；内部为同步网络请求，放入线程池避免阻塞事件循环）
+                    news_items = await asyncio.to_thread(
+                        aggregator.get_realtime_stock_news,
                         None, hours_back, max_news_per_source
                     )
 
