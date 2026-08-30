@@ -2,11 +2,10 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
+from app.services.basics_sync.utils import get_pro
 from datetime import datetime
 
-provider = get_tushare_provider()
-api = provider.api
+api = get_pro()
 
 if api is None:
     print("❌ Tushare API 不可用")

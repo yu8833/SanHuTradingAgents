@@ -28,7 +28,7 @@ async def main():
     
     provider = get_akshare_provider()
     logger.info(f"  ✅ 提供器初始化完成")
-    logger.info(f"  连接状态: {provider.connected}")
+    logger.info(f"  可用状态: {provider.is_available()}")
     
     # 测试连接
     logger.info("\n【步骤2】测试连接")

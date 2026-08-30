@@ -8,13 +8,12 @@
 import sys
 import os
 import time
-from datetime import datetime
 
 # 添加项目根目录到Python路径
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # 导入需要测试的模块
-from tradingagents.dataflows.realtime_news_utils import get_realtime_stock_news
+from tradingagents.dataflows.news.realtime_news import RealtimeNewsAggregator
 from tradingagents.utils.logging_manager import get_logger
 
 # 获取日志记录器
@@ -28,12 +27,12 @@ def test_news_for_stock(ticker):
         ticker: 股票代码
     """
     logger.info(f"开始获取{ticker}的新闻...")
-    curr_date = datetime.now().strftime("%Y-%m-%d")
     
     try:
         # 获取新闻
         start_time = time.time()
-        news = get_realtime_stock_news(ticker, curr_date)
+        aggregator = RealtimeNewsAggregator()
+        items = aggregator.get_realtime_stock_news(ticker, hours_back=24, max_news=20)
         end_time = time.time()
         
         # 打印结果
@@ -41,7 +40,12 @@ def test_news_for_stock(ticker):
         print("\n" + "=" * 80)
         print(f"股票: {ticker}")
         print("=" * 80)
-        print(news)
+        if not items:
+            print("(无新闻)")
+        else:
+            for i, it in enumerate(items, 1):
+                pub = it.publish_time.strftime("%Y-%m-%d %H:%M:%S") if it.publish_time else "未知"
+                print(f"{i}. [{pub}] {it.title}")
         print("=" * 80 + "\n")
         
         return True

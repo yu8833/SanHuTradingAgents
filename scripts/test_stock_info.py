@@ -2,6 +2,8 @@
 """
 股票基本信息获取测试脚本
 专门测试股票名称、行业等基本信息的获取功能
+
+已迁移：从已删除的 tradingagents.dataflows.tushare_utils 迁移到直连 ts.pro_api()。
 """
 
 import sys
@@ -10,168 +12,194 @@ import os
 # 添加项目根目录到Python路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import tushare as ts
+
+
+def get_pro():
+    """获取 Tushare pro API 实例（token 来自环境变量或 provider）"""
+    try:
+        from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
+        token = getattr(get_tushare_provider(), "token", None) or ""
+    except Exception:
+        token = ""
+    if not token:
+        token = os.getenv("TUSHARE_TOKEN", "").strip().strip('"').strip("'")
+    if not token:
+        return None
+    ts.set_token(token)
+    return ts.pro_api()
+
+
+def get_pro_or_die():
+    """获取 pro 实例，未连接时打印并返回 None"""
+    pro = get_pro()
+    if pro is None:
+        print("❌ Tushare未连接")
+    return pro
+
+
+def to_ts_code(symbol: str) -> str:
+    """将 A股 6 位代码转换为 ts_code（6/9开头→SH，0/1/2/3开头→SZ，4/8开头→BJ）"""
+    symbol = str(symbol).strip()
+    if "." in symbol:  # 已是 ts_code 格式（如 000001.SZ）时直接返回
+        return symbol
+    if len(symbol) != 6 or not symbol.isdigit():
+        return symbol
+    if symbol.startswith(("6", "9")):
+        suffix = "SH"
+    elif symbol.startswith(("4", "8")):
+        suffix = "BJ"
+    else:
+        suffix = "SZ"
+    return f"{symbol}.{suffix}"
+
+
 def test_stock_info_retrieval():
     """测试股票基本信息获取功能"""
     print("🔍 测试股票基本信息获取功能")
     print("=" * 50)
-    
+
     # 测试股票代码
     test_codes = ["603985", "000001", "300033"]
-    
+
     for code in test_codes:
         print(f"\n📊 测试股票代码: {code}")
         print("-" * 30)
-        
+
         try:
-            # 1. 测试Tushare股票信息获取
-            print(f"🔍 步骤1: 测试Tushare股票信息获取...")
-            from tradingagents.dataflows.interface import get_china_stock_info_tushare
-            tushare_info = get_china_stock_info_tushare(code)
-            print(f"✅ Tushare信息: {tushare_info}")
-            
+            # 1. 测试a_stock基础信息获取（Tushare/东财解析）
+            print(f"🔍 步骤1: 测试a_stock基础信息获取...")
+            from tradingagents.dataflows.a_stock import resolve_ticker
+            tushare_info = resolve_ticker(code)
+            print(f"✅ a_stock信息: {tushare_info}")
+
             # 2. 测试统一股票信息获取
             print(f"🔍 步骤2: 测试统一股票信息获取...")
             from tradingagents.dataflows.interface import get_china_stock_info_unified
             unified_info = get_china_stock_info_unified(code)
             print(f"✅ 统一信息: {unified_info}")
-            
-            # 3. 测试DataSourceManager直接调用
+
+            # 3. 测试DataSourceManager兼容层直接调用
             print(f"🔍 步骤3: 测试DataSourceManager...")
-            from tradingagents.dataflows.data_source_manager import get_china_stock_info_unified as manager_info
-            manager_result = manager_info(code)
+            from tradingagents.dataflows.data_source_manager import get_data_source_manager
+            manager = get_data_source_manager()
+            manager_result = manager.get_stock_basic_info(code)
             print(f"✅ Manager结果: {manager_result}")
-            
+
             # 4. 测试TushareAdapter直接调用
             print(f"🔍 步骤4: 测试TushareAdapter...")
-            from tradingagents.dataflows.tushare_adapter import get_tushare_adapter
-            adapter = get_tushare_adapter()
-            adapter_result = adapter.get_stock_info(code)
+            from app.services.data_sources.tushare_adapter import TushareAdapter
+            adapter = TushareAdapter()
+            adapter_result = {"name": adapter.name, "available": adapter.is_available()}
             print(f"✅ Adapter结果: {adapter_result}")
-            
+
             # 5. 测试TushareProvider直接调用
             print(f"🔍 步骤5: 测试TushareProvider...")
-            from tradingagents.dataflows.tushare_utils import TushareProvider
-            provider = TushareProvider()
-            provider_result = provider.get_stock_info(code)
+            from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
+            provider = get_tushare_provider()
+            provider_result = provider.get_company_info(code)
             print(f"✅ Provider结果: {provider_result}")
-            
+
         except Exception as e:
             print(f"❌ 测试{code}失败: {e}")
             import traceback
             traceback.print_exc()
 
+
 def test_tushare_stock_basic_api():
     """直接测试Tushare的stock_basic API"""
     print("\n🔍 直接测试Tushare stock_basic API")
     print("=" * 50)
-    
-    try:
-        from tradingagents.dataflows.tushare_utils import get_tushare_provider
-        
-        provider = get_tushare_provider()
-        
-        if not provider.connected:
-            print("❌ Tushare未连接")
-            return
-        
-        # 测试stock_basic API
-        test_codes = ["603985", "000001", "300033"]
-        
-        for code in test_codes:
-            print(f"\n📊 测试股票代码: {code}")
-            
-            # 转换为Tushare格式
-            ts_code = provider._normalize_symbol(code)
-            print(f"🔍 转换后的代码: {ts_code}")
-            
-            # 直接调用API
-            try:
-                basic_info = provider.api.stock_basic(
-                    ts_code=ts_code,
-                    fields='ts_code,symbol,name,area,industry,market,list_date'
-                )
-                
-                print(f"✅ API返回数据形状: {basic_info.shape if basic_info is not None else 'None'}")
-                
-                if basic_info is not None and not basic_info.empty:
-                    print(f"📊 返回数据:")
-                    print(basic_info.to_dict('records'))
-                else:
-                    print("❌ API返回空数据")
-                    
-            except Exception as e:
-                print(f"❌ API调用失败: {e}")
-                
-    except Exception as e:
-        print(f"❌ 测试失败: {e}")
-        import traceback
-        traceback.print_exc()
+
+    pro = get_pro_or_die()
+    if pro is None:
+        return
+
+    # 测试stock_basic API
+    test_codes = ["603985", "000001", "300033"]
+
+    for code in test_codes:
+        print(f"\n📊 测试股票代码: {code}")
+
+        # 转换为Tushare格式
+        ts_code = to_ts_code(code)
+        print(f"🔍 转换后的代码: {ts_code}")
+
+        # 直接调用API
+        try:
+            basic_info = pro.stock_basic(
+                ts_code=ts_code,
+                fields='ts_code,symbol,name,area,industry,market,list_date'
+            )
+
+            print(f"✅ API返回数据形状: {basic_info.shape if basic_info is not None else 'None'}")
+
+            if basic_info is not None and not basic_info.empty:
+                print(f"📊 返回数据:")
+                print(basic_info.to_dict('records'))
+            else:
+                print("❌ API返回空数据")
+
+        except Exception as e:
+            print(f"❌ API调用失败: {e}")
+
 
 def test_stock_basic_all():
     """测试获取所有股票基本信息"""
     print("\n🔍 测试获取所有股票基本信息")
     print("=" * 50)
-    
-    try:
-        from tradingagents.dataflows.tushare_utils import get_tushare_provider
-        
-        provider = get_tushare_provider()
-        
-        if not provider.connected:
-            print("❌ Tushare未连接")
-            return
-        
-        # 获取所有A股基本信息
-        print("🔍 获取所有A股基本信息...")
-        all_stocks = provider.api.stock_basic(
-            exchange='',
-            list_status='L',
-            fields='ts_code,symbol,name,area,industry,market,list_date'
-        )
-        
-        print(f"✅ 获取到{len(all_stocks)}只股票")
-        
-        # 查找测试股票
-        test_codes = ["603985", "000001", "300033"]
-        
-        for code in test_codes:
-            print(f"\n📊 查找股票: {code}")
-            
-            # 在所有股票中查找
-            found_stocks = all_stocks[all_stocks['symbol'] == code]
-            
-            if not found_stocks.empty:
-                stock_info = found_stocks.iloc[0]
-                print(f"✅ 找到股票:")
-                print(f"   代码: {stock_info['symbol']}")
-                print(f"   名称: {stock_info['name']}")
-                print(f"   行业: {stock_info['industry']}")
-                print(f"   地区: {stock_info['area']}")
-                print(f"   市场: {stock_info['market']}")
-                print(f"   上市日期: {stock_info['list_date']}")
-            else:
-                print(f"❌ 未找到股票: {code}")
-                
-    except Exception as e:
-        print(f"❌ 测试失败: {e}")
-        import traceback
-        traceback.print_exc()
+
+    pro = get_pro_or_die()
+    if pro is None:
+        return
+
+    # 获取所有A股基本信息
+    print("🔍 获取所有A股基本信息...")
+    all_stocks = pro.stock_basic(
+        exchange='',
+        list_status='L',
+        fields='ts_code,symbol,name,area,industry,market,list_date'
+    )
+
+    print(f"✅ 获取到{len(all_stocks)}只股票")
+
+    # 查找测试股票
+    test_codes = ["603985", "000001", "300033"]
+
+    for code in test_codes:
+        print(f"\n📊 查找股票: {code}")
+
+        # 在所有股票中查找
+        found_stocks = all_stocks[all_stocks['symbol'] == code]
+
+        if not found_stocks.empty:
+            stock_info = found_stocks.iloc[0]
+            print(f"✅ 找到股票:")
+            print(f"   代码: {stock_info['symbol']}")
+            print(f"   名称: {stock_info['name']}")
+            print(f"   行业: {stock_info['industry']}")
+            print(f"   地区: {stock_info['area']}")
+            print(f"   市场: {stock_info['market']}")
+            print(f"   上市日期: {stock_info['list_date']}")
+        else:
+            print(f"❌ 未找到股票: {code}")
+
 
 if __name__ == "__main__":
     print("🧪 股票基本信息获取测试")
     print("=" * 80)
     print("📝 此测试专门检查股票名称、行业等基本信息的获取")
     print("=" * 80)
-    
+
     # 1. 测试股票信息获取链路
     test_stock_info_retrieval()
-    
+
     # 2. 直接测试Tushare API
     test_tushare_stock_basic_api()
-    
+
     # 3. 测试获取所有股票信息
     test_stock_basic_all()
-    
+
     print("\n📋 测试总结")
     print("=" * 60)
     print("✅ 股票基本信息测试完成")

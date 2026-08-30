@@ -16,67 +16,47 @@ def test_enhanced_logging():
     """测试增强的日志功能"""
     print("🔍 测试增强的Tushare日志功能")
     print("=" * 80)
-    
+
     try:
-        from tradingagents.dataflows.data_source_manager import DataSourceManager
-        
-        manager = DataSourceManager()
-        
+        from tradingagents.dataflows.a_stock import resolve_ticker
+        from tradingagents.dataflows.interface import get_china_stock_info_unified
+
         # 测试用例1: 正常股票代码
         print("\n📊 测试用例1: 正常股票代码 (000001)")
         print("-" * 60)
-        
+
         symbol = "000001"
-        start_date = "2025-01-10"
-        end_date = "2025-01-17"
-        
-        result = manager.get_stock_data(symbol, start_date, end_date)
-        
-        print(f"结果长度: {len(result) if result else 0}")
-        print(f"结果预览: {result[:100] if result else 'None'}")
-        
+
+        result = resolve_ticker(symbol)
+        print(f"结果: {result}")
+        info = get_china_stock_info_unified(symbol)
+        print(f"统一信息: {info[:200] if info else 'None'}")
+
         # 测试用例2: 可能有问题的股票代码
         print("\n📊 测试用例2: 创业板股票 (300033)")
         print("-" * 60)
-        
+
         symbol = "300033"
-        start_date = "2025-01-10"
-        end_date = "2025-01-17"
-        
-        result = manager.get_stock_data(symbol, start_date, end_date)
-        
-        print(f"结果长度: {len(result) if result else 0}")
-        print(f"结果预览: {result[:100] if result else 'None'}")
-        
+
+        result = resolve_ticker(symbol)
+        print(f"结果: {result}")
+        info = get_china_stock_info_unified(symbol)
+        print(f"统一信息: {info[:200] if info else 'None'}")
+
         # 测试用例3: 可能不存在的股票代码
         print("\n📊 测试用例3: 可能不存在的股票代码 (999999)")
         print("-" * 60)
-        
+
         symbol = "999999"
-        start_date = "2025-01-10"
-        end_date = "2025-01-17"
-        
-        result = manager.get_stock_data(symbol, start_date, end_date)
-        
-        print(f"结果长度: {len(result) if result else 0}")
-        print(f"结果预览: {result[:100] if result else 'None'}")
-        
-        # 测试用例4: 未来日期范围
-        print("\n📊 测试用例4: 未来日期范围")
-        print("-" * 60)
-        
-        symbol = "000001"
-        start_date = "2025-12-01"
-        end_date = "2025-12-31"
-        
-        result = manager.get_stock_data(symbol, start_date, end_date)
-        
-        print(f"结果长度: {len(result) if result else 0}")
-        print(f"结果预览: {result[:100] if result else 'None'}")
-        
+
+        result = resolve_ticker(symbol)
+        print(f"结果: {result}")
+        info = get_china_stock_info_unified(symbol)
+        print(f"统一信息: {info[:200] if info else 'None'}")
+
         print("\n✅ 增强日志测试完成")
         print("📋 请查看日志文件以获取详细的调试信息")
-        
+
     except Exception as e:
         print(f"❌ 测试失败: {e}")
         import traceback
@@ -86,31 +66,27 @@ def test_direct_tushare_provider():
     """直接测试Tushare Provider"""
     print("\n🔍 直接测试Tushare Provider")
     print("=" * 80)
-    
+
     try:
-        from tradingagents.dataflows.tushare_utils import get_tushare_provider
-        
-        provider = get_tushare_provider()
-        
-        if not provider.connected:
+        from app.services.basics_sync.utils import get_pro
+
+        provider = get_pro()
+
+        if provider is None:
             print("❌ Tushare未连接")
             return
-        
+
         # 测试直接调用
-        symbol = "300033"
-        start_date = "2025-01-10"
-        end_date = "2025-01-17"
-        
-        print(f"📊 直接调用Provider: {symbol}")
-        data = provider.get_stock_daily(symbol, start_date, end_date)
-        
+        print(f"📊 直接调用Provider: 300033")
+        data = provider.daily(ts_code="300033.SZ", start_date="20250110", end_date="20250117")
+
         if data is not None and not data.empty:
             print(f"✅ 直接调用成功: {len(data)}条数据")
             print(f"📊 数据列: {list(data.columns)}")
             print(f"📊 日期范围: {data['trade_date'].min()} 到 {data['trade_date'].max()}")
         else:
             print(f"❌ 直接调用返回空数据")
-            
+
     except Exception as e:
         print(f"❌ 直接测试失败: {e}")
         import traceback
@@ -120,30 +96,26 @@ def test_adapter_layer():
     """测试适配器层"""
     print("\n🔍 测试适配器层")
     print("=" * 80)
-    
+
     try:
-        from tradingagents.dataflows.tushare_adapter import get_tushare_adapter
-        
-        adapter = get_tushare_adapter()
-        
-        if not adapter.provider or not adapter.provider.connected:
+        from app.services.data_sources.tushare_adapter import TushareAdapter
+
+        adapter = TushareAdapter()
+
+        if not adapter.is_available():
             print("❌ 适配器未连接")
             return
-        
+
         # 测试适配器调用
-        symbol = "300033"
-        start_date = "2025-01-10"
-        end_date = "2025-01-17"
-        
-        print(f"📊 调用适配器: {symbol}")
-        data = adapter.get_stock_data(symbol, start_date, end_date)
-        
-        if data is not None and not data.empty:
-            print(f"✅ 适配器调用成功: {len(data)}条数据")
-            print(f"📊 数据列: {list(data.columns)}")
+        print(f"📊 调用适配器: 300033")
+        data = adapter.get_kline("300033", period="day", limit=10)
+
+        if data:
+            print(f"✅ 适配器调用成功: {len(data)}条K线数据")
+            print(f"📊 数据列: {list(data[0].keys()) if data else '无'}")
         else:
             print(f"❌ 适配器调用返回空数据")
-            
+
     except Exception as e:
         print(f"❌ 适配器测试失败: {e}")
         import traceback

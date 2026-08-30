@@ -9,6 +9,25 @@ from app.utils.timezone import now_tz
 
 from datetime import datetime, timedelta
 
+import os
+
+
+def get_pro():
+    """获取 Tushare pro API 实例（token 来自环境变量或 provider）"""
+    import tushare as ts
+
+    try:
+        from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
+        token = getattr(get_tushare_provider(), "token", None) or ""
+    except Exception:
+        token = ""
+    if not token:
+        token = os.getenv("TUSHARE_TOKEN", "").strip().strip('"').strip("'")
+    if not token:
+        return None
+    ts.set_token(token)
+    return ts.pro_api()
+
 
 def fetch_stock_basic_df():
     """
@@ -18,10 +37,8 @@ def fetch_stock_basic_df():
     注意：这是一个同步函数，会等待 Tushare 连接完成。
     """
     import logging
-    import time
 
     from app.core.config import settings
-    from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
 
     logger = logging.getLogger(__name__)
 
@@ -34,35 +51,23 @@ def fetch_stock_basic_df():
             "Set TUSHARE_ENABLED=true in .env or use MultiSourceBasicsSyncService."
         )
 
-    provider = get_tushare_provider()
-
-    # 等待连接完成（最多等待 5 秒）
-    max_wait_seconds = 5
-    wait_interval = 0.1
-    elapsed = 0.0
-
-    logger.info("⏳ 等待 Tushare 连接...")
-    while not getattr(provider, "connected", False) and elapsed < max_wait_seconds:
-        time.sleep(wait_interval)
-        elapsed += wait_interval
-
     # 检查连接状态和API可用性
-    if not getattr(provider, "connected", False) or provider.api is None:
-        logger.error(f"❌ Tushare 连接失败（等待 {max_wait_seconds}s 后超时）")
+    pro = get_pro()
+    if pro is None:
+        logger.error("❌ Tushare 连接失败（未获取到 TUSHARE_TOKEN）")
         logger.error("💡 请检查：")
         logger.error("   1. .env 文件中配置了有效的 TUSHARE_TOKEN")
         logger.error("   2. Tushare Token 未过期且有足够的积分")
         logger.error("   3. 网络连接正常")
         raise RuntimeError(
-            f"Tushare not connected after waiting {max_wait_seconds}s. "
-            "Check TUSHARE_TOKEN in .env and ensure it's valid."
+            "Tushare not connected. Check TUSHARE_TOKEN in .env and ensure it's valid."
         )
 
     logger.info("✅ Tushare 已连接，开始获取股票列表...")
 
     # 直接调用 Tushare API 获取 DataFrame
     try:
-        df = provider.api.stock_basic(
+        df = pro.stock_basic(
             list_status='L',
             fields='ts_code,symbol,name,area,industry,market,exchange,list_date,is_hs'
         )
@@ -98,10 +103,7 @@ def find_latest_trade_date() -> str:
     - 从今天起回溯最多 5 天；
     - 如都不可用，回退为昨天日期。
     """
-    from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
-
-    provider = get_tushare_provider()
-    api = provider.api
+    api = get_pro()
     if api is None:
         raise RuntimeError("Tushare API unavailable")
 
@@ -122,10 +124,7 @@ def fetch_daily_basic_mv_map(trade_date: str) -> dict[str, dict[str, float]]:
     根据交易日获取日度基础指标映射。
     覆盖字段：total_mv/circ_mv/pe/pb/ps/turnover_rate/volume_ratio/pe_ttm/pb_mrq/ps_ttm
     """
-    from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
-
-    provider = get_tushare_provider()
-    api = provider.api
+    api = get_pro()
     if api is None:
         raise RuntimeError("Tushare API unavailable")
 
@@ -174,10 +173,7 @@ def fetch_latest_roe_map() -> dict[str, dict[str, float]]:
     """
     from datetime import datetime
 
-    from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
-
-    provider = get_tushare_provider()
-    api = provider.api
+    api = get_pro()
     if api is None:
         raise RuntimeError("Tushare API unavailable")
 

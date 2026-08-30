@@ -33,7 +33,7 @@ async def main():
     from tradingagents.dataflows.providers.china.akshare import get_akshare_provider
     
     provider = get_akshare_provider()
-    logger.info(f"  提供器连接状态: {provider.connected}")
+    logger.info(f"  提供器可用状态: {provider.is_available()}")
     
     # 3. 再次检查 requests 状态
     logger.info("\n【步骤3】检查 requests 状态（初始化后）")
