@@ -1957,6 +1957,35 @@ class SimpleAnalysisService:
         if result:
             logger.info(f"✅ 找到任务: {task_id} - 状态: {result.get('status')}")
 
+            # 🔧 跨进程一致性修复：独立 Worker 进程在它自己的内存管理器里写最终状态，
+            # backend 进程内存仍停留在创建时的 pending/processing。若内存状态非终态而
+            # MongoDB 已是终态（completed/failed/cancelled），用 MongoDB 终态覆盖陈旧内存状态。
+            try:
+                mongo_task = await get_mongo_db()["analysis_tasks"].find_one(
+                    {"task_id": task_id}, {"status": 1, "progress": 1}
+                )
+                mongo_status = mongo_task.get("status") if mongo_task else None
+                mem_status = result.get("status")
+                terminal_statuses = {"completed", "failed", "cancelled"}
+                if mongo_status in terminal_statuses and (mem_status not in terminal_statuses or mem_status != mongo_status):
+                    logger.info(
+                        f"🔄 用 MongoDB 终态覆盖陈旧内存状态: {mem_status} -> {mongo_status} (Worker 独立进程执行)"
+                    )
+                    result["status"] = mongo_status
+                    if mongo_status == "completed":
+                        result["progress"] = mongo_task.get("progress", 100)
+                        result["current_step"] = "completed"
+                        result["message"] = "分析完成"
+                    elif mongo_status == "failed":
+                        result["progress"] = mongo_task.get("progress", 0)
+                        result["current_step"] = "failed"
+                        result["message"] = "分析失败"
+                    else:  # cancelled
+                        result["progress"] = mongo_task.get("progress", 0)
+                        result["current_step"] = "cancelled"
+            except Exception as mongo_sync_err:
+                logger.warning(f"⚠️ MongoDB终态协调跳过(忽略): {mongo_sync_err}")
+
             # 🔍 调试：检查从内存获取的result_data
             result_data = result.get('result_data')
             logger.debug(f"🔍 [GET_STATUS] result_data存在: {bool(result_data)}")
