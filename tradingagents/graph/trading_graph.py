@@ -67,6 +67,7 @@ class TradingAgentsGraph:
         debug=False,
         config: Dict[str, Any] = None,
         callbacks: Optional[List] = None,
+        mode: str = "full",
     ):
         """Initialize the trading agents graph and components.
 
@@ -75,10 +76,12 @@ class TradingAgentsGraph:
             debug: Whether to run in debug mode
             config: Configuration dictionary. If None, uses default config
             callbacks: Optional list of callback handlers (e.g., for tracking LLM/tool stats)
+            mode: 分析模式，light=快评(精简链), full=尽调(完整链)
         """
         self.debug = debug
         self.config = config or DEFAULT_CONFIG
         self.callbacks = callbacks or []
+        self.mode = mode
 
         # Update the interface's config
         set_config(self.config)
@@ -133,7 +136,7 @@ class TradingAgentsGraph:
         self.log_states_dict = {}  # date to full state dict
 
         # Set up the graph: keep the workflow for recompilation with a checkpointer.
-        self.workflow = self.graph_setup.setup_graph(selected_analysts)
+        self.workflow = self.graph_setup.setup_graph(selected_analysts, mode=self.mode)
         self.graph = self.workflow.compile()
         self._checkpointer_ctx = None
 

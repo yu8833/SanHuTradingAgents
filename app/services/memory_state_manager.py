@@ -142,9 +142,12 @@ class MemoryStateManager:
         """根据分析参数计算预估总时长（秒）"""
         # 获取分析模式
         analysis_mode = parameters.get('analysis_mode', parameters.get('mode', 'deep'))
-        
+
+        # 🔧 归一化分析模式：light/quick→快评，full/deep→尽调
+        analysis_mode = 'light' if analysis_mode in ('light', 'quick') else 'full'
+
         # 🔧 根据分析模式设置不同的预估时长
-        if analysis_mode == 'quick':
+        if analysis_mode == 'light':
             # 快速分析模式：约1-2分钟
             return 120  # 2分钟
         

@@ -46,30 +46,36 @@
           </div>
         </div>
 
-        <!-- ② 分析配置（深度 + 因子 一体化） -->
+        <!-- ② 分析深度（快评 / 尽调） -->
         <div class="config-panel">
-          <div class="config-row">
+          <div class="config-head">
             <span class="config-label">分析深度</span>
-            <el-radio-group v-model="analysisMode" class="mode-group">
-              <el-radio-button label="quick">速览</el-radio-button>
-              <el-radio-button label="deep">深度</el-radio-button>
-            </el-radio-group>
+            <span class="config-tip">论证链完整度</span>
           </div>
-          <div class="config-row">
-            <span class="config-label">分析因子</span>
-            <div class="factor-group">
-              <el-checkbox v-model="includeSentiment" border class="factor-checkbox">
-                <span>情绪</span>
-              </el-checkbox>
-              <el-checkbox v-model="includeRisk" border class="factor-checkbox">
-                <span>风险</span>
-              </el-checkbox>
-            </div>
+          <div class="mode-picker">
+            <button
+              type="button"
+              class="mode-option"
+              :class="{ active: analysisMode === 'light' }"
+              @click="analysisMode = 'light'"
+            >
+              <span class="mode-option-name">快评</span>
+              <span class="mode-option-desc">精简论证链 · 更快出结论</span>
+            </button>
+            <button
+              type="button"
+              class="mode-option"
+              :class="{ active: analysisMode === 'full' }"
+              @click="analysisMode = 'full'"
+            >
+              <span class="mode-option-name">尽调</span>
+              <span class="mode-option-desc">完整论证链 · 含辩论与风控</span>
+            </button>
           </div>
           <p class="config-hint">
-            {{ analysisMode === 'quick'
-              ? '速览：快速输出核心结论，耗时更短'
-              : '深度：完整多智能体论证链，结论更充分' }}
+            {{ analysisMode === 'light'
+              ? '快评：7 位分析师取材 → 研究经理综合 → 交易员决策，跳过多空辩论与风控复核。'
+              : '尽调：完整论证链，含多空辩论、风险辩论三人组与投资组合经理二审。' }}
           </p>
         </div>
 
@@ -174,9 +180,7 @@ const authStore = useAuthStore()
 const stockInput = ref('')
 const stockCodes = ref<string[]>([])
 const submitting = ref(false)
-const analysisMode = ref<'deep' | 'quick'>('deep')
-const includeSentiment = ref(true)
-const includeRisk = ref(true)
+const analysisMode = ref<'full' | 'light'>('full')
 const availableModels = ref<any[]>([])
 const modelSettings = ref({
   quickAnalysisModel: 'qwen-plus',
@@ -314,8 +318,6 @@ const cleanup = () => {
 // ── 提交 ───────────────────────────────────────────────
 const buildParams = () => ({
   mode: analysisMode.value,
-  include_sentiment: includeSentiment.value,
-  include_risk: includeRisk.value,
   quick_analysis_model: modelSettings.value.quickAnalysisModel,
   deep_analysis_model: modelSettings.value.deepAnalysisModel
 })
@@ -505,70 +507,108 @@ onUnmounted(cleanup)
       }
     }
 
-    // ── ② 分析配置（深度 + 因子 一体化面板）──
+    // ── ② 分析深度（快评 / 尽调 卡片式选择器）──
     .config-panel {
       margin-top: 20px;
-      padding: 16px 18px;
+      padding: 18px 20px 16px;
       border-radius: var(--app-radius);
       border: 1px solid var(--el-border-color-lighter);
       background: var(--el-fill-color-lighter);
 
-      .config-row {
+      .config-head {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 16px;
-        margin-bottom: 16px;
-
-        &:last-of-type { margin-bottom: 0; }
+        margin-bottom: 12px;
 
         .config-label {
-          flex-shrink: 0;
-          font-size: 13px;
-          font-weight: 500;
-          color: var(--el-text-color-secondary);
-        }
-      }
-
-      // 分析深度：等宽分段
-      .mode-group {
-        flex: 1;
-        display: flex;
-
-        .el-radio-button { flex: 1; }
-        .el-radio-button__inner {
-          width: 100%;
-          padding: 10px 16px;
-          display: inline-flex;
-          justify-content: center;
-          align-items: center;
+          font-size: 14px;
           font-weight: 600;
+          color: var(--el-text-color-primary);
+          position: relative;
+          padding-left: 10px;
+
+          &::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 3px;
+            height: 14px;
+            border-radius: 2px;
+            background: var(--el-color-primary);
+          }
+        }
+
+        .config-tip {
+          font-size: 11px;
+          color: var(--el-text-color-placeholder);
+          letter-spacing: .3px;
         }
       }
 
-      // 分析因子：等宽复选
-      .factor-group {
-        flex: 1;
+      // 卡片式模式选择器（快评 / 尽调）
+      .mode-picker {
         display: flex;
         gap: 12px;
       }
 
-      .factor-checkbox {
+      .mode-option {
         flex: 1;
-        margin: 0;
-        height: 38px;
         display: flex;
+        flex-direction: column;
         align-items: center;
         justify-content: center;
-        border-radius: 8px;
+        gap: 6px;
+        padding: 14px 12px;
+        border: 1.5px solid var(--el-border-color);
+        border-radius: 10px;
+        background: var(--el-bg-color);
+        cursor: pointer;
+        transition: all .2s ease;
+        outline: none;
+        font-family: inherit;
 
-        span { font-size: 13.5px; font-weight: 500; }
+        &:hover {
+          border-color: var(--el-color-primary-light-5);
+          background: var(--el-color-primary-light-9);
+        }
+
+        &.active {
+          border-color: var(--el-color-primary);
+          background: var(--el-color-primary-light-9);
+          box-shadow: 0 0 0 1px var(--el-color-primary);
+
+          .mode-option-name {
+            color: var(--el-color-primary);
+          }
+        }
+
+        .mode-option-name {
+          font-size: 15px;
+          font-weight: 700;
+          color: var(--el-text-color-primary);
+          letter-spacing: 2px;
+          transition: color .2s;
+        }
+
+        .mode-option-desc {
+          font-size: 11px;
+          color: var(--el-text-color-secondary);
+          line-height: 1.3;
+          text-align: center;
+        }
       }
 
       .config-hint {
-        margin: 12px 0 0;
+        margin: 14px 0 0;
         font-size: 12px;
+        line-height: 1.5;
         color: var(--el-text-color-placeholder);
+        padding: 10px 12px;
+        border-radius: 8px;
+        background: var(--el-fill-color);
       }
     }
 

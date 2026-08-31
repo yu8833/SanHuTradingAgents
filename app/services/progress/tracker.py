@@ -280,9 +280,9 @@ class RedisProgressTracker:
 
     def set_analysis_mode(self, mode: str) -> None:
         """设置分析模式并调整预估时间
-        mode: 'quick' 或 'deep'
+        mode: 'light'(快评)/'full'(尽调)，兼容旧值 'quick'/'deep'
         """
-        if mode == 'quick':
+        if mode in ('quick', 'light'):
             # 快速分析模式：预估总时长30秒
             self.progress_data['estimated_total_time'] = 30
             self.progress_data['_base_time_override'] = 30

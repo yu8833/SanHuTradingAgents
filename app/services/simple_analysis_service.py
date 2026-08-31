@@ -505,7 +505,8 @@ def create_analysis_config(
     llm_provider: str,
     market_type: str = "A股",
     quick_model_config: dict = None,
-    deep_model_config: dict = None
+    deep_model_config: dict = None,
+    mode: str = "full"
 ) -> dict:
     """
     创建分析配置
@@ -518,6 +519,7 @@ def create_analysis_config(
         market_type: 市场类型
         quick_model_config: 快速模型的完整配置
         deep_model_config: 深度模型的完整配置
+        mode: 分析模式，light=快评(精简链), full=尽调(完整链)
 
     Returns:
         dict: 完整的分析配置
@@ -549,6 +551,9 @@ def create_analysis_config(
     # 添加分析师配置
     config["selected_analysts"] = selected_analysts
     config["debug"] = False
+
+    # 分析模式：light=快评(精简链), full=尽调(完整链)，兼容旧值 quick/deep
+    config["mode"] = "light" if mode in ("light", "quick") else "full"
 
     # 🔧 添加模型配置参数（max_tokens、temperature、timeout、retry_times）
     if quick_model_config:
@@ -740,7 +745,8 @@ class SimpleAnalysisService:
             selected_analysts=config.get("selected_analysts", ["market", "social", "news", "fundamentals", "policy", "hot_money", "lockup"]),
             debug=config.get("debug", False),
             config=config,
-            callbacks=callbacks
+            callbacks=callbacks,
+            mode=config.get("mode", "full")
         )
 
         logger.info(f"✅ TradingAgents实例创建成功（实例ID: {id(trading_graph)}）")
@@ -1321,14 +1327,20 @@ class SimpleAnalysisService:
             logger.info(f"📊 [分析师] 原始: {raw_analysts}")
             logger.info(f"📊 [分析师] 过滤后: {filtered_analysts}")
 
+            # 读取分析模式（light=快评精简链, full=尽调完整链），兼容旧值 quick/deep
+            req_mode = (request.parameters.mode if request.parameters else "") or "full"
+
             # 创建分析配置（支持混合模式）
             config = create_analysis_config(
                 selected_analysts=filtered_analysts,
                 quick_model=quick_model,
                 deep_model=deep_model,
                 llm_provider=quick_provider,  # 主要使用快速模型的供应商
-                market_type=market_type  # 使用前端传递的市场类型
+                market_type=market_type,  # 使用前端传递的市场类型
+                mode=req_mode
             )
+
+            logger.info(f"🎯 [分析模式] 页面选择: '{req_mode}' -> 实际执行链路: '{config['mode']}'")
 
             # 🔧 添加混合模式配置
             config["quick_provider"] = quick_provider

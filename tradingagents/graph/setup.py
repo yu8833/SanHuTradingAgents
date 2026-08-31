@@ -29,7 +29,9 @@ class GraphSetup:
         self.conditional_logic = conditional_logic
 
     def setup_graph(
-        self, selected_analysts=["market", "social", "news", "fundamentals", "policy", "hot_money", "lockup"]
+        self,
+        selected_analysts=["market", "social", "news", "fundamentals", "policy", "hot_money", "lockup"],
+        mode="full",
     ):
         """Set up and compile the agent workflow graph.
 
@@ -42,9 +44,15 @@ class GraphSetup:
                 - "policy": Policy analyst (A-stock specific)
                 - "hot_money": Hot money / capital flow tracker (A-stock specific)
                 - "lockup": Lockup expiry / reduction watcher (A-stock specific)
+            mode (str): 分析模式，控制论证链长短：
+                - "full": 完整链（含多空辩论 + 风险辩论 + 组合经理二审）
+                - "light": 精简链（跳过辩论与风控二审，更快出结论）
         """
         if len(selected_analysts) == 0:
             raise ValueError("Trading Agents Graph Setup Error: no analysts selected!")
+
+        # 归一化模式：兼容旧值 quick/deep
+        mode = "light" if mode in ("light", "quick") else "full"
 
         analyst_tool_nodes = {}
 
@@ -96,54 +104,65 @@ class GraphSetup:
         # Start with parallel analysts
         workflow.add_edge(START, "Parallel Analysts")
         workflow.add_edge("Parallel Analysts", "Quality Gate")
-        workflow.add_edge("Quality Gate", "Bull Researcher")
 
-        # Add remaining edges
-        workflow.add_conditional_edges(
-            "Bull Researcher",
-            self.conditional_logic.should_continue_debate,
-            {
-                "Bear Researcher": "Bear Researcher",
-                "Research Manager": "Research Manager",
-            },
-        )
-        workflow.add_conditional_edges(
-            "Bear Researcher",
-            self.conditional_logic.should_continue_debate,
-            {
-                "Bull Researcher": "Bull Researcher",
-                "Research Manager": "Research Manager",
-            },
-        )
-        workflow.add_edge("Research Manager", "Trader")
-        workflow.add_edge("Trader", "Aggressive Analyst")
-        workflow.add_conditional_edges(
-            "Aggressive Analyst",
-            self.conditional_logic.should_continue_risk_analysis,
-            {
-                "Conservative Analyst": "Conservative Analyst",
-                "Portfolio Manager": "Portfolio Manager",
-            },
-        )
-        workflow.add_conditional_edges(
-            "Conservative Analyst",
-            self.conditional_logic.should_continue_risk_analysis,
-            {
-                "Neutral Analyst": "Neutral Analyst",
-                "Portfolio Manager": "Portfolio Manager",
-            },
-        )
-        workflow.add_conditional_edges(
-            "Neutral Analyst",
-            self.conditional_logic.should_continue_risk_analysis,
-            {
-                "Aggressive Analyst": "Aggressive Analyst",
-                "Portfolio Manager": "Portfolio Manager",
-            },
-        )
+        # ── 分析模式路由 ─────────────────────────────────────
+        # full（尽调）：完整论证链，含多空辩论 + 风险辩论 + 组合经理二审
+        # light（快评）：精简论证链，跳过辩论与风控二审，更快出结论
+        if mode == "light":
+            workflow.add_edge("Quality Gate", "Research Manager")
+            workflow.add_edge("Research Manager", "Trader")
+            workflow.add_edge("Trader", "Accuracy Guardian")
+        else:
+            workflow.add_edge("Quality Gate", "Bull Researcher")
 
-        # Portfolio Manager -> Accuracy Guardian -> END
-        workflow.add_edge("Portfolio Manager", "Accuracy Guardian")
+            # 多空研究辩论
+            workflow.add_conditional_edges(
+                "Bull Researcher",
+                self.conditional_logic.should_continue_debate,
+                {
+                    "Bear Researcher": "Bear Researcher",
+                    "Research Manager": "Research Manager",
+                },
+            )
+            workflow.add_conditional_edges(
+                "Bear Researcher",
+                self.conditional_logic.should_continue_debate,
+                {
+                    "Bull Researcher": "Bull Researcher",
+                    "Research Manager": "Research Manager",
+                },
+            )
+            workflow.add_edge("Research Manager", "Trader")
+
+            # 风险辩论三人组 + 组合经理二审
+            workflow.add_edge("Trader", "Aggressive Analyst")
+            workflow.add_conditional_edges(
+                "Aggressive Analyst",
+                self.conditional_logic.should_continue_risk_analysis,
+                {
+                    "Conservative Analyst": "Conservative Analyst",
+                    "Portfolio Manager": "Portfolio Manager",
+                },
+            )
+            workflow.add_conditional_edges(
+                "Conservative Analyst",
+                self.conditional_logic.should_continue_risk_analysis,
+                {
+                    "Neutral Analyst": "Neutral Analyst",
+                    "Portfolio Manager": "Portfolio Manager",
+                },
+            )
+            workflow.add_conditional_edges(
+                "Neutral Analyst",
+                self.conditional_logic.should_continue_risk_analysis,
+                {
+                    "Aggressive Analyst": "Aggressive Analyst",
+                    "Portfolio Manager": "Portfolio Manager",
+                },
+            )
+            workflow.add_edge("Portfolio Manager", "Accuracy Guardian")
+
+        # Portfolio Manager -> Accuracy Guardian/END
         workflow.add_edge("Accuracy Guardian", END)
 
         return workflow

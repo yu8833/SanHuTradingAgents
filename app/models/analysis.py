@@ -41,8 +41,9 @@ class AnalysisParameters(BaseModel):
     include_sentiment: bool = True
     include_risk: bool = True
     language: str = "zh-CN"
-    # 分析模式：quick=速览, deep=深度
-    mode: str = Field("deep", description="分析模式: quick=速览分析, deep=深度分析")
+    # 分析模式：light=快评(精简链), full=尽调(完整链)
+    # 兼容旧值：quick→light, deep→full
+    mode: str = Field("full", description="分析模式: light=快评分析, full=尽调分析")
     # 速览分析结果（深度模式下复用）
     quick_result: dict[str, Any] | None = None
     # 模型配置
