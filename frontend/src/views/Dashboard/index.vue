@@ -13,6 +13,27 @@
       </div>
     </div>
 
+    <!-- 今日流程引导条（P4：当前时段 + 待办 + 进入作战室） -->
+    <div class="today-flow-bar" @click="goWarRoom">
+      <div class="flow-left">
+        <el-icon class="flow-flag"><Aim /></el-icon>
+        <span class="flow-title">今日作战</span>
+        <template v-for="seg in flowSegs" :key="seg.key">
+          <span class="flow-seg" :class="{ active: seg.key === currentPeriod }">
+            <span class="flow-dot">{{ seg.key === currentPeriod ? '●' : '○' }}</span>
+            {{ seg.label }}
+            <span v-if="seg.count > 0" class="flow-badge">{{ seg.count }}</span>
+          </span>
+        </template>
+      </div>
+      <div class="flow-right">
+        <span class="flow-todo">待办 {{ todayTotal }}</span>
+        <el-button type="primary" size="small" @click.stop="goWarRoom">
+          进入作战室 <el-icon><ArrowRight /></el-icon>
+        </el-button>
+      </div>
+    </div>
+
     <!-- 监控中心（简要触发记录，查看详情跳转监控中心） -->
     <MonitorSummary style="margin-bottom: 24px;" />
 
@@ -194,6 +215,7 @@ defineOptions({ name: 'DashboardHome' })
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import {
+  Aim,
   ArrowRight,
   CircleCheckFilled,
   DArrowRight,
@@ -211,6 +233,7 @@ import DataHealthCard from '@/components/Dashboard/DataHealthCard.vue'
 import MonitorSummary from '@/components/Dashboard/MonitorSummary.vue'
 import { favoritesApi } from '@/api/favorites'
 import { paperApi, type PaperAccountSummary } from '@/api/paper'
+import { warRoomApi } from '@/api/warRoom'
 import * as syncApi from '@/api/sync'
 import * as schedulerApi from '@/api/scheduler'
 import { screeningApi } from '@/api/screening'
@@ -225,6 +248,32 @@ const favoriteStocks = ref<any[]>([])
 
 // P5-12：SSE 实时行情信号是否进入降级态（断连后依赖定时刷新兜底）
 const quotesStale = ref(false)
+
+// 今日流程引导条（P4：当前时段 + 各段待办 + 进入作战室）
+const todayFlow = ref<any>(null)
+const flowSegs = computed(() => {
+  const t = todayFlow.value
+  return [
+    { key: 'pre_market', label: '盘前', count: (t?.pre_market?.plan_pending || 0) + (t?.pre_market?.macro_snapshot_ready ? 0 : 1) },
+    { key: 'intraday', label: '盘中', count: (t?.intraday?.holding_count || 0) + (t?.intraday?.alert_count || 0) },
+    { key: 'post_market', label: '盘后', count: t?.post_market?.signal_pending || 0 },
+    { key: 'weekly', label: '周度', count: t?.weekly?.done ? 0 : 1 },
+  ]
+})
+const currentPeriod = computed(() => todayFlow.value?.current_period || 'pre_market')
+const todayTotal = computed(() => todayFlow.value?.total_todo ?? 0)
+const loadTodayFlow = async () => {
+  try {
+    todayFlow.value = await warRoomApi.getToday()
+  } catch (e) {
+    console.warn('[Dashboard] loadTodayFlow', e)
+  }
+}
+const goWarRoom = () => {
+  const map: Record<string, string> = { pre_market: 'pre_market', intraday: 'intraday', post_market: 'post_market', weekly: 'weekly' }
+  const tab = map[currentPeriod.value] || 'pre_market'
+  router.push(`/war-room?tab=${tab}`)
+}
 
 // 模拟交易账户数据
 const paperAccount = ref<PaperAccountSummary | null>(null)
@@ -695,6 +744,7 @@ let favSseUnsubscribe: (() => void) | null = null
 
 // 生命周期
 onMounted(async () => {
+  await loadTodayFlow()
   await loadFavoriteStocks()
   await loadPaperAccount()
   // 收到行情更新信号立即刷新自选股（延迟约 0-2 秒）。
@@ -727,6 +777,40 @@ onMounted(async () => {
 <style lang="scss" scoped>
 .dashboard {
   // 页面容器交给全局 .app-page；顶部横幅由全局 .page-hero 提供
+
+  // 今日流程引导条（P4）
+  .today-flow-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 12px 16px;
+    margin-bottom: 24px;
+    background: var(--el-bg-color);
+    border: 1px solid var(--el-border-color-light);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: box-shadow .2s;
+    &:hover { box-shadow: var(--el-box-shadow-light); }
+
+    .flow-left { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .flow-flag { color: var(--el-color-primary); }
+    .flow-title { font-weight: 600; margin-right: 6px; }
+    .flow-seg {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 9px; border-radius: 14px;
+      color: var(--el-text-color-secondary); font-size: 13px;
+      &.active { background: var(--el-color-primary-light-9); color: var(--el-color-primary); font-weight: 600; }
+      .flow-dot { font-size: 11px; }
+      .flow-badge {
+        background: var(--el-color-danger); color: #fff;
+        font-size: 11px; line-height: 1; padding: 2px 6px; border-radius: 9px;
+      }
+    }
+    .flow-right { display: flex; align-items: center; gap: 12px; }
+    .flow-todo { font-size: 13px; color: var(--el-text-color-secondary); }
+  }
 
   // 顶部卡片统一样式
   .monitor-top {

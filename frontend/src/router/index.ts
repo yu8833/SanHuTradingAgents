@@ -51,6 +51,29 @@ const routes: RouteRecordRaw[] = [
     ]
   },
   {
+    path: '/war-room',
+    name: 'WarRoom',
+    component: () => import('@/layouts/BasicLayout.vue'),
+    meta: {
+      title: '作战',
+      icon: 'Aim',
+      requiresAuth: true,
+      transition: 'fade'
+    },
+    children: [
+      {
+        path: '',
+        name: 'WarRoomHome',
+        component: () => import('@/views/WarRoom/index.vue'),
+        meta: {
+          title: '作战室',
+          parentTitle: '作战',
+          requiresAuth: true
+        }
+      }
+    ]
+  },
+  {
     path: '/analysis',
     name: 'Analysis',
     component: () => import('@/layouts/BasicLayout.vue'),

@@ -781,6 +781,106 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"🚨 散户策略定时任务注册失败，退出信号扫描/预警检查等功能将不可用: {e}", exc_info=True)
 
+        # ==================== 宏观快扫（盘前）：交易日 8:15 生成并落库 ====================
+        # 设计文档《第六章·交易工具与日常流程》§5.5：调度 交易日 8:15 自动生成落库。
+        # 任务内部自判交易日（复用 trading_time.is_trading_day）。
+        try:
+            async def run_macro_daily_scan():
+                try:
+                    from app.utils.trading_time import is_trading_day
+                    from app.utils.timezone import now_tz
+                    if not is_trading_day(now_tz()):
+                        logger.info("⏭️ 非交易日，跳过宏观快扫")
+                        return
+                    from app.services.macro import macro_service
+                    snap = await macro_service.refresh_macro_snapshot()
+                    rule = snap.get("rule") or {}
+                    logger.info(
+                        f"🌅 [APScheduler] 宏观快扫完成: date={snap.get('date')}, "
+                        f"方向={rule.get('direction')}, 置信度={rule.get('confidence')}%, "
+                        f"指数={len(snap.get('indices', []))}, 日历={len(snap.get('calendar', []))}, "
+                        f"LLM={'可用' if snap.get('llm_available') else '降级'}"
+                    )
+                except Exception as e:
+                    logger.error(f"❌ [APScheduler] 宏观快扫失败: {e}", exc_info=True)
+
+            scheduler.add_job(
+                run_macro_daily_scan,
+                cron_trigger("15 8 * * 1-5", timezone=get_tz()),
+                id="macro_daily_scan",
+                name="宏观快扫（盘前8:15自动生成）",
+                replace_existing=True,
+            )
+            logger.info("✅ 宏观快扫定时任务已注册: 工作日 8:15")
+        except Exception as e:
+            logger.error(f"🚨 宏观快扫定时任务注册失败: {e}", exc_info=True)
+
+        # ==================== 信号跟踪有效性回填（每日盘后） ====================
+        # 设计文档 P1（§4 缺口1）：每日回填「触发已满 5 个交易日」的信号实际表现，
+        # 供周度复盘验证信号有效性。任务内部自判交易日。
+        try:
+            async def run_signal_backfill():
+                try:
+                    from app.utils.trading_time import is_trading_day
+                    from app.utils.timezone import now_tz
+                    if not is_trading_day(now_tz()):
+                        logger.info("⏭️ 非交易日，跳过信号有效性回填")
+                        return
+                    from app.services.signal_tracking_service import backfill_due_signals
+                    filled = await backfill_due_signals()
+                    logger.info(f"🔄 [APScheduler] 信号有效性回填完成: {filled} 条")
+                except Exception as e:
+                    logger.error(f"❌ [APScheduler] 信号有效性回填失败: {e}", exc_info=True)
+
+            scheduler.add_job(
+                run_signal_backfill,
+                cron_trigger("30 21 * * 1-5", timezone=get_tz()),
+                id="signal_tracking_backfill",
+                name="信号跟踪有效性回填（盘后21:30自动）",
+                replace_existing=True,
+            )
+            logger.info("✅ 信号跟踪有效性回填任务已注册: 工作日 21:30")
+        except Exception as e:
+            logger.error(f"🚨 信号跟踪有效性回填任务注册失败: {e}", exc_info=True)
+
+        # ==================== 周度复盘自动生成（周五盘后） ====================
+        # 设计文档 P3（§4 缺口3）：每周五 17:30 盘后为所有用户自动生成本周复盘
+        # （定量统计 vs 沪深300 + 持仓全红率 + 信号有效性），落库 weekly_reviews。
+        try:
+            async def run_weekly_review():
+                try:
+                    from app.utils.trading_time import is_trading_day
+                    from app.utils.timezone import now_tz
+                    from app.core.database import get_mongo_db
+                    from app.services.weekly_review_service import generate_weekly_review
+                    if not is_trading_day(now_tz()):
+                        logger.info("⏭️ 非交易日，跳过周度复盘自动生成")
+                        return
+                    db = get_mongo_db()
+                    user_ids = []
+                    cursor = db["users"].find({}, {"_id": 1})
+                    async for u in cursor:
+                        user_ids.append(str(u["_id"]))
+                    for uid in user_ids:
+                        try:
+                            await generate_weekly_review(uid)
+                        except Exception as e:
+                            logger.error(f"❌ [APScheduler] 周度复盘生成失败 user={uid}: {e}", exc_info=True)
+                    logger.info(f"🔄 [APScheduler] 周度复盘自动生成完成: {len(user_ids)} 个用户")
+                except Exception as e:
+                    logger.error(f"❌ [APScheduler] 周度复盘自动生成任务失败: {e}", exc_info=True)
+
+            scheduler.add_job(
+                run_weekly_review,
+                cron_trigger("30 17 * * 5", timezone=get_tz()),
+                id="weekly_review_auto",
+                name="周度复盘自动生成（周五盘后17:30）",
+                replace_existing=True,
+            )
+            logger.info("✅ 周度复盘自动生成任务已注册: 周五 17:30")
+        except Exception as e:
+            logger.error(f"🚨 周度复盘自动生成任务注册失败: {e}", exc_info=True)
+
         # ==================== ETF Radar 盘中采集（行业ETF资金流雷达） ====================
         # 工作日盘中每30分钟采集一次全量ETF资金流快照（~19s），写入 etf_radar_snapshot，
         # 前端 /api/etf-radar/summary 读最新快照秒回。任务内部自判交易日/时段。
@@ -1261,6 +1361,26 @@ app.include_router(news_data.router, tags=["news-data"])
 app.include_router(social_media.router, tags=["social-media"])
 app.include_router(internal_messages.router, tags=["internal-messages"])
 app.include_router(vibe_router.router, tags=["vibe-research"])
+# 宏观快扫（盘前）路由
+from app.routers import macro as macro_router
+
+app.include_router(macro_router.router, tags=["macro"])
+
+from app.routers import signal_tracking as signal_tracking_router
+
+app.include_router(signal_tracking_router.router, tags=["signal-tracking"])
+
+from app.routers import plans as plans_router
+
+app.include_router(plans_router.router, tags=["plans"])
+# 周度复盘（P3）
+from app.routers import weekly_review as weekly_review_router
+
+app.include_router(weekly_review_router.router, tags=["weekly-review"])
+# 作战室聚合（P4）
+from app.routers import war_room as war_room_router
+
+app.include_router(war_room_router.router, tags=["war-room"])
 # 策略系统（筛选 + 回测）
 from app.routers import strategy as strategy_router
 

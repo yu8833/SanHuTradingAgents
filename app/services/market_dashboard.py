@@ -183,12 +183,37 @@ def _industry_rank(rows: list[dict]) -> dict:
     return {"leading": leading, "lagging": lagging}
 
 
+def _market_regime() -> dict | None:
+    """统一市场状态（趋势+波动+建议），与「策略行情条」共用 compute_market_context 口径。
+
+    复用 compute_market_context 的进程级缓存，保证策略页与大屏看板显示一致的中性/高波动与建议。
+    """
+    try:
+        from app.strategy_system.screener import compute_market_context
+        r = compute_market_context(get_mongo_db_sync())
+        regime = r or {}
+        if regime.get("trend") not in ("bull", "bear", "sideways"):
+            return None
+        return {
+            "trend": regime.get("trend"),
+            "trend_label": regime.get("trend_label", "中性"),
+            "volatility": regime.get("volatility"),
+            "volatility_label": regime.get("volatility_label", "波动待研判"),
+            "advice": regime.get("advice", ""),
+            "as_of": regime.get("as_of"),
+        }
+    except Exception as e:  # noqa: BLE001 - 看板不因市场状态失败而崩溃
+        logger.exception("构造大盘统一市场状态失败")
+        return None
+
+
 def _build() -> dict:
     """同步构建看板数据（market_quotes + 情绪/板块/短线情绪 + 指数）。"""
     rows = _load_market_rows()
     indices = astock.index_quote()
     sentiment = _sentiment()
     emotion = _emotion()
+    regime = _market_regime()
 
     total = len(rows)
     up = sum(1 for r in rows if r["pct_chg"] > 0)
@@ -276,6 +301,7 @@ def _build() -> dict:
 
     return {
         "as_of": sentiment.get("date") or "",
+        "regime": regime,
         "indices": indices,
         "breadth": {
             "total": total, "up": up, "down": down, "flat": flat,

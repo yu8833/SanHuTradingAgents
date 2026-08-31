@@ -514,6 +514,14 @@ async def scan_three_buys_three_sells(
 
         result = await service.scan_three_buys_three_sells(params)
 
+        # 设计文档 P1（§4 缺口1）：扫描完成后自动落库买点信号到 signal_tracking，
+        # 供周度复盘回填实际表现、验证信号有效性。落库失败不阻塞扫描结果返回。
+        try:
+            from app.services.signal_tracking_service import save_scan_signals
+            await save_scan_signals(result.get("items") or [])
+        except Exception as _sig_err:
+            logger.warning(f"[three_buys_three_sells] 信号跟踪落库失败(不影响扫描): {_sig_err}")
+
         logger.info(f"[three_buys_three_sells] 扫描完成: 找到 {result['total']} 只股票, "
                    f"耗时 {result.get('took_ms')}ms")
 

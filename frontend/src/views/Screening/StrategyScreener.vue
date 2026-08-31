@@ -367,10 +367,11 @@ const volText = computed(() => {
   return { label: '波动待研判' }
 })
 
-// 简洁的操作建议文案
+// 简洁的操作建议文案（优先使用后端下发的统一文案，与大盘看板保持一致）
 const adviceText = computed(() => {
   const c = marketCtx.value
   if (!c) return '等待行情数据…'
+  if (c.advice) return c.advice
   const t = c.trend
   const v = c.volatility
   if (t === 'bull') {

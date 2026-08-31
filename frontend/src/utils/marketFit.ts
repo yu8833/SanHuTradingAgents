@@ -22,6 +22,8 @@ export interface MarketContext {
   up_ratio?: number
   pct_chg?: number
   detail?: string
+  /** 统一操作建议文案（后端下发，与大盘看板保持一致） */
+  advice?: string
 }
 
 export interface MarketFitMeta {

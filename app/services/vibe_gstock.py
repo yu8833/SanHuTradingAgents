@@ -15,6 +15,9 @@
 
 from __future__ import annotations
 
+import re
+import urllib.request
+
 from app.services import vibe_astock as astock
 
 _UA_H = {"User-Agent": astock.UA}
@@ -22,13 +25,31 @@ _GS_HOSTS = ("push2.eastmoney.com", "push2delay.eastmoney.com")
 _gs_host = [0]  # 当前可用主机下标；首次 push2 掉连后 latch 到 push2delay
 
 # 全球指数（东财 push2 secid）—— A 股看隔夜外围脸色的核心几个，均已实测。
+# 宏观快扫（盘前）外围扩展：新增日经225 / KOSPI（亚太当日情绪，push2delay 实测可用）。
 _INDICES = (
     {"key": "dji", "name": "道琼斯", "secid": "100.DJIA", "region": "美股"},
     {"key": "spx", "name": "标普500", "secid": "100.SPX", "region": "美股"},
     {"key": "ndx", "name": "纳斯达克", "secid": "100.NDX", "region": "美股"},
     {"key": "hsi", "name": "恒生指数", "secid": "100.HSI", "region": "港股"},
     {"key": "hstech", "name": "恒生科技", "secid": "124.HSTECH", "region": "港股"},
+    {"key": "n225", "name": "日经225", "secid": "100.N225", "region": "亚太"},
+    {"key": "kospi", "name": "韩国KOSPI", "secid": "100.KS11", "region": "亚太"},
 )
+
+# 富时中国 A50 期货：AKShare 东财全球期货行情中的「当月连续」/ 最近月合约。
+# 东财 CME 期货 secid（ES/NQ/YM/CN00）容器实测不可达 → 按设计文档降级路径走 AKShare。
+_FUTURES_TARGETS = (
+    {"prefix": "ES00Y", "key": "spxfut", "name": "标普500期货", "region": "美股"},
+    {"prefix": "NQ00Y", "key": "ndxfut", "name": "纳斯达克期货", "region": "美股"},
+    {"prefix": "YM00Y", "key": "djifut", "name": "道指期货", "region": "美股"},
+    {"prefix": "CN", "key": "a50fut", "name": "富时A50期货", "region": "新加坡"},
+)
+
+# 期货合约月份字母 → 数字（F=1月 ... Z=12月，跳过 I 避免与数字混淆）
+_FUT_MONTH = {"F": 1, "G": 2, "H": 3, "J": 4, "K": 5, "M": 6, "N": 7,
+              "Q": 8, "U": 9, "V": 10, "X": 11, "Z": 12}
+
+_SINA_UA_H = {"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn/"}
 
 # 搜索返回的 MktNum → (secucode 后缀, 市场名)
 _MKT = {105: (".O", "NASDAQ"), 106: (".N", "NYSE"), 107: (".O", "US"), 116: (".HK", "HK")}
@@ -75,7 +96,7 @@ def _quote_from(d: dict) -> dict:
 
 
 def global_indices() -> list[dict]:
-    """全球指数快照（道指 / 标普500 / 纳斯达克 / 恒生 / 恒生科技）。源无的档跳过。"""
+    """全球指数快照（道指 / 标普500 / 纳斯达克 / 恒生 / 恒生科技 / 日经225 / KOSPI）。源无的档跳过。"""
     out = []
     for idx in _INDICES:
         d = _push2_stock_get(idx["secid"], "f43,f57,f58,f59,f60,f170")
@@ -87,6 +108,114 @@ def global_indices() -> list[dict]:
             "price": _price(d, "f43"),
             "change_pct": round(chg / 100, 2) if isinstance(chg, (int, float)) else None,
         })
+    return out
+
+
+def vix_quote() -> dict | None:
+    """VIX 恐慌指数（Sina b_VIX，东财无 VIX 指数 secid 容器实测不可达）。
+
+    返回沿用现有结构 {key, name, price, change_pct, region}；失败返回 None。
+    """
+    try:
+        req = urllib.request.Request(
+            "https://hq.sinajs.cn/list=b_VIX", headers=_SINA_UA_H
+        )
+        text = urllib.request.urlopen(req, timeout=10).read().decode("gbk", "ignore")
+        m = re.search(r'"([^"]*)"', text)
+        if not m:
+            return None
+        parts = m.group(1).split(",")
+        # var hq_str_b_VIX="VIX恐慌指数,15.17,0.75,5.20,,,2026-08-31,23:15:46,15.24,14.42,15.48,14.89,0";
+        if len(parts) < 12:
+            return None
+        price = float(parts[1])
+        prev_close = float(parts[9]) if parts[9] else 0.0
+        change_pct = round((price / prev_close - 1) * 100, 2) if prev_close else None
+        if price <= 0:
+            return None
+        return {"key": "vix", "name": "VIX恐慌指数", "region": "美股",
+                "price": price, "change_pct": change_pct}
+    except Exception:
+        return None
+
+
+def _front_month_code(codes: list[str], prefix: str, cur_key: int) -> str | None:
+    """从期货合约代码中选最近月（>= 当前月）的主力合约代码。
+
+    合约代码形如 `CN26U`（CN + 年份两位 + 月份字母）。返回最近未来月合约；
+    无未来月合约时退而取最近的一个（避免次月合约尚未上市）。
+    """
+    best, best_key = None, None
+    for code in codes:
+        if not code.startswith(prefix):
+            continue
+        m = re.match(r"(\d{2})([A-Z])", code[len(prefix):])
+        if not m:
+            continue
+        mon = _FUT_MONTH.get(m.group(2))
+        if not mon:
+            continue
+        key = (2000 + int(m.group(1))) * 12 + mon
+        if best_key is None or abs(key - cur_key) < abs(best_key - cur_key):
+            best_key, best = key, code
+    return best
+
+
+def index_futures() -> list[dict]:
+    """美股股指期货（标普/纳指/道指）+ 富时A50期货（AKShare 东财全球期货行情）。
+
+    东财 CME 期货 secid 容器实测不可达，按设计文档降级路径走 AKShare：
+    `futures_global_spot_em()` 返回全市场 600+ 期货合约，这里只按目标代码过滤。
+    ES/NQ/YM 用「当月连续」合约（ES00Y 等）；A50 无连续合约，取最近月主力。
+    返回沿用现有结构 {key, name, price, change_pct, region}；失败返回 []。
+    """
+    try:
+        import akshare as ak
+        df = ak.futures_global_spot_em()
+        if df is None or df.empty:
+            return []
+        codes = df["代码"].astype(str).tolist()
+        today = __import__("datetime").date.today()
+        cur_key = today.year * 12 + today.month
+        out = []
+        for t in _FUTURES_TARGETS:
+            if t["prefix"].endswith("00Y"):
+                # 当月连续合约：精确匹配代码
+                row = df[df["代码"].astype(str) == t["prefix"]]
+            else:
+                # A50：最近月主力合约
+                code = _front_month_code(codes, t["prefix"], cur_key)
+                row = df[df["代码"].astype(str) == code] if code else df.iloc[0:0]
+            if row.empty:
+                continue
+            r = row.iloc[0]
+            try:
+                price = float(r.get("最新价"))
+                change_pct = float(r.get("涨跌幅"))
+            except (TypeError, ValueError):
+                continue
+            if price <= 0:
+                continue
+            out.append({
+                "key": t["key"], "name": t["name"], "region": t["region"],
+                "price": price, "change_pct": change_pct,
+            })
+        return out
+    except Exception:
+        return []
+
+
+def macro_indices() -> list[dict]:
+    """宏观快扫外围指数全集：现有 7 指数 + VIX + 股指期货 + A50 期货。
+
+    每个指数沿用统一结构 {key, name, price, change_pct, region}。
+    VIX/期货任一来源失败仅跳过该档，不阻塞整体。
+    """
+    out = global_indices()
+    vix = vix_quote()
+    if vix:
+        out.append(vix)
+    out.extend(index_futures())
     return out
 
 

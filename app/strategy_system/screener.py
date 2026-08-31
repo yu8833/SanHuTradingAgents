@@ -304,6 +304,17 @@ def compute_market_context(db) -> dict:
         f"行情{label}，{'高' if volatility == 'high' else '低'}波动"
     )
 
+    # 统一操作建议文案（与前端「策略行情条」保持一致，作为唯一文案源下发）
+    if trend == "bull":
+        advice = "偏强但波动大 → 优先选择突破/趋势类，注意控制仓位" if volatility == "high" else \
+            "偏强 → 优先选择趋势、突破、放量类策略"
+    elif trend == "bear":
+        advice = "偏弱且高波动 → 谨慎操作，可关注超跌反弹小仓试错" if volatility == "high" else \
+            "偏弱 → 降低仓位，关注低估值避险与超跌反弹"
+    else:  # sideways
+        advice = "震荡高波动 → 区间操作为主，注意假突破风险" if volatility == "high" else \
+            "震荡 → 关注回踩支撑、反转类策略"
+
     data = {
         "as_of": latest,
         "trend": trend,
@@ -317,6 +328,7 @@ def compute_market_context(db) -> dict:
         "breadth_swing": round(broad_swing, 4),
         "avg_abs": round(avg_abs20, 2),
         "detail": detail,
+        "advice": advice,
         "cache": False,
     }
     _market_context_cache["time"] = now_ts

@@ -149,8 +149,18 @@ export interface DashboardLimit {
   tiers: { boards: number; count: number; plus?: boolean }[]
 }
 
+export interface MarketRegime {
+  trend: 'bull' | 'bear' | 'sideways'
+  trend_label: string
+  volatility: 'high' | 'low' | 'unknown' | null
+  volatility_label: string
+  advice: string
+  as_of?: string | null
+}
+
 export interface MarketDashboard {
   as_of: string
+  regime?: MarketRegime | null
   indices: IndexQuote[]
   breadth: {
     total: number

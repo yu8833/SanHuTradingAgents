@@ -18,6 +18,24 @@
       </div>
     </div>
 
+    <!-- 大盘状态条（与「常用策略」行情条统一口径下发，展示一致的中性/高波动与建议） -->
+    <div v-if="regime && !loading" class="regime-bar" :class="'regime-' + regime.trend">
+      <div class="regime-chip">
+        <el-icon>
+          <TrendCharts v-if="regime.trend === 'bull'" />
+          <Bottom v-else-if="regime.trend === 'bear'" />
+          <Minus v-else />
+        </el-icon>
+        <span class="regime-label">{{ regime.trend_label }}</span>
+        <span class="regime-vol">· {{ regime.volatility_label }}</span>
+      </div>
+      <div v-if="regime.advice" class="regime-advice">
+        <el-icon><Opportunity /></el-icon>
+        <span>{{ regime.advice }}</span>
+      </div>
+      <span v-if="regime.as_of" class="regime-asof">{{ regime.as_of }}</span>
+    </div>
+
     <el-tabs v-model="activeTab" class="overview-tabs">
       <!-- ============ A股市场 ============ -->
       <el-tab-pane label="A股市场" name="ashare">
@@ -316,6 +334,10 @@ import {
   Refresh,
   Loading,
   Odometer,
+  TrendCharts,
+  Bottom,
+  Minus,
+  Opportunity,
 } from '@element-plus/icons-vue'
 import {
   vibeApi,
@@ -332,6 +354,9 @@ const indices = ref<IndexQuote[]>([])
 const globalIndices = ref<GlobalIndex[]>([])
 const globalStocks = ref<GlobalStock[]>([])
 const dashboard = ref<MarketDashboard | null>(null)
+
+// 大盘统一市场状态（与「常用策略」行情条同口径，后端下发）
+const regime = computed(() => dashboard.value?.regime ?? null)
 
 // 全球著名股票按 美股 / 港股 分组
 const usStocks = computed(() => globalStocks.value.filter(s => s.region === '美股'))
@@ -534,6 +559,55 @@ onMounted(() => {
 .overview-tabs :deep(.el-tabs__header) {
   margin-bottom: 16px;
 }
+
+/* 大盘统一状态条（与「常用策略」行情条同口径） */
+.regime-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 0 0 16px;
+  padding: 10px 16px;
+  border-radius: var(--app-radius);
+  border: 1px solid var(--el-border-color-lighter);
+  background: var(--el-fill-color-lighter);
+}
+.regime-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--el-text-color-primary);
+}
+.regime-chip .el-icon {
+  font-size: 16px;
+}
+.regime-vol {
+  font-weight: 500;
+  color: var(--el-text-color-secondary);
+}
+.regime-advice {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+}
+.regime-advice .el-icon {
+  color: var(--el-color-warning);
+  font-size: 14px;
+}
+.regime-asof {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--el-text-color-placeholder);
+  font-family: var(--app-font-mono);
+}
+.regime-bull .regime-chip { color: var(--el-color-danger); }
+.regime-bear .regime-chip { color: var(--el-color-success); }
+.regime-sideways .regime-chip { color: var(--el-text-color-regular); }
+.regime-sideways .regime-chip .el-icon { color: var(--el-color-warning); }
 
 .block {
   margin-bottom: 24px;

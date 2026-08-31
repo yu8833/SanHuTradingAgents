@@ -11,6 +11,11 @@
       <template #title>速览</template>
     </el-menu-item>
 
+    <el-menu-item index="/war-room">
+      <el-icon><Aim /></el-icon>
+      <template #title>作战</template>
+    </el-menu-item>
+
     <el-menu-item index="/learning" v-show="false">
       <el-icon><Reading /></el-icon>
       <template #title>资料</template>
@@ -118,6 +123,7 @@ import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import {
   Odometer,
+  Aim,
   Reading,
   TrendCharts,
   Search,

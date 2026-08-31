@@ -141,6 +141,17 @@ async def set_cache(key: str, value: Any, ttl: int | None = None, category: str 
     _memory_set(key, value, min(ttl, 60))
 
 
+async def clear_cache(key: str):
+    """清除指定 key 的缓存（Redis + 内存双清）。"""
+    if await _ensure_redis_available():
+        try:
+            from app.core.database import redis_client
+            await redis_client.delete(key)
+        except Exception as e:
+            logger.warning(f"Redis清除缓存失败: {e}")
+    _memory_cache.pop(key, None)
+
+
 async def cached(key: str, build_fn: Callable, category: str = "default",
                  valid: Callable[[Any], bool] = bool) -> Any:
     """
