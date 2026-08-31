@@ -292,6 +292,13 @@ class RedisProgressTracker:
         """update progress and persist; accepts dict or plain message string"""
         try:
             if isinstance(progress_update, dict):
+                # 统一刻度：进度只允许前进，任何写入器都不能使其回退。
+                pct = progress_update.get('progress_percentage')
+                if pct is not None:
+                    current = self.progress_data.get('progress_percentage', 0)
+                    if float(pct) < float(current):
+                        progress_update = dict(progress_update)
+                        progress_update.pop('progress_percentage')
                 self.progress_data.update(progress_update)
             elif isinstance(progress_update, str):
                 self.progress_data['last_message'] = progress_update

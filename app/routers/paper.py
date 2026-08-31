@@ -14,6 +14,7 @@ from app.services.paper_executor import (
     _fetch_live_price,
     execute_market_order,
 )
+from app.services.portfolio_service import portfolio_service
 
 router = APIRouter(prefix="/paper", tags=["paper"])
 logger = logging.getLogger("webapi")
@@ -359,6 +360,8 @@ async def list_positions(
 
         last = await _get_last_price(code, market)
         mkt = round((last or 0.0) * qty, 2)
+        # stock_name 为空或为代码时自动补全真实名称（与持仓追踪一致，避免显示成代码/空）
+        stock_name = await portfolio_service._resolve_stock_name(code, p.get("stock_name", ""))
         enriched.append({
             "id": str(p.get("_id", "")),
             "code": code,
@@ -372,7 +375,7 @@ async def list_positions(
             "unrealized_pnl": None if last is None else round((last - avg_cost) * qty, 2),
             # 策略与平仓元数据（用于交易复盘）
             "strategy": p.get("strategy", "default"),
-            "stock_name": p.get("stock_name", ""),
+            "stock_name": stock_name,
             "buy_date": p.get("buy_date"),
             "thesis": p.get("thesis"),
             "stop_loss_price": p.get("stop_loss_price"),

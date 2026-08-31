@@ -136,7 +136,7 @@
             <span v-else class="text-muted">未设置</span>
           </template>
         </el-table-column>
-        <el-table-column label="买入日期" width="110" prop="buy_date" />
+        <el-table-column label="买入日期" min-width="130" prop="buy_date" />
         <el-table-column label="操作" width="180" fixed="right">
           <template #default="{ row }">
             <el-button size="small" link @click="openEditDialog(row)">编辑</el-button>

@@ -63,8 +63,7 @@
         <el-icon><TrendCharts /></el-icon>
         <span>分析</span>
       </template>
-      <el-menu-item index="/analysis/single">单股分析</el-menu-item>
-      <el-menu-item index="/analysis/batch">批量分析</el-menu-item>
+      <el-menu-item index="/analysis">股票分析</el-menu-item>
       <el-menu-item index="/reports">分析报告</el-menu-item>
     </el-sub-menu>
 

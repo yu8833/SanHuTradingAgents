@@ -750,9 +750,14 @@ class SimpleAnalysisService:
     async def create_analysis_task(
         self,
         user_id: str,
-        request: SingleAnalysisRequest
+        request: SingleAnalysisRequest,
+        batch_id: str | None = None
     ) -> dict[str, Any]:
-        """创建分析任务（立即返回，不执行分析）"""
+        """创建分析任务（立即返回，不执行分析）
+
+        Args:
+            batch_id: 可选，所属批次的 batch_id，用于批量分析归并与批次进度聚合。
+        """
         try:
             # 生成任务ID
             task_id = str(uuid.uuid4())
@@ -800,6 +805,7 @@ class SimpleAnalysisService:
                         "status": "pending",
                         "progress": 0,
                         "created_at": now_tz(),
+                        "batch_id": batch_id,
                     }},
                     upsert=True
                 )
@@ -1165,8 +1171,12 @@ class SimpleAnalysisService:
 
             # 异步更新进度（在线程池中调用）
             def update_progress_sync(progress: int, message: str, step: str):
-                """在线程池中同步更新进度"""
+                """在线程池中同步更新进度（统一刻度，只前进不回退）"""
                 try:
+                    # 计算有效进度：不得超过当前进度，保证各通道（Redis/内存/MongoDB）刻度一致
+                    current_pct = progress_tracker.progress_data.get('progress_percentage', 0) if progress_tracker else progress
+                    effective = progress if progress > current_pct else int(current_pct)
+
                     # 同时更新 Redis 进度跟踪器
                     if progress_tracker:
                         progress_tracker.update_progress({
@@ -1184,7 +1194,7 @@ class SimpleAnalysisService:
                             self.memory_manager.update_task_status(
                                 task_id=task_id,
                                 status=TaskStatus.RUNNING,
-                                progress=progress,
+                                progress=effective,
                                 message=message,
                                 current_step=step
                             )
@@ -1206,7 +1216,7 @@ class SimpleAnalysisService:
                         {"task_id": task_id},
                         {
                             "$set": {
-                                "progress": progress,
+                                "progress": effective,
                                 "current_step": step,
                                 "message": message,
                                 "updated_at": now_tz()
@@ -1333,29 +1343,32 @@ class SimpleAnalysisService:
             logger.info(f"🔍 [模型验证] 配置中的LLM供应商: {config.get('llm_provider')}")
 
             # 定义进度回调函数，用于接收 LangGraph 的实时进度
-            # 节点进度映射表（与 RedisProgressTracker 的步骤权重对应）
+            # 统一刻度：节点进度映射表（整数百分比，与 RedisProgressTracker 的累计步骤权重对应）
+            # 必须与 trading_graph._send_progress_update 发出的标签逐字一致，且只增不减
             node_progress_map = {
-                # 分析师阶段 (10% → 45%) - 7个分析师
-                "📊 市场分析师": 15,        # 10% + 5%
-                "💬 社交媒体分析师": 20,    # 10% + 10%
-                "📰 新闻分析师": 25,        # 10% + 15%
-                "💼 基本面分析师": 30,      # 10% + 20%
-                "📜 政策分析师": 35,        # 10% + 25%
-                "💰 游资追踪师": 40,        # 10% + 30%
-                "🔓 解禁追踪师": 45,        # 10% + 35%
-                # 研究辩论阶段 (45% → 70%)
-                "🐂 看涨研究员": 51.25,      # 45% + 6.25%
-                "🐻 看跌研究员": 57.5,       # 45% + 12.5%
-                "👔 研究经理": 70,           # 45% + 25%
-                # 交易员阶段 (70% → 78%)
-                "💼 交易员决策": 78,         # 70% + 8%
-                # 风险评估阶段 (78% → 93%)
-                "🔥 激进风险评估": 81.75,    # 78% + 3.75%
-                "🛡️ 保守风险评估": 85.5,    # 78% + 7.5%
-                "⚖️ 中性风险评估": 89.25,   # 78% + 11.25%
-                "🎯 投资组合经理": 93,           # 78% + 15%
-                # 最终阶段 (93% → 100%)
-                "📡 最终决策": 97,           # 93% + 4%
+                # 分析师阶段 (预置 20% -> 45%) - 7个分析师，每个 +5%
+                "📊 市场分析师": 25,        # 20% + 5%
+                "💬 社交媒体分析师": 30,    # 25% + 5%
+                "📰 新闻分析师": 35,        # 30% + 5%
+                "💼 基本面分析师": 40,      # 35% + 5%
+                "📜 政策分析师": 45,        # 40% + 5%
+                "💰 游资追踪师": 50,        # 45% + 5%
+                "🔓 解禁追踪师": 55,        # 50% + 5%
+                # 数据质量审核 (55% -> 65%)
+                "✅ 数据质量审核": 62,       # 55% + 7%
+                # 研究辩论阶段 (65% -> 78%)
+                "🐂 看涨研究员": 68,        # 62% + 6%
+                "🐻 看跌研究员": 73,        # 68% + 5%
+                "👔 研究经理": 78,          # 73% + 5%
+                # 交易员阶段 (78% -> 84%)
+                "💼 交易员决策": 84,         # 78% + 6%
+                # 风险评估阶段 (84% -> 95%)
+                "🔥 激进风险评估": 88,       # 84% + 4%
+                "🛡️ 保守风险评估": 91,       # 88% + 3%
+                "⚖️ 中性风险评估": 93,       # 91% + 2%
+                "🎯 投资组合经理": 95,       # 93% + 2%
+                # 最终阶段 (95% -> 97%，最终 100% 由 mark_completed 完成)
+                "📡 最终决策": 97,           # 95% + 2%
             }
 
             def graph_progress_callback(message: str):
@@ -1496,65 +1509,8 @@ class SimpleAnalysisService:
 
             # 开始分析 - 进度10%，即将进入分析师阶段
             # 注意：不要手动设置过高的进度，让 graph_progress_callback 来更新实际的分析进度
+            # 统一刻度：不再使用模拟进度线程（simulate_progress），避免假进度抢占真实进度
             update_progress_sync(10, "🤖 开始多智能体协作分析", "agent_analysis")
-
-            # 启动一个异步任务来模拟进度更新
-            import threading
-            import time
-
-            def simulate_progress():
-                """模拟TradingAgents内部进度，同步更新进度百分比"""
-                try:
-                    if not progress_tracker:
-                        return
-
-                    # 定义进度步骤 (进度%, 消息, 睡眠时间秒)
-                    progress_steps = [
-                        # 分析师阶段 (10% → 45%) - 7个分析师
-                        (15, "📊 技术分析师正在分析", 12),
-                        (20, "💬 市场情绪分析师正在分析", 10),
-                        (25, "📰 新闻分析师正在分析", 10),
-                        (30, "💼 基本面分析师正在分析", 12),
-                        (35, "📜 政策分析师正在分析", 10),
-                        (40, "🔥 游资追踪师正在分析", 10),
-                        (45, "🔓 解禁追踪师正在分析", 8),
-                        # 研究辩论阶段 (45% → 70%)
-                        (51, "🐂 看涨研究员构建论据", 8),
-                        (57, "🐻 看跌研究员识别风险", 6),
-                        (63, "🎯 研究辩论进行中", 10),
-                        (70, "👔 研究经理形成共识", 6),
-                        # 交易员阶段 (70% → 78%)
-                        (78, "💼 交易员制定策略", 8),
-                        # 风险评估阶段 (78% → 93%)
-                        (82, "🔥 激进风险评估", 5),
-                        (86, "🛡️ 保守风险评估", 5),
-                        (89, "⚖️ 中性风险评估", 5),
-                        (93, "🎯 投资组合经理最终决策", 6),
-                        # 最终阶段 (93% → 95%)
-                        (95, "📡 生成最终决策报告", 4),
-                    ]
-
-                    for progress_pct, message, sleep_secs in progress_steps:
-                        time.sleep(sleep_secs)
-                        # 检查任务是否已完成，如果已完成则停止模拟
-                        current_pct = progress_tracker.progress_data.get('progress_percentage', 0)
-                        if current_pct >= 95:
-                            break
-                        # 只在模拟进度大于当前进度时才更新
-                        if progress_pct > current_pct:
-                            progress_tracker.update_progress({
-                                'progress_percentage': progress_pct,
-                                'last_message': message
-                            })
-                        else:
-                            progress_tracker.update_progress(message)
-
-                except Exception as e:
-                    logger.warning(f"⚠️ 进度模拟失败: {e}")
-
-            # 启动进度模拟线程
-            progress_thread = threading.Thread(target=simulate_progress, daemon=True)
-            progress_thread.start()
 
             logger.info("🚀 准备调用 trading_graph.propagate（适配新接口，不再传 progress_callback）")
 

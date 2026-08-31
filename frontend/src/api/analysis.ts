@@ -142,6 +142,35 @@ export interface AnalysisTaskStatus {
   [key: string]: any  // 后端可能携带扩展字段
 }
 
+// 子任务进度
+export interface BatchTaskProgress {
+  task_id: string
+  symbol: string
+  stock_name?: string
+  status: string  // pending | processing | completed | failed | cancelled
+  progress: number
+  started_at?: string
+  completed_at?: string
+  last_error?: string
+}
+
+// 批次聚合进度（GET /api/analysis/batches/{id}）
+export interface BatchProgress {
+  batch_id: string
+  title?: string
+  description?: string
+  status: string  // pending | processing | completed | partial_success | failed
+  total_tasks: number
+  completed_tasks: number
+  failed_tasks: number
+  cancelled_tasks: number
+  running_tasks: number
+  progress: number
+  created_at?: string
+  started_at?: string
+  tasks: BatchTaskProgress[]
+}
+
 // 股票分析API
 export const analysisApi = {
   // 开始分析
@@ -214,6 +243,11 @@ export const analysisApi = {
 
   // 获取批次详情（兼容原有队列接口，若后续需要）
   getBatch(batchId: string): Promise<any> {
+    return request.get(`/api/analysis/batches/${batchId}`)
+  },
+
+  // 获取批次聚合进度（总进度/子任务/失败明细，MongoDB持久化，供「股票分析」页使用）
+  getBatchProgress(batchId: string): Promise<ApiResponse<BatchProgress>> {
     return request.get(`/api/analysis/batches/${batchId}`)
   },
 

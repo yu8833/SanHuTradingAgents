@@ -81,10 +81,38 @@ class PortfolioService:
             self.db = get_mongo_db()
         return self.db
 
+    async def _resolve_stock_name(self, symbol: str, provided_name: str) -> str:
+        """
+        解析股票名称：名称「不停显示成代码」的根因是写入路径从不自动补名。
+
+        规则：
+        - 若 provided_name 非空且不等于代码本身，视为真实名称，原样返回；
+        - 否则从权威集合 stock_basic_info 按代码查名，命中则返回真实名称；
+        - 仍未命中则回退为 provided_name（可能为空串，展示层再回退为代码）。
+        仅解析 6 位数字代码（A股），其他代码原样返回，避免影响港股/美股。
+        """
+        clean = str(provided_name or "").strip()
+        if clean and clean != str(symbol).strip():
+            return clean
+        code6 = str(symbol).strip()
+        if not code6.isdigit() or len(code6) != 6:
+            return clean
+        try:
+            db = await self._get_db()
+            info = await db.stock_basic_info.find_one(
+                {"$or": [{"symbol": code6}, {"code": code6}],
+                 "name": {"$nin": ["", None]}}
+            )
+            if info and info.get("name"):
+                return info["name"]
+        except Exception as e:
+            logger.warning(f"⚠️ 解析股票名称失败 {symbol}: {e}")
+        return clean
+
     # ------------------------------------------------------------------
     # 序列化：paper_positions 文档 → API 输出格式
     # ------------------------------------------------------------------
-    def _serialize_position(self, doc: dict[str, Any]) -> dict[str, Any]:
+    async def _serialize_position(self, doc: dict[str, Any]) -> dict[str, Any]:
         """
         将 paper_positions 文档序列化为 API 输出格式。
         字段映射：code→symbol, avg_cost→cost_price
@@ -102,9 +130,13 @@ class PortfolioService:
         if "avg_cost" in result and "cost_price" not in result:
             result["cost_price"] = result["avg_cost"]
 
-        # 确保 stock_name 存在（paper_positions 可能没有）
+        # 确保 stock_name 存在（paper_positions 可能没有），
+        # 缺失或为代码时从权威集合 stock_basic_info 查询补全真实名称，
+        # 覆盖存量数据与所有写入路径，避免名称反复显示成代码。
         if not result.get("stock_name"):
-            result["stock_name"] = result.get("symbol", result.get("code", ""))
+            sym = result.get("symbol", result.get("code", ""))
+            resolved = await self._resolve_stock_name(sym, "")
+            result["stock_name"] = resolved or sym
 
         # 确保 buy_date 存在
         if not result.get("buy_date"):
@@ -169,7 +201,9 @@ class PortfolioService:
                     "quantity": new_qty,
                     "available_qty": new_qty,  # 手动创建不受T+1限制
                     "avg_cost": new_avg,
-                    "stock_name": position.stock_name or existing.get("stock_name", ""),
+                    "stock_name": await self._resolve_stock_name(
+                        position.symbol, position.stock_name or existing.get("stock_name", "")
+                    ),
                     "buy_date": position.buy_date or existing.get("buy_date"),
                     "strategy": position.strategy or existing.get("strategy", "default"),
                     "stop_loss_price": position.stop_loss_price or existing.get("stop_loss_price"),
@@ -183,7 +217,7 @@ class PortfolioService:
                     return_document=True,
                 )
                 logger.info(f"✅ 合并持仓成功: user_id={position.user_id}, code={position.symbol}")
-                return self._serialize_position(result)
+                return await self._serialize_position(result)
 
             # 新建持仓
             doc = {
@@ -195,7 +229,7 @@ class PortfolioService:
                 "available_qty": position.quantity,
                 "frozen_qty": 0,
                 "avg_cost": position.cost_price,
-                "stock_name": position.stock_name,
+                "stock_name": await self._resolve_stock_name(position.symbol, position.stock_name),
                 "buy_date": position.buy_date,
                 "position_ratio": position.position_ratio,
                 "notes": position.notes,
@@ -211,7 +245,7 @@ class PortfolioService:
             doc["_id"] = result.inserted_id
 
             logger.info(f"✅ 创建持仓成功: user_id={position.user_id}, code={position.symbol}")
-            return self._serialize_position(doc)
+            return await self._serialize_position(doc)
 
         except Exception as e:
             logger.error(f"❌ 创建持仓失败: {e}", exc_info=True)
@@ -229,7 +263,7 @@ class PortfolioService:
             }).sort("updated_at", -1)
             positions = await cursor.to_list(length=None)
 
-            return [self._serialize_position(p) for p in positions]
+            return [await self._serialize_position(p) for p in positions]
 
         except Exception as e:
             logger.error(f"❌ 获取持仓列表失败: {e}", exc_info=True)
@@ -256,9 +290,13 @@ class PortfolioService:
             if "cost_price" in filtered_updates:
                 filtered_updates["avg_cost"] = filtered_updates.pop("cost_price")
 
+            # stock_name 为空时，用代码自动补名，避免名称被覆写为空/代码
+            if filtered_updates.get("stock_name") in (None, ""):
+                filtered_updates.pop("stock_name", None)
+
             if not filtered_updates:
                 doc = await collection.find_one({"_id": ObjectId(position_id)})
-                return self._serialize_position(doc)
+                return await self._serialize_position(doc)
 
             filtered_updates["updated_at"] = now_tz().isoformat()
 
@@ -273,7 +311,7 @@ class PortfolioService:
             else:
                 logger.warning(f"⚠️ 更新持仓未找到: position_id={position_id}")
 
-            return self._serialize_position(result)
+            return await self._serialize_position(result)
 
         except Exception as e:
             logger.error(f"❌ 更新持仓失败: {e}", exc_info=True)
@@ -339,7 +377,7 @@ class PortfolioService:
             else:
                 logger.warning(f"⚠️ 平仓未找到或已平仓: position_id={position_id}")
 
-            return self._serialize_position(result)
+            return await self._serialize_position(result)
 
         except Exception as e:
             logger.error(f"❌ 平仓失败: {e}", exc_info=True)
@@ -355,7 +393,7 @@ class PortfolioService:
                 "quantity": {"$gt": 0},
             }).sort("updated_at", -1)
             positions = await cursor.to_list(length=None)
-            return [self._serialize_position(p) for p in positions]
+            return [await self._serialize_position(p) for p in positions]
         except Exception as e:
             logger.error(f"❌ 获取未平仓持仓失败: {e}", exc_info=True)
             raise Exception(f"获取未平仓持仓失败: {str(e)}")
@@ -373,7 +411,7 @@ class PortfolioService:
                 "quantity": {"$gt": 0},
             }).sort("updated_at", -1)
             positions = await cursor.to_list(length=None)
-            return [self._serialize_position(p) for p in positions]
+            return [await self._serialize_position(p) for p in positions]
         except Exception as e:
             logger.error(f"❌ 按策略获取持仓失败: {e}", exc_info=True)
             raise Exception(f"按策略获取持仓失败: {str(e)}")
@@ -403,10 +441,12 @@ class PortfolioService:
             # 序列化交易记录为"已平仓持仓"格式
             closed = []
             for t in trades:
+                code = t.get("code")
+                tname = t.get("stock_name")
                 closed.append({
-                    "code": t.get("code"),
-                    "symbol": t.get("code"),
-                    "stock_name": t.get("stock_name", t.get("code", "")),
+                    "code": code,
+                    "symbol": code,
+                    "stock_name": await self._resolve_stock_name(code, tname or code or ""),
                     "exit_price": t.get("price"),
                     "cost_price": 0.0,  # 需要从买入记录匹配，此处简化
                     "quantity": t.get("quantity"),
@@ -508,7 +548,7 @@ class PortfolioService:
                     "available_qty": position.quantity,
                     "frozen_qty": 0,
                     "avg_cost": position.cost_price,
-                    "stock_name": position.stock_name,
+                    "stock_name": await self._resolve_stock_name(position.symbol, position.stock_name),
                     "buy_date": position.buy_date,
                     "position_ratio": position.position_ratio,
                     "notes": position.notes,

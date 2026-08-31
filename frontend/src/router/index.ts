@@ -54,7 +54,7 @@ const routes: RouteRecordRaw[] = [
     path: '/analysis',
     name: 'Analysis',
     component: () => import('@/layouts/BasicLayout.vue'),
-    redirect: '/analysis/single',
+    redirect: '/analysis',
     meta: {
       title: '分析',
       icon: 'TrendCharts',
@@ -62,23 +62,35 @@ const routes: RouteRecordRaw[] = [
     },
     children: [
       {
-        path: 'single',
-        name: 'SingleAnalysis',
-        component: () => import('@/views/Analysis/SingleAnalysis.vue'),
+        path: '',
+        name: 'StockAnalysis',
+        component: () => import('@/views/Analysis/StockAnalysis.vue'),
         meta: {
-          title: '单股分析',
+          title: '股票分析',
           parentTitle: '分析',
           requiresAuth: true
         }
       },
       {
+        path: 'single',
+        name: 'SingleAnalysis',
+        redirect: '/analysis',
+        meta: {
+          title: '单股分析',
+          parentTitle: '分析',
+          requiresAuth: true,
+          hideInMenu: true
+        }
+      },
+      {
         path: 'batch',
         name: 'BatchAnalysis',
-        component: () => import('@/views/Analysis/BatchAnalysis.vue'),
+        redirect: '/analysis',
         meta: {
           title: '批量分析',
           parentTitle: '分析',
-          requiresAuth: true
+          requiresAuth: true,
+          hideInMenu: true
         }
       },
       ]

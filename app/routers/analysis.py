@@ -10,10 +10,13 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.models.analysis import (
+    AnalysisParameters,
+    AnalysisStatus,
     BatchAnalysisRequest,
     SingleAnalysisRequest,
 )
@@ -884,21 +887,18 @@ async def list_user_tasks(
 @router.post("/batch", response_model=dict[str, Any])
 async def submit_batch_analysis(
     request: BatchAnalysisRequest,
-    user: dict = Depends(get_current_user)
+    user: dict = Depends(get_current_user),
+    queue_svc: QueueService = Depends(get_queue_service)
 ):
-    """提交批量分析任务（真正的并发执行）
+    """提交批量分析任务（统一Worker队列调度，支持并发限制和可见性超时）
 
-    ⚠️ 注意：不使用 BackgroundTasks，因为它是串行执行的！
-    改用 asyncio.create_task 实现真正的并发执行。
+    批量分析任务统一入队，由独立Worker进程消费，严格遵守用户/系统并发限制，
+    批次和任务均持久化到MongoDB，可实时查询进度。
     """
     try:
         logger.info(f"🎯 [批量分析] 收到批量分析请求: title={request.title}")
 
         simple_service = get_simple_analysis_service()
-        batch_id = str(uuid.uuid4())
-        task_ids: list[str] = []
-        mapping: list[dict[str, str]] = []
-
         # 获取股票代码列表 (兼容旧字段)
         stock_symbols = request.get_symbols()
         logger.info(f"📊 [批量分析] 股票代码列表: {stock_symbols}")
@@ -912,62 +912,96 @@ async def submit_batch_analysis(
         if len(stock_symbols) > MAX_BATCH_SIZE:
             raise ValueError(f"批量分析最多支持 {MAX_BATCH_SIZE} 个股票，当前提交了 {len(stock_symbols)} 个")
 
-        # 为每只股票创建单股分析任务
+        # 持久化批次记录到MongoDB
+        from app.core.database import get_mongo_db
+        from app.models.analysis import BatchStatus
+        from app.utils.timezone import now_tz
+
+        batch_id = str(uuid.uuid4())
+        db = get_mongo_db()
+
+        # 批次记录（user_id 使用字符串，与 analysis_tasks 保持一致，便于按用户聚合查询）
+        batch_doc = {
+            "batch_id": batch_id,
+            "user_id": user["id"],
+            "title": request.title,
+            "description": request.description,
+            "total_tasks": len(stock_symbols),
+            "completed_tasks": 0,
+            "failed_tasks": 0,
+            "cancelled_tasks": 0,
+            "progress": 0,
+            "parameters": (request.parameters or AnalysisParameters()).model_dump(mode="json"),
+            "status": BatchStatus.PENDING.value,
+            "created_at": now_tz(),
+            "started_at": None,
+            "completed_at": None,
+        }
+
+        await db.analysis_batches.insert_one(batch_doc)
+        logger.info(f"✅ [批量分析] 批次已持久化到MongoDB: batch_id={batch_id}")
+
+        # 为每只股票创建任务并入队
+        task_ids: list[str] = []
+        mapping: list[dict[str, str]] = []
+        enqueued_count = 0
+
         for i, symbol in enumerate(stock_symbols):
             logger.info(f"📝 [批量分析] 正在创建第 {i+1}/{len(stock_symbols)} 个任务: {symbol}")
 
             single_req = SingleAnalysisRequest(
                 symbol=symbol,
-                stock_code=symbol,  # 兼容字段
+                stock_code=symbol,
                 parameters=request.parameters
             )
 
             try:
-                create_res = await simple_service.create_analysis_task(user["id"], single_req)
+                # 创建任务（传入batch_id）并写入MongoDB
+                create_res = await simple_service.create_analysis_task(
+                    user["id"],
+                    single_req,
+                    batch_id=batch_id
+                )
                 task_id = create_res.get("task_id")
                 if not task_id:
                     raise RuntimeError(f"创建任务失败：未返回task_id (symbol={symbol})")
-                task_ids.append(task_id)
-                mapping.append({"symbol": symbol, "stock_code": symbol, "task_id": task_id})
-                logger.info(f"✅ [批量分析] 已创建任务: {task_id} - {symbol}")
-            except Exception as create_error:
-                logger.error(f"❌ [批量分析] 创建任务失败: {symbol}, 错误: {create_error}", exc_info=True)
-                raise
 
-        # 🔧 使用 asyncio.create_task 实现真正的并发执行
-        # 不使用 BackgroundTasks，因为它是串行执行的
-        async def run_concurrent_analysis():
-            """并发执行所有分析任务"""
-            tasks = []
-            for i, symbol in enumerate(stock_symbols):
-                task_id = task_ids[i]
-                single_req = SingleAnalysisRequest(
+                # 入队到Redis队列，由Worker消费
+                params_dict = single_req.parameters.model_dump() if single_req.parameters else {}
+                queue_params = {
+                    "task_id": task_id,
+                    "symbol": symbol,
+                    "stock_code": symbol,
+                    "user_id": str(user["id"]),
+                    "batch_id": batch_id,
+                    "created_at": now_tz().isoformat(),
+                    **params_dict
+                }
+
+                await queue_svc.enqueue_task(
+                    user_id=str(user["id"]),
                     symbol=symbol,
-                    stock_code=symbol,
-                    parameters=request.parameters
+                    params=queue_params,
+                    batch_id=batch_id,
+                    task_id=task_id
                 )
 
-                # 创建异步任务
-                async def run_single_analysis(tid: str, req: SingleAnalysisRequest, uid: str):
-                    try:
-                        logger.info(f"🚀 [并发任务] 开始执行: {tid} - {req.stock_code}")
-                        await simple_service.execute_analysis_background(tid, uid, req)
-                        logger.info(f"✅ [并发任务] 执行完成: {tid}")
-                    except Exception as e:
-                        logger.error(f"❌ [并发任务] 执行失败: {tid}, 错误: {e}", exc_info=True)
+                task_ids.append(task_id)
+                mapping.append({"symbol": symbol, "stock_code": symbol, "task_id": task_id})
+                enqueued_count += 1
+                logger.info(f"✅ [批量分析] 任务已入队: {task_id} - {symbol}")
 
-                # 添加到任务列表
-                task = asyncio.create_task(run_single_analysis(task_id, single_req, user["id"]))
-                tasks.append(task)
-                logger.info(f"✅ [批量分析] 已创建并发任务: {task_id} - {symbol}")
+            except Exception as create_error:
+                logger.error(f"❌ [批量分析] 创建/入队任务失败: {symbol}, 错误: {create_error}", exc_info=True)
+                raise
 
-            # 等待所有任务完成（不阻塞响应）
-            await asyncio.gather(*tasks, return_exceptions=True)
-            logger.info(f"🎉 [批量分析] 所有任务执行完成: batch_id={batch_id}")
+        # 更新批次状态为processing
+        await db.analysis_batches.update_one(
+            {"batch_id": batch_id},
+            {"$set": {"status": BatchStatus.PROCESSING.value, "started_at": now_tz()}}
+        )
 
-        # 在后台启动并发任务（不等待完成）
-        asyncio.create_task(run_concurrent_analysis())
-        logger.info(f"🚀 [批量分析] 已启动 {len(task_ids)} 个并发任务")
+        logger.info(f"🚀 [批量分析] 已提交 {enqueued_count} 个任务到Worker队列，batch_id={batch_id}")
 
         return {
             "success": True,
@@ -976,9 +1010,9 @@ async def submit_batch_analysis(
                 "total_tasks": len(task_ids),
                 "task_ids": task_ids,
                 "mapping": mapping,
-                "status": "submitted"
+                "status": "processing"
             },
-            "message": f"批量分析任务已提交，共{len(task_ids)}个股票，正在并发执行"
+            "message": f"批量分析任务已提交，共{len(task_ids)}个股票，正在队列中等待执行"
         }
     except Exception as e:
         logger.error(f"❌ [批量分析] 提交失败: {e}", exc_info=True)
@@ -1020,11 +1054,203 @@ async def analyze_batch(
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/batches/{batch_id}")
-async def get_batch(batch_id: str, user: dict = Depends(get_current_user), svc: QueueService = Depends(get_queue_service)):
-    b = await svc.get_batch(batch_id)
-    if not b or b.get("user") != user["id"]:
-        raise HTTPException(status_code=404, detail="batch not found")
-    return b
+async def get_batch(batch_id: str, user: dict = Depends(get_current_user)):
+    """获取批次聚合进度（总进度/子任务/失败明细），数据来源于MongoDB持久化的批次和任务"""
+    try:
+        from app.core.database import get_mongo_db
+        from app.utils.timezone import to_display_iso
+
+        db = get_mongo_db()
+
+        # 读取批次记录，校验归属
+        batch = await db.analysis_batches.find_one({"batch_id": batch_id})
+        if not batch:
+            raise HTTPException(status_code=404, detail="batch not found")
+
+        if str(batch.get("user_id", "")) != str(user["id"]):
+            raise HTTPException(status_code=404, detail="batch not found")
+
+        # 读取批次下的所有任务
+        total_tasks = int(batch.get("total_tasks", 0))
+        tasks_cursor = db.analysis_tasks.find(
+            {"batch_id": batch_id, "user_id": str(user["id"])}
+        ).sort("created_at", 1)
+
+        tasks = []
+        completed = failed = cancelled = running = 0
+        sum_progress = 0
+
+        async for doc in tasks_cursor:
+            status = doc.get("status", "pending") or "pending"
+            progress = int(doc.get("progress", 0) or 0)
+            if status == "completed":
+                completed += 1
+            elif status == "failed":
+                failed += 1
+            elif status == "cancelled":
+                cancelled += 1
+            elif status in ("processing", "running", "queued", "pending"):
+                running += 1
+
+            sum_progress += progress
+            tasks.append({
+                "task_id": doc.get("task_id"),
+                "symbol": doc.get("symbol") or doc.get("stock_code") or doc.get("stock_symbol"),
+                "stock_name": doc.get("stock_name"),
+                "status": status,
+                "progress": progress,
+                "started_at": to_display_iso(doc.get("started_at")),
+                "completed_at": to_display_iso(doc.get("completed_at")),
+                "last_error": doc.get("last_error") or doc.get("error_message"),
+            })
+
+        # 计算整体进度（平均各子任务进度；已完成按100计）
+        if tasks:
+            overall_progress = min(100, round(sum_progress / len(tasks))) if sum_progress else 0
+        else:
+            overall_progress = 0
+
+        # 由子任务状态推导批次状态
+        if total_tasks and completed + failed + cancelled >= total_tasks:
+            if failed == 0:
+                batch_status = "completed"
+            elif completed > 0:
+                batch_status = "partial_success"
+            else:
+                batch_status = "failed"
+        else:
+            batch_status = "processing" if running > 0 or tasks else (batch.get("status") or "pending")
+
+        return {
+            "success": True,
+            "data": {
+                "batch_id": batch_id,
+                "title": batch.get("title"),
+                "description": batch.get("description"),
+                "status": batch_status,
+                "total_tasks": total_tasks,
+                "completed_tasks": completed,
+                "failed_tasks": failed,
+                "cancelled_tasks": cancelled,
+                "running_tasks": running,
+                "progress": overall_progress,
+                "created_at": to_display_iso(batch.get("created_at")),
+                "started_at": to_display_iso(batch.get("started_at")),
+                "tasks": tasks,
+            },
+            "message": "批次进度获取成功"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 获取批次进度失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def batch_progress_generator(batch_id: str, user_id: str):
+    """批次进度 SSE 生成器：轮询MongoDB任务状态，实时推送聚合进度，全部结束时关闭"""
+    import json as _json
+
+    from app.core.config import settings
+    from app.core.database import get_mongo_db
+
+    db = get_mongo_db()
+    poll_interval = float(getattr(settings, "SSE_BATCH_POLL_SECONDS", 2))
+    heartbeat_every = int(getattr(settings, "SSE_HEARTBEAT_INTERVAL_SECONDS", 10))
+    max_idle_seconds = int(getattr(settings, "SSE_BATCH_MAX_IDLE_SECONDS", 1800))
+
+    yield "event: connected\ndata: {\"message\": \"批次进度流已连接\"}\n\n"
+
+    last_hb = time.monotonic()
+    idle_elapsed = 0.0
+    last_snapshot = None
+
+    try:
+        while idle_elapsed < max_idle_seconds:
+            await asyncio.sleep(poll_interval)
+            idle_elapsed += poll_interval
+
+            tasks_cursor = db.analysis_tasks.find(
+                {"batch_id": batch_id, "user_id": user_id}
+            ).sort("created_at", 1)
+            tasks = []
+            completed = failed = cancelled = running = sum_progress = 0
+            for doc in await tasks_cursor.to_list(length=None):
+                status = doc.get("status", "pending") or "pending"
+                progress = int(doc.get("progress", 0) or 0)
+                if status == "completed":
+                    completed += 1
+                elif status == "failed":
+                    failed += 1
+                elif status == "cancelled":
+                    cancelled += 1
+                else:
+                    running += 1
+                sum_progress += progress
+                tasks.append({
+                    "task_id": doc.get("task_id"),
+                    "symbol": doc.get("symbol") or doc.get("stock_code") or doc.get("stock_symbol"),
+                    "status": status,
+                    "progress": progress,
+                    "last_error": doc.get("last_error") or doc.get("error_message"),
+                })
+
+            total = len(tasks)
+            overall = min(100, round(sum_progress / total)) if total else 0
+            terminal = total and (completed + failed + cancelled) >= total
+
+            snapshot = {
+                "batch_id": batch_id,
+                "status": "completed" if terminal else ("processing" if tasks else "pending"),
+                "total_tasks": total,
+                "completed_tasks": completed,
+                "failed_tasks": failed,
+                "cancelled_tasks": cancelled,
+                "running_tasks": running,
+                "progress": overall,
+                "tasks": tasks,
+            }
+
+            # 仅当进度发生变化时推送，避免无效流量
+            if snapshot != last_snapshot:
+                last_snapshot = snapshot
+                yield f"event: progress\ndata: {_json.dumps(snapshot, ensure_ascii=False)}\n\n"
+                idle_elapsed = 0.0
+
+            now = time.monotonic()
+            if now - last_hb >= heartbeat_every:
+                yield f"event: heartbeat\ndata: {{\"timestamp\": {time.time()}}}\n\n"
+                last_hb = now
+
+            if terminal:
+                yield "event: done\ndata: {\"message\": \"批次分析已全部结束\"}\n\n"
+                break
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        logger.error(f"[SSE-Batch] 推送批次进度异常: {e}", exc_info=True)
+        yield f"event: error\ndata: {{\"error\": \"{str(e)}\"}}\n\n"
+
+
+@router.get("/batches/{batch_id}/events")
+async def stream_batch_progress(
+    batch_id: str,
+    token: str | None = Query(default=None, description="SSE 认证 token（EventSource 不支持自定义 header）"),
+    authorization: str | None = Header(default=None),
+):
+    """批次进度实时推送 SSE 端点（EventSource 兼容，支持 ?token= 或 Authorization header）"""
+    from app.routers.sse import get_current_user_for_sse
+
+    user = await get_current_user_for_sse(authorization=authorization, token=token)
+    return StreamingResponse(
+        batch_progress_generator(batch_id, str(user["id"])),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
 
 # 任务和批次查询端点
 # 注意：这个路由被移到了 /tasks/{task_id}/status 之后，避免路由冲突

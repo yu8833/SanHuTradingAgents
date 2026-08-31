@@ -416,23 +416,29 @@ class TradingAgentsGraph:
                         trace.append(chunk)
                 final_state = trace[-1]
             else:
-                # 使用普通 invoke，传入 config 参数
-                # 注意：LangChain invoke 不支持 stream_mode，需要使用 stream 才能获取流式输出
-                config = args.get("config", {})
-                # 移除可能导致问题的 callbacks
-                if "callbacks" in config:
-                    del config["callbacks"]
-                final_state = self.graph.invoke(init_agent_state, config=config)
+                # 使用 stream 模式驱动真实进度上报（通过 self.callbacks/节点完成度）。
+                # 不使用 invoke：invoke 会让 graph_progress_callback 完全失效，进度条无法前进。
+                final_state = self._run_with_progress(init_agent_state, args)
 
             signal = self.finalize_graph_run(company_name, trade_date, final_state)
             return final_state, signal
         finally:
             self.close_graph_run()
 
+    def _emit_progress(self, label):
+        """Invoke all registered plain-function callbacks with a milestone label."""
+        for callback in self.callbacks:
+            try:
+                callback(label)
+            except Exception as cb_err:
+                logger.warning(f"Progress callback failed: {cb_err}")
+
     def _send_progress_update(self, state):
         """Send progress updates based on state field completion.
 
         Works with stream_mode="values" by detecting newly-completed report fields.
+        Milestone labels must match the service's node_progress_map so that the
+        percentage scale stays unified and monotonic.
         """
         try:
             if not isinstance(state, dict):
@@ -440,6 +446,7 @@ class TradingAgentsGraph:
 
             if not hasattr(self, '_progress_sent'):
                 self._progress_sent = set()
+            sent = self._progress_sent
 
             analyst_labels = [
                 ("market_report", "📊 市场分析师"),
@@ -452,32 +459,53 @@ class TradingAgentsGraph:
             ]
 
             for report_key, label in analyst_labels:
-                if report_key in self._progress_sent:
+                if label in sent:
                     continue
                 report_val = state.get(report_key, "")
                 if report_val and isinstance(report_val, str) and len(report_val.strip()) > 10:
-                    self._progress_sent.add(report_key)
-                    for callback in self.callbacks:
-                        try:
-                            callback(label)
-                        except Exception as cb_err:
-                            logger.warning(f"Progress callback failed: {cb_err}")
+                    sent.add(label)
+                    self._emit_progress(label)
 
-            if state.get("data_quality_summary") and 'quality_gate' not in self._progress_sent:
-                self._progress_sent.add('quality_gate')
-                for callback in self.callbacks:
-                    try:
-                        callback("✅ 数据质量审核")
-                    except Exception as cb_err:
-                        logger.warning(f"Progress callback failed: {cb_err}")
+            if "✅ 数据质量审核" not in sent and state.get("data_quality_summary"):
+                sent.add("✅ 数据质量审核")
+                self._emit_progress("✅ 数据质量审核")
 
-            if state.get("final_trade_decision") and 'final' not in self._progress_sent:
-                self._progress_sent.add('final')
-                for callback in self.callbacks:
-                    try:
-                        callback("🎯 最终决策")
-                    except Exception as cb_err:
-                        logger.warning(f"Progress callback failed: {cb_err}")
+            # 研究团队辩论阶段
+            debate = state.get("investment_debate_state") or {}
+            if "🐂 看涨研究员" not in sent and (debate.get("bull_history") or debate.get("current_response")):
+                sent.add("🐂 看涨研究员")
+                self._emit_progress("🐂 看涨研究员")
+            if "🐻 看跌研究员" not in sent and debate.get("bear_history"):
+                sent.add("🐻 看跌研究员")
+                self._emit_progress("🐻 看跌研究员")
+            if "👔 研究经理" not in sent and state.get("investment_plan"):
+                sent.add("👔 研究经理")
+                self._emit_progress("👔 研究经理")
+
+            # 交易员阶段
+            if "💼 交易员决策" not in sent and state.get("trader_investment_plan"):
+                sent.add("💼 交易员决策")
+                self._emit_progress("💼 交易员决策")
+
+            # 风险团队阶段
+            risk = state.get("risk_debate_state") or {}
+            if "🔥 激进风险评估" not in sent and risk.get("aggressive_history"):
+                sent.add("🔥 激进风险评估")
+                self._emit_progress("🔥 激进风险评估")
+            if "🛡️ 保守风险评估" not in sent and risk.get("conservative_history"):
+                sent.add("🛡️ 保守风险评估")
+                self._emit_progress("🛡️ 保守风险评估")
+            if "⚖️ 中性风险评估" not in sent and risk.get("neutral_history"):
+                sent.add("⚖️ 中性风险评估")
+                self._emit_progress("⚖️ 中性风险评估")
+            if "🎯 投资组合经理" not in sent and state.get("risk_control_decision"):
+                sent.add("🎯 投资组合经理")
+                self._emit_progress("🎯 投资组合经理")
+
+            # 最终决策阶段
+            if "📡 最终决策" not in sent and state.get("final_trade_decision"):
+                sent.add("📡 最终决策")
+                self._emit_progress("📡 最终决策")
 
         except Exception as e:
             logger.error(f"Progress update failed: {e}", exc_info=True)
@@ -491,9 +519,17 @@ class TradingAgentsGraph:
         if hasattr(self, '_progress_sent'):
             delattr(self, '_progress_sent')
 
-        final_state = dict(init_agent_state)
+        # 移除 config 中的原始回调函数：它是给 LangGraph 的 handler，不是我们的
+        # 进度回调。真实进度通过 self.callbacks/_send_progress_update 传递。
+        config = args.get("config", {})
+        if "callbacks" in config:
+            del config["callbacks"]
+
+        final_state = None
+        if init_agent_state is not None:
+            final_state = dict(init_agent_state)
         chunk_count = 0
-        for chunk in self.graph.stream(init_agent_state, **args):
+        for chunk in self.graph.stream(init_agent_state, stream_mode="values", **args):
             chunk_count += 1
             if isinstance(chunk, dict):
                 final_state = chunk
@@ -503,7 +539,7 @@ class TradingAgentsGraph:
                         'fundamentals_report', 'policy_report', 'hot_money_report', 'lockup_report']
         logger.info(f"📊 [Final State Reports] Total chunks processed: {chunk_count}")
         for rf in report_fields:
-            val = final_state.get(rf, '')
+            val = final_state.get(rf, '') if isinstance(final_state, dict) else ''
             logger.info(f"  ↳ {rf}: length={len(val) if isinstance(val, str) else 'NOT_STR'}, empty={not val if isinstance(val, str) else True}")
 
         return final_state
