@@ -108,6 +108,14 @@ class SchedulerService:
         # {job_id: datetime}
         self._job_start_times = {}
 
+        # 每个 job 的异步锁，用于串行化 _record_job_execution 的写操作。
+        # 快速任务（如非交易时段的行情入库）SUBMITTED 与 EXECUTED 事件几乎同时触发，
+        # 二者各自 asyncio.create_task 派发的协程会在 await DB 处交错竞态，
+        # 导致产生"孤儿 running 记录"（永不被终态）与重复 success 记录。
+        # 加锁后同一 job 的 running/success/failed 写操作严格串行，消除竞态。
+        # {job_id: asyncio.Lock}
+        self._job_record_locks = {}
+
         # 添加事件监听器，监控任务执行
         self._setup_event_listeners()
     
@@ -861,6 +869,35 @@ class SchedulerService:
         except Exception as e:
             logger.error(f"❌ 检测僵尸任务失败: {e}")
 
+    async def restore_paused_jobs_on_startup(self) -> None:
+        """启动时恢复已停用任务的调度暂停状态。
+
+        fix A：自动停用（连续失败）与手动停用都会把 scheduler_metadata.enabled 置为 False，
+        但 main.py 的任务注册仅由 settings 开关驱动，后端重启后会把这些任务重新启用，
+        导致「自动停用保护」在重启后失效。此方法在启动完成后读取 enabled=False 的任务，
+        并在调度器中对应置为 paused，使停用状态跨重启保持生效。
+        """
+        try:
+            db = self._get_db()
+            disabled = await db.scheduler_metadata.find({"enabled": False}).to_list(length=200)
+            if not disabled:
+                return
+            restored = 0
+            for doc in disabled:
+                job_id = doc.get("job_id")
+                if not job_id:
+                    continue
+                job = self.scheduler.get_job(job_id)
+                # 仅暂停当前处于活动态（未被调度器自动置为暂停）的任务，避免重复动作
+                if job and job.next_run_time is not None:
+                    self.scheduler.pause_job(job_id)
+                    restored += 1
+                    logger.warning(f"⏸️ 启动恢复停用状态: 任务 {job_id} ({job.name}) 已置为暂停")
+            if restored:
+                logger.info(f"✅ 启动时共恢复 {restored} 个已停用任务的暂停状态")
+        except Exception as e:
+            logger.error(f"❌ 恢复已停用任务暂停状态失败: {e}", exc_info=True)
+
     def _on_job_submitted(self, event: JobSubmissionEvent):
         """任务开始执行回调（任务被提交到执行器时触发）
 
@@ -989,6 +1026,10 @@ class SchedulerService:
             progress: 执行进度（0-100）
             is_manual: 是否手动触发
         """
+        # 同一 job 记录的写入串行化，避免 SUBMITTED/EXECUTED 两个异步协程在 await 处
+        # 交错竞态产生"孤儿 running"或重复 success 记录（见 __init__ 中的注释）。
+        lock = self._job_record_locks.setdefault(job_id, asyncio.Lock())
+        await lock.acquire()
         try:
             db = self._get_db()
 
@@ -1032,6 +1073,21 @@ class SchedulerService:
                     if existing_terminal:
                         logger.debug(
                             f"ℹ️ 任务 {job_id} 调度时刻 {scheduled_naive} 已有终态记录，跳过创建 running"
+                        )
+                        return
+                else:
+                    # scheduled_time 缺失（如 SUBMITTED 事件未携带）时，退化为按时间窗口判断：
+                    # 近期（5 分钟内）已存在终态记录，说明本次运行已经结束，跳过创建 running，
+                    # 进一步杜绝孤儿 running。
+                    term_window = get_utc8_now() - timedelta(minutes=5)
+                    fallback_terminal = await db.scheduler_executions.find_one({
+                        "job_id": job_id,
+                        "status": {"$in": ["success", "failed"]},
+                        "timestamp": {"$gte": term_window}
+                    })
+                    if fallback_terminal:
+                        logger.debug(
+                            f"ℹ️ 任务 {job_id} 近期已有终态记录，跳过创建 running（scheduled_time 缺失）"
                         )
                         return
 
@@ -1134,7 +1190,9 @@ class SchedulerService:
                 await self._handle_job_failure_tracking(job_id, status)
 
         except Exception as e:
-            logger.error(f"❌ 记录任务执行历史失败: {e}")
+            logger.error(f"❌ 记录任务执行历史失败: {e}", exc_info=True)
+        finally:
+            lock.release()
 
     async def _handle_job_failure_tracking(self, job_id: str, status: str):
         """

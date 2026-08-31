@@ -1066,7 +1066,13 @@ async def lifespan(app: FastAPI):
         # 否则只有在首次调用 /api/scheduler/* 时才会创建，可能导致事件监听器永不注册
         try:
             from app.services.scheduler_service import get_scheduler_service
-            get_scheduler_service()
+            svc = get_scheduler_service()
+            # fix A：恢复历史停用（自动停用/手动停用）任务在调度器中的暂停状态，
+            # 避免后端重启后停用状态失效被重新启用。scheduler.start() 后执行，DB 已就绪。
+            try:
+                await svc.restore_paused_jobs_on_startup()
+            except Exception as _restore_e:
+                logger.warning(f"⚠️ 恢复已停用任务暂停状态异常（忽略，不影响启动）: {_restore_e}")
             logger.info("✅ 调度器服务已初始化（事件监听器+僵尸检测已注册）")
         except Exception as e:
             logger.error(f"❌ 调度器服务初始化失败: {e}", exc_info=True)
