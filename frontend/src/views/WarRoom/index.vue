@@ -729,9 +729,9 @@ const todayText = computed(() => {
 })
 
 const flowSegments = computed(() => [
-  { key: 'pre_market', label: '盘前', count: (todayData.value?.pre_market?.plan_pending || 0) + (todayData.value?.pre_market?.macro_snapshot_ready ? 0 : 1) },
-  { key: 'intraday', label: '盘中', count: alertsUnread.value },
-  { key: 'post_market', label: '盘后', count: todayData.value?.post_market?.signal_pending || 0 },
+  { key: 'pre_market', label: '盘前', count: todayData.value?.pre_market?.todo ?? 0 },
+  { key: 'intraday', label: '盘中', count: todayData.value?.intraday?.todo ?? 0 },
+  { key: 'post_market', label: '盘后', count: todayData.value?.post_market?.todo ?? 0 },
   { key: 'weekly', label: '周度', count: todayData.value?.weekly?.todo ?? 0 }
 ])
 const tabIndexMap: Record<string, string> = { pre_market: 'pre_market', intraday: 'intraday', post_market: 'post_market', weekly: 'weekly' }
