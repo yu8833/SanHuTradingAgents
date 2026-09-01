@@ -3,7 +3,7 @@
 设计文档《第六章·交易工具与日常流程》§4 缺口3：
 - 定量统计：本周收益率（vs 沪深300）、交易笔数、胜率、持仓全红率
 - 持仓全红率 = 盈利持仓数 / 总持仓数（教材 5.3 核心指标）
-- 对比沪深300：AKShare stock_zh_index_daily(sh000300) 周度涨跌
+- 对比沪深300：Tushare 指数日线（pro.index_daily）优先，AKShare stock_zh_index_daily(sh000300) 兜底
 - 信号有效性：复用 P1 signal_tracking 聚合统计
 - 落库 weekly_reviews（user_id + week_start 唯一），周五盘后自动生成
 """
@@ -39,38 +39,78 @@ def _last_friday_before(week_start: date) -> date:
 
 
 def _fetch_hs300_weekly_return(week_start_str: str, today_str: str) -> dict:
-    """沪深300 本周涨跌幅（AKShare sh000300 日线）。失败返回 unavailable。"""
+    """沪深300 本周涨跌幅：Tushare 指数日线优先（设计文档 §4 缺口3），AKShare 兜底。失败返回 unavailable。"""
+    week_start = date.fromisoformat(week_start_str)
+    prev_friday = _last_friday_before(week_start)
+    start_ts = prev_friday.strftime("%Y%m%d")
+    end_ts = today_str.replace("-", "")
+
+    # 1) Tushare 指数日线（优先）
+    rows = _hs300_tushare_rows(start_ts, end_ts)
+    # 2) AKShare 兜底
+    if not rows:
+        rows = _hs300_akshare_rows(prev_friday.isoformat())
+    if not rows:
+        return {"available": False, "message": "沪深300日线不可用"}
+
+    # rows = [(date_iso, close)]，升序
+    week_rows = [c for d, c in rows if d >= week_start.isoformat()]
+    if not week_rows:
+        return {"available": False, "message": "本周无沪深300数据"}
+    last_close = week_rows[-1]
+    # 基准：上周五收盘，缺失则用本周第一根
+    base_close = next((c for d, c in rows if d == prev_friday.isoformat()), week_rows[0])
+    if base_close <= 0:
+        return {"available": False, "message": "沪深300基准价无效"}
+    return {
+        "available": True,
+        "ret_pct": round((last_close / base_close - 1) * 100, 2),
+        "last_close": round(last_close, 2),
+        "base_close": round(base_close, 2),
+    }
+
+
+def _hs300_tushare_rows(start_ts: str, end_ts: str) -> list[tuple[str, float]]:
+    """Tushare 指数日线（pro.index_daily，000300.SH）。失败/无 token 返回 []。"""
+    try:
+        import os
+        import tushare as ts
+        token = os.getenv("TUSHARE_TOKEN", "").strip().strip('"').strip("'")
+        if not token:
+            return []
+        ts.set_token(token)
+        pro = ts.pro_api()
+        df = pro.index_daily(
+            ts_code="000300.SH", start_date=start_ts, end_date=end_ts,
+            fields="trade_date,close",
+        )
+        if df is None or len(df) == 0 or "trade_date" not in df.columns or "close" not in df.columns:
+            return []
+        df = df.sort_values("trade_date")
+        out: list[tuple[str, float]] = []
+        for _, r in df.iterrows():
+            d = str(r["trade_date"])[:8]
+            out.append((f"{d[:4]}-{d[4:6]}-{d[6:8]}", float(r["close"])))
+        return out
+    except Exception as e:
+        logger.warning(f"沪深300 Tushare 指数日线获取失败: {e}")
+        return []
+
+
+def _hs300_akshare_rows(floor_date: str) -> list[tuple[str, float]]:
+    """AKShare sh000300 日线兜底。失败返回 []。"""
     try:
         import akshare as ak
         df = ak.stock_zh_index_daily(symbol=HS300_CODE)
         if df is None or len(df) == 0 or "date" not in df.columns or "close" not in df.columns:
-            return {"available": False, "message": "沪深300日线为空"}
-        # date 列可能为 str/date/datetime
+            return []
         df = df.copy()
         df["date"] = df["date"].astype(str).str[:10]
-        week_start = date.fromisoformat(week_start_str)
-        prev_friday = _last_friday_before(week_start)
-        rows = df[df["date"] >= week_start.isoformat()]
-        if len(rows) == 0:
-            return {"available": False, "message": "本周无沪深300数据"}
-        last_close = float(rows.iloc[-1]["close"])
-        # 基准：上周五收盘，缺失则用本周第一根
-        prev_row = df[df["date"] == prev_friday.isoformat()]
-        if len(prev_row) > 0:
-            base_close = float(prev_row.iloc[0]["close"])
-        else:
-            base_close = float(rows.iloc[0]["close"])
-        if base_close <= 0:
-            return {"available": False, "message": "沪深300基准价无效"}
-        return {
-            "available": True,
-            "ret_pct": round((last_close / base_close - 1) * 100, 2),
-            "last_close": round(last_close, 2),
-            "base_close": round(base_close, 2),
-        }
+        df = df[df["date"] >= floor_date]
+        return [(str(r["date"]), float(r["close"])) for _, r in df.iterrows()]
     except Exception as e:
-        logger.warning(f"沪深300周度涨跌获取失败: {e}")
-        return {"available": False, "message": str(e)[:120]}
+        logger.warning(f"沪深300 AKShare 日线获取失败: {e}")
+        return []
 
 
 async def _fetch_week_trades(user_id: str, week_start_str: str) -> list[dict]:

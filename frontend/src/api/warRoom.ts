@@ -21,7 +21,7 @@ export interface WarRoomToday {
     signal_pending: number
     signal_total: number
   }
-  weekly: { done: boolean }
+  weekly: { done: boolean; todo: number }
   total_todo: number
 }
 
@@ -64,6 +64,32 @@ export interface PlanItem {
   position?: Record<string, any> | null
 }
 
+export interface TodayTrade {
+  code: string
+  name: string
+  side: 'buy' | 'sell'
+  quantity: number
+  price?: number | null
+  amount?: number | null
+  pnl?: number | null
+  strategy?: string | null
+  timestamp?: string
+}
+
+export interface TodayAlert {
+  id?: string
+  ts?: number
+  rule_name?: string
+  source?: string
+  symbol?: string
+  name?: string
+  message?: string
+  price?: number | null
+  change_pct?: number | null
+  signals?: string[]
+  severity?: string
+}
+
 export interface WeeklyReview {
   week_start: string
   week_end: string
@@ -101,6 +127,24 @@ export const warRoomApi = {
       date: date || undefined,
       refresh: refresh || undefined
     }, { timeout: 120000 })
+    return res.data
+  },
+
+  // 盘前：手动刷新宏观快照（立即刷新，绕过 8:15 定时任务）
+  async refreshMacro() {
+    const res = await ApiClient.post<MacroSnapshot | null>('/api/macro/refresh', undefined, { timeout: 120000 })
+    return res.data
+  },
+
+  // 盘中：今日触发预警列表（与今日聚合角标同口径）
+  async getTodayAlerts() {
+    const res = await ApiClient.get<{ total: number; items: TodayAlert[] }>('/api/war-room/today-alerts')
+    return res.data
+  },
+
+  // 盘后：当日成交记录（交易复盘）
+  async getTodayTrades() {
+    const res = await ApiClient.get<{ total: number; items: TodayTrade[] }>('/api/war-room/today-trades')
     return res.data
   },
 

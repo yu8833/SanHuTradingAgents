@@ -198,6 +198,38 @@ async def update_plan_status(user_id: str, plan_id: str, status: str,
         return None
 
 
+async def auto_associate_trade(user_id: str, code: str, direction: str, trade_id: str,
+                               plan_date: str | None = None) -> dict | None:
+    """成交后自动关联当日待执行计划（设计文档 §4 缺口2："执行后自动关联 paper_trades"）。
+
+    按 用户+代码+方向+当日 匹配 pending 计划，标记 executed 并写入 executed_trade_id，
+    形成"计划→成交→复盘"链路。无匹配返回 None；失败不抛出（不阻塞成交主流程）。
+    """
+    try:
+        db = get_mongo_db()
+        plan = await db[COLLECTION].find_one_and_update(
+            {
+                "user_id": user_id,
+                "code": code,
+                "direction": direction,
+                "status": STATUS_PENDING,
+                "date": plan_date or _today(),
+            },
+            {"$set": {
+                "status": STATUS_EXECUTED,
+                "executed_trade_id": trade_id,
+                "updated_at": datetime.utcnow(),
+            }},
+            return_document=True,
+        )
+        if plan:
+            logger.info(f"📌 计划→成交自动关联: plan={plan.get('_id')} trade={trade_id} {code} {direction}")
+        return _serialize(plan) if plan else None
+    except Exception as e:
+        logger.error(f"计划自动关联失败（不影响成交）: {e}", exc_info=True)
+        return None
+
+
 def _check_triggered(direction: str, trigger_price: float | None, last_price: float | None) -> bool:
     """价格触达判断：买入=回落至触发价以下；卖出=涨至触发价以上。"""
     if last_price is None or trigger_price is None:

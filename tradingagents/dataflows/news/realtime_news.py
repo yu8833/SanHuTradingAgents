@@ -75,7 +75,9 @@ def _fetch_market_news(limit: int = 50) -> list[NewsItem]:
                 except (ValueError, TypeError, OSError):
                     pub_time = None
             items.append(NewsItem(
-                title=title, content=content, url="", source="财联社", publish_time=pub_time
+                title=title, content=content,
+                url=f"https://www.cls.cn/detail/{item.get('id', '')}" if item.get("id") else "",
+                source="财联社", publish_time=pub_time
             ))
     except Exception as e:
         logger.warning("财联社实时新闻获取失败: %s", e)
@@ -92,10 +94,13 @@ def _fetch_market_news(limit: int = 50) -> list[NewsItem]:
         }
         r_em = _em_get(em_url, params=em_params, headers={"User-Agent": _UA, "Referer": "https://kuaixun.eastmoney.com/"}, timeout=10)
         for item in r_em.json().get("data", {}).get("fastNewsList", []):
+            code = str(item.get("code", "") or "")
             items.append(NewsItem(
                 title=item.get("title", ""),
                 content=str(item.get("summary", "") or "")[:300],
-                url=str(item.get("infoUrl", "") or ""),
+                url=str(item.get("infoUrl", "") or "") or (
+                    f"http://wap.eastmoney.com/3g/news/article,8,365,1,{code}.shtml" if code else ""
+                ),
                 source="东财快讯",
                 publish_time=_parse_time(item.get("showTime")),
             ))

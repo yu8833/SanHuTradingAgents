@@ -92,6 +92,29 @@ class TestMacroScorer:
         assert r["score"] == 0
         assert r["confidence"] == 0
 
+    def test_confidence_ignores_non_fired_signals(self):
+        """未触发信号不稀释置信度：满分只计已触发信号的权重。"""
+        indices = [
+            _idx("spx", "标普500", 5000, 1.2),    # 触发 +1
+            _idx("ndx", "纳斯达克", 15000, 0.2),  # 未触发（阈值内）
+            _idx("hsi", "恒生指数", 20000, -0.2), # 未触发（阈值内）
+        ]
+        r = ms.score_macro(indices, [], [], None)
+        assert r["score"] == 1
+        assert r["max_abs"] == 1, r  # 只有 spx 的权重 1 计入分母
+        assert r["confidence"] == 100, r
+
+    def test_confidence_conflicting_signals(self):
+        """触发信号方向分歧 → 置信度下降（反映分歧而非稀释）。"""
+        indices = [
+            _idx("spx", "标普500", 5000, 1.2),    # +1
+            _idx("ndx", "纳斯达克", 15000, -1.0), # -1
+        ]
+        r = ms.score_macro(indices, [], [], None)
+        assert r["score"] == 0
+        assert r["max_abs"] == 2, r
+        assert r["confidence"] == 0, r
+
     def test_event_polarity(self):
         """事件极性：利好 +2 / 利空 -2。"""
         assert ms._event_polarity("央行降息 0.1个百分点") > 0

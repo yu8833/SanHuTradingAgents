@@ -238,7 +238,7 @@ async def get_signal_stats() -> dict:
         ])
         rows = await cursor.to_list(length=20)
         stats = []
-        total = {"count": 0, "win": 0, "loss": 0, "flat": 0, "hit_stop": 0}
+        total = {"count": 0, "win": 0, "loss": 0, "flat": 0, "hit_stop": 0, "win_rate": 0}
         for r in rows:
             count = r["count"]
             win_rate = round(r["win"] / count * 100, 1) if count else 0
@@ -254,6 +254,8 @@ async def get_signal_stats() -> dict:
             })
             for k in ("count", "win", "loss", "flat", "hit_stop"):
                 total[k] += r[k]
+        if total["count"]:
+            total["win_rate"] = round(total["win"] / total["count"] * 100, 1)
         pending_count = await col.count_documents({"status": "pending"})
         return {
             "by_type": stats,

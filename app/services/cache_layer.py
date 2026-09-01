@@ -153,10 +153,11 @@ async def clear_cache(key: str):
 
 
 async def cached(key: str, build_fn: Callable, category: str = "default",
-                 valid: Callable[[Any], bool] = bool) -> Any:
+                 valid: Callable[[Any], bool] = bool, ttl: int | None = None) -> Any:
     """
     带缓存的数据获取：命中则返回，未命中则调用 build_fn 构建并缓存。
     valid 返回 False 的结果不缓存，下次直接重试。
+    ttl 指定时覆盖分级 TTL（例如财经日历固定 1 天），否则按 category+时段自动分级。
     """
     hit = await get_cache(key)
     if hit is not None:
@@ -169,7 +170,7 @@ async def cached(key: str, build_fn: Callable, category: str = "default",
         value = await asyncio.to_thread(build_fn)
 
     if valid(value):
-        await set_cache(key, value, category=category)
+        await set_cache(key, value, ttl=ttl, category=category)
     else:
         logger.warning(f"缓存跳过（校验失败）: {key}")
 

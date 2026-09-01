@@ -605,7 +605,18 @@ async def execute_market_order(
                 trade_doc["thesis"] = pos["thesis"]
         if analysis_id:
             trade_doc["analysis_id"] = analysis_id
-        await db["paper_trades"].insert_one(trade_doc)
+        trade_result = await db["paper_trades"].insert_one(trade_doc)
+
+        # 设计文档 P2（§4 缺口2）：成交后自动关联当日待执行计划 → "计划→成交→复盘"链路。
+        # 按 用户+代码+方向+当日 匹配 pending 计划，标记 executed 并写入 executed_trade_id。
+        # 失败/无匹配不阻塞成交主流程。
+        try:
+            from app.services.plan_service import auto_associate_trade
+            await auto_associate_trade(
+                user_id, normalized_code, side, str(trade_result.inserted_id)
+            )
+        except Exception as _plan_err:
+            logger.warning(f"⚠️ 计划自动关联失败（不影响成交）: {_plan_err}")
     except Exception:
         # 一致性补偿：任一步失败即回滚账户/持仓到变更前快照，删除本次订单与交易记录
         logger.warning(f"⚠️ 订单执行失败，执行回滚: {normalized_code} {side} qty={qty}")

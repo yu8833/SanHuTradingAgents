@@ -111,6 +111,7 @@ def _fetch_macro_news(hours_back: int = 24, top_n: int = 40) -> list[dict]:
             "content": (n.content or "")[:200],
             "source": n.source,
             "publish_time": pub.isoformat() if pub else "",
+            "url": getattr(n, "url", "") or "",
         })
 
     # 去重（按标题）

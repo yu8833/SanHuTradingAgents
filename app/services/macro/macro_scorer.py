@@ -12,7 +12,9 @@
 | 高重要性政策/数据事件 | 利好 +2 / 利空 -2 |
 | 昨日大盘情绪 | 涨跌家数 >3:1 → +1；<1:3 → -1 |
 
-聚合：总分 ≥2 偏多、≤-2 偏空、否则中性；置信度 = |总分|/满分。
+聚合：总分 ≥2 偏多、≤-2 偏空、否则中性；
+置信度 = |总分|/满分，其中满分 = 已触发信号的权重绝对值之和（衡量触发信号间的方向一致度；
+未触发（score=0）的信号不计入分母，避免大量中性信号结构性稀释置信度，使低置信度反映"信号平淡/分歧"而非"信号太少"）。
 输出：{direction, score, confidence, signals[]}，每条带依据 —— 可解释、可回测。
 
 本模块为纯函数（无 IO），便于单测与回测。
@@ -109,13 +111,14 @@ def score_macro(indices: list[dict], calendar: list[dict],
     """
     signals: list[dict] = []
     total = 0
-    max_abs = 0  # 可用信号的满分绝对值之和（用于置信度）
+    max_abs = 0  # 已触发信号的满分绝对值之和（用于置信度）
 
     def _add(sig: dict, contrib: int):
         nonlocal total, max_abs
         signals.append(sig)
         total += contrib
-        max_abs += abs(sig["weight"])
+        if contrib != 0:
+            max_abs += abs(sig["weight"])
 
     # 1. 标普500
     spx = _find_index(indices, "spx")

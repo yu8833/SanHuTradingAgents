@@ -283,10 +283,17 @@ def _build_calendar(days: int = _CALENDAR_DAYS) -> list[dict]:
 
 
 async def get_financial_calendar(days: int = _CALENDAR_DAYS) -> list[dict]:
-    """财经日历（未来 7 天），Redis 1 天 TTL 缓存。"""
+    """财经日历（未来 7 天），Redis 1 天 TTL 缓存（设计文档 §5.3-B / A.5）。
+
+    缓存键必须含参考日期：日历窗口随日期滑动，若只用 {days} 作键，
+    前一天生成的"未来7天"窗口会被次日复用（如 08-31 的日历被 09-01 命中，
+    导致快照里出现 08-31 的事件）。按日期分键后，每天窗口独立、次日自动重建。
+    """
+    today = date.today().isoformat()
     return await cached(
-        f"macro:calendar:{days}",
+        f"macro:calendar:{days}:{today}",
         lambda: _build_calendar(days),
         category="financial",
         valid=bool,
+        ttl=86400,
     )

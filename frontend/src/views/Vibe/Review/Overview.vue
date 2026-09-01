@@ -8,7 +8,7 @@
         </div>
         <div class="page-hero-text">
           <h2 class="page-hero-title">{{ today }} · 大盘看板</h2>
-          <p class="page-hero-sub">大盘指数 / 全球市场一屏看全</p>
+          <p class="page-hero-sub">大盘指数 / 市场情绪 / 涨跌分布一屏看全</p>
         </div>
       </div>
       <div class="page-hero-meta">
@@ -238,84 +238,6 @@
       </div>
     </section>
       </el-tab-pane>
-
-      <!-- ============ 全球市场 ============ -->
-      <el-tab-pane label="全球市场" name="global">
-        <section class="block">
-          <div class="block-head">
-            <span class="block-title"><el-icon><DataLine /></el-icon> 全球指数</span>
-          </div>
-          <div class="grid grid-5">
-            <el-card
-              v-for="item in globalIndices"
-              :key="item.key"
-              shadow="never"
-              class="idx-card"
-            >
-              <div class="idx-name">
-                {{ item.name }}<span class="region">{{ item.region }}</span>
-              </div>
-              <div class="idx-price">{{ fmtPrice(item.price) }}</div>
-              <div class="idx-change" :class="colorClass(item.change_pct)">
-                {{ fmtPct(item.change_pct) }}
-              </div>
-            </el-card>
-            <el-card v-if="!globalIndices.length && !loading" shadow="never" class="idx-card empty-card">
-              <el-empty :image-size="48" description="暂无全球指数" />
-            </el-card>
-          </div>
-        </section>
-
-        <section class="block">
-          <div class="block-head">
-            <span class="block-title"><el-icon><DataLine /></el-icon> 美股</span>
-          </div>
-          <div class="grid grid-5">
-            <el-card
-              v-for="item in usStocks"
-              :key="item.secid"
-              shadow="never"
-              class="idx-card"
-            >
-              <div class="idx-name">
-                {{ item.name }}<span class="region">美股</span>
-              </div>
-              <div class="idx-price">{{ fmtPrice(item.price) }}</div>
-              <div class="idx-change" :class="colorClass(item.change_pct)">
-                {{ fmtPct(item.change_pct) }}
-              </div>
-            </el-card>
-            <el-card v-if="!usStocks.length && !loading" shadow="never" class="idx-card empty-card">
-              <el-empty :image-size="48" description="暂无美股数据" />
-            </el-card>
-          </div>
-        </section>
-
-        <section class="block">
-          <div class="block-head">
-            <span class="block-title"><el-icon><DataLine /></el-icon> 港股</span>
-          </div>
-          <div class="grid grid-5">
-            <el-card
-              v-for="item in hkStocks"
-              :key="item.secid"
-              shadow="never"
-              class="idx-card"
-            >
-              <div class="idx-name">
-                {{ item.name }}<span class="region">港股</span>
-              </div>
-              <div class="idx-price">{{ fmtPrice(item.price) }}</div>
-              <div class="idx-change" :class="colorClass(item.change_pct)">
-                {{ fmtPct(item.change_pct) }}
-              </div>
-            </el-card>
-            <el-card v-if="!hkStocks.length && !loading" shadow="never" class="idx-card empty-card">
-              <el-empty :image-size="48" description="暂无港股数据" />
-            </el-card>
-          </div>
-        </section>
-      </el-tab-pane>
     </el-tabs>
 
     <!-- 免责声明 -->
@@ -342,8 +264,6 @@ import {
 import {
   vibeApi,
   type IndexQuote,
-  type GlobalIndex,
-  type GlobalStock,
   type MarketDashboard,
 } from '@/api/vibe'
 import { fmtPrice, fmtPct, fmtAbsPct, fmtAmount, fmtSigned, clsByVal } from '@/utils/format'
@@ -351,16 +271,10 @@ import { fmtPrice, fmtPct, fmtAbsPct, fmtAmount, fmtSigned, clsByVal } from '@/u
 const loading = ref(false)
 const activeTab = ref('ashare')
 const indices = ref<IndexQuote[]>([])
-const globalIndices = ref<GlobalIndex[]>([])
-const globalStocks = ref<GlobalStock[]>([])
 const dashboard = ref<MarketDashboard | null>(null)
 
 // 大盘统一市场状态（与「常用策略」行情条同口径，后端下发）
 const regime = computed(() => dashboard.value?.regime ?? null)
-
-// 全球著名股票按 美股 / 港股 分组
-const usStocks = computed(() => globalStocks.value.filter(s => s.region === '美股'))
-const hkStocks = computed(() => globalStocks.value.filter(s => s.region === '港股'))
 
 const today = computed(() => {
   const d = new Date()
@@ -509,21 +423,13 @@ const loadAll = async () => {
   try {
     const results = await Promise.allSettled([
       withTimeout(vibeApi.getIndices(), 15000),
-      withTimeout(vibeApi.getGlobalIndices(), 15000),
-      withTimeout(vibeApi.getGlobalStocks(), 15000),
       withTimeout(vibeApi.getDashboard(), 20000),
     ])
 
     // 逐个处理结果，失败不影响其他数据显示
-    const [idxRes, gRes, gsRes, dashRes] = results
+    const [idxRes, dashRes] = results
     if (idxRes.status === 'fulfilled') {
       indices.value = idxRes.value.data || []
-    }
-    if (gRes.status === 'fulfilled') {
-      globalIndices.value = gRes.value.data || []
-    }
-    if (gsRes.status === 'fulfilled') {
-      globalStocks.value = gsRes.value.data || []
     }
     if (dashRes.status === 'fulfilled') {
       dashboard.value = dashRes.value.data || null
@@ -650,10 +556,6 @@ onMounted(() => {
   grid-template-columns: repeat(4, 1fr);
 }
 
-.grid-5 {
-  grid-template-columns: repeat(5, 1fr);
-}
-
 .idx-card {
   border-radius: 8px;
 }
@@ -713,12 +615,8 @@ onMounted(() => {
   text-align: center;
 }
 
-@media (max-width: 1200px) {
-  .grid-5 { grid-template-columns: repeat(3, 1fr); }
-}
-
 @media (max-width: 768px) {
-  .grid-4, .grid-5 { grid-template-columns: repeat(2, 1fr); }
+  .grid-4 { grid-template-columns: repeat(2, 1fr); }
 }
 
 /* ===== 市场看板（借鉴 tickflow Dashboard）===== */
