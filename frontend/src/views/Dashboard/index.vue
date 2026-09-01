@@ -254,10 +254,10 @@ const todayFlow = ref<any>(null)
 const flowSegs = computed(() => {
   const t = todayFlow.value
   return [
-    { key: 'pre_market', label: '盘前', count: (t?.pre_market?.plan_pending || 0) + (t?.pre_market?.macro_snapshot_ready ? 0 : 1) },
-    { key: 'intraday', label: '盘中', count: (t?.intraday?.holding_count || 0) + (t?.intraday?.alert_count || 0) },
-    { key: 'post_market', label: '盘后', count: t?.post_market?.signal_pending || 0 },
-    { key: 'weekly', label: '周度', count: t?.weekly?.done ? 0 : 1 },
+    { key: 'pre_market', label: '盘前', count: t?.pre_market?.todo || 0 },
+    { key: 'intraday', label: '盘中', count: t?.intraday?.todo || 0 },
+    { key: 'post_market', label: '盘后', count: t?.post_market?.todo || 0 },
+    { key: 'weekly', label: '周度', count: t?.weekly?.todo || 0 },
   ]
 })
 const currentPeriod = computed(() => todayFlow.value?.current_period || 'pre_market')
