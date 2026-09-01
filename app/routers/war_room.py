@@ -158,6 +158,10 @@ async def war_room_today(user: dict = Depends(_get_optional_user)):
         alert_count = await db["monitor_alerts"].count_documents(
             {"ts": {"$gte": day_start_ms}}
         )
+        # 盘中待确认指令数（策略指令 Tab 的"待确认指令"，status=pending 的三买三卖订单）。
+        pending_orders = await db["monitor_tbs_orders"].count_documents(
+            {"user_id": uid, "status": "pending"}
+        ) if uid else 0
 
         # 盘后：待验证信号数（signal_tracking）
         signal_pending = await db["signal_tracking"].count_documents(
@@ -190,7 +194,7 @@ async def war_room_today(user: dict = Depends(_get_optional_user)):
 
         # 各段待办计数（与前端 flowSegments 角标口径完全一致，保证「待办合计」= 四段角标之和）
         pre_todo = plan_pending + (0 if bool(macro_snap) else 1)
-        intra_todo = alert_count
+        intra_todo = pending_orders
         post_todo = signal_pending
         total_todo = pre_todo + intra_todo + post_todo + weekly_todo
 
@@ -207,6 +211,7 @@ async def war_room_today(user: dict = Depends(_get_optional_user)):
             "intraday": {
                 "holding_count": holding_count,
                 "alert_count": alert_count,
+                "pending_orders": pending_orders,
                 "todo": intra_todo,
             },
             "post_market": {

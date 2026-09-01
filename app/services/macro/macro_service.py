@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from app.services.cache_layer import cached
@@ -231,7 +231,7 @@ async def build_macro_snapshot(days: int = 7) -> dict:
         "rule": rule,
         "llm_interpretation": llm["interpretation"],
         "llm_available": llm["available"],
-        "created_at": datetime.utcnow(),
+        "created_at": datetime.now(timezone.utc),
     }
 
 
