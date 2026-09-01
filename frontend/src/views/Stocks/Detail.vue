@@ -1609,6 +1609,9 @@ onMounted(async () => {
   sseUnsubscribe = subscribeQuotesUpdate((signal) => {
     // 收到行情更新信号，立即拉取最新报价（SSE 优先，轮询兜底）
     fetchQuote(false)
+    // 🔥 盘中即时：行情更新时同步刷新量价分析与三买三卖（后端有交易30s/非交易5min结果缓存，不会高频打库）
+    fetchVolumePriceAnalysis()
+    fetchBuySellCheck()
   })
 })
 

@@ -173,3 +173,111 @@ def load_symbol_history(
     """加载单只股票的历史日线，返回降序或升序均可（调用方自行排序）。"""
     df = load_daily_panel(db, [symbol], start_dt, end_dt, period=period)
     return df
+
+
+def _safe_float(v) -> float:
+    """将可能为 None / str / 非数值 的字段转为 float，非法则返回 0。"""
+    try:
+        if v is None:
+            return 0.0
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def normalize_realtime_snapshot(realtime_quote: dict) -> dict | None:
+    """把 market_quotes 的单只实时快照归一化为标准行，供各分析模块合并。
+
+    返回字段（均为统一口径）:
+      - date: 行情对应交易日的 YYYY-MM-DD 字符串（兼容 20251028 / 2025-10-28）
+      - open / high / low / close / volume / amount: 浮点数
+      - pre_close: 昨收价（缺失为 0）
+      - pct_chg: 当日涨跌幅，小数口径（0.0057 = +0.57%）
+
+    仅当快照存在且交易日有效时返回 dict，否则返回 None。
+    本函数只做归一化，不写库，不影响每日同步。
+    """
+    if not realtime_quote:
+        return None
+    rt_raw = str(realtime_quote.get("trade_date") or "")
+    if not rt_raw:
+        return None
+    rt_date = rt_raw
+    if len(rt_raw) == 8 and rt_raw.isdigit():
+        rt_date = f"{rt_raw[:4]}-{rt_raw[4:6]}-{rt_raw[6:8]}"
+
+    close = _safe_float(realtime_quote.get("close"))
+    if close <= 0:
+        return None
+
+    pre_close = _safe_float(realtime_quote.get("pre_close"))
+    if pre_close <= 0:
+        pre_close = _safe_float(realtime_quote.get("prev_close"))
+
+    # 涨跌幅优先由昨收计算（小数口径）；昨收缺失时用存档涨跌幅折算为小数
+    pct = None
+    if pre_close > 0:
+        pct = close / pre_close - 1.0
+    else:
+        raw_pct = realtime_quote.get("pct_chg")
+        if raw_pct is not None:
+            try:
+                pct = float(raw_pct)
+                if abs(pct) > 1.5:  # 百分数（如 5.32）折为小数
+                    pct = pct / 100.0
+            except (TypeError, ValueError):
+                pct = None
+
+    return {
+        "date": rt_date,
+        "open": _safe_float(realtime_quote.get("open")),
+        "high": _safe_float(realtime_quote.get("high")),
+        "low": _safe_float(realtime_quote.get("low")),
+        "close": close,
+        "volume": _safe_float(realtime_quote.get("volume")),
+        "amount": _safe_float(realtime_quote.get("amount")),
+        "pre_close": pre_close,
+        "pct_chg": pct,
+    }
+
+
+def merge_realtime_into_panel(
+    df: pd.DataFrame,
+    realtime_quote: dict,
+    symbol: str,
+) -> pd.DataFrame:
+    """把当日实时快照合并进历史日线 DataFrame（追加或覆盖当日行）。
+
+    输出列与 load_daily_panel 一致：date 为 YYYY-MM-DD 字符串，pct_chg 为小数口径。
+    纯内存拼接（只读 market_quotes 快照），不写 stock_daily_quotes，不影响每日同步。
+    """
+    row = normalize_realtime_snapshot(realtime_quote)
+    if row is None or df is None or df.empty:
+        return df
+
+    date_str = row["date"]
+    has = (df["date"].astype(str) == date_str).any()
+    if has:
+        # 覆盖已有当日行（可能为历史落库的盘中数据，用最新实时快照覆盖）
+        new_df = df.copy()
+        mask = new_df["date"].astype(str) == date_str
+        new_df.loc[mask, ["open", "high", "low", "close", "volume", "amount", "pct_chg"]] = [
+            row["open"], row["high"], row["low"], row["close"],
+            row["volume"], row["amount"], row["pct_chg"],
+        ]
+        return new_df
+    # 追加当日实时行
+    new_row = {
+        "symbol": symbol,
+        "date": date_str,
+        "open": row["open"],
+        "high": row["high"],
+        "low": row["low"],
+        "close": row["close"],
+        "volume": row["volume"],
+        "amount": row["amount"],
+        "pct_chg": row["pct_chg"],
+    }
+    new_df = pd.concat([df.copy(), pd.DataFrame([new_row])], ignore_index=True)
+    new_df = new_df.sort_values("date").reset_index(drop=True)
+    return new_df

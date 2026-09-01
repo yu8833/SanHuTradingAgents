@@ -51,6 +51,17 @@ def _analyze_volume_price_sync(db, symbol: str) -> dict[str, Any]:
     if df is None or df.empty:
         return {"success": False, "message": f"无 {symbol} 历史行情数据"}
 
+    # 🔥 盘中即时：交易日时把 market_quotes 当日实时快照合并进历史日线，
+    #    避免量价分析滞后于当日实时行情一整日。纯内存拼接，不写库。
+    try:
+        from app.utils.trading_time import is_trading_day
+        if is_trading_day(today):
+            realtime_quote = db["market_quotes"].find_one({"code": symbol})
+            if realtime_quote:
+                df = data_adapter.merge_realtime_into_panel(df, realtime_quote, symbol)
+    except Exception as e:
+        logger.warning(f"⚠️ 量价分析合并实时快照失败（忽略，按历史数据分析）: {e}")
+
     df["date"] = pd.to_datetime(df["date"])
     df = df.sort_values("date").reset_index(drop=True)
 

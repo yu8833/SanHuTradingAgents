@@ -752,6 +752,8 @@ function splitItems(text?: string | string[]): string[] {
 // 快照生成时间格式化：今日显示「今日 HH:MM」，否则「M/D HH:MM」
 function fmtClock(iso?: string): string {
   if (!iso) return '—'
+  // 兜底：后端可能返回无时区的 naive ISO（如旧缓存），一律视为 UTC，避免按本地时区解析导致时间倒退
+  if (!/([Z]|[+-]\d{2}:?\d{2} ?\(.+\))$/.test(iso.trim())) iso += 'Z'
   const d = new Date(iso)
   if (isNaN(d.getTime())) return '—'
   const pad = (n: number) => String(n).padStart(2, '0')

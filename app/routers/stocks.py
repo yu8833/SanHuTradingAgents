@@ -2116,6 +2116,16 @@ async def get_volume_price_analysis(
             detail="量价分析仅支持A股"
         )
 
+    # 🔥 结果缓存：交易时段30s/非交易时段5min（与 K线 realtime 分级一致）
+    vp_cache_key = f"stock:volume-price:{normalized_code}"
+    try:
+        cached_vp = await asyncio.to_thread(get_cache_sync, vp_cache_key)
+        if cached_vp is not None:
+            logger.info(f"📦 量价分析缓存命中: {normalized_code}")
+            return ok(cached_vp)
+    except Exception as e:
+        logger.warning(f"⚠️ 读取量价分析缓存失败: {e}")
+
     try:
         from app.services.volume_price_analysis import analyze_volume_price
         from app.core.database import get_mongo_db_sync
@@ -2129,6 +2139,10 @@ async def get_volume_price_analysis(
                 detail=result.get("message", "量价分析数据不足")
             )
 
+        try:
+            await asyncio.to_thread(set_cache_sync, vp_cache_key, result, category="realtime")
+        except Exception as e:
+            logger.warning(f"⚠️ 写入量价分析缓存失败: {e}")
         return ok(result)
 
     except HTTPException:
@@ -2165,6 +2179,16 @@ async def get_buy_sell_check(
             detail="三买三卖检查仅支持A股"
         )
 
+    # 🔥 结果缓存：交易时段30s/非交易时段5min（与 K线 realtime 分级一致）
+    bs_cache_key = f"stock:buy-sell-check:{normalized_code}"
+    try:
+        cached_bs = await asyncio.to_thread(get_cache_sync, bs_cache_key)
+        if cached_bs is not None:
+            logger.info(f"📦 三买三卖缓存命中: {normalized_code}")
+            return ok(cached_bs)
+    except Exception as e:
+        logger.warning(f"⚠️ 读取三买三卖缓存失败: {e}")
+
     try:
         from app.services.three_buys_three_sells_service import get_three_buys_three_sells_service
 
@@ -2177,6 +2201,10 @@ async def get_buy_sell_check(
                 detail=result.get("message", "三买三卖数据不足")
             )
 
+        try:
+            await asyncio.to_thread(set_cache_sync, bs_cache_key, result, category="realtime")
+        except Exception as e:
+            logger.warning(f"⚠️ 写入三买三卖缓存失败: {e}")
         return ok(result)
 
     except HTTPException:

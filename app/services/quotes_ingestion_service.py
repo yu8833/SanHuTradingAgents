@@ -409,6 +409,12 @@ class QuotesIngestionService:
             return True
 
     async def _collection_stale(self, latest_trade_date: str | None) -> bool:
+        """集合是否已整体落后于 latest_trade_date（只看集合最大值对应的归属日）。
+
+        仅用于「整体是否需要补数」的粗判：若集合最大 trade_date < 最新交易日则返回 True。
+        注意：该判断无法发现「个别股票滞后但集合整体有当日数据」的场景，
+        个股级校准由 `repair_stale_stocks` 负责。
+        """
         if not latest_trade_date:
             return False
         db = get_mongo_db()
@@ -422,6 +428,86 @@ class QuotesIngestionService:
             return doc_td < str(latest_trade_date)
         except Exception:
             return True
+
+    def _resolve_trade_date(self) -> str:
+        """
+        解析当前行情归属交易日（YYYYMMDD）。
+
+        用本地交易日历统一判定，替代对数据源的依赖：
+        - 今天是交易日且已过收盘（15:00）→ 今天（当日完整收盘快照归属今日）
+        - 今天是交易日且盘中 → 今天（实时行情归属当日）
+        - 今天非交易日（周末/节假日）→ 最近一个已结束的交易日
+
+        相比 `find_latest_trade_date_with_fallback`：AKShare 恒返回"昨天"，导致
+        盘中/收盘的当日实时快照被误标成上一交易日，造成 market_quotes 内
+        trade_date 前后不一致（修复：个股滞后无法自愈的根因之一）。
+        """
+        from app.utils.trading_time import get_latest_trade_day
+        now = datetime.now(self.tz)
+        if self.is_trading_day(now):
+            # 开盘日：无论盘中还是收盘，实时/收盘快照归属均为当日
+            return now.strftime("%Y%m%d")
+        latest = get_latest_trade_day(now)
+        return latest.strftime("%Y%m%d")
+
+    def is_trading_day(self, now: datetime | None = None) -> bool:
+        """今日是否为交易日（委托统一交易时间工具）。"""
+        from app.utils.trading_time import is_trading_day
+        now = now or datetime.now(self.tz)
+        return is_trading_day(now)
+
+    async def repair_stale_stocks(self, target_trade_date: str, quotes_map: dict[str, dict]) -> int:
+        """
+        逐只校准 `market_quotes` 中 trade_date 落后于 target_trade_date 的股票。
+
+        `_collection_stale` 只能发现「集合整体滞后」；当集合内已有当日数据（如 300189=9-1）
+        时，个别股票（如 002997=8-31）滞后不会被 backfill 触发。本方法扫描所有
+        trade_date < target 的股票，若本次快照能提供其有效当日数据，则校准到 target，
+        实现个股级自愈，避免分析模块因实时快照缺失而显示首日/陈旧数据。
+
+        Args:
+            target_trade_date: 本次写入的目标归属日（YYYYMMDD）
+            quotes_map: 本次已获取的全市场实时快照 {code6: {...}}
+
+        Returns:
+            校准的股票数量
+        """
+        target = str(target_trade_date)
+        if not target or not quotes_map:
+            return 0
+        try:
+            db = get_mongo_db()
+            coll = db[self.collection_name]
+            # 找出库中 trade_date 落后于 target 的股票 code
+            stale_codes: list[str] = []
+            cursor = coll.find({"trade_date": {"$lt": target}}, {"code": 1})
+            async for doc in cursor:
+                c = str(doc.get("code") or "")
+                if c:
+                    stale_codes.append(c)
+            if not stale_codes:
+                logger.info(f"✅ 无 trade_date 落后的股票（目标 {target}）")
+                return 0
+
+            # 仅取本次快照中有数据且能提供有效收盘价的股票做校准
+            sub: dict[str, dict] = {}
+            for code in stale_codes:
+                q = quotes_map.get(code)
+                if not q:
+                    continue
+                if _s_price(q.get("close")) is not None:
+                    sub[code] = q
+            if not sub:
+                logger.info(f"⚠️ 有 {len(stale_codes)} 只落后股票，但本次快照均无有效行情，跳过校准")
+                return 0
+
+            # 复用统一入库逻辑（正确 set trade_date=target）
+            await self._bulk_upsert(sub, target, "repair-stale")
+            logger.info(f"🩺 逐只校准完成：{len(sub)}/{len(stale_codes)} 只落后股票已更新至 {target}")
+            return len(sub)
+        except Exception as e:
+            logger.warning(f"个股滞后校准失败（忽略）: {e}")
+            return 0
 
     async def _compute_missing_pct_batch(self, codes: list[str], trade_date: str) -> dict[str, float]:
         """批量用上一交易日日线补算昨收价（P1-1）。
@@ -662,7 +748,12 @@ class QuotesIngestionService:
             try:
                 from app.services.screening_service import KlineCache
                 from app.services.sync_cache_layer import delete_cache_by_prefix_sync
-                for prefix in ["quotes:", "quote:", "stock:[0-9]", f"{KlineCache.PREFIX}:"]:
+                # stock:*:volume-price / stock:*:buy-sell-check：行情更新后主动失效量价分析与
+                # 三买三卖结果缓存，避免接口返回基于旧 trade_date 计算的陈旧结果（与本次
+                # 个股滞后自愈联动，保证详情页分析模块与最新行情一致）。
+                for prefix in ["quotes:", "quote:", "stock:[0-9]",
+                               "stock:volume-price:", "stock:buy-sell-check:",
+                               f"{KlineCache.PREFIX}:"]:
                     with contextlib.suppress(Exception):
                         cleared += delete_cache_by_prefix_sync(prefix)
             except Exception as e:
@@ -889,7 +980,7 @@ class QuotesIngestionService:
                 logger.warning("backfill: 未获取到行情数据，跳过")
                 return
             try:
-                trade_date = manager.find_latest_trade_date_with_fallback() or datetime.now(self.tz).strftime("%Y%m%d")
+                trade_date = self._resolve_trade_date()
             except Exception:
                 trade_date = datetime.now(self.tz).strftime("%Y%m%d")
             await self._bulk_upsert(quotes_map, trade_date, source)
@@ -1051,16 +1142,23 @@ class QuotesIngestionService:
                 )
                 return
 
-            # 获取交易日（同步阻塞调用，放入线程池避免阻塞事件循环）
+            # 获取交易日：统一走本地交易日历判定，避免数据源（AKShare 恒返回昨天）
+            # 把当日实时快照误标成上一交易日，导致 market_quotes 中 trade_date 前后不一。
             try:
-                manager = DataSourceManager()
-                trade_date = await asyncio.to_thread(manager.find_latest_trade_date_with_fallback) or \
-                    datetime.now(self.tz).strftime("%Y%m%d")
+                trade_date = await asyncio.to_thread(self._resolve_trade_date)
             except Exception:
                 trade_date = datetime.now(self.tz).strftime("%Y%m%d")
 
             # 入库
             await self._bulk_upsert(quotes_map, trade_date, source_name)
+
+            # 个股级自愈：校准库中 trade_date 落后于本次归属日的股票，
+            # 避免个别股票（如数据源某轮遗漏导致的滞后）长期停留在上一交易日。
+            # 仅入库成功后执行，此时集合内已含当日数据，仅补落后的少数股票。
+            try:
+                await self.repair_stale_stocks(trade_date, quotes_map)
+            except Exception as e:
+                logger.warning(f"个股滞后校准失败（忽略）: {e}")
 
             # 记录成功状态
             await self._record_sync_status(

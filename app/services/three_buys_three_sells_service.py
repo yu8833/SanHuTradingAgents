@@ -1992,6 +1992,54 @@ class ThreeBuysThreeSellsService:
             "market_trend": market_trend
         }
 
+    async def _merge_realtime_snapshot(
+        self,
+        kline: list[dict[str, Any]],
+        code: str,
+    ) -> list[dict[str, Any]]:
+        """盘中即时：把 market_quotes 当日实时快照合并进单股历史日线（追加或覆盖当日行）。
+
+        仅交易日生效（周末/节假日 market_quotes 里是最后交易日快照，不补）。
+        输出字段与 _batch_get_quotes 一致：trade_date=YYYY-MM-DD，pct_chg=百分数。
+        纯内存只读拼接，不写 stock_daily_quotes，不影响每日同步。
+        """
+        try:
+            from app.utils.trading_time import is_trading_day
+
+            if not is_trading_day(now_tz()):
+                return kline
+            from app.strategy_system.data_adapter import normalize_realtime_snapshot
+
+            db = await self._get_db()
+            realtime_quote = await db["market_quotes"].find_one({"code": code})
+            row = normalize_realtime_snapshot(realtime_quote)
+            if row is None:
+                return kline
+            snap = {
+                "code": code,
+                "trade_date": row["date"],
+                "open": row["open"],
+                "high": row["high"],
+                "low": row["low"],
+                "close": row["close"],
+                "volume": row["volume"],
+                "amount": row["amount"],
+                "pct_chg": (row["pct_chg"] * 100.0) if row["pct_chg"] is not None else None,
+                "data_source": "market_quotes",
+            }
+            idx = next(
+                (i for i, k in enumerate(kline) if k.get("trade_date") == row["date"]),
+                -1,
+            )
+            if idx >= 0:
+                kline[idx] = snap
+            else:
+                kline.append(snap)
+                kline.sort(key=lambda k: k.get("trade_date", ""))
+        except Exception as e:
+            logger.warning(f"⚠️ 三买三卖合并实时快照失败（忽略，按历史数据分析）: {e}")
+        return kline
+
     async def check_single_stock(self, code: str) -> dict[str, Any]:
         """单股三买三卖买卖点检查 + 辅助检查点（供个股详情页展示）。
 
@@ -2027,6 +2075,8 @@ class ThreeBuysThreeSellsService:
 
         quotes = await self._batch_get_quotes([code], start_str, end_str)
         kline = quotes.get(code, [])
+        # 🔥 盘中即时：交易日合并当日实时快照，避免买卖点检查滞后一整日
+        kline = await self._merge_realtime_snapshot(kline, code)
         if len(kline) < 70:
             return {"success": False, "message": f"{code} 历史数据不足"}
 
