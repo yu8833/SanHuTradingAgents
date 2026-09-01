@@ -47,7 +47,6 @@
           <section class="block">
             <div class="block-head">
               <span class="block-title"><el-icon><Compass /></el-icon> 宏观方向判断</span>
-              <span v-if="macro.created_at" class="block-hint">生成于 {{ fmtClock(macro.created_at) }}</span>
               <div class="block-actions">
                 <span v-if="!macro.llm_available" class="block-hint llm-off">解读不可用（仅规则结果）</span>
                 <el-button size="small" :icon="Refresh" :loading="macroRefreshing" @click="refreshMacro">立即刷新</el-button>

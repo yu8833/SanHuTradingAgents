@@ -287,6 +287,10 @@ def normalize(rule: dict) -> dict:
 
 
 # ── 服务 ────────────────────────────────────────────────
+# 指令去重状态：凡已存在以下任一状态，视为"同一信号已被处理过"，不再重复生成待确认指令
+_DEDUP_STATUSES = ("pending", "executed", "cancelled", "dismissed")
+
+
 class MonitorService:
     """监控服务：规则 CRUD + 行情评估 + 告警存储。"""
 
@@ -704,13 +708,13 @@ class MonitorService:
                     direction = self._tbs_direction(stype, r.get("tbs_dir", "buy"))
                     if not direction:
                         continue
-                    # 去重：已有同源 pending 指令
+                    # 去重：已有同源指令（含已处理/已忽略/已取消），避免处理过的内容重复生成
                     existing = await db[self.tbs_orders_coll].find_one({
                         "user_id": user_id,
                         "rule_id": r["id"],
                         "symbol": sym,
                         "signal_type": stype,
-                        "status": "pending",
+                        "status": {"$in": _DEDUP_STATUSES},
                     })
                     if existing:
                         continue
@@ -782,11 +786,11 @@ class MonitorService:
 
     def _strategy_order_exists(self, rules_orders: list[dict], rule_id: str,
                                sym: str, sig_type: str) -> bool:
-        """判断同源指令是否已存在（pending/executed 视为已处理，避免重复生成）。"""
+        """判断同源指令是否已存在（含已处理状态），避免重复生成。"""
         for o in rules_orders:
             if (o.get("rule_id") == rule_id and o.get("symbol") == sym
                     and o.get("signal_type") == sig_type
-                    and o.get("status") in ("pending", "executed")):
+                    and o.get("status") in _DEDUP_STATUSES):
                 return True
         return False
 
@@ -868,7 +872,7 @@ class MonitorService:
 
             # 预取同源指令，用于去重判断
             existing_orders = await db[self.tbs_orders_coll].find(
-                {"rule_id": r["id"], "status": {"$in": ["pending", "executed"]}}
+                {"rule_id": r["id"], "status": {"$in": _DEDUP_STATUSES}}
             ).to_list(length=None)
 
             if tbs_dir in ("buy", "both"):
