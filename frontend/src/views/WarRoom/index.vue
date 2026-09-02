@@ -52,22 +52,69 @@
                 <el-button size="small" :icon="Refresh" :loading="macroRefreshing" @click="refreshMacro">立即刷新</el-button>
               </div>
             </div>
-            <el-card shadow="never" class="direction-card">
-              <div class="dir-row">
-                <span class="dir-badge" :class="directionClass">{{ ruleDirection }}</span>
-                <span class="dir-score">规则总分 <b>{{ rule?.score ?? 0 }}</b></span>
-              </div>
-              <div class="signal-list" v-if="rule?.signals?.length">
-                <div v-for="(s, i) in rule.signals" :key="i" class="signal-row">
-                  <span class="sig-name">{{ s.name }}</span>
-                  <span class="sig-detail">{{ s.detail }}</span>
-                  <span class="sig-score" :class="s.score > 0 ? 'up' : s.score < 0 ? 'down' : ''">
-                    {{ s.score > 0 ? `+${s.score}` : s.score }}
+            <!-- 5.2 仪表盘式方向 + 置信度（当日基准静态快照） -->
+            <el-card shadow="never" class="direction-dash">
+              <div class="dash-top">
+                <div class="dash-left">
+                  <span class="dir-badge" :class="statusClass(basis?.status)">{{ statusLabel(basis?.status) }}</span>
+                  <span class="dash-conf" :class="{ low: basis?.low_confidence }">
+                    <span class="conf-num">{{ basis?.confidence ?? 0 }}<b>%</b></span>
+                    <span class="conf-label">{{ confidenceLabel() }}</span>
                   </span>
                 </div>
+                <div class="dash-right">
+                  <div class="dash-lock" :class="{ pending: !basis?.locked_at }">
+                    <el-icon><Lock /></el-icon>
+                    <span>{{ basis?.locked_at ? `当日锁定于 ${lockTime}` : '盘中不重算 · 以盘前基准为准' }}</span>
+                  </div>
+                  <span class="dash-scale-hint">刻度 = 状态区间 · 指针 = 基准 score 定位</span>
+                </div>
               </div>
-              <el-empty v-else :image-size="40" description="暂无规则依据" />
+
+              <!-- 三段刻度条-偏空─中性─偏多 -->
+              <div class="gauge">
+                <div class="gauge-track" :class="{ lock: gaugeLocked }">
+                  <div class="gauge-seg seg-bear">偏空</div>
+                  <div class="gauge-seg seg-neutral">中性</div>
+                  <div class="gauge-seg seg-bull">偏多</div>
+                  <div class="gauge-pointer" :style="{ left: gaugePos + '%' }">
+                    <div class="gauge-needle"></div>
+                  </div>
+                </div>
+                <div class="gauge-scale">
+                  <span class="g-scale bear-zone">偏空 · 减仓避离</span>
+                  <span class="g-scale neutral-zone">观望 · 不做多空断言</span>
+                  <span class="g-scale bull-zone">偏多 · 可进取</span>
+                  <span class="g-score">规则总分 <b>{{ rule?.score ?? 0 }}</b></span>
+                </div>
+              </div>
+
+              <!-- 低置信度 / 观望解释 -->
+              <div v-if="basis?.low_confidence || basis?.status === '中性(观望)'" class="dash-note">
+                <el-icon><WarningFilled /></el-icon>
+                置信度 {{ basis?.confidence ?? 0 }}% &lt; 阈值 {{ basis?.confidence_threshold ?? 30 }}% → 指针停在「观望」，明确不做多空强断言；若执行，仓位减半。
+              </div>
+              <div v-else-if="basis?.status === '数据不足'" class="dash-note"><el-icon><WarningFilled /></el-icon>数据不足，不足以形成方向基准。</div>
             </el-card>
+
+            <!-- 5.1 方向拆解面板（信号溯源） -->
+            <div v-if="rule?.signals?.length" class="signal-panel">
+              <div class="panel-head">
+                <span class="panel-title"><el-icon><Magnet /></el-icon> 方向拆解 · 信号溯源</span>
+                <span class="panel-hint">每只信号：数值 / 权重 / 判定 / 如何影响方向，全部直接展示</span>
+              </div>
+              <div v-for="(s, i) in signalRows" :key="i" class="signal-row">
+                <span class="sig-name">{{ s.name }}</span>
+                <span class="sig-value" :class="sigValueClass(s)">{{ sigValueText(s) }}</span>
+                <span class="sig-weight">权重 {{ s.weight ?? 0 }}</span>
+                <span class="sig-judge" :class="judgeClass(s.judge)">{{ judgeLabel(s.judge) }}</span>
+                <span class="sig-score" :class="s.score > 0 ? 'up' : s.score < 0 ? 'down' : ''">
+                  {{ s.score > 0 ? `+${s.score}` : s.score }}
+                </span>
+                <span class="sig-explain">{{ s.detail || '—' }}</span>
+              </div>
+            </div>
+            <el-empty v-else :image-size="40" description="暂无规则依据" />
             <div v-if="llm" class="llm-card">
               <div class="llm-sec">
                 <div class="llm-tag">今日关键词</div>
@@ -198,38 +245,176 @@
           <el-button size="small" type="primary" :icon="Refresh" :loading="macroRefreshing" @click="refreshMacro">立即生成</el-button>
         </el-empty>
 
-        <!-- ⑤ 当日计划 -->
+        <!-- ⑤ 当日计划生成流水线（5.3 带审计痕迹） -->
+        <section class="block">
+          <div class="block-head">
+            <span class="block-title"><el-icon><Operation /></el-icon> 当日计划生成流水线</span>
+            <div class="block-actions">
+              <span v-if="planGen" class="block-hint">候选 {{ planGen.candidates_count ?? 0 }} 条 · 待人工确认</span>
+              <el-button size="small" type="primary" :icon="MagicStick" :class="{ 'is-generating': genPlanLoading }" @click="generatePlan">
+                {{ genPlanLoading ? '生成中…' : (planGen ? '重新生成' : '生成当日计划') }}
+              </el-button>
+            </div>
+          </div>
+
+          <template v-if="planGen?.audit?.steps?.length">
+            <div class="pipeline">
+              <template v-for="(st, i) in planGen.audit.steps" :key="i">
+                <div class="pipeline-step" :class="'p-step-' + pipelineKey(st.step)">
+                  <div class="p-step-top">
+                    <span class="p-step-name">{{ stepLabel(st.step) }}</span>
+                    <span class="p-step-count">
+                      扫描 <b>{{ st.scanned }}</b>
+                      <template v-if="st.dropped"> → 保留 <b class="kept">{{ st.kept }}</b></template>
+                    </span>
+                  </div>
+                  <div class="p-step-rule">{{ st.rule }}</div>
+                  <div class="p-step-bar">
+                    <span class="fill" :style="{ width: keptPct(st) + '%' }"></span>
+                  </div>
+                  <div class="p-step-reasons">
+                    <span v-for="(r, ri) in st.reasons" :key="ri" class="p-reason">
+                      <span class="r-dot"></span>{{ r }}
+                    </span>
+                  </div>
+                </div>
+                <div v-if="i < planGen.audit.steps.length - 1" class="pipeline-arrow">
+                  <el-icon><Right /></el-icon>
+                </div>
+              </template>
+            </div>
+            <p class="pipeline-tip">
+              <el-icon><InfoFilled /></el-icon>
+              四段从「环境 → 行业 → 个股 → 计划」，每段展示扫描与过滤漏斗；宏观方向显式标注为过滤条件，非黑箱。
+            </p>
+            <!-- 行业方向预测 → 当日预测行业池（Stage2/Stage3 产品化展示） -->
+            <div v-if="planGen?.industries?.length" class="ind-strip">
+              <span class="ind-strip-label">预测行业池</span>
+              <el-tag v-for="(ind, ii) in planGen.industries" :key="ii" size="small" type="info" effect="plain" class="ind-tag">
+                {{ ind.industry }} · {{ ind.confidence }}%
+              </el-tag>
+            </div>
+          </template>
+          <el-empty v-else :image-size="48" description="点击「生成当日计划」，查看 环境 → 行业 → 个股 → 计划 四段决策过程与过滤漏斗" />
+        </section>
+
+        <!-- ⑥ 待确认计划候选（5.4 来源 + 人工最后一道闸） -->
+        <section class="block" v-if="planGen?.candidates?.length">
+          <div class="block-head">
+            <span class="block-title"><el-icon><Checked /></el-icon> 待确认计划候选</span>
+            <span class="block-hint">自动生成 ≠ 自动下单 · 确认后写入当日计划</span>
+          </div>
+          <div class="cand-grid">
+            <el-card v-for="(c, ci) in planGen.candidates" :key="c.code + ci" shadow="never" class="cand-card">
+              <div class="cand-head">
+                <span class="cand-name">{{ c.name || c.code }} <span class="fav-code">{{ c.code }}</span></span>
+                <span class="cand-sig" v-if="c.signal_label">{{ c.signal_label }}</span>
+              </div>
+              <div class="cand-source" v-if="c.source?.label">
+                <span class="src-dot"></span>{{ c.source.label }}
+              </div>
+              <div class="cand-fields">
+                <div class="fld"><span class="k">触发价</span><span class="v">{{ c.trigger_price }}</span></div>
+                <div class="fld"><span class="k">止损</span><span class="v down">{{ c.stop_loss }}</span></div>
+                <div class="fld"><span class="k">卖出</span><span class="v">{{ shortSell(c.sell_condition) }}</span></div>
+                <div class="fld"><span class="k">仓位</span><span class="v">{{ positionText(c.position) }}</span></div>
+              </div>
+              <div class="cand-actions">
+                <el-button size="small" type="primary" :loading="confirmingIdx === ci" @click="confirmCandidate(ci)">确认写库</el-button>
+                <el-button size="small" @click="editCandidate(ci)">改价</el-button>
+                <el-button size="small" type="danger" plain @click="removeCandidate(ci)">删</el-button>
+              </div>
+            </el-card>
+          </div>
+        </section>
+
+        <!-- ⑦ 今日卖出观测（持仓卖出评估：哪些需要卖 / 减仓 / 止损止盈） -->
+        <section class="block" v-if="planGen?.sell_candidates?.length">
+          <div class="block-head">
+            <span class="block-title"><el-icon><Sell /></el-icon> 今日卖出观测</span>
+            <span class="block-hint">持仓卖出评估（止损/止盈 + 三买三卖卖点）· 确认后写入当日计划</span>
+          </div>
+          <el-table v-loading="genPlanLoading" :data="planGen.sell_candidates" stripe size="small" class="app-table app-table--compact">
+            <el-table-column label="标的" min-width="120">
+              <template #default="{ row }">{{ row.name }} <span class="fav-code">{{ row.code }}</span></template>
+            </el-table-column>
+            <el-table-column label="建议" width="110">
+              <template #default="{ row }">
+                <span class="sell-advice" :class="sellAdviceTagClass(row)">{{ row.signal_label || row.advice_label || '卖出' }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="现价" width="90">
+              <template #default="{ row }">{{ row.last_price ?? '—' }}</template>
+            </el-table-column>
+            <el-table-column label="盈亏率" width="100">
+              <template #default="{ row }">
+                <span v-if="row.profit_loss_rate != null" :class="clsByVal(row.profit_loss_rate, '')">{{ fmtPct(row.profit_loss_rate) }}</span>
+                <span v-else>—</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="卖出触发价" width="100">
+              <template #default="{ row }">{{ row.trigger_price ?? '—' }}</template>
+            </el-table-column>
+            <el-table-column label="原因" min-width="170" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.reason || row.sell_condition || '—' }}</template>
+            </el-table-column>
+            <el-table-column label="操作" width="150" fixed="right">
+              <template #default="{ row, $index }">
+                <el-button size="small" type="danger" plain :loading="confirmingSellIdx === $index" @click="confirmSellCandidate($index)">确认卖出</el-button>
+                <el-button size="small" @click="removeSellCandidate($index)">否</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </section>
+
+        <!-- ⑧ 当日计划 -->
         <section class="block">
           <div class="block-head">
             <span class="block-title"><el-icon><Tickets /></el-icon> 当日计划</span>
             <el-button size="small" type="primary" :icon="Plus" @click="openPlanDialog">添加计划</el-button>
           </div>
           <el-table v-loading="plansLoading" :data="plans" stripe size="small" class="app-table app-table--compact">
-            <el-table-column prop="name" label="标的" min-width="120">
+            <el-table-column prop="name" label="标的" min-width="110">
               <template #default="{ row }">{{ row.name || row.code }}</template>
             </el-table-column>
-            <el-table-column label="方向" width="80">
+            <el-table-column label="来源" min-width="150">
+              <template #default="{ row }">
+                <span v-if="row.source?.label" class="plan-source">
+                  <span class="src-dot"></span>{{ row.source.label }}
+                </span>
+                <span v-else class="plan-source manual"><span class="src-dot"></span>手动添加</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="方向" width="70">
               <template #default="{ row }">
                 <span :class="row.direction === 'buy' ? 'up' : 'down'">{{ row.direction_label }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="触发价" width="100">
+            <el-table-column label="触发价" width="90">
               <template #default="{ row }">{{ row.trigger_price ?? '—' }}</template>
             </el-table-column>
-            <el-table-column label="仓位" width="110">
+            <el-table-column label="仓位" width="100">
               <template #default="{ row }">{{ positionText(row.position) }}</template>
             </el-table-column>
-            <el-table-column prop="stop_loss" label="止损" width="100">
+            <el-table-column prop="stop_loss" label="止损" width="90">
               <template #default="{ row }">{{ row.stop_loss ?? '—' }}</template>
             </el-table-column>
-            <el-table-column prop="sell_condition" label="卖出条件" min-width="160" show-overflow-tooltip />
-            <el-table-column label="状态" width="90">
+            <el-table-column prop="sell_condition" label="卖出条件" min-width="140" show-overflow-tooltip />
+            <el-table-column label="状态" width="80">
               <template #default="{ row }">
                 <el-tag size="small" :type="planStatusTag(row.status)">{{ planStatusLabel(row.status) }}</el-tag>
               </template>
             </el-table-column>
+            <el-table-column label="操作" width="150" fixed="right">
+              <template #default="{ row }">
+                <el-button v-if="row.status === 'pending'" size="small" link type="primary" @click="editPlan(row)">改价</el-button>
+                <el-button v-if="row.status === 'pending'" size="small" link type="primary" @click="confirmPlanWrite(row)">确认</el-button>
+                <el-button v-if="row.status === 'pending'" size="small" link type="danger" @click="removePlan(row)">删除</el-button>
+                <span v-else class="no-op">—</span>
+              </template>
+            </el-table-column>
           </el-table>
-          <el-empty v-if="!plans.length" description="今日暂无计划，盘前写下来盘中严格执行" />
+          <el-empty v-if="!plans.length" description="今日暂无计划：可点「生成当日计划」自动装配，或手动添加" />
         </section>
       </el-tab-pane>
 
@@ -336,37 +521,89 @@
 
         <section class="block">
           <div class="block-head">
-            <span class="block-title"><el-icon><AlarmClock /></el-icon> 计划执行 · 实时价触达</span>
-            <el-button size="small" :icon="Refresh" :loading="evalLoading" @click="evaluatePlans">对照实时价评估</el-button>
+            <span class="block-title"><el-icon><Odometer /></el-icon> 买卖点实时指导</span>
+            <div class="block-actions">
+              <span v-if="guide?.as_of" class="block-hint">评估于 {{ guide.as_of }} · 盘中每 30s 自动刷新</span>
+              <el-button size="small" :icon="Refresh" :loading="guideLoading" @click="loadIntradayGuide">对照实时价评估</el-button>
+            </div>
           </div>
-          <el-table v-loading="evalLoading" :data="evalPlans" stripe size="small" class="app-table app-table--compact">
-            <el-table-column prop="name" label="标的" min-width="120">
-              <template #default="{ row }">{{ row.name || row.code }}</template>
-            </el-table-column>
-            <el-table-column label="方向" width="80">
-              <template #default="{ row }">
-                <span :class="row.direction === 'buy' ? 'up' : 'down'">{{ row.direction_label }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="触发价" width="100">
-              <template #default="{ row }">{{ row.trigger_price ?? '—' }}</template>
-            </el-table-column>
-            <el-table-column label="实时价" width="100">
-              <template #default="{ row }">{{ row.last_price ?? '—' }}</template>
-            </el-table-column>
-            <el-table-column label="可执行" width="90">
-              <template #default="{ row }">
-                <el-tag v-if="row.triggered" type="danger" size="small">可执行</el-tag>
-                <el-tag v-else type="info" size="small">待触达</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="120">
-              <template #default="{ row }">
-                <el-button v-if="row.triggered" size="small" type="primary" @click="goTrade(row)">去交易</el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-          <el-empty v-if="!evalPlans.length" :image-size="48" description="今日无待执行计划" />
+
+          <!-- 买入建议（未买入的股票：什么时候适合买） -->
+          <div class="sub-block">
+            <div class="sub-title"><el-icon><ShoppingCart /></el-icon> 买入建议 · 何时买
+              <span v-if="guideBuys.length" class="guide-count">{{ guideBuys.length }}</span>
+            </div>
+            <el-table v-loading="guideLoading" :data="guideBuys" stripe size="small" class="app-table app-table--compact" max-height="320">
+              <el-table-column label="标的" min-width="120">
+                <template #default="{ row }">{{ row.name }} <span class="fav-code">{{ row.code }}</span></template>
+              </el-table-column>
+              <el-table-column label="信号" width="90">
+                <template #default="{ row }">{{ row.signal_label || '计划' }}</template>
+              </el-table-column>
+              <el-table-column label="触发价" width="90">
+                <template #default="{ row }">{{ row.trigger_price ?? '—' }}</template>
+              </el-table-column>
+              <el-table-column label="实时价" width="90">
+                <template #default="{ row }">{{ row.last_price ?? '—' }}</template>
+              </el-table-column>
+              <el-table-column label="偏离" width="80">
+                <template #default="{ row }">
+                  <span v-if="row.distance_pct != null" :class="clsByVal(-row.distance_pct, '')">{{ fmtPct(row.distance_pct) }}</span>
+                  <span v-else>—</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="状态" width="90">
+                <template #default="{ row }">
+                  <el-tag v-if="row.triggered" type="danger" size="small">可执行</el-tag>
+                  <el-tag v-else type="info" size="small">待触达</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="advice" label="建议" min-width="170" show-overflow-tooltip />
+              <el-table-column label="操作" width="100">
+                <template #default="{ row }">
+                  <el-button v-if="row.triggered" size="small" type="primary" @click="goTrade(row)">去交易</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+            <el-empty v-if="!guideBuys.length" :image-size="48" description="今日暂无待买入计划/候选，可到盘前 Tab 生成当日计划" />
+          </div>
+
+          <!-- 卖出建议（已买入的股票：是否卖 / 什么时候卖） -->
+          <div class="sub-block">
+            <div class="sub-title"><el-icon><Sell /></el-icon> 卖出建议 · 是否卖 / 何时卖
+              <span v-if="guideSells.length" class="guide-count">{{ guideSells.length }}</span>
+            </div>
+            <el-table v-loading="guideLoading" :data="guideSells" stripe size="small" class="app-table app-table--compact" max-height="360">
+              <el-table-column label="标的" min-width="130">
+                <template #default="{ row }">{{ row.name }} <span class="fav-code">{{ row.code }}</span></template>
+              </el-table-column>
+              <el-table-column label="现价" width="90">
+                <template #default="{ row }">{{ row.last_price ?? '—' }}</template>
+              </el-table-column>
+              <el-table-column label="盈亏率" width="100">
+                <template #default="{ row }">
+                  <span v-if="row.profit_loss_rate != null" :class="clsByVal(row.profit_loss_rate, '')">{{ fmtPct(row.profit_loss_rate) }}</span>
+                  <span v-else>—</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="建议" width="110">
+                <template #default="{ row }">
+                  <el-tag size="small" :type="sellAdviceType(row)">{{ row.advice_label || row.advice || '持有' }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="卖出触发价" width="100">
+                <template #default="{ row }">{{ row.trigger_price ?? '—' }}</template>
+              </el-table-column>
+              <el-table-column prop="reason" label="原因 / 建议" min-width="190" show-overflow-tooltip />
+              <el-table-column label="操作" width="130" fixed="right">
+                <template #default="{ row }">
+                  <el-button v-if="row.advice && row.advice !== '持有'" size="small" type="danger" plain @click="addSellToPlan(row)">加卖出计划</el-button>
+                  <el-button v-else size="small" text disabled>持有中</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+            <el-empty v-if="!guideSells.length" :image-size="48" description="暂无持仓，无需卖出评估" />
+          </div>
         </section>
 
         <!-- ⑤ 自选重点（≤5 只实时行情） -->
@@ -448,8 +685,15 @@
           </div>
           <el-table v-loading="signalsLoading" :data="signals" stripe size="small" class="app-table app-table--compact" max-height="420">
             <el-table-column prop="signal_type" label="信号" width="90" />
-            <el-table-column label="标的" width="120">
-              <template #default="{ row }">{{ row.name || row.code }}</template>
+            <el-table-column label="标的代码" width="100">
+              <template #default="{ row }">
+                <router-link :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
+              </template>
+            </el-table-column>
+            <el-table-column label="标的名称" min-width="110">
+              <template #default="{ row }">
+                <router-link :to="`/stocks/${row.code}`" class="stock-name">{{ row.name || row.code }}</router-link>
+              </template>
             </el-table-column>
             <el-table-column prop="trigger_date" label="触发日" width="110" />
             <el-table-column label="状态" width="90">
@@ -650,17 +894,40 @@
         <el-button type="primary" :loading="creatingPlan" @click="submitPlan">保存</el-button>
       </template>
     </el-dialog>
+
+    <!-- 改价 / 改止损（5.4 人工可改） -->
+    <el-dialog v-model="editDialog" :title="editMode === 'candidate' ? '调整候选计划' : '调整当日计划'" width="480px">
+      <el-form :model="editForm" label-width="90px">
+        <el-form-item label="标的">
+          <span class="edit-target">{{ editTargetText }}</span>
+        </el-form-item>
+        <el-form-item label="触发价">
+          <el-input-number v-model="editForm.trigger_price" :controls="false" :precision="2" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="止损位">
+          <el-input-number v-model="editForm.stop_loss" :controls="false" :precision="2" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="卖出条件">
+          <el-input v-model="editForm.sell_condition" placeholder="可留空" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editDialog = false">取消</el-button>
+        <el-button type="primary" :loading="savingEdit" @click="saveEdit">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, onActivated, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Aim, Refresh, Setting, Compass, Position, Calendar, Bell, Tickets, Plus,
           Odometer, TrendCharts, Bottom, Minus, InfoFilled, Coin, AlarmClock,
-          Search, Document, Histogram, Warning, EditPen, Star, Lightning, MagicStick, DataLine
+          Search, Document, Histogram, Warning, EditPen, Star, Lightning, MagicStick, DataLine,
+          Lock, Magnet, Operation, Checked, Right, WarningFilled, Sell, ShoppingCart
 } from '@element-plus/icons-vue'
 import { warRoomApi, type WarRoomToday } from '@/api/warRoom'
 import { portfolioApi } from '@/api/portfolio'
@@ -672,13 +939,35 @@ import { fmtPct, fmtSigned, fmtMoney, clsByVal } from '@/utils/format'
 
 defineOptions({ name: 'WarRoomHome' })
 
+// fetch 辅助：绕开 axios 拦截器（其 401 刷新 token 逻辑可能挂起）
+async function _fetchJSON<T>(path: string, init: RequestInit = {}, timeoutMs = 20000): Promise<T> {
+  const token = localStorage.getItem('auth-token') || ''
+  const headers = new Headers(init.headers || {})
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
+  // 超时兜底：任何请求挂起都 abort，杜绝按钮无限"生成中"
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+  try {
+    const res = await fetch(path, { ...init, headers, signal: ctrl.signal })
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+    const j = await res.json()
+    return (j as any)?.data ?? j
+  } finally {
+    clearTimeout(timer)
+  }
+}
+const _planGenerate = () => _fetchJSON<any>('/api/war-room/daily-plan/generate', { method: 'POST', body: '{}' }, 60000)
+const _planStatus = (id: string) => _fetchJSON<any>('/api/war-room/daily-plan/status/' + id, {}, 15000)
+const _planResult = (id: string) => _fetchJSON<any>('/api/war-room/daily-plan/result/' + id, {}, 15000)
+
 const route = useRoute()
 const router = useRouter()
 
 const activeTab = ref('pre_market')
 const loading = ref(false)
 const plansLoading = ref(false)
-const evalLoading = ref(false)
+const guideLoading = ref(false)
 const signalsLoading = ref(false)
 const backfillLoading = ref(false)
 const genWeeklyLoading = ref(false)
@@ -711,7 +1000,6 @@ const foreignHkStocks = computed(() => foreignStocks.value.filter(s => s.region 
 const llm = computed(() => macro.value?.llm_interpretation || null)
 const rule = computed(() => macro.value?.rule || null)
 const plans = ref<any[]>([])
-const evalPlans = ref<any[]>([])
 const regime = ref<any>(null)
 const posSummary = ref<any>(null)
 const signals = ref<any[]>([])
@@ -762,19 +1050,78 @@ function fmtClock(iso?: string): string {
     : `${d.getMonth() + 1}/${d.getDate()} ${hm}`
 }
 
-const ruleDirection = computed(() => {
+// ---- 5.2 当日方向基准（basis 四态 + 置信度 + 锁定 + 指针）----
+const basis = computed(() => macro.value?.basis || null)
+// 状态是否锁定（盘前基准语义）：有 locked_at 即锁定
+const gaugeLocked = computed(() => !!basis.value?.locked_at)
+
+function statusLabel(s?: string) {
+  return s || ruleDirection() || '—'
+}
+function ruleDirection() {
   const d = rule.value?.direction
-  if (!d) return '—'
+  if (!d) return '数据不足'
   if (d.includes('多')) return '偏多'
   if (d.includes('空')) return '偏空'
-  return '中性'
+  return '中性(观望)'
+}
+// 状态 → 视觉 class：偏空=绿(跌)，偏多=红(涨)，中性/数据不足=灰
+function statusClass(s?: string) {
+  if (s?.includes('空')) return 'bear'
+  if (s?.includes('多')) return 'bull'
+  if (s === '中性(观望)') return 'neutral'
+  return 'nodata'
+}
+// 置信度等级文案
+function confidenceLabel() {
+  const c = basis.value?.confidence ?? 0
+  if (basis.value?.status === '数据不足') return '数据不足'
+  if (basis.value?.low_confidence || basis.value?.status === '中性(观望)') return '观望 · 低置信'
+  if (c >= 70) return '高置信'
+  if (c >= 50) return '中置信'
+  return '低置信'
+}
+const lockTime = computed(() => fmtClock(basis.value?.locked_at))
+// 指针位置：低置信/数据不足 → 锁定在中心「观望」；否则按 score 映射到 [-46%, +46%]
+const gaugePos = computed(() => {
+  if (basis.value?.low_confidence || basis.value?.status === '数据不足' || basis.value?.status === '中性(观望)') {
+    return 50
+  }
+  const score = Number(basis.value?.score ?? 0) || 0
+  const norm = Math.max(-1, Math.min(1, score / 10))
+  return Math.round(50 + norm * 46)
 })
-const directionClass = computed(() => {
-  const d = rule.value?.direction
-  if (d?.includes('多')) return 'bull'
-  if (d?.includes('空')) return 'bear'
+
+// ---- 5.1 信号溯源辅助 ----
+function judgeLabel(j?: string) {
+  return { 利多: '利多', 利空: '利空', 中性: '中性' }[j || ''] || j || '中性'
+}
+function judgeClass(j?: string) {
+  if (j === '利多') return 'bull'
+  if (j === '利空') return 'bear'
   return 'neutral'
+}
+
+// 5.1 信号溯源：按权重从高到低排列，且行内直接显示该信号的涨跌幅/数值
+const PCT_SIGNAL_NAMES = new Set(['标普500', '纳斯达克', '恒生指数', '日经225', '韩国KOSPI',
+  '富时A50期货', '标普500期货', '纳斯达克期货', '道指期货'])
+const signalRows = computed(() => {
+  const list = (rule.value?.signals || []).slice()
+  list.sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0)) // 权重高->低
+  return list
 })
+function sigValueText(s: any): string {
+  const v = s?.value
+  if (typeof v === 'number' && PCT_SIGNAL_NAMES.has(s.name)) return fmtPct(v) // 涨跌幅类
+  if (typeof v === 'number') return String(v) // VIX 点位
+  if (typeof v === 'string' && /[/:]/.test(v) && v.length <= 14) return v // 涨跌家数比
+  return '' // 事件类长文本不占行内值列
+}
+function sigValueClass(s: any): string {
+  const v = s?.value
+  if (typeof v === 'number' && PCT_SIGNAL_NAMES.has(s.name)) return clsByVal(v, '')
+  return ''
+}
 
 // ---- 数据加载 ----
 async function loadToday() {
@@ -972,53 +1319,143 @@ function addScanToPlan(row: any) {
   planDialog.value = true
 }
 
-async function evaluatePlans() {
-  evalLoading.value = true
+// ---- 盘中买卖实时指导（买入触达 + 持仓卖出建议）----
+const guide = ref<any>(null)
+const guideBuys = computed(() => guide.value?.buys || [])
+const guideSells = computed(() => guide.value?.sells || [])
+
+async function loadIntradayGuide() {
+  guideLoading.value = true
   try {
-    const pending = await warRoomApi.getPlans(undefined, 'pending')
-    const codes = (pending?.items || []).map((p: any) => p.code)
-    if (codes.length === 0) {
-      evalPlans.value = []
-      return
-    }
-    // 批量取实时价（复用 vibe 行情）
-    const { vibeApi } = await import('@/api/vibe')
-    const qres: any = await vibeApi.getQuotes(codes)
-    const quotes: Record<string, number> = {}
-    for (const q of qres?.data || []) {
-      if (q?.price != null) quotes[q.code] = q.price
-    }
-    const res: any = await warRoomApi.getPlans(undefined, 'pending')
-    evalPlans.value = (res?.items || []).map((p: any) => {
-      const last = quotes[p.code]
-      const triggered = p.direction === 'buy'
-        ? (last != null && p.trigger_price != null && last <= p.trigger_price)
-        : (last != null && p.trigger_price != null && last >= p.trigger_price)
-      return { ...p, last_price: last ?? null, triggered: !!triggered }
-    })
+    const d: any = await warRoomApi.getIntradayGuide()
+    guide.value = d
   } catch (e) {
-    console.warn('[WarRoom] evaluatePlans', e)
+    console.warn('[WarRoom] loadIntradayGuide', e)
   } finally {
-    evalLoading.value = false
+    guideLoading.value = false
   }
 }
 
+// 卖出建议标签配色：清仓/止损=danger，减仓/止盈=warning，持有=info
+function sellAdviceType(row: any): 'danger' | 'warning' | 'info' {
+  const a = (row.advice || row.advice_label || '').toString()
+  if (/清仓|止损|S3|离场/.test(a)) return 'danger'
+  if (/减仓|止盈|S1|S2|安全|预警/.test(a)) return 'warning'
+  return 'info'
+}
+// 盘前卖出观测「建议」文本的强调色
+function sellAdviceTagClass(row: any): string {
+  const a = (row.signal_label || row.advice_label || '').toString()
+  if (/清仓|止损|S3|离场/.test(a)) return 'down'
+  if (/减仓|止盈|预警/.test(a)) return 'warn'
+  return ''
+}
+
+// 盘中卖出建议 → 加入当日计划（direction=sell）
+function addSellToPlan(row: any) {
+  planForm.value = {
+    code: row.code,
+    name: row.name,
+    direction: 'sell',
+    trigger_price: row.trigger_price ?? undefined,
+    stop_loss: undefined,
+    sell_condition: (row.reason || row.advice_text || row.advice || '').slice(0, 120)
+  }
+  planDialog.value = true
+}
+
+// 盘前卖出观测确认写库（direction=sell）
+const confirmingSellIdx = ref<number>(-1)
+async function confirmSellCandidate(ci: number) {
+  const c = planGen.value?.sell_candidates?.[ci]
+  if (!c) return
+  confirmingSellIdx.value = ci
+  try {
+    await warRoomApi.createPlan({
+      code: c.code,
+      name: c.name || undefined,
+      direction: 'sell',
+      trigger_price: c.trigger_price,
+      stop_loss: undefined,
+      sell_condition: c.reason || c.sell_condition || undefined,
+      source: c.source || undefined
+    })
+    ElMessage.success(`${c.name || c.code} 已写入卖出计划`)
+    planGen.value.sell_candidates.splice(ci, 1)
+    planGen.value.sell_count = planGen.value.sell_candidates.length
+    await loadPlans()
+    await loadToday()
+  } catch (e) {
+    ElMessage.error('确认写库失败')
+  } finally {
+    confirmingSellIdx.value = -1
+  }
+}
+function removeSellCandidate(ci: number) {
+  const c = planGen.value?.sell_candidates?.[ci]
+  if (!c) return
+  planGen.value.sell_candidates.splice(ci, 1)
+  planGen.value.sell_count = planGen.value.sell_candidates.length
+  ElMessage.success(`已否决卖出观测 ${c.name || c.code}`)
+}
+
 // ---- 盘中实时（SSE 订阅 + 30s 轮询兜底）----
-// 设计文档 A.3 Tab2④ / A.5：SSE 订阅计划标的实时价，价格触达目标自动高亮"可执行"
+// SSE 订阅买卖点标的实时价：买入候选按触发价高亮"可执行"，持仓实时判定止损/止盈触发
 let stopQuotes: (() => void) | null = null
 let intradayPoll: number | null = null
 
 function onQuotesUpdate(signal: QuotesUpdateSignal) {
   const qs = signal.quotes
   if (!qs) return
-  evalPlans.value = evalPlans.value.map((p) => {
-    const q = qs[p.code]
-    if (!q || q.close == null) return p
-    const triggered = p.direction === 'buy'
-      ? (p.trigger_price != null && q.close <= p.trigger_price)
-      : (p.trigger_price != null && q.close >= p.trigger_price)
-    return { ...p, last_price: q.close, triggered: !!triggered }
-  })
+  // 买入建议：更新现价 + 重新判定触达/偏离
+  if (guide.value?.buys) {
+    guide.value.buys = guide.value.buys.map((p: any) => {
+      const q = qs[p.code]
+      if (!q || q.close == null) return p
+      const tp = p.trigger_price
+      const price = q.close
+      const dist = tp ? Math.round((price / tp - 1) * 10000) / 100 : null
+      const triggered = tp != null && price <= tp
+      return {
+        ...p,
+        last_price: price,
+        distance_pct: dist,
+        triggered: !!triggered,
+        advice: triggered
+          ? `已回落至 ${tp} 下方，时间点成立，可执行买入`
+          : (dist != null && dist <= 2 ? `接近触发价（偏离 ${dist}%），可提前挂单` : p.advice)
+      }
+    })
+  }
+  // 卖出建议：更新现价/盈亏率，并做止损/止盈的实时触发判定（信号级建议仍以评估结果为准）
+  if (guide.value?.sells) {
+    guide.value.sells = guide.value.sells.map((p: any) => {
+      const q = qs[p.code]
+      if (!q || q.close == null) return p
+      const price = q.close
+      const cost = p.avg_cost
+      const stop = p.stop_loss_price
+      const take = p.take_profit_price
+      let advice = p.advice
+      let adviceLabel = p.advice_label
+      let reason = p.reason
+      if (stop && price <= Number(stop)) {
+        advice = '触发止损'
+        adviceLabel = '无条件离场'
+        reason = `现价 ${price} 已跌破止损位 ${stop}，无条件止损离场`
+      } else if (take && price >= Number(take) && !/持有/.test(advice || '')) {
+        advice = '触及止盈'
+        adviceLabel = '分批止盈'
+        reason = `现价 ${price} 已达止盈位 ${take}，分批止盈一半`
+      }
+      return {
+        ...p,
+        last_price: price,
+        profit_loss_rate: cost ? Math.round((price / cost - 1) * 10000) / 100 : null,
+        advice, advice_label: adviceLabel, reason
+      }
+    })
+  }
 }
 
 function startIntradayLive() {
@@ -1026,7 +1463,7 @@ function startIntradayLive() {
   stopQuotes = subscribeQuotesUpdate(onQuotesUpdate, (status) => {
     // connected / degraded：由轮询兜底，无需额外提示
   })
-  intradayPoll = window.setInterval(() => { evaluatePlans() }, 30000)
+  intradayPoll = window.setInterval(() => { loadIntradayGuide() }, 30000)
 }
 
 function stopIntradayLive() {
@@ -1100,6 +1537,434 @@ function goTrade(row: any) {
   router.push(`/paper?code=${encodeURIComponent(row.code)}`)
 }
 
+// ---- 5.3 计划生成流水线（四段审计痕迹，异步 + SSE 实时进度）----
+const planGen = ref<any>(null)
+const genPlanLoading = ref(false)
+const confirmingIdx = ref<number>(-1)
+const genPlanJobId = ref<string>('')
+const genPlanProgress = ref(0)
+const genPlanStage = ref('')
+let planStreamController: AbortController | null = null
+let planCompletionTimer: ReturnType<typeof setInterval> | null = null
+
+// 清理所有计划生成相关的后台任务（看门狗 + SSE）
+function _clearPlanWatchdog() {
+  if (planCompletionTimer) {
+    clearInterval(planCompletionTimer)
+    planCompletionTimer = null
+  }
+  if (planStreamController) {
+    planStreamController.abort()
+    planStreamController = null
+  }
+}
+
+const STEP_MAP: Record<string, string> = { 环境: '环境', 行业: '行业', 个股: '个股', 计划: '计划', 卖出: '卖出' }
+function stepLabel(k?: string) { return STEP_MAP[k || ''] || k || '—' }
+// 段标识（class 用拼音/英文），与后端 step 名（中文）一一对应
+function pipelineKey(k?: string) {
+  return { 环境: 'env', 行业: 'ind', 个股: 'stock', 计划: 'plan', 卖出: 'sell' }[k || ''] || 'env'
+}
+function keptPct(st: any) {
+  if (!st || !st.scanned) return 0
+  return Math.round((st.kept / st.scanned) * 100)
+}
+
+function stopPlanStream() {
+  if (planCompletionTimer) { clearInterval(planCompletionTimer); planCompletionTimer = null }
+  if (planStreamController) {
+    planStreamController.abort()
+    planStreamController = null
+  }
+}
+
+function planStreamError(msg?: string) {
+  ElMessage.error(msg || '计划生成中断，请稍后重试')
+  stopPlanStream()
+  genPlanLoading.value = false
+}
+
+// 同步一次任务当前状态（SSE 连接后兜底，防止漏掉已完成的进度事件）
+async function syncPlanJobState(jobId: string) {
+  try {
+    const st = await _planStatus(jobId)
+    if (!st) return
+    if (st.status === 'done') {
+      const r = await _planResult(jobId)
+      if (r) {
+        planGen.value = r
+        genPlanProgress.value = 100
+        genPlanStage.value = ''
+        ElMessage.success(`已生成 ${r.candidates_count ?? 0} 条计划候选，请人工确认`)
+      }
+      genPlanLoading.value = false
+    } else if (st.status === 'error') {
+      planStreamError(st.error || '计划生成失败')
+    } else {
+      genPlanProgress.value = st.progress ?? genPlanProgress.value
+      genPlanStage.value = st.stage || ''
+      // 竞态兜底：connected 触发本函数为"未 await 的异步回查"，其 GET /status 可能在
+      // SSE done 事件之后才以 running 返回；此时 planGen 可能已含完整候选结果，
+      // 必须保留，禁止用空占位覆盖（否则已完成的候选列表被清空、前端不渲染）。
+      if (!planGen.value?.candidates?.length) {
+        planGen.value = {
+          candidates: [], candidates_count: 0,
+          audit: { steps: planGen.value?.audit?.steps || [], total: planGen.value?.audit?.steps?.length || 0 }
+        }
+      }
+    }
+  } catch (e) {
+    genPlanLoading.value = false
+  }
+}
+
+async function watchPlanJob(jobId: string) {
+  const token = localStorage.getItem('auth-token')
+  const baseUrl = (import.meta.env.VITE_API_BASE_URL as string) || ''
+  const controller = new AbortController()
+  planStreamController = controller
+  let finished = false
+  // ── 完成判定兜底（看门狗）────────────────────────────
+  // 根因：本函数此前完全依赖 SSE 判定"完成"。但浏览器端 SSE 连接一旦异常
+  // （ERR_CONNECTION_CLOSED / ERR_ABORTED，均已在真实环境捕获），reader.read()
+  // 会永久挂起，导致 genPlanLoading 永不复位、按钮永远转圈、结果不渲染。
+  // 解决：并行走一个 2s 轮询 status 的"完成通道"，done 即拉 result 呈现；并设
+  // 120s 硬超时兜底——无论任意路径，按钮都必在有限时间内复位、结果必被展示。
+  let done = false
+  const deadline = Date.now() + 120000
+  planCompletionTimer = setInterval(() => {
+    (async () => {
+      try {
+        if (done || Date.now() > deadline) {
+          clearInterval(planCompletionTimer!)
+          planCompletionTimer = null
+          if (done) return
+          // 硬超时：强制结束，并按需最后一次拉取结果
+          try {
+            const r = await _planResult(jobId)
+            if (r && !planGen.value?.candidates?.length) { planGen.value = r; genPlanProgress.value = 100; genPlanStage.value = '' }
+          } catch { /* 忽略 */ }
+          try { controller.abort() } catch { /* 忽略 */ }
+          genPlanLoading.value = false
+          return
+        }
+        const st = await _planStatus(jobId)
+        if (st?.status === 'done') {
+          done = true
+          clearInterval(planCompletionTimer!)
+          planCompletionTimer = null
+          const r = await _planResult(jobId)
+          if (r && !planGen.value?.candidates?.length) { planGen.value = r; genPlanProgress.value = 100; genPlanStage.value = '' }
+          genPlanLoading.value = false
+          try { controller.abort() } catch { /* 忽略 */ }
+        } else if (st?.status === 'error') {
+          done = true
+          clearInterval(planCompletionTimer!)
+          planCompletionTimer = null
+          planStreamError(st.error || '计划生成失败')
+        }
+      } catch { /* 下一轮重试 */ }
+    })()
+  }, 2000)
+  // ── 结束看门狗 ─────────────────────────────────────
+  // 先探一次状态（任务可能已快速完成）
+  try {
+    const st = await _planStatus(jobId)
+    if (st?.status === 'done') { await syncPlanJobState(jobId); return }
+    if (st?.status === 'error') { planStreamError(st.error || '计划生成失败'); return }
+  } catch { /* 继续走 SSE */ }
+
+  try {
+    const resp = await fetch(`${baseUrl}/api/war-room/daily-plan/stream/${jobId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: controller.signal,
+    })
+    if (!resp.ok || !resp.body) { planStreamError(`进度流连接失败(${resp.status})`); return }
+    const reader = resp.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let event = 'message'
+    const dataBuffer: string[] = []
+    const dispatch = () => {
+      const raw = dataBuffer.join('\n')
+      dataBuffer.length = 0
+      if (event === 'progress' && raw) {
+        try {
+          const evt = JSON.parse(raw)
+          if (evt.status === 'done') {
+            finished = true
+            done = true
+            planGen.value = evt.result
+            genPlanProgress.value = 100
+            genPlanStage.value = ''
+            genPlanLoading.value = false
+            ElMessage.success(`已生成 ${evt.result?.candidates_count ?? 0} 条计划候选，请人工确认`)
+            stopPlanStream()
+          } else if (evt.status === 'error') {
+            finished = true
+            done = true
+            planStreamError(evt.message || '计划生成失败')
+          } else {
+            // running：逐段点亮审计漏斗
+            genPlanProgress.value = evt.progress ?? 0
+            genPlanStage.value = evt.stage || ''
+            const steps = Array.isArray(evt.steps) ? evt.steps : []
+            planGen.value = { candidates: [], candidates_count: 0, audit: { steps, total: steps.length } }
+          }
+        } catch { /* 忽略坏包 */ }
+      } else if (event === 'connected') {
+        syncPlanJobState(jobId)
+      }
+      event = 'message'
+    }
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() ?? ''
+      for (const line of lines) {
+        const t = line.replace(/\r$/, '')
+        if (t === '') dispatch()
+        else if (t.startsWith(':')) continue
+        else if (t.startsWith('event:')) event = t.slice(6).trim()
+        else if (t.startsWith('data:')) dataBuffer.push(t.slice(5).replace(/^ /, ''))
+      }
+      if (finished) break
+    }
+    // 流结束但未 done → 兜底刷新
+    if (!finished && !controller.signal.aborted) {
+      await syncPlanJobState(jobId)
+      if (planGen.value?.candidates_count) ElMessage.success(`已生成 ${planGen.value.candidates_count} 条计划候选，请人工确认`)
+      genPlanLoading.value = false
+      done = true
+      stopPlanStream()
+    }
+  } catch (e) {
+    if ((e as any)?.name !== 'AbortError') planStreamError()
+  }
+}
+
+async function generatePlan() {
+  // 防抖：以 genPlanLoading 为权威防抖依据（而非 genPlanJobId）。
+  // genPlanJobId 曾在旧版本/keep-alive 缓存中残留非空值，若以它防抖会导致按钮"点了没反应"。
+  if (genPlanLoading.value) return
+  _clearPlanWatchdog()
+  genPlanLoading.value = true
+  planGen.value = null
+  genPlanJobId.value = ''
+  genPlanProgress.value = 0
+  genPlanStage.value = '环境'
+  try {
+    const job = await _planGenerate()
+    if (!job?.job_id) {
+      ElMessage.error('计划生成失败')
+      genPlanLoading.value = false
+      genPlanJobId.value = ''
+      return
+    }
+    const jobId = job.job_id
+    genPlanJobId.value = jobId
+    genPlanProgress.value = 50
+    genPlanStage.value = '计划'
+    // 直接轮询（绕开 SSE 流挂起问题）：每 300ms 查 status，done 就拉 result
+    const deadline = Date.now() + 60000
+    let done = false
+    let failCount = 0
+    while (!done && Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 300))
+      try {
+        const st = await _planStatus(jobId)
+        if (!st) continue
+        // 更新进度
+        if (st.progress != null) genPlanProgress.value = st.progress
+        if (st.stage) genPlanStage.value = st.stage
+        if (st.status === 'done') {
+          const result = await _planResult(jobId)
+          if (result) {
+            planGen.value = result
+            genPlanProgress.value = 100
+            genPlanStage.value = ''
+            if (result.pending_reason) {
+              ElMessage.warning(result.pending_reason)
+            } else {
+              ElMessage.success(`已生成 ${result.candidates_count ?? 0} 条计划候选`)
+            }
+          }
+          genPlanJobId.value = ''
+          done = true
+        } else if (st.status === 'error') {
+          ElMessage.error(st.error || '计划生成失败')
+          done = true
+        }
+      } catch {
+        // 不再静默吞错：连续 5 次获取失败即视为链路异常，报错退出（否则按钮可能长时间"生成中"）
+        if (++failCount >= 5) { ElMessage.error('计划状态获取失败，请重试'); done = true }
+      }
+    }
+    if (!done) {
+      // 超时兜底：直接拉 result（可能后端已完成）
+      try {
+        const result = await _planResult(jobId)
+        if (result) { planGen.value = result; genPlanProgress.value = 100; genPlanStage.value = '' }
+      } catch {}
+      genPlanLoading.value = false
+      genPlanJobId.value = ''
+    } else {
+      genPlanLoading.value = false
+    }
+  } catch (e) {
+    ElMessage.error('计划生成失败')
+  } finally {
+    // 无论成功 / 失败 / 异常，一律复位按钮与 job 状态，杜绝"生成中…"卡死
+    genPlanLoading.value = false
+    genPlanJobId.value = ''
+    _clearPlanWatchdog()
+  }
+}
+
+// 打开即读「今日计划快照」（盘前 8:15 预生成落库）：GET 纯读、秒回；
+// 快照未生成（冷启动/未到盘前）时保持空态，用户可点「生成当日计划」触发 job。
+async function loadTodayPlan() {
+  try {
+    const d = await _fetchJSON<any>('/api/war-room/daily-plan/today', {}, 15000)
+    if (d?.generated && d.result && d.result.candidates?.length) {
+      planGen.value = d.result
+      genPlanProgress.value = 100
+      genPlanStage.value = ''
+      return true
+    }
+    planGen.value = null
+    return false
+  } catch { /* 快照读取失败保持空态 */ planGen.value = null; return false }
+}
+
+// ---- 5.4 候选 → 人工确认 / 改价 / 删除 ----
+async function confirmCandidate(ci: number) {
+  const c = planGen.value?.candidates?.[ci]
+  if (!c) return
+  confirmingIdx.value = ci
+  try {
+    await warRoomApi.createPlan({
+      code: c.code,
+      name: c.name || undefined,
+      direction: c.direction || 'buy',
+      trigger_price: c.trigger_price,
+      stop_loss: c.stop_loss,
+      sell_condition: c.sell_condition || undefined,
+      source: c.source || undefined
+    })
+    ElMessage.success(`${c.name || c.code} 已写入当日计划`)
+    // 从候选移除 → 前端本地刷新（不重取，避免 pending 漂移）
+    planGen.value.candidates.splice(ci, 1)
+    planGen.value.candidates_count = planGen.value.candidates.length
+    await loadPlans()
+    await loadToday()
+  } catch (e) {
+    ElMessage.error('确认写库失败')
+  } finally {
+    confirmingIdx.value = -1
+  }
+}
+
+function editCandidate(ci: number) {
+  const c = planGen.value?.candidates?.[ci]
+  if (!c) return
+  editMode.value = 'candidate'
+  editCandidateIdx.value = ci
+  editTargetId.value = ''
+  editTargetText.value = `${c.name || c.code} ${c.code}`
+  editForm.value = {
+    trigger_price: c.trigger_price ?? undefined,
+    stop_loss: c.stop_loss ?? undefined,
+    sell_condition: c.sell_condition || ''
+  }
+  editDialog.value = true
+}
+
+function removeCandidate(ci: number) {
+  const c = planGen.value?.candidates?.[ci]
+  if (!c) return
+  planGen.value.candidates.splice(ci, 1)
+  planGen.value.candidates_count = planGen.value.candidates.length
+  ElMessage.success(`已否决候选 ${c.name || c.code}`)
+}
+
+// ---- 5.4 已写计划的人工可改 ----
+const editDialog = ref(false)
+const editMode = ref<'candidate' | 'plan'>('plan')
+const editTargetId = ref('')
+const editTargetText = ref('')
+const editCandidateIdx = ref(-1)
+const savingEdit = ref(false)
+const editForm = ref({ trigger_price: undefined as number | undefined, stop_loss: undefined as number | undefined, sell_condition: '' })
+
+function editPlan(row: any) {
+  editMode.value = 'plan'
+  editTargetId.value = row.id
+  editTargetText.value = `${row.name || row.code} ${row.code}`
+  editCandidateIdx.value = -1
+  editForm.value = {
+    trigger_price: row.trigger_price ?? undefined,
+    stop_loss: row.stop_loss ?? undefined,
+    sell_condition: row.sell_condition || ''
+  }
+  editDialog.value = true
+}
+
+async function saveEdit() {
+  savingEdit.value = true
+  try {
+    if (editMode.value === 'candidate') {
+      const c = planGen.value.candidates[editCandidateIdx.value]
+      if (!c) return
+      if (editForm.value.trigger_price != null) c.trigger_price = editForm.value.trigger_price
+      if (editForm.value.stop_loss != null) c.stop_loss = editForm.value.stop_loss
+      c.sell_condition = editForm.value.sell_condition || c.sell_condition
+    } else {
+      const payload: Record<string, any> = {}
+      if (editForm.value.trigger_price != null) payload.trigger_price = editForm.value.trigger_price
+      if (editForm.value.stop_loss != null) payload.stop_loss = editForm.value.stop_loss
+      if (editForm.value.sell_condition) payload.sell_condition = editForm.value.sell_condition
+      await warRoomApi.updatePlanDetail(editTargetId.value, payload)
+      await loadPlans()
+    }
+    ElMessage.success('已更新')
+    editDialog.value = false
+  } catch (e) {
+    ElMessage.error('保存失败')
+  } finally {
+    savingEdit.value = false
+  }
+}
+
+// 确认已写计划（编辑后落定；pending 已是默认，主要做触发/确认入口）
+async function confirmPlanWrite(row: any) {
+  if (row.status !== 'pending') return
+  ElMessage.success(`${row.name || row.code} 计划已就绪，盘中价格触达将提醒`)
+}
+
+async function removePlan(row: any) {
+  try {
+    await ElMessageBox.confirm(`确认删除计划「${row.name || row.code}」？`, '删除确认', { type: 'warning' })
+  } catch {
+    return
+  }
+  try {
+    await warRoomApi.deletePlan(row.id)
+    ElMessage.success('计划已删除')
+    await loadPlans()
+    await loadToday()
+  } catch (e) {
+    ElMessage.error('删除失败')
+  }
+}
+
+function shortSell(s?: string) {
+  if (!s) return '—'
+  return s.length > 18 ? s.slice(0, 18) + '…' : s
+}
+
 function goScheduled() {
   router.push('/tasks')
 }
@@ -1108,7 +1973,7 @@ function refreshCurrent() {
   loadToday()
   // 设计文档 A.5：进入 Tab/点刷新即拉取该时段静态数据
   if (activeTab.value === 'pre_market') { ensureMacroAuto(); loadGlobalStocks(); loadPlans() }
-  if (activeTab.value === 'intraday') { loadTodayAlerts(); loadRegime(); loadPositions(); evaluatePlans(); loadFavorites(); startIntradayLive() }
+  if (activeTab.value === 'intraday') { loadTodayAlerts(); loadRegime(); loadPositions(); loadIntradayGuide(); loadFavorites(); startIntradayLive() }
   if (activeTab.value === 'post_market') { loadSignals(); loadTodayTrades() }
   if (activeTab.value === 'weekly') loadWeekly()
 }
@@ -1124,7 +1989,7 @@ function onTabChange(name: string | number) {
   // 所以先手动同步 activeTab，保证 UI 高亮 + 后续依赖 activeTab.value 的逻辑一致。
   activeTab.value = String(name)
   if (name === 'pre_market') { ensureMacroAuto(); loadGlobalStocks(); loadPlans() }
-  if (name === 'intraday') { loadTodayAlerts(); loadRegime(); loadPositions(); evaluatePlans(); loadFavorites(); startIntradayLive() }
+  if (name === 'intraday') { loadTodayAlerts(); loadRegime(); loadPositions(); loadIntradayGuide(); loadFavorites(); startIntradayLive() }
   if (name === 'post_market') { loadSignals(); loadTodayTrades() }
   if (name === 'weekly') loadWeekly()
   // 离开盘中 → 关闭 SSE 订阅与轮询
@@ -1208,7 +2073,25 @@ onMounted(async () => {
             if (cp && tabIndexMap[cp]) activeTab.value = cp
           }
           refreshCurrent()
+          // 打开即读：加载今日计划快照（盘前预生成成品），无需点击生成
+          await loadTodayPlan()
         })
+
+// keep-alive 激活钩子：每次组件被复用时强制清空全部计划生成相关状态。
+// 残留状态危害：
+//   1) genPlanJobId 残留在旧版本代码中非空 → generatePlan 防抖直接 return（按钮"点了没反应"）；
+//   2) genPlanLoading 残留 true → 按钮永远显示"生成中…"卡死。
+// 因此这里一次性复位 jobId/progress/stage/loading/结果，并停掉一切后台任务。
+onActivated(() => {
+  genPlanLoading.value = false
+  genPlanJobId.value = ''
+  genPlanProgress.value = 0
+  genPlanStage.value = ''
+  planGen.value = null
+  _clearPlanWatchdog()
+  // 每次从缓存返回都重新读今日快照（盘前预生成成品，秒回），保证最新
+  loadTodayPlan()
+})
 
 onUnmounted(() => { stopIntradayLive() })
 </script>
@@ -1280,24 +2163,170 @@ onUnmounted(() => { stopIntradayLive() })
   }
   .block-tip { color: var(--el-text-color-secondary); font-size: 13px; margin: 0; }
 
-  // 宏观方向卡
-  .direction-card {
-    .dir-row { display: flex; align-items: center; gap: 16px; margin-bottom: 12px; flex-wrap: wrap; }
+  // 5.2 仪表盘式方向卡
+  .direction-dash {
+    .dash-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+    .dash-left { display: flex; align-items: center; gap: 16px; }
+    .dash-right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
     .dir-badge {
-      font-size: 18px; font-weight: 700; padding: 4px 14px; border-radius: 8px;
+      font-size: 20px; font-weight: 700; padding: 6px 18px; border-radius: 8px; letter-spacing: 1px;
       &.bull { background: var(--el-color-danger-light-9); color: var(--el-color-danger); }
       &.bear { background: var(--el-color-success-light-9); color: var(--el-color-success); }
       &.neutral { background: var(--el-bg-color-page); color: var(--el-text-color-secondary); }
+      &.nodata { background: var(--el-fill-color); color: var(--el-text-color-secondary); }
     }
-    .dir-score { font-size: 13px; color: var(--el-text-color-secondary); b { color: var(--el-text-color-primary); } }
-    .signal-list { display: flex; flex-direction: column; gap: 6px; }
+    .dash-conf {
+      display: flex; align-items: baseline; gap: 8px; padding: 4px 14px; border-radius: 8px;
+      background: var(--el-color-primary-light-9);
+      &.low { background: var(--el-bg-color-page); }
+      .conf-num { font-size: 26px; font-weight: 800; color: var(--el-color-primary); b { font-size: 15px; font-weight: 700; margin-left: 1px; } }
+      &.low .conf-num { color: var(--el-text-color-secondary); }
+      .conf-label { font-size: 12px; color: var(--el-text-color-secondary); white-space: nowrap; }
+    }
+    .dash-lock {
+      display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600;
+      color: var(--el-color-success);
+      .el-icon { font-size: 15px; }
+      &.pending { color: var(--el-text-color-secondary); font-weight: 500; }
+    }
+    .dash-scale-hint { font-size: 12px; color: var(--el-text-color-placeholder); }
+  }
+
+  // 三段刻度条
+  .gauge {
+    position: relative; padding: 4px 0 0;
+    .gauge-track {
+      position: relative; display: flex; height: 34px; border-radius: 8px; overflow: visible;
+      &.lock { box-shadow: 0 0 0 1px var(--el-border-color-lighter); }
+      .gauge-seg {
+        flex: 1; display: flex; align-items: center; justify-content: center;
+        font-size: 13px; font-weight: 700; color: #fff;
+        &:first-child { border-radius: 8px 0 0 8px; }
+        &:last-child { border-radius: 0 8px 8px 0; }
+      }
+      .seg-bear { background: linear-gradient(90deg, var(--el-color-success-dark-2), var(--el-color-success)); }
+      .seg-neutral { background: var(--el-fill-color-dark); color: var(--el-text-color-regular); }
+      .seg-bull { background: linear-gradient(90deg, var(--el-color-danger), var(--el-color-danger-dark-2)); }
+      .gauge-pointer {
+        position: absolute; top: -6px; transform: translateX(-50%);
+        transition: left .5s ease;
+        .gauge-needle {
+          width: 0; height: 0; margin: 0 auto;
+          border-left: 7px solid transparent; border-right: 7px solid transparent;
+          border-bottom: 12px solid var(--el-text-color-primary);
+          filter: drop-shadow(0 1px 1px rgba(0,0,0,.35));
+        }
+      }
+    }
+    .gauge-scale {
+      display: flex; align-items: center; margin-top: 8px; font-size: 12px;
+      .g-scale { flex: 1; &:nth-child(2) { text-align: center; } &:nth-child(3) { text-align: right; } }
+      .bear-zone { color: var(--el-color-success); }
+      .neutral-zone { color: var(--el-text-color-secondary); }
+      .bull-zone { color: var(--el-color-danger); }
+      .g-score { margin-left: 14px; color: var(--el-text-color-secondary); white-space: nowrap; b { color: var(--el-text-color-primary); } }
+    }
+  }
+
+  .dash-note {
+    display: flex; align-items: flex-start; gap: 6px; margin-top: 12px;
+    padding: 8px 12px; font-size: 13px; line-height: 1.6;
+    background: var(--el-bg-color-page); color: var(--el-color-warning); border-radius: 6px;
+    .el-icon { margin-top: 2px; }
+  }
+
+  // 5.1 方向拆解面板（信号溯源）
+  .signal-panel {
+    margin-top: 12px; padding: 12px 14px;
+    border: 1px solid var(--el-border-color-lighter); border-radius: 8px;
+    .panel-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .panel-title { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 600; color: var(--el-text-color-primary); .el-icon { color: var(--el-color-primary); } }
+    .panel-hint { font-size: 12px; color: var(--el-text-color-secondary); }
     .signal-row {
-      display: flex; align-items: center; gap: 12px; padding: 6px 10px;
-      background: var(--el-bg-color-page); border-radius: 6px; font-size: 13px;
-      .sig-name { flex: 0 0 160px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      .sig-detail { flex: 1; color: var(--el-text-color-secondary); word-break: break-word; }
-      .sig-score { width: 40px; text-align: right; font-weight: 600; }
+      display: grid;
+      grid-template-columns: minmax(140px, 190px) 72px 78px 72px 40px 1fr;
+      column-gap: 10px; align-items: center;
+      padding: 7px 12px;
+      border-radius: 6px; font-size: 13px;
+      &:nth-child(odd) { background: var(--el-bg-color-page); }
+      .sig-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .sig-value { font-variant-numeric: tabular-nums; font-weight: 500; color: var(--el-text-color-regular); white-space: nowrap; }
+      .sig-weight { color: var(--el-text-color-placeholder); font-size: 12px; white-space: nowrap; }
+      .sig-judge {
+        justify-self: start; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600;
+        &.bull { background: var(--el-color-danger-light-9); color: var(--el-color-danger); }
+        &.bear { background: var(--el-color-success-light-9); color: var(--el-color-success); }
+        &.neutral { background: var(--el-bg-color-page); color: var(--el-text-color-secondary); }
+      }
+      .sig-score { text-align: right; font-weight: 600; }
+      .sig-explain { color: var(--el-text-color-secondary); font-size: 12px; line-height: 1.5; }
     }
+  }
+
+  // 5.3 计划生成流水线
+  .pipeline {
+    display: flex; align-items: stretch; gap: 6px; flex-wrap: wrap;
+    .pipeline-step {
+      flex: 1 1 180px; min-width: 180px; padding: 12px 14px; border-radius: 10px;
+      border: 1px solid var(--el-border-color-light); background: var(--el-bg-color);
+      border-top: 3px solid var(--el-color-primary);
+      &.p-step-env { border-top-color: var(--el-color-info); }
+      &.p-step-ind { border-top-color: var(--el-color-warning); }
+      &.p-step-stock { border-top-color: var(--el-color-danger); }
+      &.p-step-plan { border-top-color: var(--el-color-success); }
+      &.p-step-sell { border-top-color: #9261d6; }
+      .p-step-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+      .p-step-name { font-size: 15px; font-weight: 700; }
+      .p-step-count { font-size: 12px; color: var(--el-text-color-secondary); b { color: var(--el-text-color-primary); font-size: 14px; } b.kept { color: var(--el-color-success); } }
+      .p-step-rule { font-size: 12px; color: var(--el-text-color-secondary); line-height: 1.5; margin-bottom: 8px; min-height: 32px; }
+      .p-step-bar { height: 6px; border-radius: 3px; background: var(--el-fill-color); overflow: hidden; }
+      .fill { display: block; height: 100%; border-radius: 3px; background: var(--el-color-primary); transition: width .5s ease; }
+      &.p-step-env .fill { background: var(--el-color-info); }
+      &.p-step-ind .fill { background: var(--el-color-warning); }
+      &.p-step-stock .fill { background: var(--el-color-danger); }
+      &.p-step-plan .fill { background: var(--el-color-success); }
+      .p-step-reasons { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+      .p-reason { display: flex; align-items: flex-start; gap: 6px; font-size: 12px; color: var(--el-text-color-regular); line-height: 1.4; }
+      .r-dot { flex: 0 0 auto; width: 6px; height: 6px; margin-top: 5px; border-radius: 50%; background: var(--el-color-primary); }
+    }
+    .pipeline-arrow { display: flex; align-items: center; color: var(--el-text-color-placeholder); font-size: 18px; align-self: center; }
+  }
+  .pipeline-tip { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 12px; color: var(--el-text-color-secondary); }
+  // 预测行业池（Stage2 行业方向预测产物）
+  .ind-strip { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 10px;
+    .ind-strip-label { flex: none; font-size: 12px; font-weight: 600; color: var(--el-text-color-regular); }
+    .ind-tag { flex: none; }
+  }
+
+  // 5.4 计划候选 / 来源
+  .cand-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+  .cand-card {
+    .cand-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+    .cand-name { font-size: 15px; font-weight: 600; }
+    .cand-sig { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--el-color-warning-light-9); color: var(--el-color-warning); white-space: nowrap; }
+    .cand-source { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--el-color-primary); margin-bottom: 8px; }
+    .cand-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; font-size: 12px; margin-bottom: 10px; }
+    .fld { display: flex; justify-content: space-between; gap: 6px; .k { color: var(--el-text-color-secondary); } .v { color: var(--el-text-color-primary); font-weight: 600; &.down { color: var(--el-color-success); } } }
+    .cand-actions { display: flex; gap: 6px; }
+  }
+  .src-dot { flex: 0 0 auto; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--el-color-primary); }
+  .plan-source { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--el-color-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+  .plan-source.manual { color: var(--el-text-color-secondary); .src-dot { background: var(--el-fill-color-dark); } }
+  .edit-target { color: var(--el-text-color-primary); font-weight: 600; }
+  .no-op { color: var(--el-text-color-placeholder); }
+
+  // 今日卖出观测 / 买卖点实时指导
+  .sell-advice {
+    display: inline-block; padding: 2px 8px; border-radius: 10px;
+    font-size: 12px; font-weight: 600; white-space: nowrap;
+    background: var(--el-fill-color); color: var(--el-text-color-regular);
+    &.down { background: var(--el-color-danger-light-9); color: var(--el-color-danger); }
+    &.warn { background: var(--el-color-warning-light-9); color: var(--el-color-warning); }
+  }
+  .guide-count {
+    display: inline-block; margin-left: 4px; padding: 0 7px;
+    font-size: 11px; line-height: 18px; border-radius: 10px;
+    background: var(--el-color-primary-light-9); color: var(--el-color-primary); font-weight: 600;
   }
 
   .llm-card {

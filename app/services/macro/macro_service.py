@@ -25,6 +25,39 @@ logger = logging.getLogger(__name__)
 # 快照集合名（与 design doc §5.5 一致）
 SNAPSHOT_COLLECTION = "macro_daily_snapshots"
 
+# 当日方向"低置信度"门槛（百分比）：低于它 → 基调定为"中性(观望)"，不强断言多空
+CONFIDENCE_THRESHOLD = 30
+_STRONG = {"偏多": "偏多", "偏空": "偏空", "多": "偏多", "空": "偏空"}
+
+
+def _direction_status(direction: str | None, confidence: int, threshold: int = CONFIDENCE_THRESHOLD) -> str:
+    """当日方向四态：偏多 / 偏空 / 中性(观望) / 数据不足。
+
+    低置信度(<threshold)或中性方向一律归为「观望」，明确不做多空强断言；
+    无方向数据归为「数据不足」。实现对文档 5.2「状态四态」的权威口径。
+    """
+    if not direction:
+        return "数据不足"
+    base = _STRONG.get(direction) or "中性"
+    if base == "中性" or confidence < threshold:
+        return "中性(观望)"
+    return base
+
+
+def _build_basis(rule: dict, created_at) -> dict:
+    """构建当日方向基准（5.2）：状态四态 + 低置信度标记 + 锁定时间戳。"""
+    direction = rule.get("direction")
+    confidence = int(rule.get("confidence") or 0)
+    return {
+        "status": _direction_status(direction, confidence),
+        "direction": direction,
+        "confidence": confidence,
+        "low_confidence": bool(direction) and confidence < CONFIDENCE_THRESHOLD,
+        "confidence_threshold": CONFIDENCE_THRESHOLD,
+        "locked_at": created_at,
+        "score": rule.get("score", 0),
+    }
+
 
 # ---------------------------------------------------------------------------
 # 数据聚合（数据层 A-D）
@@ -220,6 +253,12 @@ async def build_macro_snapshot(days: int = 7) -> dict:
     breadth = await _collect_breadth()
 
     rule = score_macro(indices, calendar, news, breadth)
+    created_at = datetime.now(timezone.utc)
+
+    # 5.1：为每条信号补充"判定"（利多/利空/中性），便于面板逐条复核
+    for sig in rule.get("signals", []):
+        sig["judge"] = "利多" if sig.get("score", 0) > 0 else ("利空" if sig.get("score", 0) < 0 else "中性")
+
     llm = await _llm_interpretation(indices, calendar, news, rule)
 
     return {
@@ -229,9 +268,10 @@ async def build_macro_snapshot(days: int = 7) -> dict:
         "news_top": news[:20],
         "breadth": breadth,
         "rule": rule,
+        "basis": _build_basis(rule, created_at),  # 5.2 当日方向基准
         "llm_interpretation": llm["interpretation"],
         "llm_available": llm["available"],
-        "created_at": datetime.now(timezone.utc),
+        "created_at": created_at,
     }
 
 
@@ -265,6 +305,10 @@ async def get_macro_snapshot(date_str: str | None = None) -> dict | None:
         if not doc:
             return None
         doc.pop("_id", None)
+        # 兼容旧快照：若缺少 basis（当日方向基准，5.2），按 rule 实时补齐，
+        # 保证已落库的存量快照也能提供"状态四态 + 置信 + 锁定"基准。
+        if not doc.get("basis") and doc.get("rule"):
+            doc["basis"] = _build_basis(doc["rule"], doc.get("created_at") or datetime.now(timezone.utc))
         return doc
 
     key = f"macro:snapshot:{date_str}"
@@ -272,8 +316,23 @@ async def get_macro_snapshot(date_str: str | None = None) -> dict | None:
 
 
 async def refresh_macro_snapshot() -> dict:
-    """生成今日快照并落库（手动刷新 / 8:15 调度共用）。返回快照。"""
+    """生成今日快照并落库（手动刷新 / 8:15 调度共用）。返回快照。
+
+    5.2 盘前锁定：当日方向基准一旦锁定（存在 locked_at），盘中刷新只更新
+    事实数据（指数/日历/快讯/信号值），沿用盘前基准，避免方向盘中横跳
+    （对应文档 §3.2"盘中不重算标签，只展示基准"、§5.2 指针仅在盘前定位一次）。
+    """
     snap = await build_macro_snapshot()
+    # 今日是否已存在锁定基准 → 若已锁定则保留原基准
+    try:
+        from app.core.database import get_mongo_db
+        db = get_mongo_db()
+        existing = await db[SNAPSHOT_COLLECTION].find_one({"date": snap["date"]})
+        old_basis = (existing or {}).get("basis") or {}
+        if old_basis.get("locked_at"):
+            snap["basis"] = old_basis
+    except Exception as e:
+        logger.warning(f"盘前基准锁定判断跳过: {e}")
     await _persist_snapshot(snap)
     # 清今日快照缓存，下次读取即时生效
     from app.services.cache_layer import clear_cache

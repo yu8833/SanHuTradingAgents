@@ -495,8 +495,8 @@ class FavoritesService:
         if not m:
             return b or "-"
         code = m.group(1)
-        # 北交所代码以 4/8 开头
-        if code.startswith(("4", "8")):
+        # 北交所代码以 4/8 开头（含 920 新代码段）
+        if code.startswith(("4", "8", "92")):
             return "北交所"
         if code.startswith(("300", "301", "302")):
             return "创业板"

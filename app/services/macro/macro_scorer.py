@@ -51,15 +51,21 @@ def _find_index(indices: list[dict], key: str) -> dict | None:
 
 
 def _score_change(v: float, high: float, low: float, name: str, detail: str) -> dict:
-    """按涨跌幅阈值打分：>high → +1，<low → -1，否则 0。"""
+    """按涨跌幅阈值打分：>high → +1，<low → -1，否则 0。
+
+    detail 写明"当前值 + 触发规则 + 判定 + 对方向的贡献"，让悬浮可读清如何影响方向。
+    """
     if v > high:
         score = INDEX_WEIGHT
+        judge = f">{high:+.1f}% 处偏多 → 利多，贡献 {INDEX_WEIGHT:+d}"
     elif v < low:
         score = -INDEX_WEIGHT
+        judge = f"<{low:+.1f}% 处偏空 → 利空，贡献 {score:+d}"
     else:
         score = 0
+        judge = f"介于 {low:+.1f}%~{high:+.1f}% 波动 → 中性，贡献 0"
     return {"name": name, "value": v, "score": score,
-            "detail": f"{detail} {v:+.2f}%", "weight": INDEX_WEIGHT}
+            "detail": f"{detail} {v:+.2f}%；{judge}", "weight": INDEX_WEIGHT}
 
 
 def _event_polarity(title: str) -> int:
@@ -93,7 +99,7 @@ def _score_events(news: list[dict]) -> tuple[list[dict], int]:
             "name": "高重要性政策/数据事件",
             "value": title[:40],
             "score": score,
-            "detail": f"{'利好' if polarity > 0 else '利空'}：{title[:50]}",
+            "detail": f"{'利好' if polarity > 0 else '利空'}（贡献 {score:+d}）：{title[:50]}",
             "weight": EVENT_WEIGHT,
         })
     return signals, total
@@ -146,12 +152,15 @@ def score_macro(indices: list[dict], calendar: list[dict],
         v = vix["price"]
         if v < VIX_RISK_ON:
             score = INDEX_WEIGHT
+            judge = f"低于 {VIX_RISK_ON:.0f} 风险偏好 → 利多"
         elif v > VIX_RISK_OFF:
             score = -INDEX_WEIGHT
+            judge = f"高于 {VIX_RISK_OFF:.0f} 恐慌 → 利空"
         else:
             score = 0
+            judge = f"介于 {VIX_RISK_ON:.0f}~{VIX_RISK_OFF:.0f} 波动 → 中性"
         _add({"name": "VIX恐慌指数", "value": v, "score": score,
-              "detail": f"VIX={v:.1f}（<{VIX_RISK_ON:.0f} 风险偏好 / >{VIX_RISK_OFF:.0f} 恐慌）",
+              "detail": f"VIX={v:.1f}（{judge}，贡献 {score:+d}）",
               "weight": INDEX_WEIGHT}, score)
 
     # 5. 富时A50期货 / 美股期货（同标普 ±0.5%）
@@ -175,12 +184,15 @@ def score_macro(indices: list[dict], calendar: list[dict],
         ratio = up / down if down else (BREADTH_BULL if up else 0)
         if ratio > BREADTH_BULL:
             score = INDEX_WEIGHT
+            judge = f"涨跌比 {ratio:.1f}:1 超 3:1 普涨 → 利多"
         elif ratio < BREADTH_BEAR:
             score = -INDEX_WEIGHT
+            judge = f"涨跌比 {ratio:.2f}:1 破 1:3 普跌 → 利空"
         else:
             score = 0
+            judge = "涨跌比接近均衡 → 中性"
         _add({"name": "昨日大盘情绪", "value": f"{up}:{down}", "score": score,
-              "detail": f"涨跌家数 {up}/{down}（>3:1 偏多 / <1:3 偏空）",
+              "detail": f"涨跌家数 {up}/{down}（{judge}，贡献 {score:+d}）",
               "weight": INDEX_WEIGHT}, score)
 
     # 聚合

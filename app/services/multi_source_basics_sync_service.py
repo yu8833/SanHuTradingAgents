@@ -475,11 +475,12 @@ class MultiSourceBasicsSyncService:
             return code
 
         # 根据代码前缀判断交易所
+        # 沪市：60/68/90、北交所新代码段：92 需优先于 9 判定
         if code.startswith(('60', '68', '90')):  # 上海证券交易所
             return f"{code}.SS"
         elif code.startswith(('00', '30', '20')):  # 深圳证券交易所
             return f"{code}.SZ"
-        elif code.startswith(('8', '4')):  # 北京证券交易所
+        elif code.startswith(('8', '4', '92')):  # 北京证券交易所（含 920 新代码段）
             return f"{code}.BJ"
         else:
             # 无法识别的代码，返回原始代码（确保不为空）

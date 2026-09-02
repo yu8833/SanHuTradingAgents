@@ -65,11 +65,9 @@ export default defineConfig(({ mode }) => {
       }
     }
   },
-  // 生产构建剔除 console.log/debug/info 与 debugger 语句，减少包体积并避免生产环境日志噪音
-  // 开发模式（mode=development）保留全部日志以便调试
-  esbuild: {
-    drop: mode === 'production' ? ['console', 'debugger'] : [],
-  },
+  // 注意：暂不启用 esbuild.drop=['console']——此前生产构建把诊断用的 console 日志全部剔除，
+  // 导致"生成当日计划卡住"问题时无法从浏览器控制台拿到 [generatePlan]/[fetchJSON] 追踪线索。
+  // 待问题彻底稳定后，可恢复生产环境剔除 console 以减小包体积。
   build: {
     target: 'es2020',  // 支持 nullish coalescing operator (??) 和 optional chaining (?.)
     outDir: 'dist',

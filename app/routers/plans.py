@@ -34,6 +34,15 @@ class PlanCreateRequest(BaseModel):
     strategy: str | None = Field("default", description="仓位反算策略")
     notes: str | None = Field(None, description="备注")
     date: str | None = Field(None, description="计划日期 YYYY-MM-DD，默认当日")
+    source: dict | None = Field(None, description="5.4 来源标签 {type, ref, label}")
+
+
+class PlanDetailUpdateRequest(BaseModel):
+    trigger_price: float | None = Field(None, description="触发价")
+    stop_loss: float | None = Field(None, description="止损位")
+    sell_condition: str | None = Field(None, description="卖出条件")
+    name: str | None = Field(None, description="标的名称")
+    notes: str | None = Field(None, description="备注")
 
 
 class PlanStatusRequest(BaseModel):
@@ -94,6 +103,39 @@ async def update_plan(plan_id: str, req: PlanStatusRequest, user: dict = Depends
     except Exception as e:
         logger.error(f"更新计划失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"更新计划失败: {e}") from None
+
+
+@router.put("/{plan_id}")
+async def update_plan_detail(plan_id: str, req: PlanDetailUpdateRequest,
+                             user: dict = Depends(get_current_user)):
+    """5.4 人工可改：改价 / 改止损 / 改卖出条件（改触发价后自动重算仓位）。"""
+    try:
+        plan = await plan_service.update_plan_detail(
+            user["id"], plan_id, req.model_dump(exclude_unset=True)
+        )
+        if plan is None:
+            raise HTTPException(status_code=404, detail="计划不存在或无权访问")
+        return ok(plan)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"修改计划失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"修改计划失败: {e}") from None
+
+
+@router.delete("/{plan_id}")
+async def delete_plan(plan_id: str, user: dict = Depends(get_current_user)):
+    """5.4 人工删除：仅允许删除未执行(pending)的计划。"""
+    try:
+        deleted = await plan_service.delete_plan(user["id"], plan_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="计划不存在、已执行或无权访问")
+        return ok({"deleted": True})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"删除计划失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"删除计划失败: {e}") from None
 
 
 @router.post("/evaluate")

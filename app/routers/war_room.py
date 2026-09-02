@@ -7,10 +7,13 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 from datetime import time as dtime
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi.responses import StreamingResponse
 
 from app.core.database import get_mongo_db
 from app.core.response import ok
@@ -118,6 +121,165 @@ async def war_room_today_alerts(user: dict = Depends(get_current_user)):
     except Exception as e:
         logger.error(f"今日预警读取失败: {e}", exc_info=True)
         return ok({"total": 0, "items": []}, message="今日预警读取失败")
+
+
+@router.get("/intraday-guide")
+async def war_room_intraday_guide(user: dict = Depends(get_current_user)):
+    """盘中买卖实时指导：
+      buys:  当日 pending 买入计划 + 当日未确认买入候选 → 实时价触达/偏离/建议
+      sells: 持仓逐只评估 → 持有/减仓/清仓/止损/止盈 建议（含卖出触发价）
+
+    输出与 plan_generation 的 sell_candidates 同源（intraday_guide_service），
+    但「盘中」版本叠加实时行情，判定止损/止盈/触达更及时。
+    """
+    try:
+        from app.services.intraday_guide_service import build_intraday_guide
+        guide = await build_intraday_guide(user["id"])
+        return ok(guide)
+    except Exception as e:
+        logger.error(f"盘中买卖指导生成失败: {e}", exc_info=True)
+        return ok({"as_of": None, "buys": [], "sells": [], "buy_count": 0, "sell_count": 0},
+                  message="盘中买卖指导生成失败")
+
+
+@router.post("/daily-plan/generate")
+async def war_room_generate_daily_plan(user: dict = Depends(get_current_user)):
+    """5.3 启动当日计划生成任务。
+
+    四段计算较重（约 50-150s 冷算），改为后台任务：立即返回 job_id，前端经
+    GET /daily-plan/stream/{job_id} SSE 实时接收 环境→行业→个股→计划 进度，
+    done 后经 GET /daily-plan/result/{job_id} 取回候选。不落库，由前端人工确认后写库。
+    """
+    try:
+        from app.services.plan_generation_service import start_plan_job
+        job = start_plan_job(user["id"])
+        return ok({"job_id": job.get("job_id"), "status": job.get("status"),
+                   "progress": job.get("progress", 0), "stage": job.get("stage")})
+    except Exception as e:
+        logger.error(f"当日计划任务创建失败: {e}", exc_info=True)
+        return ok({"job_id": None, "status": "error", "progress": 0}, message="任务创建失败")
+
+
+@router.get("/daily-plan/today")
+async def war_room_today_daily_plan(user: dict = Depends(get_current_user)):
+    """读取「今日计划快照」（盘前 8:15 预生成落库）：打开即读、纯读秒回。
+
+    快照未生成（如尚未到盘前任务 / 冷启动）返回 generated=false，前端再走 POST generate。
+    """
+    from app.services.plan_generation_service import load_daily_plan_snapshot
+    today = now_tz().strftime("%Y-%m-%d")
+    try:
+        result = await load_daily_plan_snapshot()
+        return ok({"generated": result is not None, "date": today, "result": result})
+    except Exception as e:
+        logger.error(f"今日计划快照读取失败: {e}", exc_info=True)
+        return ok({"generated": False, "date": today, "result": None}, message="读取失败")
+
+
+@router.get("/daily-plan/status/{job_id}")
+async def war_room_plan_status(job_id: str, user: dict = Depends(get_current_user)):
+    """查询计划生成任务状态（供 SSE 断连后轮询兜底）。"""
+    from app.services.plan_generation_service import _job_view
+    job = _job_view(job_id)
+    if not job or job.get("user_id") != user["id"]:
+        return ok(None, message="任务不存在")
+    return ok(job)
+
+
+@router.get("/daily-plan/result/{job_id}")
+async def war_room_plan_result(job_id: str, user: dict = Depends(get_current_user)):
+    """取回已完成任务的候选结果。"""
+    from app.services.plan_generation_service import _plan_jobs, get_plan_result
+    j = _plan_jobs.get(job_id)
+    if not j or j.get("user_id") != user["id"]:
+        return ok(None, message="任务不存在")
+    result = await get_plan_result(job_id)
+    if result is None:
+        return ok(None, message="任务尚未完成")
+    return ok(result)
+
+
+@router.get("/daily-plan/stream/{job_id}")
+async def war_room_plan_progress(job_id: str, user: dict = Depends(get_current_user)):
+    """实时进度流：订阅 Redis pubsub `task_progress:{job_id}`，逐段推送审计进度。"""
+    from app.services.plan_generation_service import _job_view
+    job = _job_view(job_id)
+    if not job or job.get("user_id") != user["id"]:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    async def gen():
+        try:
+            from app.core.database import get_redis_client
+            r = get_redis_client()
+        except Exception as e:
+            logger.error(f"计划进度流 Redis 不可用: {e}")
+            yield f"event: error\ndata: {{\"message\":\"Redis 不可用: {str(e)}\"}}\n\n"
+            return
+        pubsub = r.pubsub()
+        channel = f"task_progress:{job_id}"
+        await pubsub.subscribe(channel)
+        try:
+            yield f"event: connected\ndata: {{\"job_id\":\"{job_id}\",\"message\":\"已连接当日计划进度流\"}}\n\n"
+            # —— 竞态兜底 ——
+            # Redis pubsub 即发即弃（无队列）。当任务在 SSE 订阅前「秒完成」时，
+            # 已 publish 的 done 事件会被丢弃，前端将一直等不到终态而永久转圈。
+            # 这里在 connected 后直接回查任务真实状态，若已终态则补发并退出，
+            # 保证「快任务」与「慢任务」都能可靠送达 done/error。
+            from app.services.plan_generation_service import get_plan_result as _get_result
+            from app.services.plan_generation_service import _json_default
+            job_now = _job_view(job_id)
+            if job_now and job_now.get("status") == "done":
+                res = await _get_result(job_id)
+                payload = {
+                    "status": "done",
+                    "stage": job_now.get("stage") or "计划",
+                    "progress": 100,
+                    "result": res,
+                }
+                yield "event: progress\ndata: " + json.dumps(
+                    payload, ensure_ascii=False, default=_json_default
+                ) + "\n\n"
+                return
+            if job_now and job_now.get("status") == "error":
+                payload = {
+                    "status": "error",
+                    "stage": job_now.get("stage") or "环境",
+                    "progress": job_now.get("progress", 0),
+                    "message": job_now.get("error") or "计划生成失败",
+                }
+                yield "event: progress\ndata: " + json.dumps(
+                    payload, ensure_ascii=False
+                ) + "\n\n"
+                return
+            while True:
+                try:
+                    msg = await asyncio.wait_for(
+                        pubsub.get_message(ignore_subscribe_messages=True), timeout=1.0
+                    )
+                except asyncio.TimeoutError:
+                    continue
+                if msg and msg.get("type") == "message":
+                    yield f"event: progress\ndata: {msg['data']}\n\n"
+                    try:
+                        data = __import__("json").loads(msg["data"])
+                        if data.get("status") in ("done", "error"):
+                            break
+                    except Exception:
+                        pass
+        finally:
+            try:
+                await pubsub.unsubscribe(channel)
+            except Exception:
+                pass
+            try:
+                await pubsub.close()
+            except Exception:
+                pass
+
+    return StreamingResponse(
+        gen(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/today")

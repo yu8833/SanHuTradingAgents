@@ -15,10 +15,20 @@ import json
 import logging
 import time
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+def json_default(obj: Any) -> Any:
+    """Redis 缓存 JSON 序列化兜底：支持 datetime/date/set/tuple，
+    避免含时间字段的结构写入 Redis 时整段失败（此前只写内存缓存）。"""
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    if isinstance(obj, (set, tuple)):
+        return list(obj)
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 # Redis 健康状态短缓存：避免每次缓存访问都 ping Redis
 _redis_health_at: float = 0.0
@@ -133,7 +143,7 @@ async def set_cache(key: str, value: Any, ttl: int | None = None, category: str 
     if await _ensure_redis_available():
         try:
             from app.core.database import redis_client
-            await redis_client.setex(key, ttl, json.dumps(value, ensure_ascii=False))
+            await redis_client.setex(key, ttl, json.dumps(value, ensure_ascii=False, default=json_default))
         except Exception as e:
             logger.warning(f"Redis写入失败，仅写内存缓存: {e}")
 

@@ -145,8 +145,8 @@ class LimitUpPullbackService:
             return 19.5  # 创业板
         elif code.startswith("688"):
             return 19.5  # 科创板
-        elif code.startswith("8") or code.startswith("4"):
-            return 29.5  # 北交所
+        elif code.startswith("8") or code.startswith("4") or code.startswith("92"):
+            return 29.5  # 北交所（含 920 新代码段）
         elif is_st:
             return 4.8   # ST股
         else:

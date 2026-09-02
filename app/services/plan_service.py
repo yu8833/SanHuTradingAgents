@@ -146,6 +146,8 @@ async def create_plan(user_id: str, data: dict) -> dict:
         "sell_condition": data.get("sell_condition"),
         "status": STATUS_PENDING,
         "executed_trade_id": None,
+        # 5.4 来源标签：{type, ref, label}，标注该条计划的来源（已验证信号/候选池/手动），便于审计与人工可改
+        "source": data.get("source"),
         "notes": data.get("notes"),
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow(),
@@ -196,6 +198,66 @@ async def update_plan_status(user_id: str, plan_id: str, status: str,
     except Exception as e:
         logger.error(f"计划状态更新失败: {e}", exc_info=True)
         return None
+
+
+async def update_plan_detail(user_id: str, plan_id: str, fields: dict) -> dict | None:
+    """改价 / 改止损 / 改卖出条件（5.4 人工可改）：字段级更新并重算仓位。
+
+    buy 计划改触发价后重新反算仓位；sell 计划不反算仓位。
+    """
+    db = get_mongo_db()
+    from bson import ObjectId
+    if not ObjectId.is_valid(plan_id):
+        return None
+    try:
+        existing = await db[COLLECTION].find_one({"_id": ObjectId(plan_id), "user_id": user_id})
+        if not existing:
+            return None
+
+        allowed = {"trigger_price", "stop_loss", "sell_condition", "name", "notes", "source"}
+        update = {
+            k: v for k, v in fields.items()
+            if k in allowed and v is not None
+        }
+        direction = fields.get("direction") or existing.get("direction")
+        # buy 且改了触发价 → 自动重算仓位
+        if (direction == DIRECTION_BUY and update.get("trigger_price") is not None
+                and existing.get("trigger_price") != update["trigger_price"]):
+            new_pos = await _position_sizing(
+                user_id, existing.get("code", ""), float(update["trigger_price"]),
+                existing.get("strategy", "default"),
+            )
+            if new_pos:
+                update["position"] = new_pos
+
+        if not update:
+            return _serialize(dict(existing))
+        update["updated_at"] = datetime.utcnow()
+        res = await db[COLLECTION].find_one_and_update(
+            {"_id": ObjectId(plan_id), "user_id": user_id},
+            {"$set": update},
+            return_document=True,
+        )
+        return _serialize(res) if res else None
+    except Exception as e:
+        logger.error(f"计划详情更新失败: {e}", exc_info=True)
+        return None
+
+
+async def delete_plan(user_id: str, plan_id: str) -> bool:
+    """删除计划（5.4 人工删除，仅允许删除未执行的计划）。"""
+    db = get_mongo_db()
+    from bson import ObjectId
+    if not ObjectId.is_valid(plan_id):
+        return False
+    try:
+        res = await db[COLLECTION].delete_one(
+            {"_id": ObjectId(plan_id), "user_id": user_id, "status": STATUS_PENDING}
+        )
+        return bool(res.deleted_count)
+    except Exception as e:
+        logger.error(f"计划删除失败: {e}", exc_info=True)
+        return False
 
 
 async def auto_associate_trade(user_id: str, code: str, direction: str, trade_id: str,

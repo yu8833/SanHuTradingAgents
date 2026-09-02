@@ -801,6 +801,31 @@ async def lifespan(app: FastAPI):
                         f"指数={len(snap.get('indices', []))}, 日历={len(snap.get('calendar', []))}, "
                         f"LLM={'可用' if snap.get('llm_available') else '降级'}"
                     )
+                    # 计算并持久化「当日候选快照」：让「当日计划生成」退化为纯读取，
+                    # 不再现场全量重算候选池（实测冷算 ~40-50s）。冷算主体在后台执行，
+                    # 不阻塞任何用户请求；下次点击生成只读库 + 秒级装配。
+                    from app.services.candidate_pool import candidate_pool_service
+                    snap = await candidate_pool_service.compute_daily_candidate_snapshot(
+                        top_n=10, per_industry=3, limit=20,
+                    )
+                    logger.info(
+                        f"✅ [APScheduler] 当日候选快照已持久化: as_of={snap.get('as_of')}, "
+                        f"个股{len((snap.get('overview') or {}).get('items', []))}只"
+                        f"（计划生成改为纯读取）"
+                    )
+                    # 行业方向预测 → 个股行业硬绑定 → 计划装配，直接落「今日计划快照」，
+                    # 用户打开作战室 GET /daily-plan/today 即见成品，无需点击生成。
+                    from app.services.plan_generation_service import (
+                        generate_daily_plan,
+                        persist_daily_plan_snapshot,
+                    )
+                    plan = await generate_daily_plan(user_id=None)
+                    await persist_daily_plan_snapshot(plan)
+                    logger.info(
+                        f"✅ [APScheduler] 当日计划快照已生成: "
+                        f"行业{len(plan.get('industries') or [])}个, "
+                        f"候选{plan.get('candidates_count', 0)}条（作战室打开即读）"
+                    )
                 except Exception as e:
                     logger.error(f"❌ [APScheduler] 宏观快扫失败: {e}", exc_info=True)
 

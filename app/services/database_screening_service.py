@@ -348,8 +348,8 @@ class DatabaseScreeningService:
                 market_type = "A股"  # 上海
             elif code.startswith(("0", "3")):
                 market_type = "A股"  # 深圳
-            elif code.startswith("8") or code.startswith("4"):
-                market_type = "A股"  # 北交所
+            elif code.startswith("8") or code.startswith("4") or code.startswith("92"):
+                market_type = "A股"  # 北交所（含 920 新代码段）
 
         result = {
             # 基础信息

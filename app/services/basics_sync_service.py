@@ -406,8 +406,8 @@ class BasicsSyncService:
             return f"{code}.SS"  # 上海证券交易所
         elif code.startswith(('00', '30', '20')):
             return f"{code}.SZ"  # 深圳证券交易所
-        elif code.startswith(('8', '4')):
-            return f"{code}.BJ"  # 北京证券交易所
+        elif code.startswith(('8', '4', '92')):
+            return f"{code}.BJ"  # 北京证券交易所（含 920 新代码段）
         else:
             # 无法识别的代码，返回原始代码（确保不为空）
             return code if code else ""

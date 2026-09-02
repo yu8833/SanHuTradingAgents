@@ -27,9 +27,9 @@ UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
 def get_prefix(code: str) -> str:
     """6 位代码 → 交易所前缀，自动去掉 .SZ/.SH/.BJ 后缀。"""
     clean = code.split(".")[0]
-    if clean.startswith(("6", "9")):
+    if clean.startswith(("6", "90")):
         return "sh"
-    if clean.startswith("8"):
+    if clean.startswith(("8", "92")):  # 北交所（含 920 新代码段）
         return "bj"
     return "sz"
 
@@ -418,7 +418,7 @@ def individual_info(code: str) -> dict:
 def disclosure(code: str) -> list[dict]:
     """巨潮公告全文列表（akshare cninfo，本环境不稳，保留作备用）。"""
     ak = _akshare()
-    market = "沪市" if code.startswith("6") else ("北交所" if code.startswith("8") else "深市")
+    market = "沪市" if code.startswith("6") else ("北交所" if (code.startswith("8") or code.startswith("92")) else "深市")
     df = ak.stock_zh_a_disclosure_report_cninfo(symbol=code, market=market)
     return df.head(30).to_dict("records") if df is not None and not df.empty else []
 

@@ -166,8 +166,13 @@ class BaoStockAdapter(DataSourceAdapter):
                                     valuation_data.append(rs_valuation.get_row_data())
                                 if valuation_data:
                                     row = valuation_data[0]
-                                    symbol = code.replace('sh.', '').replace('sz.', '')
-                                    ts_code = f"{symbol}.SH" if code.startswith('sh.') else f"{symbol}.SZ"
+                                    symbol = code.replace('sh.', '').replace('sz.', '').replace('bj.', '')
+                                    if code.startswith('sh.'):
+                                        ts_code = f"{symbol}.SH"
+                                    elif code.startswith('bj.'):
+                                        ts_code = f"{symbol}.BJ"  # 北交所
+                                    else:
+                                        ts_code = f"{symbol}.SZ"
                                     pe_ttm = self._safe_float(row[3]) if len(row) > 3 else None
                                     pb_mrq = self._safe_float(row[4]) if len(row) > 4 else None
                                     ps_ttm = self._safe_float(row[5]) if len(row) > 5 else None
@@ -263,8 +268,8 @@ class BaoStockAdapter(DataSourceAdapter):
                 bs_code = f"sh.{code_stripped}"  # 上交所
             elif code_stripped.startswith('0') or code_stripped.startswith('3'):
                 bs_code = f"sz.{code_stripped}"  # 深交所（0开头为主板，3开头为创业板）
-            elif code_stripped.startswith('8') or code_stripped.startswith('4'):
-                bs_code = f"bj.{code_stripped}"  # 北交所
+            elif code_stripped.startswith('8') or code_stripped.startswith('4') or code_stripped.startswith('92'):
+                bs_code = f"bj.{code_stripped}"  # 北交所（含 920 新代码段）
             else:
                 bs_code = f"sh.{code_stripped}"  # 默认上交所
 

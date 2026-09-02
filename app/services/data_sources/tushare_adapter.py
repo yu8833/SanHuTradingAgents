@@ -362,9 +362,9 @@ class TushareAdapter(DataSourceAdapter):
 
             # normalize ts_code: 6-digit code -> ts_code format
             if '.' not in code:
-                if code.startswith(('6', '9')):
+                if code.startswith(('6', '90')):
                     ts_code = f"{code}.SH"
-                elif code.startswith('8'):
+                elif code.startswith(('8', '4', '92')):  # 北交所（含 920 新代码段）
                     ts_code = f"{code}.BJ"
                 else:
                     ts_code = f"{code}.SZ"
@@ -449,9 +449,9 @@ class TushareAdapter(DataSourceAdapter):
         try:
             # normalize ts_code: 6-digit code -> ts_code format
             if '.' not in code:
-                if code.startswith(('6', '9')):
+                if code.startswith(('6', '90')):
                     ts_code = f"{code}.SH"
-                elif code.startswith('8'):
+                elif code.startswith(('8', '4', '92')):  # 北交所（含 920 新代码段）
                     ts_code = f"{code}.BJ"
                 else:
                     ts_code = f"{code}.SZ"

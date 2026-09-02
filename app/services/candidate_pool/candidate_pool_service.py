@@ -16,12 +16,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import threading
 import time
 from collections import OrderedDict
+from datetime import datetime, timezone
 
-from app.core.database import get_mongo_db_sync
+from app.core.database import get_mongo_db, get_mongo_db_sync
+from app.services.cache_layer import json_default
 from app.services.candidate_pool import industry_layer, stock_score_layer
 from app.services.favorites_service import favorites_service
 from app.strategy_system.screener import _resolve_as_of
@@ -34,9 +37,10 @@ logger = logging.getLogger(__name__)
 # 内存：仅保存 JSON 可序列化 dict，保留最近 4 个结果。
 # ──────────────────────────────────────────────────────────────
 _OVERVIEW_CACHE_MAX = 4
-# TTL 6 小时：结果只随 as_of（最新交易日）变化，EOD 日线 18:30 后才更新 → 键变化自动失效。
-# 10 分钟 TTL 会导致用户间隔稍久再打开页面就触发全量重算（~20s），故延长至 6 小时。
-_OVERVIEW_CACHE_TTL = 21600
+# TTL 24 小时：结果只随 as_of（最新交易日）变化，EOD 日线更新 → 次日 as_of 变 → 键变化自动失效。
+# 6 小时 TTL 会在交易日内过期，导致「计划生成」当天首次冷启动全量重算（实测 ~51s）；
+# 24h TTL + 盘前 8:15 预热，保证用户点击生成时始终命中缓存（实测热路径 0.6s）。
+_OVERVIEW_CACHE_TTL = 86400
 _overview_cache: OrderedDict[tuple, tuple[float, dict]] = OrderedDict()
 _overview_cache_lock = threading.Lock()
 
@@ -44,6 +48,12 @@ _overview_cache_lock = threading.Lock()
 def _overview_cache_key(as_of: str, top_n: int, per_industry: int,
                         industries: list[str] | None) -> tuple:
     return (as_of, top_n, per_industry, tuple(industries) if industries else None)
+
+
+def _overview_redis_key(as_of: str, top_n: int, per_industry: int,
+                        industries: list[str] | None) -> str:
+    ind = ",".join(industries) if industries else ""
+    return f"candidate:overview:{as_of}:{top_n}:{per_industry}:{ind}"
 
 
 def _overview_cache_get(key: tuple) -> dict | None:
@@ -142,31 +152,50 @@ async def get_candidate_industries(top_n: int = 20, as_of=None) -> dict:
     """第1层：强势行业列表，并叠加行业级 ΔG 景气（宏观层面判断）。
 
     对 top_n 个强势行业逐个聚合其成分股 ΔG，输出主导象限/平均 G/分布，供前端展示。
+
+    性能：行业面板 + 逐行业 ΔG 聚合为最贵的重活（约 40s），结果级缓存到 Redis（TTL 6h），
+    跨进程/重启秒回，消除「生成计划」时行业段的重复重算。
     """
-    data = industry_layer.get_industries(top_n=top_n, as_of=as_of)
-    industries = data.get("industries", [])
-    if not industries:
+    db_tmp = get_mongo_db_sync()
+    as_of_date = _resolve_as_of(db_tmp, as_of) or ""
+    cache_key = f"candidate:industries:{as_of_date}:{top_n}"
+
+    async def _build() -> dict:
+        data = industry_layer.get_industries(top_n=top_n, as_of=as_of_date)
+        industries = data.get("industries", [])
+        if not industries:
+            return data
+
+        try:
+            from app.services.dg_prosperity_service import get_dg_prosperity_service
+            dg_svc = get_dg_prosperity_service()
+            # 并行聚合各行业成分股 ΔG，避免逐行业串行 DB 查询拖慢候选池加载
+            ind_names = [ind.get("industry", "") for ind in industries]
+            results = await asyncio.gather(
+                *[dg_svc.get_sector_dg(n) for n in ind_names],
+                return_exceptions=True,
+            )
+            for ind, res in zip(industries, results):
+                if isinstance(res, dict):
+                    ind["sector_dg"] = res
+                else:
+                    ind["sector_dg"] = {}
+                    logger.warning(f"行业 {ind.get('industry')} ΔG 获取失败（跳过）: {res}")
+        except Exception as e:
+            logger.warning(f"候选池行业级 ΔG 批量获取失败（跳过）: {e}")
+
         return data
 
     try:
-        from app.services.dg_prosperity_service import get_dg_prosperity_service
-        dg_svc = get_dg_prosperity_service()
-        # 并行聚合各行业成分股 ΔG，避免逐行业串行 DB 查询拖慢候选池加载
-        ind_names = [ind.get("industry", "") for ind in industries]
-        results = await asyncio.gather(
-            *[dg_svc.get_sector_dg(n) for n in ind_names],
-            return_exceptions=True,
+        from app.services.cache_layer import cached
+        # valid：行业列表为空（数据未就绪）时不缓存，避免"空结果被缓存 24h 后永久命中"
+        return await cached(
+            cache_key, _build, category="financial", ttl=86400,
+            valid=lambda v: bool((v or {}).get("industries")),
         )
-        for ind, res in zip(industries, results):
-            if isinstance(res, dict):
-                ind["sector_dg"] = res
-            else:
-                ind["sector_dg"] = {}
-                logger.warning(f"行业 {ind.get('industry')} ΔG 获取失败（跳过）: {res}")
     except Exception as e:
-        logger.warning(f"候选池行业级 ΔG 批量获取失败（跳过）: {e}")
-
-    return data
+        logger.warning(f"候选池行业缓存未命中（直接计算）: {e}")
+        return await _build()
 
 
 def get_candidate_industry_members(industry: str, as_of=None) -> dict:
@@ -416,6 +445,19 @@ async def get_candidate_stocks_overview(top_n: int = 10, per_industry: int = 3,
     if cached is not None:
         return cached
 
+    # 跨进程兜底：backend/worker 各进程内存缓存独立，先查 Redis（行业/个股结果已落在 Redis，
+    # 重启或换进程也秒回，无需全量重算）
+    redis_key = _overview_redis_key(as_of_date, top_n, per_industry, industries)
+    try:
+        from app.core.database import get_redis_client
+        raw = await get_redis_client().get(redis_key)
+        if raw:
+            hit = json.loads(raw)
+            _overview_cache_put(cache_key, hit)
+            return hit
+    except Exception as e:
+        logger.warning(f"候选池 overview Redis 读取失败（重算）: {e}")
+
     if industries:
         ind_names = [n for n in (industries or []) if n][:top_n]
     else:
@@ -450,8 +492,96 @@ async def get_candidate_stocks_overview(top_n: int = 10, per_industry: int = 3,
             break
     result = {"as_of": as_of_date, "industry": "",
               "items": uniq, "total": len(uniq)}
+    # 空结果不缓存：数据未就绪时算出的空概览，一旦被缓存 24h 会导致此后一律秒回空，
+    # 即使数据已同步完成也永远读不到候选（实测 0.05s 返回 total=0 的根因）。
+    if not uniq:
+        logger.warning(f"候选池概览为空（as_of={as_of_date}），跳过缓存，下次重试")
+        return result
     _overview_cache_put(cache_key, result)
+    # 跨进程持久化：写入 Redis（与内存 TTL 对齐 6h），此后重启/换进程秒回
+    try:
+        from app.core.database import get_redis_client
+        await get_redis_client().setex(
+            redis_key, _OVERVIEW_CACHE_TTL,
+            json.dumps(result, ensure_ascii=False, default=json_default),
+        )
+    except Exception as e:
+        logger.warning(f"候选池 overview Redis 持久化失败（仅内存）: {e}")
     return result
+
+
+# ──────────────────────────────────────────────────────────────
+# 「当日候选快照」持久化：把候选池行业 + 个股概览计算结果按交易日落库。
+# 供「当日计划生成」纯读取，避免生成时重复全量现算（实测冷算 ~40-50s）。
+# as_of 变化（新交易日 EOD 后）→ 新键 upsert，跨天自动重建，绝不跨天复用旧数据。
+# ──────────────────────────────────────────────────────────────
+_DAILY_SNAPSHOT_COLLECTION = "daily_candidate_snapshots"
+
+
+async def compute_daily_candidate_snapshot(
+    top_n: int = 10, per_industry: int = 3, limit: int = 20,
+) -> dict:
+    """计算并持久化「当日候选快照」到 MongoDB（按 as_of 交易日唯一）。
+
+    盘前预热 / 候选池刷新均走这里：一次性完成行业+个股重算并落库，
+    使「当日计划生成」后续退化为纯读。返回快照结构。
+    """
+    inds = await get_candidate_industries(top_n=top_n)
+    industries = [
+        i.get("industry", "")
+        for i in (inds.get("industries") or [])
+        if i.get("industry")
+    ]
+    overview = await get_candidate_stocks_overview(
+        top_n=top_n, per_industry=per_industry, limit=limit,
+    )
+    as_of = overview.get("as_of") or inds.get("as_of") or ""
+    if not overview.get("items"):
+        logger.warning(f"候选概览为空（as_of={as_of}），跳过快照落库，避免覆盖有效快照")
+        return {
+            "as_of": as_of,
+            "generated_at": datetime.now(timezone.utc),
+            "industries": [],
+            "overview": overview,
+        }
+    snapshot = {
+        "as_of": as_of,
+        "generated_at": datetime.now(timezone.utc),
+        "industries": industries[:top_n],
+        "overview": overview,
+    }
+    try:
+        db = get_mongo_db()
+        await db[_DAILY_SNAPSHOT_COLLECTION].create_index(
+            [("as_of", 1)], unique=True, background=True,
+        )
+        await db[_DAILY_SNAPSHOT_COLLECTION].update_one(
+            {"as_of": as_of}, {"$set": snapshot}, upsert=True,
+        )
+        logger.info(
+            f"✅ 当日候选快照已持久化: as_of={as_of}, "
+            f"行业{len(industries)}个, 个股{len(overview.get('items', []))}只"
+        )
+    except Exception as e:
+        logger.warning(f"候选快照持久化失败（仅本次内存返回）: {e}")
+    return snapshot
+
+
+async def load_daily_candidate_snapshot(as_of: str | None = None) -> dict | None:
+    """纯读取已持久化的「当日候选快照」，不触发任何重算。无快照返回 None。
+
+    供「当日计划生成」各段使用 —— 命中则计划生成完全不碰候选池重计算。
+    """
+    try:
+        db_sync = get_mongo_db_sync()
+        as_of_date = _resolve_as_of(db_sync, as_of) or ""
+        if not as_of_date:
+            return None
+        db = get_mongo_db()
+        return await db[_DAILY_SNAPSHOT_COLLECTION].find_one({"as_of": as_of_date})
+    except Exception as e:
+        logger.warning(f"候选快照读取失败: {e}")
+        return None
 
 
 async def batch_add_favorites(user_id: str, items: list[dict]) -> dict:

@@ -156,7 +156,7 @@ class AKShareAdapter(DataSourceAdapter):
                     return f"{code}.SH"
                 elif code.startswith(('00', '30', '20')):
                     return f"{code}.SZ"
-                elif code.startswith(('8', '4')):
+                elif code.startswith(('8', '4', '92')):  # 北交所（含 920 新代码段）
                     return f"{code}.BJ"
                 else:
                     return f"{code}.SZ"  # 默认深圳
@@ -176,7 +176,7 @@ class AKShareAdapter(DataSourceAdapter):
                     return '主板'
                 elif code.startswith('688'):
                     return '科创板'
-                elif code.startswith('8'):
+                elif code.startswith(('8', '92')):  # 北交所（含 920 新代码段）
                     return '北交所'
                 elif code.startswith('4'):
                     return '新三板'

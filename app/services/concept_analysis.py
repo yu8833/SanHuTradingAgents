@@ -133,9 +133,9 @@ def _load_code_name_map() -> dict[str, str]:
 
 def _market_prefix(code: str) -> str:
     """根据代码推断市场前缀（SH/SZ/BJ），用于补齐名称为空时的展示。"""
-    if code.startswith(("6", "9")):
+    if code.startswith(("6", "90")):
         return "SH"
-    if code.startswith(("8", "4")):
+    if code.startswith(("8", "4", "92")):  # 北交所（含 920 新代码段）
         return "BJ"
     return "SZ"
 
