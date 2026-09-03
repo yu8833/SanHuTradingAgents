@@ -1,0 +1,52 @@
+# ruff 配置（放在项目根目录 pyproject.toml 等价功能）
+# 与 pre-commit 钩子共用同一份配置
+line-length = 120
+target-version = "py310"
+
+[lint]
+# E=pycodestyle errors, F=pyflakes, B=flake8-bugbear, I=isort, UP=pyupgrade,
+# A=flake8-builtins, RUF100=unused noqa, SIM=sim114简化, PIE=pie, PT=pytest
+select = [
+    "E",
+    "F",
+    "B",
+    "I",
+    "UP",
+    "A",
+    "RUF100",
+    "SIM",
+    "PT",
+]
+
+# 暂时忽略冲突的或需要大量修改的
+ignore = [
+    "E501",       # 允许长行超过 120（由 line-length 软限制）
+    "B008",       # 允许函数默认参数可变（项目多处依赖此模式）
+    "UP034",      # 暂不强制 esle/finally 展开
+    "E402",       # app/worker/* 故意延迟 import（解决循环依赖+启动提速）
+]
+
+# 排除遗留旧测试目录（已归档或不在当前 CI 收集范围），仅保留 app/cli + 新测试子目录
+# 避免 6000+ 历史风格问题阻塞 push
+# 注意：ruff exclude 用 glob 模式
+exclude = [
+    "tests/_archive/*",
+    "tests/0.1.14/*",
+    "tests/unit/*",
+    "tests/integration/*",
+    "tests/tradingagents/*",
+    "tests/dataflows/*",
+    "tests/config/*",
+    "tests/services/*",
+    "tests/middleware/*",
+    "tests/system/*",
+    "tests/test_tushare_unified.py",
+]
+
+[lint.isort]
+known-first-party = ["app", "cli", "tests", "tradingagents"]
+section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
+
+[format]
+quote-style = "double"
+indent-style = "space"
