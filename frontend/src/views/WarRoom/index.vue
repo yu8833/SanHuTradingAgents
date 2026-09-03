@@ -860,11 +860,9 @@
           <p class="block-tip">做对了什么 / 做错了什么 / 有没有违反系统规则 / 三系统信号一致性 —— 在交易复盘页记录。</p>
         </section>
       </el-tab-pane>
-    </el-tabs>
-
-    <!-- 全局背景数据区（外围市场 / 财经日历 / 重要快讯）：四个时段 Tab 均可见，
-         折叠为单行标题（含快照时间），点开查看详情，避免每个 Tab 重复整块内容 -->
-    <template v-if="macro">
+    <!-- ============ 参考（全局背景数据区：外围市场 / 财经日历 / 重要快讯） ============ -->
+      <el-tab-pane label="参考" name="reference">
+        <template v-if="macro">
       <el-collapse v-model="bgCollapse" class="bg-collapse">
         <el-collapse-item name="bg">
           <template #title>
@@ -965,7 +963,12 @@
           </section>
         </el-collapse-item>
       </el-collapse>
-    </template>
+        </template>
+        <el-empty v-else-if="!loading" :image-size="48" description="全局背景数据（外围市场 / 财经日历 / 重要快讯）依赖盘前宏观快照：快照未生成时暂为空，可先到盘前 Tab 点「立即生成」" />
+        <p class="block-tip" style="margin: 12px 0 0">外围市场 / 财经日历 / 重要快讯为全天参考信息：快照生成后此处可见，可在外围市场卡点「刷新」更新。</p>
+      </el-tab-pane>
+    </el-tabs>
+
 
     <!-- 添加计划弹窗 -->
     <el-dialog v-model="planDialog" title="添加当日计划" width="520px">
@@ -1163,7 +1166,7 @@ const flowSegments = computed(() => [
   { key: 'post_market', label: '盘后', count: todayData.value?.post_market?.todo ?? 0 },
   { key: 'weekly', label: '周度', count: todayData.value?.weekly?.todo ?? 0 }
 ])
-const tabIndexMap: Record<string, string> = { pre_market: 'pre_market', intraday: 'intraday', post_market: 'post_market', weekly: 'weekly' }
+const tabIndexMap: Record<string, string> = { pre_market: 'pre_market', intraday: 'intraday', post_market: 'post_market', weekly: 'weekly', reference: 'reference' }
 const currentPeriod = computed(() => todayData.value?.current_period || 'pre_market')
 
 // 待办合计构成说明（悬浮提示，避免数字来源不可解释）
