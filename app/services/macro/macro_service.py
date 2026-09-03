@@ -334,7 +334,8 @@ def _extract_news_value(ev: dict, news: list[dict]) -> float | None:
         blob = f"{n.get('title') or ''} {n.get('content') or ''}"
         if kw not in blob:
             continue
-        for unit in ("万人", "万", "亿", "%", "个百分点"):
+        # 单位覆盖 万/亿/%/千/K 及无空格变体（如 "23.4万"、"初请 23.1K"）
+        for unit in ("万人", "万", "千人", "K", "k", "%", "个百分点"):
             m = __import__("re").search(rf"([0-9]+(?:\.[0-9]+)?)\s*{unit}", blob)
             if m:
                 try:
@@ -359,7 +360,7 @@ def _call_llm_calendar(cfg: dict, prompt: str) -> str:
                  "content": "你是宏观数据解读助手。针对列表中的已公布财经事件，逐条输出一行解读，"
                             "格式严格为「事件名：解读（1-2 句）」。只做定性分析（对 A 股情绪/风格/"
                             "货币政策的含义），可引用快讯；不得编造任何具体数值；数据缺失项明确写"
-                            "『实际值未获取』。每条一行，不要输出其它内容。"},
+                            "『实际值未获取』并提示该数据公开可查（如金十数据/英为财情）。每条一行，不要输出其它内容。"},
                 {"role": "user", "content": prompt},
             ],
             "temperature": 0.2,
@@ -375,11 +376,13 @@ def _call_llm_calendar(cfg: dict, prompt: str) -> str:
 
 
 def _calendar_fallback_analysis(ev: dict) -> str:
-    """LLM 不可用时保留的可读兜底解读。"""
+    """LLM 不可用时保留的可读兜底解读（透明说明数据获取链路，避免"查不到"误解）。"""
     actual = ev.get("actual")
     if actual is not None:
         return f"已公布 · 实际 {actual}（公开快讯流提取）；对市场的解读请结合下方宏观方向判断与快讯"
-    return "已公布（公开数据源暂未取到实际值，可到快讯流/行情中确认）"
+    return ("已公布。系统采用的结构化财经接口当前未取到该数值：AKShare 初请序列数据陈旧"
+            "（上游停在旧日期）、东财/金十等接口不可用；该数据为公开信息，可通过搜索引擎/"
+            "金十数据/英为财情等渠道查看，快讯流如出现带数值条目将自动回填。")
 
 
 async def _calendar_ai_analysis(calendar: list[dict], news: list[dict]) -> list[dict]:
