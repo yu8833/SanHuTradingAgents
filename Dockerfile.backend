@@ -76,7 +76,6 @@ COPY tradingagents ./tradingagents
 COPY config ./config
 COPY scripts ./scripts
 COPY docs ./docs
-COPY install ./install
 
 # 重要：用本地 tradingagents 覆盖 PyPI 安装的版本
 # 因为 app/ 代码依赖本地版本的 tradingagents 结构
@@ -85,8 +84,8 @@ RUN cp -r /app/tradingagents /app/tradingagents_pypi_backup && \
     cp -r /app/tradingagents_pypi_backup /app/tradingagents && \
     rm -rf /app/tradingagents_pypi_backup
 
-# 复制Docker环境配置文件
-COPY .env.docker ./.env
+# 复制环境配置文件（用示例模板，真实密钥由运行时 env 注入）
+COPY .env.example ./.env
 
 # 暴露后端端口（与docker-compose.v1.0.0.yml一致）
 EXPOSE 8000

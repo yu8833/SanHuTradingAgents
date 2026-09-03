@@ -127,8 +127,9 @@ scripts/build-and-publish-*.sh
 scripts/full_redeploy_*.sh
 
 # 配置示例文件
-.env.example
 *.example
+!.env.example
+# 注：.env.example 需保留在构建上下文（Dockerfile.backend COPY 为容器内 .env）
 
 # 其他配置文件
 .editorconfig
