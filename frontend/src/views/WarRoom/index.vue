@@ -920,46 +920,65 @@
             </div>
           </section>
 
-          <!-- 今日财经日历 -->
+          <!-- 今日财经日历：含昨天/今天已公布事件的实际值 + 规则化解读 -->
           <section class="block">
             <div class="block-head">
               <span class="block-title"><el-icon><Calendar /></el-icon> 今日财经日历</span>
-              <span class="block-hint">未来 7 日（东财优先 · AKShare 兜底）</span>
+              <span class="block-hint">昨天 + 未来 7 日 · 已公布事件带实际值与解读</span>
             </div>
-            <el-table v-loading="loading" :data="macro.calendar || []" stripe size="small" class="app-table app-table--compact">
-              <el-table-column label="日期" width="110">
-                <template #default="{ row }">{{ row.date }}</template>
-              </el-table-column>
-              <el-table-column label="地区" width="80">
-                <template #default="{ row }">{{ regionLabel(row.region) }}</template>
-              </el-table-column>
-              <el-table-column prop="event" label="事件" min-width="220" />
-              <el-table-column label="重要性" width="90">
+            <el-table v-loading="loading" :data="macro.calendar || []" stripe size="small" class="app-table app-table--compact" max-height="420">
+              <el-table-column label="日期" width="104">
                 <template #default="{ row }">
-                  <el-tag size="small" :type="importanceTag(row.importance)">{{ importanceLabel(row.importance) }}</el-tag>
+                  <span :class="{ 'cal-announced': row.announced }">{{ row.date }}</span>
                 </template>
               </el-table-column>
-              <el-table-column prop="forecast" label="预期" width="90" />
-              <el-table-column prop="actual" label="实际" width="90" />
+              <el-table-column label="地区" width="72">
+                <template #default="{ row }">{{ regionLabel(row.region) }}</template>
+              </el-table-column>
+              <el-table-column prop="event" label="事件" min-width="170" show-overflow-tooltip />
+              <el-table-column label="状态" width="76">
+                <template #default="{ row }">
+                  <el-tag v-if="row.announced" size="small" type="success">已公布</el-tag>
+                  <el-tag v-else size="small" type="info">待发布</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="预期" width="72">
+                <template #default="{ row }">{{ row.forecast ?? '—' }}</template>
+              </el-table-column>
+              <el-table-column label="实际" width="80">
+                <template #default="{ row }">
+                  <b v-if="row.actual != null" class="up">{{ row.actual }}</b>
+                  <span v-else>—</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="解读" min-width="260" show-overflow-tooltip>
+                <template #default="{ row }">
+                  <span v-if="row.announced" :class="{ 'cal-analysis': true }">{{ row.analysis || '已公布（数据待确认）' }}</span>
+                  <span v-else class="cal-pending">公布后结合实际值分析</span>
+                </template>
+              </el-table-column>
             </el-table>
             <el-empty v-if="!macro.calendar?.length" description="暂无财经日历数据" />
           </section>
 
-          <!-- 重要快讯 -->
+          <!-- 重要快讯：多源（财联社/东财 + 资讯雷达）· 仅保留宏观/市场级与自选/持仓/当日计划相关个股 -->
           <section class="block">
             <div class="block-head">
               <span class="block-title"><el-icon><Bell /></el-icon> 重要快讯</span>
-              <span class="block-hint">近 24 小时 · 高/中重要性</span>
+              <span class="block-hint">近 24 小时 · 多源聚合（财联社 / 东财 / 资讯雷达）· 已按相关性过滤无关个股</span>
             </div>
             <div class="news-list">
-              <div v-for="(n, i) in macro.news_top || []" :key="i" class="news-row">
+              <div v-for="(n, i) in relevantNews" :key="i" class="news-row">
                 <el-tag size="small" :type="importanceTag(n.importance)">{{ importanceLabel(n.importance) }}</el-tag>
+                <el-tag v-if="n.source" size="small" effect="plain" type="info">{{ sourceShort(n.source) }}</el-tag>
                 <a v-if="n.url" class="news-title" :href="n.url" target="_blank" rel="noopener noreferrer">{{ n.title }}</a>
                 <span v-else class="news-title">{{ n.title }}</span>
                 <span class="news-time">{{ newsTime(n.publish_time) }}</span>
               </div>
               <el-empty v-if="!macro.news_top?.length" :image-size="48" description="暂无快讯" />
+              <p v-else-if="!relevantNews.length" class="block-tip">快讯均为无关个股/非市场级内容，已按相关性过滤（可在自选/持仓/当日计划中添加标的后再看）</p>
             </div>
+            <p v-if="filteredNewsCount > 0" class="block-tip">已过滤 {{ filteredNewsCount }} 条与自选/持仓/当日计划无关的个股快讯</p>
           </section>
         </el-collapse-item>
       </el-collapse>
@@ -1497,6 +1516,58 @@ const scanTodaysCount = computed(() => {
   const today = todayData.value?.today
   return today ? (signals.value || []).filter(s => (s.trigger_date || '').slice(0, 10) === today).length : 0
 })
+
+// ---- 重要快讯相关性过滤（参考 Tab）----
+// 相关标的口径 = 自选 + 持仓 + 当日计划；无关个股（含 6 位代码或个股行为词且非市场级）不展示，
+// 避免"山东矿机 涨停"这类与用户无关、却被误标"高"的个股快讯混入"重要快讯"。
+const newsRelated = computed(() => {
+  const codes = new Set<string>()
+  const names = new Set<string>()
+  for (const f of favorites.value || []) {
+    const c = String(f.symbol || f.stock_code || '').trim()
+    if (c) codes.add(c)
+    if (f.stock_name) names.add(String(f.stock_name).trim())
+  }
+  for (const p of posSummary.value?.positions || []) {
+    const c = String(p.symbol || p.code || '').trim()
+    if (c) codes.add(c)
+    if (p.stock_name) names.add(String(p.stock_name).trim())
+  }
+  for (const p of plans.value || []) {
+    const c = String(p.code || '').trim()
+    if (c) codes.add(c)
+    if (p.name) names.add(String(p.name).trim())
+  }
+  return { codes, names }
+})
+const STOCK_ACTION_RE = /涨停|跌停|连板|\d+板|中签|减持|增持|回购|停牌|复牌|公告|中标|签约|签订|签署|解禁|重组|业绩预告|扭亏|预增|预减|获准|批复|定增|配股|可转债|大涨|大跌/
+// 市场级语义词（用于豁免个股判定）：不含机构词（证监会/国务院/政策等常伴随个股公告）
+const MARKET_WORD_RE = /指数|大盘|板块|央行|利率|LPR|MLF|CPI|PPI|PMI|社融|M2|关税|国常会|美联储|非农|失业|GDP|通胀|北向|流动性|降准|降息|A股|港股|美股|现货|期货|市场|资金|监管|税收|议案|法案/
+function isRelevantNews(n: any, related: { codes: Set<string>; names: Set<string> }): boolean {
+  const title = String(n.title || '')
+  if (!title) return true
+  const codeMatch = title.match(/\d{6}/)
+  if (codeMatch) return related.codes.has(codeMatch[0])
+  // 无代码但命中"个股行为词"且未命中"市场级词" → 判为个股新闻，仅当命中相关名称保留
+  if (STOCK_ACTION_RE.test(title) && !MARKET_WORD_RE.test(title)) {
+    for (const nm of related.names) if (nm && nm.length >= 2 && title.includes(nm)) return true
+    return false
+  }
+  return true
+}
+const relevantNews = computed(() =>
+  (macro.value?.news_top || []).filter(n => isRelevantNews(n, newsRelated.value))
+)
+const filteredNewsCount = computed(() =>
+  (macro.value?.news_top || []).length - relevantNews.value.length
+)
+// 资讯源徽标：资讯雷达的 RSS 源名过长，统一裁短
+function sourceShort(src?: string): string {
+  if (!src) return ''
+  const s = String(src)
+  if (s.startsWith('资讯雷达')) return '资讯雷达'
+  return s.length > 8 ? s.slice(0, 8) : s
+}
 
 function addScanToPlan(row: any) {
   // 兼容两种来源：三买三卖扫描结果（signals[0].trigger_price / stop_price / primary_signal_label）
@@ -2141,6 +2212,8 @@ function onTabChange(name: string | number) {
   if (name === 'intraday') { loadTodayAlerts(); loadRegime(); loadPositions(); loadIntradayGuide(); loadFavorites(); startIntradayLive() }
   if (name === 'post_market') { loadSignals(); loadTodayTrades() }
   if (name === 'weekly') loadWeekly()
+  // 参考 Tab：加载自选/持仓/当日计划，用于重要快讯相关性过滤
+  if (name === 'reference') { loadFavorites(); loadPositions(); loadPlans() }
   // 离开盘中 → 关闭 SSE 订阅与轮询
   if (name !== 'intraday') stopIntradayLive()
 }
@@ -2284,6 +2357,11 @@ onUnmounted(() => {
   }
 
   // 流程引导条
+  // 日历已公布事件高亮与解读
+  .cal-announced { font-weight: 600; color: var(--el-color-success); }
+  .cal-analysis { color: var(--el-text-color-regular); }
+  .cal-pending { color: var(--el-text-color-secondary); }
+
   .flow-bar {
     display: flex;
     align-items: center;

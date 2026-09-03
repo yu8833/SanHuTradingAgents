@@ -20,8 +20,8 @@ from app.services.cache_layer import cached
 
 logger = logging.getLogger(__name__)
 
-# 日历前瞻天数
-_CALENDAR_DAYS = 7
+# 日历窗口：昨天 + 今天 + 未来数天（已公布事件也纳入，供盘前/参考解读）
+_CALENDAR_DAYS = 8  # 含昨天（昨天 + 未来 7 天）
 
 # FOMC 2026 议息会议（决议公布日 = 会议第 2 天，北京时间通常次日凌晨）。
 # 手工维护：每年年初按美联储官方日程更新一次（2026-08-31 据 fomccalendars.htm 核实）。
@@ -237,16 +237,16 @@ def _akshare_values() -> dict[str, dict]:
     return values
 
 
-def _manual_events(today: date, days: int) -> list[dict]:
-    """从规则表生成 [today, today+days-1] 窗口内的高频事件日历。"""
-    end = today + timedelta(days=days - 1)
+def _manual_events(start: date, days: int) -> list[dict]:
+    """从规则表生成 [start, start+days-1] 窗口内的高频事件日历（start 可为昨天）。"""
+    end = start + timedelta(days=days - 1)
     out: list[dict] = []
     for ev in _HIGH_FREQ_EVENTS:
         try:
-            dt = ev["rule"](today)
+            dt = ev["rule"](start)
         except Exception:
             continue
-        if dt is None or not (today <= dt <= end):
+        if dt is None or not (start <= dt <= end):
             continue
         out.append({
             "date": dt.isoformat(),
@@ -261,37 +261,135 @@ def _manual_events(today: date, days: int) -> list[dict]:
     return out
 
 
+def _is_announced(ev: dict, today: date) -> bool:
+    """事件是否已公布：日期早于今天视为已公布；今天的事件按发布时点判定（HH:MM 格式）。"""
+    try:
+        d = date.fromisoformat(ev["date"])
+    except (ValueError, TypeError):
+        return False
+    if d < today:
+        return True
+    if d > today:
+        return False
+    rt = str(ev.get("release_time") or "")
+    if len(rt) == 5 and rt[2] == ":" and rt[:2].isdigit() and rt[3:].isdigit():
+        now = datetime.now().time()
+        try:
+            hh, mm = int(rt[:2]), int(rt[3:])
+        except ValueError:
+            return False
+        return now >= datetime.now().replace(hour=hh, minute=mm, second=0, microsecond=0).time()
+    return False  # "中旬"/"次日02:00" 等非 HH:MM 时点今天暂记未公布
+
+
+def _build_analysis(ev: dict) -> str:
+    """对已公布事件生成一句话解读（实际值 vs 预期/前值 的方向语义）。
+
+    与宏观快照 LLM 解读互补：此处在日历行直接给出可读的规则化分析，
+    不依赖大模型（确定性、秒回），覆盖 CPI/PMI/利率/就业/社融五大类。
+    """
+    actual = ev.get("actual")
+    forecast = ev.get("forecast")
+    previous = ev.get("previous")
+    event = str(ev.get("event") or "")
+
+    def _cmp(a, b) -> str | None:
+        """比较两个数值，返回 'above'/'below'/'flat'；任一缺失返回 None。"""
+        try:
+            fa, fb = float(a), float(b)
+        except (TypeError, ValueError):
+            return None
+        if fa > fb + 1e-9:
+            return "above"
+        if fa < fb - 1e-9:
+            return "below"
+        return "flat"
+
+    if actual is None:
+        return "已公布（数据未接入，可在快讯/行情中确认）"
+    base = f"实际 {actual}"
+
+    if "CPI" in event or "PPI" in event or "通胀" in event:
+        # 通胀类：高于预期 → 收紧预期升温 → 偏空；低于预期 → 宽松交易 → 偏多
+        ref = _cmp(actual, forecast) if forecast is not None else _cmp(actual, previous)
+        if ref == "above":
+            tail = "高于预期/前值，通胀韧性 → 货币收紧预期升温，短线偏空（压制成长风格）"
+        elif ref == "below":
+            tail = "低于预期/前值，通胀回落 → 宽松交易升温，短线偏多"
+        else:
+            tail = "符合预期，对市场影响有限"
+        return f"{base}，{tail}"
+    if "非农" in event or "失业" in event or "初请" in event:
+        # 就业类：就业强 → 推迟降息 → 偏空；就业弱 → 降息预期 → 偏多
+        ref = _cmp(actual, forecast) if forecast is not None else _cmp(actual, previous)
+        hmm = "高于预期/前值，就业强韧 → 降息预期降温，短线偏空" if ref == "above" else (
+            "低于预期/前值，就业走弱 → 宽松预期升温，短线偏多" if ref == "below" else "符合预期，影响有限")
+        return f"{base}，{hmm}"
+    if "PMI" in event or "ISM" in event:
+        ref = _cmp(actual, forecast) if forecast is not None else _cmp(actual, previous)
+        hmm = "高于预期/前值，景气扩张 → 利好风险资产/周期方向" if ref == "above" else (
+            "低于预期/前值，景气收缩 → 偏谨慎，利好防御/债类" if ref == "below" else "符合预期，影响有限")
+        return f"{base}，{hmm}"
+    if "LPR" in event or "MLF" in event or "利率决议" in event or "FOMC" in event:
+        # 利率决议一般 announced 后 actual 难直接获得（多数为点阵/声明），按前值方向假设
+        ref = _cmp(actual, previous)
+        hmm = ("低于前值 = 降息/宽松 → 流动性利好，短线偏多" if ref == "below" else
+               "高于前值 = 加息/收紧 → 短线偏空" if ref == "above" else "与上期持平，中性")
+        return f"{base}（较前值），{hmm}"
+    if "社融" in event or "M2" in event:
+        ref = _cmp(actual, forecast) if forecast is not None else _cmp(actual, previous)
+        hmm = "高于预期/前值，宽信用 → 利好大盘与顺周期" if ref == "above" else (
+            "低于预期/前值，信用偏弱 → 偏谨慎" if ref == "below" else "符合预期，影响有限")
+        return f"{base}，{hmm}"
+    ref = _cmp(actual, forecast) if forecast is not None else _cmp(actual, previous)
+    hmm = "高于预期" if ref == "above" else "低于预期" if ref == "below" else "符合预期"
+    return f"{base}，{hmm}；对 A 股的影响请结合快讯与宏观解读综合判断"
+
+
 def _build_calendar(days: int = _CALENDAR_DAYS) -> list[dict]:
-    """日历构建：东财首选，失败走 AKShare 增强 + 手工高频事件日历。"""
+    """日历构建：东财首选，失败走 AKShare 增强 + 手工高频事件日历。
+
+    窗口含昨天：已公布事件标记 announced=True 并附近期实际值（AKShare 最近一期）
+    与规则化解读 analysis，供参考 Tab 直接呈现"昨天/今天已发生事件的详细分析"。
+    """
     rows = _eastmoney_calendar()
     if rows:
         return rows
 
     today = date.today()
-    events = _manual_events(today, days)
+    events = _manual_events(today - timedelta(days=1), days)
     if not events:
         return events
 
-    # AKShare 增强：为命中事件附加 {previous, forecast}
+    # AKShare 增强：为命中事件附加 {actual, forecast, previous}
     values = _akshare_values()
     for ev in events:
         v = values.get(ev["event"])
         if v:
             ev["forecast"] = v.get("forecast")
             ev["previous"] = v.get("previous")
+            ev["actual"] = v.get("actual")
+    # 已公布判定 + 解读（未公布事件不携带"实际"值——AKShare 最近一期为上期数据，避免误导）
+    for ev in events:
+        ev["announced"] = _is_announced(ev, today)
+        if ev["announced"]:
+            ev["analysis"] = _build_analysis(ev)
+        else:
+            ev.pop("actual", None)
     return events
 
 
 async def get_financial_calendar(days: int = _CALENDAR_DAYS) -> list[dict]:
-    """财经日历（未来 7 天），Redis 1 天 TTL 缓存（设计文档 §5.3-B / A.5）。
+    """财经日历（昨天 + 未来 7 天），Redis 1 天 TTL 缓存（设计文档 §5.3-B / A.5）。
 
     缓存键必须含参考日期：日历窗口随日期滑动，若只用 {days} 作键，
-    前一天生成的"未来7天"窗口会被次日复用（如 08-31 的日历被 09-01 命中，
+    前一天生成的窗口会被次日复用（如 08-31 的日历被 09-01 命中，
     导致快照里出现 08-31 的事件）。按日期分键后，每天窗口独立、次日自动重建。
+    v2：日历加入 已公布事件实际值+解读（announced/actual/analysis），键升级避免旧缓存残留。
     """
     today = date.today().isoformat()
     return await cached(
-        f"macro:calendar:{days}:{today}",
+        f"macro:calendar:v3:{days}:{today}",
         lambda: _build_calendar(days),
         category="financial",
         valid=bool,

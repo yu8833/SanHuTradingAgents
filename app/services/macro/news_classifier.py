@@ -10,11 +10,15 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timedelta
 
 from app.services.cache_layer import cached
 
 logger = logging.getLogger(__name__)
+
+# 个股新闻判定：标题含 6 位股票代码（如 "山东矿机(002526) 涨停"）
+_STOCK_CODE_RE = re.compile(r"\b\d{6}\b")
 
 # 重要性关键词表：高 / 中 / 低。命中优先级从高到低。
 _HIGH_KEYWORDS = (
@@ -31,6 +35,28 @@ _HIGH_KEYWORDS = (
     # 市场级
     "降准降息", "央行", "政策", "国务院", "中央经济工作会议", "政治局会议",
 )
+# 全局宏观豁免词（用于区分"个股新闻"与"宏观级快讯"——仅当标题命中这些真正
+# 的全局词时才不作为个股新闻压制；"证监会/政策/国务院"等机构词常伴随个股公告，
+# 不纳入豁免，避免"金富科技…证监会批复"这类个股新闻被豁免）
+_GLOBAL_KEYWORDS = (
+    "降准", "降息", "LPR", "MLF", "央行", "美联储", "加息", "利率决议",
+    "非农", "失业率", "CPI", "PPI", "PMI", "社融", "GDP",
+    "关税", "制裁", "贸易战", "国常会", "政治局", "中央经济工作会议", "印花税",
+)
+# 个股动作关键词（标题命中即倾向个股新闻，除非同时命中全局宏观词）
+_STOCK_ACTION_KW = re.compile(
+    r"涨停|跌停|连板|中签|回购|增持|减持|定增|配股|可转债|批复|中标|签订|签署|"
+    r"业绩预告|预增|预减|扭亏|获准|停牌|复牌|\d+板"
+)
+
+
+def _is_stock_news(title: str) -> bool:
+    """个股新闻识别：含 6 位股票代码，或命中个股动作词（涨停/增持/批复…）且不含全局宏观词。"""
+    if _STOCK_CODE_RE.search(title):
+        return True
+    if _STOCK_ACTION_KW.search(title) and not any(k in title for k in _GLOBAL_KEYWORDS):
+        return True
+    return False
 
 _MEDIUM_KEYWORDS = (
     "财报", "业绩", "涨停", "跌停", "回购", "增持", "减持", "重组", "并购",
@@ -85,38 +111,69 @@ def classify_news_item(item: dict) -> dict:
 
 
 def _fetch_macro_news(hours_back: int = 24, top_n: int = 40) -> list[dict]:
-    """抓取市场级快讯（财联社 + 东财 7x24），分级 + 时间窗口 + 去重 + 截断。
+    """抓取多源市场级快讯（财联社 + 东财 7x24 文字流 + 资讯雷达 108 个公开 RSS），
+    分级 + 时间窗口 + 去重 + 截断。
 
-    优先保留高重要性条目；时间窗口内不足时放宽到更多小时。返回统一结构：
-    {title, content, source, publish_time, importance, category}。
+    数据源：
+      1) RealtimeNewsAggregator（tradingagents core：财联社 + 东财 7x24 文字流）；
+      2) newsradar（app/services/newsradar：12 赛道 108 个公开 RSS 源，与"资讯雷达"页同源）；
+    个股新闻压制：标题含 6 位股票代码、且未命中全局高重要性关键词（降准/加息/关税等）的
+    个股公告/异动类新闻最高降为 low，避免"XX 涨停"被误标为高/中混入"重要快讯"。
+
+    返回统一结构：{title, content, source, publish_time, importance, category}。
     """
+    rows: list[dict] = []
+
+    # 数据源 1：财联社 + 东财 7x24 文字流
     try:
         from tradingagents.dataflows.news.realtime_news import RealtimeNewsAggregator
         agg = RealtimeNewsAggregator()
         items = agg.get_realtime_stock_news(symbol=None, hours_back=hours_back, max_news=60)
+        for n in items:
+            pub = n.publish_time
+            # 无时间戳者保留（无法判断窗口）；有时间戳者过滤出窗口内
+            if pub is not None and pub < datetime.now() - timedelta(hours=hours_back):
+                continue
+            rows.append({
+                "title": n.title,
+                "content": (n.content or "")[:200],
+                "source": n.source,
+                "publish_time": pub.isoformat() if pub else "",
+                "url": getattr(n, "url", "") or "",
+            })
     except Exception as e:
-        logger.warning(f"实时快讯获取失败: {e}")
-        return []
+        logger.warning(f"实时快讯（财联社/东财）获取失败: {e}")
 
-    now = datetime.now()
-    cutoff = now - timedelta(hours=hours_back)
-    rows: list[dict] = []
-    for n in items:
-        pub = n.publish_time
-        # 无时间戳者保留（无法判断窗口）；有时间戳者过滤出窗口内
-        if pub is not None and pub < cutoff:
-            continue
-        rows.append({
-            "title": n.title,
-            "content": (n.content or "")[:200],
-            "source": n.source,
-            "publish_time": pub.isoformat() if pub else "",
-            "url": getattr(n, "url", "") or "",
-        })
+    # 数据源 2：资讯雷达（108 个公开 RSS 源，与资讯雷达页同源）。
+    # 同步抓取（与财联社源一致，频率低：宏观快照 8:15/手动刷新时执行一次）。
+    radar_data = None
+    try:
+        from app.services.newsradar import fetch_radar
+        radar_data = fetch_radar()
+    except Exception as e:
+        logger.warning(f"资讯雷达源不可用: {e}")
 
-    # 去重（按标题）
-    seen: set[str] = set()
+    if radar_data:
+        cnt = 0
+        for ind in radar_data.get("industries") or []:
+            for it in ind.get("items") or []:
+                title = str(it.get("title") or "").strip()
+                if not title:
+                    continue
+                ts = it.get("ts") or 0
+                rows.append({
+                    "title": title,
+                    "content": str(it.get("summary") or "")[:200],
+                    "source": f"资讯雷达·{it.get('source') or ind.get('name') or 'RSS'}",
+                    "publish_time": datetime.fromtimestamp(int(ts)).isoformat() if ts else "",
+                    "url": it.get("url") or "",
+                })
+                cnt += 1
+        if cnt:
+            logger.info(f"资讯雷达并入 {cnt} 条快讯（多源）")
+
     unique: list[dict] = []
+    seen: set[str] = set()
     for r in rows:
         key = r["title"].strip()
         if not key or key in seen:
@@ -124,10 +181,13 @@ def _fetch_macro_news(hours_back: int = 24, top_n: int = 40) -> list[dict]:
         seen.add(key)
         unique.append(r)
 
-    # 分级（高优先排在前面），再按时间倒序
+    # 分级（高优先排在前面），再按时间倒序；个股新闻压制
     for r in unique:
         r.update({"importance": _classify_importance(r["title"]),
                   "category": _classify_category(r["title"])})
+        if _is_stock_news(r["title"]):
+            r["importance"] = "low"   # 个股异动/公告类：不构成"重要"级
+            r["category"] = "个股"
 
     def _ts(r: dict) -> float:
         try:
@@ -143,9 +203,9 @@ def _fetch_macro_news(hours_back: int = 24, top_n: int = 40) -> list[dict]:
 
 
 async def get_macro_news(hours_back: int = 24, top_n: int = 40) -> list[dict]:
-    """分级快讯（缓存 5min/1h）。"""
+    """分级快讯（缓存 5min/1h）。v2：多源合并（财联社/东财 + 资讯雷达）+ 个股压制。"""
     return await cached(
-        f"macro:news:{hours_back}:{top_n}",
+        f"macro:news:v3:{hours_back}:{top_n}",
         lambda: _fetch_macro_news(hours_back, top_n),
         category="news",
         valid=bool,
