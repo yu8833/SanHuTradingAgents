@@ -42,10 +42,11 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build test image
-        # test 镜像 FROM tradingagents-backend:latest，须先构建 backend 并 load 到本地，
-        # 否则 buildx 不会把镜像放到本地 daemon，test 构建时 pull 失败。
+        # test 镜像 FROM tradingagents-backend:latest。runner 的 compose 版本较旧且
+        # 无本地 daemon 镜像，直接 build test 会去 Docker Hub 拉同名镜像而失败。
+        # 先用 docker build（默认 --load 到 daemon）生成本地 backend 镜像，再 build test。
         run: |
-          docker compose build --load backend
+          docker build -f Dockerfile.backend -t tradingagents-backend:latest .
           docker compose build test
 
       - name: ruff lint (warn mode, non-blocking)
@@ -73,10 +74,11 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build test image
-        # test 镜像 FROM tradingagents-backend:latest，须先构建 backend 并 load 到本地，
-        # 否则 buildx 不会把镜像放到本地 daemon，test 构建时 pull 失败。
+        # test 镜像 FROM tradingagents-backend:latest。runner 的 compose 版本较旧且
+        # 无本地 daemon 镜像，直接 build test 会去 Docker Hub 拉同名镜像而失败。
+        # 先用 docker build（默认 --load 到 daemon）生成本地 backend 镜像，再 build test。
         run: |
-          docker compose build --load backend
+          docker build -f Dockerfile.backend -t tradingagents-backend:latest .
           docker compose build test
 
       - name: Run unit + regression + coverage
