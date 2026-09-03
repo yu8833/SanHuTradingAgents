@@ -862,100 +862,109 @@
       </el-tab-pane>
     </el-tabs>
 
-    <!-- 全局背景数据区（外围市场 / 财经日历 / 重要快讯）：四个时段 Tab 均可见，盘前/盘后参考通用 -->
+    <!-- 全局背景数据区（外围市场 / 财经日历 / 重要快讯）：四个时段 Tab 均可见，
+         折叠为单行标题（含快照时间），点开查看详情，避免每个 Tab 重复整块内容 -->
     <template v-if="macro">
-      <div class="global-bg-head">
-        <span class="global-bg-title">全局背景 · 全天参考</span>
-        <span class="block-hint">快照生成于 {{ fmtClock(macro.created_at) }}，可点「刷新」更新</span>
-      </div>
-      <!-- 外围市场快照（指数 / 美股 / 港股分类，样式仿大盘看板全球市场） -->
-      <section class="block">
-        <div class="block-head">
-          <span class="block-title"><el-icon><Position /></el-icon> 外围市场快照</span>
-          <div class="block-actions">
-            <span class="block-hint">指数 / 美股 / 港股 · 截至 {{ fmtClock(macro.created_at) }}</span>
-            <el-button size="small" :icon="Refresh" :loading="macroRefreshing || foreignStocksLoading" @click="refreshForeignMarket">刷新</el-button>
-          </div>
-        </div>
+      <el-collapse v-model="bgCollapse" class="bg-collapse">
+        <el-collapse-item name="bg">
+          <template #title>
+            <span class="bg-collapse-title">
+              <el-icon><Position /></el-icon>
+              <span class="bg-title-text">全局背景 · 全天参考</span>
+              <span class="block-hint">外围市场 / 财经日历 / 重要快讯 · 快照生成于 {{ fmtClock(macro.created_at) }}，可点开在外围市场卡「刷新」更新</span>
+            </span>
+          </template>
 
-        <div class="sub-block">
-          <div class="sub-title"><el-icon><DataLine /></el-icon> 指数</div>
-          <div class="grid grid-4">
-            <el-card v-for="idx in macro.indices || []" :key="idx.key" shadow="never" class="idx-card">
-              <div class="idx-name">{{ idx.name }}<span class="region">{{ idx.region }}</span></div>
-              <div class="idx-price">{{ idx.price != null ? idx.price.toFixed(2) : '—' }}</div>
-              <div class="idx-pct" :class="clsByVal(idx.change_pct, '')">{{ fmtPct(idx.change_pct) }}</div>
-            </el-card>
-            <el-empty v-if="!macro.indices?.length" :image-size="48" description="暂无指数数据" />
-          </div>
-        </div>
+          <!-- 外围市场快照（指数 / 美股 / 港股分类，样式仿大盘看板全球市场） -->
+          <section class="block">
+            <div class="block-head">
+              <span class="block-title"><el-icon><Position /></el-icon> 外围市场快照</span>
+              <div class="block-actions">
+                <span class="block-hint">指数 / 美股 / 港股 · 截至 {{ fmtClock(macro.created_at) }}</span>
+                <el-button size="small" :icon="Refresh" :loading="macroRefreshing || foreignStocksLoading" @click="refreshForeignMarket">刷新</el-button>
+              </div>
+            </div>
 
-        <div class="sub-block">
-          <div class="sub-title"><el-icon><DataLine /></el-icon> 美股</div>
-          <div class="grid grid-4">
-            <el-card v-for="s in foreignUsStocks" :key="s.secid" shadow="never" class="idx-card">
-              <div class="idx-name">{{ s.name }}<span class="region">美股</span></div>
-              <div class="idx-price">{{ s.price != null ? s.price.toFixed(2) : '—' }}</div>
-              <div class="idx-pct" :class="clsByVal(s.change_pct, '')">{{ fmtPct(s.change_pct) }}</div>
-            </el-card>
-            <el-empty v-if="!foreignUsStocks.length" :image-size="48" description="暂无美股数据" />
-          </div>
-        </div>
+            <div class="sub-block">
+              <div class="sub-title"><el-icon><DataLine /></el-icon> 指数</div>
+              <div class="grid grid-4">
+                <el-card v-for="idx in macro.indices || []" :key="idx.key" shadow="never" class="idx-card">
+                  <div class="idx-name">{{ idx.name }}<span class="region">{{ idx.region }}</span></div>
+                  <div class="idx-price">{{ idx.price != null ? idx.price.toFixed(2) : '—' }}</div>
+                  <div class="idx-pct" :class="clsByVal(idx.change_pct, '')">{{ fmtPct(idx.change_pct) }}</div>
+                </el-card>
+                <el-empty v-if="!macro.indices?.length" :image-size="48" description="暂无指数数据" />
+              </div>
+            </div>
 
-        <div class="sub-block">
-          <div class="sub-title"><el-icon><DataLine /></el-icon> 港股</div>
-          <div class="grid grid-4">
-            <el-card v-for="s in foreignHkStocks" :key="s.secid" shadow="never" class="idx-card">
-              <div class="idx-name">{{ s.name }}<span class="region">港股</span></div>
-              <div class="idx-price">{{ s.price != null ? s.price.toFixed(2) : '—' }}</div>
-              <div class="idx-pct" :class="clsByVal(s.change_pct, '')">{{ fmtPct(s.change_pct) }}</div>
-            </el-card>
-            <el-empty v-if="!foreignHkStocks.length" :image-size="48" description="暂无港股数据" />
-          </div>
-        </div>
-      </section>
+            <div class="sub-block">
+              <div class="sub-title"><el-icon><DataLine /></el-icon> 美股</div>
+              <div class="grid grid-4">
+                <el-card v-for="s in foreignUsStocks" :key="s.secid" shadow="never" class="idx-card">
+                  <div class="idx-name">{{ s.name }}<span class="region">美股</span></div>
+                  <div class="idx-price">{{ s.price != null ? s.price.toFixed(2) : '—' }}</div>
+                  <div class="idx-pct" :class="clsByVal(s.change_pct, '')">{{ fmtPct(s.change_pct) }}</div>
+                </el-card>
+                <el-empty v-if="!foreignUsStocks.length" :image-size="48" description="暂无美股数据" />
+              </div>
+            </div>
 
-      <!-- 今日财经日历 -->
-      <section class="block">
-        <div class="block-head">
-          <span class="block-title"><el-icon><Calendar /></el-icon> 今日财经日历</span>
-          <span class="block-hint">未来 7 日（东财优先 · AKShare 兜底）</span>
-        </div>
-        <el-table v-loading="loading" :data="macro.calendar || []" stripe size="small" class="app-table app-table--compact">
-          <el-table-column label="日期" width="110">
-            <template #default="{ row }">{{ row.date }}</template>
-          </el-table-column>
-          <el-table-column label="地区" width="80">
-            <template #default="{ row }">{{ regionLabel(row.region) }}</template>
-          </el-table-column>
-          <el-table-column prop="event" label="事件" min-width="220" />
-          <el-table-column label="重要性" width="90">
-            <template #default="{ row }">
-              <el-tag size="small" :type="importanceTag(row.importance)">{{ importanceLabel(row.importance) }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="forecast" label="预期" width="90" />
-          <el-table-column prop="actual" label="实际" width="90" />
-        </el-table>
-        <el-empty v-if="!macro.calendar?.length" description="暂无财经日历数据" />
-      </section>
+            <div class="sub-block">
+              <div class="sub-title"><el-icon><DataLine /></el-icon> 港股</div>
+              <div class="grid grid-4">
+                <el-card v-for="s in foreignHkStocks" :key="s.secid" shadow="never" class="idx-card">
+                  <div class="idx-name">{{ s.name }}<span class="region">港股</span></div>
+                  <div class="idx-price">{{ s.price != null ? s.price.toFixed(2) : '—' }}</div>
+                  <div class="idx-pct" :class="clsByVal(s.change_pct, '')">{{ fmtPct(s.change_pct) }}</div>
+                </el-card>
+                <el-empty v-if="!foreignHkStocks.length" :image-size="48" description="暂无港股数据" />
+              </div>
+            </div>
+          </section>
 
-      <!-- 重要快讯 -->
-      <section class="block">
-        <div class="block-head">
-          <span class="block-title"><el-icon><Bell /></el-icon> 重要快讯</span>
-          <span class="block-hint">近 24 小时 · 高/中重要性</span>
-        </div>
-        <div class="news-list">
-          <div v-for="(n, i) in macro.news_top || []" :key="i" class="news-row">
-            <el-tag size="small" :type="importanceTag(n.importance)">{{ importanceLabel(n.importance) }}</el-tag>
-            <a v-if="n.url" class="news-title" :href="n.url" target="_blank" rel="noopener noreferrer">{{ n.title }}</a>
-            <span v-else class="news-title">{{ n.title }}</span>
-            <span class="news-time">{{ newsTime(n.publish_time) }}</span>
-          </div>
-          <el-empty v-if="!macro.news_top?.length" :image-size="48" description="暂无快讯" />
-        </div>
-      </section>
+          <!-- 今日财经日历 -->
+          <section class="block">
+            <div class="block-head">
+              <span class="block-title"><el-icon><Calendar /></el-icon> 今日财经日历</span>
+              <span class="block-hint">未来 7 日（东财优先 · AKShare 兜底）</span>
+            </div>
+            <el-table v-loading="loading" :data="macro.calendar || []" stripe size="small" class="app-table app-table--compact">
+              <el-table-column label="日期" width="110">
+                <template #default="{ row }">{{ row.date }}</template>
+              </el-table-column>
+              <el-table-column label="地区" width="80">
+                <template #default="{ row }">{{ regionLabel(row.region) }}</template>
+              </el-table-column>
+              <el-table-column prop="event" label="事件" min-width="220" />
+              <el-table-column label="重要性" width="90">
+                <template #default="{ row }">
+                  <el-tag size="small" :type="importanceTag(row.importance)">{{ importanceLabel(row.importance) }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="forecast" label="预期" width="90" />
+              <el-table-column prop="actual" label="实际" width="90" />
+            </el-table>
+            <el-empty v-if="!macro.calendar?.length" description="暂无财经日历数据" />
+          </section>
+
+          <!-- 重要快讯 -->
+          <section class="block">
+            <div class="block-head">
+              <span class="block-title"><el-icon><Bell /></el-icon> 重要快讯</span>
+              <span class="block-hint">近 24 小时 · 高/中重要性</span>
+            </div>
+            <div class="news-list">
+              <div v-for="(n, i) in macro.news_top || []" :key="i" class="news-row">
+                <el-tag size="small" :type="importanceTag(n.importance)">{{ importanceLabel(n.importance) }}</el-tag>
+                <a v-if="n.url" class="news-title" :href="n.url" target="_blank" rel="noopener noreferrer">{{ n.title }}</a>
+                <span v-else class="news-title">{{ n.title }}</span>
+                <span class="news-time">{{ newsTime(n.publish_time) }}</span>
+              </div>
+              <el-empty v-if="!macro.news_top?.length" :image-size="48" description="暂无快讯" />
+            </div>
+          </section>
+        </el-collapse-item>
+      </el-collapse>
     </template>
 
     <!-- 添加计划弹窗 -->
@@ -1124,6 +1133,8 @@ const alertsUnread = computed(() => {
 
 const todayData = ref<WarRoomToday | null>(null)
 const macro = ref<any>(null)
+// 全局背景区折叠状态（默认展开，用户可收起减少滚动）
+const bgCollapse = ref<string[]>(['bg'])
 const foreignStocksLoading = ref(false)
 const foreignStocks = ref<any[]>([])
 const foreignUsStocks = computed(() => foreignStocks.value.filter(s => s.region === '美股'))
@@ -1184,10 +1195,11 @@ function splitItems(text?: string | string[]): string[] {
 function fmtClock(iso?: string): string {
   if (!iso) return '—'
   let s = String(iso).trim()
-  // 兼容部分浏览器（Safari）对 >3 位微秒（如 .007000+00:00）的解析失败：截断到 3 位
-  s = s.replace(/\.(\d{3})\d+(Z|[+-]\d{2}:?\d{2})$/, '.$1$2')
-  // 兜底：后端可能返回无时区的 naive ISO（如旧缓存），一律视为 UTC，避免按本地时区解析导致时间倒退
-  if (!/([Z]|[+-]\d{2}:?\d{2} ?\(.+\))$/.test(s)) s += 'Z'
+  // 统一截断多余小数秒到 3 位（后端微秒 .898000，部分浏览器解析 >3 位微秒失败）
+  s = s.replace(/\.(\d{3})\d+/, '.$1')
+  // 时区判定：Z / ±HH:MM（可有可无括号注释，如 "+08:00 (CST)"）都视为带时区；
+  // 无时区的 naive ISO（如旧缓存）一律按 UTC 补 Z，避免按本地时区解析导致时间倒退
+  if (!/([Z]|[+-]\d{2}:?\d{2}( ?\(.+\))?)$/.test(s)) s += 'Z'
   const d = new Date(s)
   if (isNaN(d.getTime())) return '—'
   const pad = (n: number) => String(n).padStart(2, '0')
@@ -2246,18 +2258,23 @@ onUnmounted(() => {
 
 <style lang="scss" scoped>
 .war-room {
-  // 全局背景数据区（四个时段 Tab 均可见）
-  .global-bg-head {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    margin: 8px 0 12px;
-    padding-top: 4px;
+  // 全局背景数据区（四个时段 Tab 均可见，折叠为单行标题）
+  .bg-collapse {
+    margin: 8px 0 16px;
+    border: 1px solid var(--el-border-color-light);
+    border-radius: 10px;
 
-    .global-bg-title {
-      font-size: 15px;
-      font-weight: 600;
-      color: var(--el-text-color-primary);
+    .bg-collapse-title {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+
+      .bg-title-text {
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--el-text-color-primary);
+      }
     }
   }
 
