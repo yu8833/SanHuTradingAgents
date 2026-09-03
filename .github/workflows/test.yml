@@ -49,6 +49,10 @@ jobs:
           docker build -f Dockerfile.backend -t tradingagents-backend:latest .
           docker compose build test
 
+      - name: Prepare .env for compose run
+        # compose run 需要 env_file: .env（compose run 缺该文件直接报错退出）
+        run: cp .env.example .env
+
       - name: ruff lint (warn mode, non-blocking)
         run: |
           echo "=== ruff lint（报告但暂不阻止合并） ==="
@@ -83,6 +87,7 @@ jobs:
 
       - name: Run unit + regression + coverage
         run: >
+          cp -n .env.example .env || true &&
           docker compose run --rm --no-deps test
           python -m pytest
           -m "unit or regression"
