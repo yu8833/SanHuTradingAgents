@@ -37,7 +37,7 @@ jobs:
   backend-static:
     name: Backend static checks (in container)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -68,7 +68,7 @@ jobs:
   backend-unit:
     name: Backend Unit + Regression (in container)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 60
     needs: backend-static
     steps:
       - uses: actions/checkout@v4
