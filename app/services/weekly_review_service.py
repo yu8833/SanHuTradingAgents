@@ -15,7 +15,7 @@ import logging
 from datetime import date, datetime, time as dtime, timedelta
 
 from app.core.database import get_mongo_db
-from app.utils.timezone import now_tz
+from app.utils.timezone import get_tz, now_tz
 
 logger = logging.getLogger(__name__)
 
@@ -114,13 +114,27 @@ def _hs300_akshare_rows(floor_date: str) -> list[tuple[str, float]]:
 
 
 async def _fetch_week_trades(user_id: str, week_start_str: str) -> list[dict]:
-    """本周 paper_trades 成交记录。"""
+    """本周 paper_trades 成交记录。
+
+    时间窗口径（与 /api/war-room/today-trades 一致）：
+    - timestamp 为 BSON datetime（UTC 存库），必须用 datetime 对象比较。
+      字符串与 datetime 混比属跨类型范围比较，MongoDB 一律不匹配（实测返回空），
+      会导致周度统计把本周成交全部漏掉（trade_count/胜率恒为 0）。
+    - 窗口 = [本周一 00:00 北京, 下周一 00:00 北京)，用 aware datetime，
+      motor 会按 UTC 归一存储值，亦与既有 aware 写入语义对齐。
+    - trade_date 为 "YYYY-MM-DD" 字符串（存量数据部分为 null），单独用字符串范围过滤。
+    """
+    from datetime import timedelta as _td
     db = get_mongo_db()
+    week_start = date.fromisoformat(week_start_str)
+    start = datetime.combine(week_start, dtime.min).replace(tzinfo=get_tz())
+    end = start + _td(days=7)
+    end_str = (week_start + _td(days=7)).isoformat()
     q = {
         "user_id": user_id,
         "$or": [
-            {"timestamp": {"$gte": week_start_str}},
-            {"trade_date": {"$gte": week_start_str}},
+            {"timestamp": {"$gte": start, "$lt": end}},
+            {"trade_date": {"$gte": week_start_str, "$lt": end_str}},
         ],
     }
     docs = await db["paper_trades"].find(q).to_list(None)

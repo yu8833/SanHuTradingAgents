@@ -206,15 +206,30 @@ async def build_premarket_sell_candidates(user_id: str) -> list[dict]:
 
     仅返回有明确卖出动作（清仓/减仓/止损/止盈）的持仓；
     「继续持有」的持仓不列入候选（减少噪声，避免人工误操作）。
+
+    参考价口径：优先取行情服务最新价（盘前多为最近收盘/昨收），失败回退三买三卖
+    日K 快照收盘价，避免盘前把 T-1 收盘价当作"现价"误导用户。
     """
     positions = await _load_open_positions(user_id)
+    scope = positions[: _SELL_LIMIT]
+    # 一次取齐参考价（失败降级，不影响整体）
+    quotes: dict[str, dict] = {}
+    codes = [p["code"] for p in scope if p.get("code")]
+    if codes:
+        try:
+            from app.services.quotes_service import get_quotes_service
+            quotes = await get_quotes_service().get_quotes(codes)
+        except Exception as e:
+            logger.warning(f"盘前卖出观测参考价获取失败（回退信号快照价）: {e}")
     items: list[dict] = []
-    for pos in positions[: _SELL_LIMIT]:
+    for pos in scope:
         sig = await _eval_sell_signal(pos["code"])
         # 名称兜底：持仓未存 stock_name 时用信号评估返回的名称
         if not pos.get("name") or pos.get("name") == pos["code"]:
             pos = {**pos, "name": (sig or {}).get("name") or pos["name"]}
-        advice = _advice_for(pos, sig.get("close") if sig else None, sig)
+        ref_price = ((quotes.get(pos["code"]) or {}).get("close")
+                     or (sig.get("close") if sig else None))
+        advice = _advice_for(pos, ref_price, sig)
         if advice.get("advice") == "持有":
             continue
         if advice.get("advice_label") == "等待实时价":
@@ -258,7 +273,14 @@ async def build_intraday_guide(user_id: str) -> dict:
                 buys_src[p["code"]] = {"type": "plan", "plan_id": p.get("id"), "item": p}
         # 今日已写入当日计划的代码（无论状态：待确认/已确认/已执行）：
         # 已在计划中覆盖的标的不再从快照候选重复加入，避免「已执行」的股票仍在盘中显示可执行。
+        # 同样跳过用户在盘前页「否」掉的候选（plan_overrides 持久化否决）。
         planned_today = await _today_planned_codes(user_id)
+        try:
+            from app.services.plan_generation_service import load_plan_overrides
+            _ovr = await load_plan_overrides(user_id)
+            _dismissed = _ovr.get("dismissed") or {}
+        except Exception:
+            _dismissed = {}
         snap = await load_daily_plan_snapshot(today)
         for c in (snap or {}).get("candidates") or []:
             if c.get("direction") != "buy" or not c.get("code"):
@@ -266,6 +288,8 @@ async def build_intraday_guide(user_id: str) -> dict:
             code = str(c["code"]).strip()
             if code in planned_today:
                 continue
+            if _dismissed.get(code) == "candidate":
+                continue  # 盘前已否决：盘中不再提醒
             buys_src.setdefault(code, {"type": "candidate", "plan_id": None, "item": c})
     except Exception as e:
         logger.warning(f"盘中买入数据源读取失败（降级）: {e}")
@@ -302,7 +326,7 @@ async def build_intraday_guide(user_id: str) -> dict:
         elif triggered:
             advice = f"已回落至 {tp_f} 下方，时间点成立，可执行买入"
         elif dist is not None and dist <= 2:
-            advice = f"接近触发价（偏离 {dist}%），可提前挂单等待成交"
+            advice = f"接近触发价（距触发价 {dist}%），可提前挂单等待成交"
         elif dist is not None:
             advice = f"等待回落至 {tp_f}（当前价 {price} 偏离 {dist}%）"
         else:

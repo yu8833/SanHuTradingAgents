@@ -12,7 +12,7 @@ import json
 import logging
 from datetime import time as dtime
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Body, Depends, Header, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.core.database import get_mongo_db
@@ -189,7 +189,9 @@ async def war_room_today_daily_plan(user: dict = Depends(get_current_user)):
 
     快照未生成（如尚未到盘前任务 / 冷启动）返回 generated=false，前端再走 POST generate。
     """
-    from app.services.plan_generation_service import load_daily_plan_snapshot, _today_planned_codes
+    from app.services.plan_generation_service import (
+        load_daily_plan_snapshot, _today_planned_codes, load_plan_overrides,
+    )
     today = now_tz().strftime("%Y-%m-%d")
     try:
         result = await load_daily_plan_snapshot()
@@ -214,10 +216,82 @@ async def war_room_today_daily_plan(user: dict = Depends(get_current_user)):
                     # filtered_count>0 表示流水线已自动执行、结果被用户已计划去重清理。
                     "filtered_count": (total_cand - len(cands)) + (total_sell - len(sells)),
                 }
+            # 应用用户当日的「否决/改价」持久化覆写（dismissed 按 kind 过滤，overrides 覆盖字段）
+            _ovr = await load_plan_overrides(user["id"])
+            _dismissed = _ovr.get("dismissed") or {}
+            _overrides = _ovr.get("overrides") or {}
+            if _dismissed or _overrides:
+                _cands = result.get("candidates") or []
+                _sells = result.get("sell_candidates") or []
+                _new_cands = [
+                    {**c, **(_overrides.get(str(c.get("code")).strip(), {}) or {})}
+                    for c in _cands
+                    if _dismissed.get(str(c.get("code")).strip()) != "candidate"
+                ]
+                _new_sells = [
+                    {**s, **(_overrides.get(str(s.get("code")).strip(), {}) or {})}
+                    for s in _sells
+                    if _dismissed.get(str(s.get("code")).strip()) != "sell"
+                ]
+                result = {
+                    **result,
+                    "candidates": _new_cands,
+                    "candidates_count": len(_new_cands),
+                    "sell_candidates": _new_sells,
+                    "sell_count": len(_new_sells),
+                }
         return ok({"generated": result is not None, "date": today, "result": result})
     except Exception as e:
         logger.error(f"今日计划快照读取失败: {e}", exc_info=True)
         return ok({"generated": False, "date": today, "result": None}, message="读取失败")
+
+
+@router.post("/daily-plan/dismiss")
+async def war_room_plan_dismiss(
+    payload: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    """持久化「否决候选/卖出观测」：{code, kind: candidate|sell, dismissed: bool}。
+
+    存 plan_overrides（按用户+日期），读取快照时按其过滤，切页/重进不再还原。
+    """
+    from app.services.plan_generation_service import save_plan_overrides
+    code = str((payload.get("code") or "")).strip()
+    kind = payload.get("kind") or "candidate"
+    dismissed = bool(payload.get("dismissed"))
+    if not code:
+        return ok(False, message="缺少 code")
+    if kind not in ("candidate", "sell"):
+        return ok(False, message="kind 仅支持 candidate/sell")
+    try:
+        await save_plan_overrides(
+            user["id"], dismissed={code: kind if dismissed else None})
+        return ok({"code": code, "dismissed": dismissed})
+    except Exception as e:
+        logger.error(f"计划候选否决保存失败: {e}", exc_info=True)
+        return ok(False, message="保存失败")
+
+
+@router.post("/daily-plan/override")
+async def war_room_plan_override(
+    payload: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    """持久化「改价候选」：{code, trigger_price?, stop_loss?, sell_condition?}。"""
+    from app.services.plan_generation_service import save_plan_overrides
+    code = str((payload.get("code") or "")).strip()
+    if not code:
+        return ok(False, message="缺少 code")
+    fields = {k: payload.get(k) for k in ("trigger_price", "stop_loss", "sell_condition")
+              if payload.get(k) is not None}
+    if not fields:
+        return ok(True)
+    try:
+        await save_plan_overrides(user["id"], overrides={code: fields})
+        return ok({"code": code, "fields": fields})
+    except Exception as e:
+        logger.error(f"计划候选改价保存失败: {e}", exc_info=True)
+        return ok(False, message="保存失败")
 
 
 @router.get("/daily-plan/status/{job_id}")

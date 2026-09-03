@@ -701,6 +701,63 @@ async def generate_daily_plan(user_id: str,
 # ══════════════════════════════════════════════════════════════
 _DAILY_PLAN_COLLECTION = "daily_plan_snapshots"
 
+# 用户对候选/卖出观测的「否决/改价」持久化集合（按 用户+日期）：
+# {user_id, date, dismissed: {code: kind}, overrides: {code: {trigger_price/stop_loss/sell_condition}}}
+# 用于把盘前页「删 / 否 / 改价」从纯前端本地状态提升为持久化，切页/重进不再还原。
+_OVERRIDE_COLLECTION = "plan_overrides"
+
+
+async def load_plan_overrides(user_id: str, date: str | None = None) -> dict:
+    """读取用户当日覆写：{dismissed: {code: kind}, overrides: {code: {...}}}，缺失返回空。"""
+    if not user_id:
+        return {"dismissed": {}, "overrides": {}}
+    try:
+        from app.core.database import get_mongo_db
+        from app.utils.timezone import now_tz
+        db = get_mongo_db()
+        date = date or now_tz().strftime("%Y-%m-%d")
+        doc = await db[_OVERRIDE_COLLECTION].find_one(
+            {"user_id": user_id, "date": date}, {"_id": 0})
+        if not doc:
+            return {"dismissed": {}, "overrides": {}}
+        return {
+            "dismissed": doc.get("dismissed") or {},
+            "overrides": doc.get("overrides") or {},
+        }
+    except Exception as e:
+        logger.warning(f"计划覆写读取失败（按空处理）: {e}")
+        return {"dismissed": {}, "overrides": {}}
+
+
+async def save_plan_overrides(user_id: str, dismissed: dict | None = None,
+                              overrides: dict | None = None) -> dict:
+    """增量保存覆写（merge 当日文档）。dismissed: {code: kind}；overrides: {code: {..}}。"""
+    if not user_id:
+        return {}
+    from app.core.database import get_mongo_db
+    from app.utils.timezone import now_tz
+    date = now_tz().strftime("%Y-%m-%d")
+    db = get_mongo_db()
+    doc = await db[_OVERRIDE_COLLECTION].find_one({"user_id": user_id, "date": date})
+    cur = doc or {"dismissed": {}, "overrides": {}}
+    if dismissed is not None:
+        # None 值条目=撤销否决
+        merged = dict(cur.get("dismissed") or {})
+        for code, kind in dismissed.items():
+            if kind:
+                merged[str(code)] = kind
+            else:
+                merged.pop(str(code), None)
+        cur["dismissed"] = merged
+    if overrides is not None:
+        cur["overrides"] = {**(cur.get("overrides") or {}), **overrides}
+    try:
+        await db[_OVERRIDE_COLLECTION].update_one(
+            {"user_id": user_id, "date": date}, {"$set": cur}, upsert=True)
+    except Exception as e:
+        logger.warning(f"计划覆写保存失败: {e}")
+    return cur
+
 
 async def persist_daily_plan_snapshot(result: dict) -> dict:
     """把当日计划结果按「今日日期」落库（upsert，跨天自动重建）。"""
@@ -748,7 +805,16 @@ def _rkey(job_id: str, kind: str) -> str:
 
 
 def start_plan_job(user_id: str) -> dict:
-    """启动当日计划后台任务，立即返回 job 元信息（不在请求内等待计算）。"""
+    """启动当日计划后台任务，立即返回 job 元信息（不在请求内等待计算）。
+
+    并发防重：同一用户已有「运行中」任务时复用该任务，避免用户反复点击
+    「重新生成」堆叠多套重型流水线（每套 50-150s）。已完成（done）的任务
+    不拦截——用户主动「重新生成」允许新开任务覆盖。
+    """
+    for _j in _plan_jobs.values():
+        if _j.get("user_id") == user_id and _j.get("status") == "running":
+            logger.info(f"计划生成防重：user={user_id} 已有运行中任务 {_j.get('job_id')}，复用")
+            return _job_view(_j["job_id"])
     job_id = uuid.uuid4().hex
     _plan_jobs[job_id] = {
         "job_id": job_id,

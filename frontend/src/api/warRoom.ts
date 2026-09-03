@@ -245,12 +245,12 @@ export const warRoomApi = {
     return res.data
   },
 
-  // 盘前：宏观快照
+  // 盘前：宏观快照（纯读，秒回；缺失返回 None，由前端提示走 POST /macro/refresh 生成）
   async getMacroOverview(date?: string, refresh = false) {
     const res = await ApiClient.get<MacroSnapshot | null>('/api/macro/daily-overview', {
       date: date || undefined,
       refresh: refresh || undefined
-    }, { timeout: 120000 })
+    }, { timeout: 30000 })
     return res.data
   },
 

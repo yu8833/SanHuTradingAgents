@@ -34,7 +34,7 @@
       </div>
       <div class="flow-spacer"></div>
       <span class="flow-todo">待办合计 <b>{{ todayData?.total_todo ?? 0 }}</b>
-        <span class="flow-todo-sub">计划 {{ todayData?.pre_market?.plan_pending ?? 0 }} · 预警 {{ alertsUnread }} · 信号 {{ todayData?.post_market?.signal_pending ?? 0 }}</span>
+        <span class="flow-todo-sub" :title="todoTooltip">计划 {{ todayData?.pre_market?.plan_pending ?? 0 }} · 预警 {{ alertsUnread }} · 指令 {{ todayData?.intraday?.pending_orders ?? 0 }} · 信号 {{ todayData?.post_market?.signal_pending ?? 0 }}</span>
       </span>
     </div>
 
@@ -49,6 +49,7 @@
               <span class="block-title"><el-icon><Compass /></el-icon> 宏观方向判断</span>
               <div class="block-actions">
                 <span v-if="!macro.llm_available" class="block-hint llm-off">解读不可用（仅规则结果）</span>
+                <span class="block-hint">快照生成于 {{ fmtClock(macro.created_at) }}<template v-if="gaugeLocked && basis?.locked_at"> · 方向锁定 {{ fmtClock(basis.locked_at) }}</template></span>
                 <el-button size="small" :icon="Refresh" :loading="macroRefreshing" @click="refreshMacro">立即刷新</el-button>
               </div>
             </div>
@@ -164,7 +165,7 @@
           <el-button size="small" type="primary" :icon="Refresh" :loading="macroRefreshing" @click="refreshMacro">立即生成</el-button>
         </el-empty>
 
-        <!-- ⑤ 当日计划生成流水线（5.3 带审计痕迹） -->
+        <!-- ② 当日计划生成流水线（5.3 带审计痕迹） -->
         <section class="block">
           <div class="block-head">
             <span class="block-title"><el-icon><Operation /></el-icon> 当日计划生成流水线</span>
@@ -235,7 +236,7 @@
           <el-empty v-else :image-size="48" description="点击「生成当日计划」，查看 环境 → 行业 → 个股 → 计划 → 卖出 五段决策过程与过滤漏斗" />
         </section>
 
-        <!-- ⑥ 待确认计划候选（5.4 来源 + 人工最后一道闸） -->
+        <!-- ③ 待确认计划候选（5.4 来源 + 人工最后一道闸） -->
         <section class="block" v-if="planGen?.candidates?.length">
           <div class="block-head">
             <span class="block-title"><el-icon><Checked /></el-icon> 待确认计划候选</span>
@@ -268,7 +269,7 @@
           </div>
         </section>
 
-        <!-- ⑦ 今日卖出观测（持仓卖出评估：哪些需要卖 / 减仓 / 止损止盈） -->
+        <!-- ④ 今日卖出观测（持仓卖出评估：哪些需要卖 / 减仓 / 止损止盈） -->
         <section class="block" v-if="planGen?.sell_candidates?.length">
           <div class="block-head">
             <span class="block-title"><el-icon><Sell /></el-icon> 今日卖出观测</span>
@@ -290,7 +291,7 @@
                 <span class="sell-advice" :class="sellAdviceTagClass(row)">{{ row.signal_label || row.advice_label || '卖出' }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="现价" width="90">
+            <el-table-column label="参考价" width="90">
               <template #default="{ row }">{{ row.last_price ?? '—' }}</template>
             </el-table-column>
             <el-table-column label="盈亏率" width="100">
@@ -314,7 +315,7 @@
           </el-table>
         </section>
 
-        <!-- ⑧ 当日计划 -->
+        <!-- ⑤ 当日计划 -->
         <section class="block">
           <div class="block-head">
             <span class="block-title"><el-icon><Tickets /></el-icon> 当日计划</span>
@@ -370,98 +371,6 @@
           </el-table>
           <el-empty v-if="!plans.length" description="今日暂无计划：可点「生成当日计划」自动装配，或手动添加" />
         </section>
-
-        <!-- 背景数据区（外围市场 / 财经日历 / 重要快讯） -->
-        <template v-if="macro">
-          <!-- ② 外围市场快照（指数 / 美股 / 港股分类，样式仿大盘看板全球市场） -->
-          <section class="block">
-            <div class="block-head">
-              <span class="block-title"><el-icon><Position /></el-icon> 外围市场快照</span>
-              <div class="block-actions">
-                <span class="block-hint">指数 / 美股 / 港股</span>
-                <el-button size="small" :icon="Refresh" :loading="macroRefreshing || foreignStocksLoading" @click="refreshForeignMarket">刷新</el-button>
-              </div>
-            </div>
-
-            <div class="sub-block">
-              <div class="sub-title"><el-icon><DataLine /></el-icon> 指数</div>
-              <div class="grid grid-4">
-                <el-card v-for="idx in macro.indices || []" :key="idx.key" shadow="never" class="idx-card">
-                  <div class="idx-name">{{ idx.name }}<span class="region">{{ idx.region }}</span></div>
-                  <div class="idx-price">{{ idx.price != null ? idx.price.toFixed(2) : '—' }}</div>
-                  <div class="idx-pct" :class="clsByVal(idx.change_pct, '')">{{ fmtPct(idx.change_pct) }}</div>
-                </el-card>
-                <el-empty v-if="!macro.indices?.length" :image-size="48" description="暂无指数数据" />
-              </div>
-            </div>
-
-            <div class="sub-block">
-              <div class="sub-title"><el-icon><DataLine /></el-icon> 美股</div>
-              <div class="grid grid-4">
-                <el-card v-for="s in foreignUsStocks" :key="s.secid" shadow="never" class="idx-card">
-                  <div class="idx-name">{{ s.name }}<span class="region">美股</span></div>
-                  <div class="idx-price">{{ s.price != null ? s.price.toFixed(2) : '—' }}</div>
-                  <div class="idx-pct" :class="clsByVal(s.change_pct, '')">{{ fmtPct(s.change_pct) }}</div>
-                </el-card>
-                <el-empty v-if="!foreignUsStocks.length" :image-size="48" description="暂无美股数据" />
-              </div>
-            </div>
-
-            <div class="sub-block">
-              <div class="sub-title"><el-icon><DataLine /></el-icon> 港股</div>
-              <div class="grid grid-4">
-                <el-card v-for="s in foreignHkStocks" :key="s.secid" shadow="never" class="idx-card">
-                  <div class="idx-name">{{ s.name }}<span class="region">港股</span></div>
-                  <div class="idx-price">{{ s.price != null ? s.price.toFixed(2) : '—' }}</div>
-                  <div class="idx-pct" :class="clsByVal(s.change_pct, '')">{{ fmtPct(s.change_pct) }}</div>
-                </el-card>
-                <el-empty v-if="!foreignHkStocks.length" :image-size="48" description="暂无港股数据" />
-              </div>
-            </div>
-          </section>
-
-          <!-- ③ 今日财经日历 -->
-          <section class="block">
-            <div class="block-head">
-              <span class="block-title"><el-icon><Calendar /></el-icon> 今日财经日历</span>
-              <span class="block-hint">未来 7 日（东财优先 · AKShare 兜底）</span>
-            </div>
-            <el-table v-loading="loading" :data="macro.calendar || []" stripe size="small" class="app-table app-table--compact">
-              <el-table-column label="日期" width="110">
-                <template #default="{ row }">{{ row.date }}</template>
-              </el-table-column>
-              <el-table-column label="地区" width="80">
-                <template #default="{ row }">{{ regionLabel(row.region) }}</template>
-              </el-table-column>
-              <el-table-column prop="event" label="事件" min-width="220" />
-              <el-table-column label="重要性" width="90">
-                <template #default="{ row }">
-                  <el-tag size="small" :type="importanceTag(row.importance)">{{ importanceLabel(row.importance) }}</el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column prop="forecast" label="预期" width="90" />
-              <el-table-column prop="actual" label="实际" width="90" />
-            </el-table>
-            <el-empty v-if="!macro.calendar?.length" description="暂无财经日历数据" />
-          </section>
-
-          <!-- ④ 重要快讯 -->
-          <section class="block">
-            <div class="block-head">
-              <span class="block-title"><el-icon><Bell /></el-icon> 重要快讯</span>
-              <span class="block-hint">近 24 小时 · 高/中重要性</span>
-            </div>
-            <div class="news-list">
-              <div v-for="(n, i) in macro.news_top || []" :key="i" class="news-row">
-                <el-tag size="small" :type="importanceTag(n.importance)">{{ importanceLabel(n.importance) }}</el-tag>
-                <a v-if="n.url" class="news-title" :href="n.url" target="_blank" rel="noopener noreferrer">{{ n.title }}</a>
-                <span v-else class="news-title">{{ n.title }}</span>
-                <span class="news-time">{{ newsTime(n.publish_time) }}</span>
-              </div>
-              <el-empty v-if="!macro.news_top?.length" :image-size="48" description="暂无快讯" />
-            </div>
-          </section>
-        </template>
       </el-tab-pane>
 
       <!-- ============ 盘中 ============ -->
@@ -475,10 +384,15 @@
             </div>
           </div>
 
+          <el-alert v-if="quotesUnavailable" type="warning" :closable="false" show-icon style="margin-bottom: 12px">
+            实时行情暂不可用，以下卖出建议基于信号快照价（止损/止盈实时触发不可用），可点「对照实时价评估」重试。
+          </el-alert>
+
           <!-- 买入建议（未买入的股票：什么时候适合买） -->
           <div class="sub-block">
             <div class="sub-title"><el-icon><ShoppingCart /></el-icon> 买入建议 · 何时买
               <span v-if="guideBuys.length" class="guide-count">{{ guideBuys.length }}</span>
+              <span class="block-hint">距触发价：负值 = 已低于触发价</span>
             </div>
             <el-table v-loading="guideLoading" :data="guideBuys" stripe size="small" class="app-table app-table--compact" max-height="320">
               <el-table-column label="代码" width="100">
@@ -500,7 +414,7 @@
               <el-table-column label="实时价" width="90">
                 <template #default="{ row }">{{ row.last_price ?? '—' }}</template>
               </el-table-column>
-              <el-table-column label="偏离" width="80">
+              <el-table-column label="距触发价" width="90">
                 <template #default="{ row }">
                   <span v-if="row.distance_pct != null" :class="clsByVal(-row.distance_pct, '')">{{ fmtPct(row.distance_pct) }}</span>
                   <span v-else>—</span>
@@ -569,6 +483,7 @@
         </section><section class="block">
           <div class="block-head">
             <span class="block-title"><el-icon><Coin /></el-icon> 持仓追踪</span>
+            <span class="block-hint">实时行情更新于 {{ quoteTs || '—' }}</span>
             <router-link to="/portfolio" class="more-link">持仓追踪页 →</router-link>
           </div>
           <div class="kpi-row" v-if="posSummary">
@@ -613,7 +528,7 @@
             </el-table-column>
           </el-table>
           <el-empty v-if="!posSummary?.positions?.length" :image-size="48" description="暂无持仓" />
-        </section><!-- ①.5 今日预警（角标数字对应本列表行数，顶部「盘中」待办） -->
+        </section><!-- ③ 今日预警（角标数字对应本列表行数，顶部「盘中」待办） -->
         <section class="block">
           <div class="block-head">
             <span class="block-title"><el-icon><Bell /></el-icon> 今日预警
@@ -649,10 +564,11 @@
             </el-table-column>
           </el-table>
           <el-empty v-if="!todayAlerts.length && !alertsLoading" :image-size="48" description="今日暂无触发预警" />
-        </section><!-- ⑤ 自选重点（≤5 只实时行情） -->
+        </section><!-- ④ 自选重点（≤5 只实时行情） -->
         <section class="block">
           <div class="block-head">
             <span class="block-title"><el-icon><Star /></el-icon> 自选重点</span>
+            <span class="block-hint">实时行情更新于 {{ quoteTs || '—' }}</span>
             <router-link to="/favorites" class="more-link">全部自选 →</router-link>
           </div>
           <div class="grid grid-4">
@@ -683,7 +599,7 @@
             <span v-if="regime.as_of" class="regime-asof">{{ regime.as_of }}</span>
           </div>
           <el-empty v-else :image-size="48" description="暂无市场环境数据" />
-        </section><!-- ② 监控中心（复用现有组件：价格/涨跌幅/持仓退出信号预警） -->
+        </section><!-- ⑥ 监控中心（复用现有组件：价格/涨跌幅/持仓退出信号预警） -->
         <section class="block">
           <div class="block-head">
             <span class="block-title"><el-icon><Lightning /></el-icon> 监控中心</span>
@@ -695,7 +611,7 @@
 
       <!-- ============ 盘后 ============ -->
       <el-tab-pane label="盘后" name="post_market">
-        <!-- ① 信号扫描结果（三买三卖，扫描后自动落库 signal_tracking） -->
+        <!-- ① 交易复盘 · 当日成交（盘后 Tab 首位，先看结果） -->
         <section class="block">
           <div class="block-head">
             <span class="block-title"><el-icon><Document /></el-icon> 交易复盘 · 当日成交</span>
@@ -739,20 +655,20 @@
           </el-table>
           <el-empty v-if="!todayTrades.length" :image-size="48" description="今日暂无成交记录" />
           <p class="block-tip" style="margin-top: 10px">盘后 Step1 更新数据 · Step2 信号扫描落库 · Step3 次日计划预填，见上方信号跟踪与盘前 Tab 计划。</p>
-        </section><!-- ④ 次日计划预填（接近买点标的 → 一键加入计划） -->
-        <section class="block" v-if="scanResult?.items?.length">
+        </section><!-- ② 次日计划预填（接近买点标的 → 一键加入计划；数据源 = 信号跟踪） -->
+        <section class="block" v-if="prefillItems.length">
           <div class="block-head">
             <span class="block-title"><el-icon><Tickets /></el-icon> 次日计划预填</span>
-            <span class="block-hint">接近买点标的，点击卡片加入明日计划</span>
+            <span class="block-hint">来自信号跟踪 · 待验证买点信号，点击卡片加入明日计划</span>
           </div>
           <div class="scan-prefill-grid">
-            <div v-for="row in scanResult.items.slice(0, 6)" :key="row.code" class="prefill-card" @click="addScanToPlan(row)">
+            <div v-for="row in prefillItems" :key="row.code" class="prefill-card" @click="addScanToPlan(row)">
               <div class="prefill-name">
                 <a :href="stockHref(row.code)" target="_blank" rel="noopener" class="stock-link stock-code">{{ row.code }}</a>
                 <a :href="stockHref(row.code)" target="_blank" rel="noopener" class="stock-link">{{ row.name }}</a>
               </div>
-              <div class="prefill-line">触发 <b>{{ row.signals?.[0]?.trigger_price ?? row.close }}</b> · 止损 {{ row.stop_price ?? '—' }}</div>
-              <div class="prefill-line sub">{{ row.primary_signal_label }} · BIAS60 {{ row.bias60?.toFixed(2) }}</div>
+              <div class="prefill-line">触发 <b>{{ row.signal_price ?? row.signals?.[0]?.trigger_price ?? row.close ?? '—' }}</b> · 止损 {{ row.snapshot?.stop_price ?? row.stop_price ?? '—' }}</div>
+              <div class="prefill-line sub">{{ row.signal_label || row.primary_signal_label || '三买三卖' }} · BIAS60 {{ row.snapshot?.bias60?.toFixed(2) ?? row.bias60?.toFixed(2) }}</div>
             </div>
           </div>
         </section><section class="block">
@@ -765,8 +681,8 @@
           </div>
           <div class="kpi-row" v-if="signalStats?.total">
             <div class="kpi-cell">
-              <div class="kpi-label">已回填</div>
-              <div class="kpi-value">{{ signalStats.total.count ?? signalStats.total?.count ?? 0 }}</div>
+              <div class="kpi-label">累计已回填</div>
+              <div class="kpi-value" :title="`已回填样本数：${signalStats.total.count ?? 0}（按钮提示的 N 条为本次回填数）`">{{ signalStats.total.count ?? signalStats.total?.count ?? 0 }}</div>
             </div>
             <div class="kpi-cell">
               <div class="kpi-label">胜率</div>
@@ -824,6 +740,9 @@
             <span>共 <b>{{ scanResult.total }}</b> 只命中<template v-if="scanResult.scanned_count"> · 扫描 {{ scanResult.scanned_count }} 只</template></span>
             <span v-if="scanResult.market_trend"> · 大盘趋势 {{ scanResult.market_trend }}</span>
           </div>
+          <el-alert v-if="scanTodaysCount > 0" type="info" :closable="false" show-icon style="margin-bottom: 10px">
+            今日已有 {{ scanTodaysCount }} 条买点信号自动落库「信号跟踪」（盘后 16:00 自动扫描）；如需刷新数据可重新扫描。
+          </el-alert>
           <el-table v-loading="scanLoading" :data="scanResult?.items || []" stripe size="small" class="app-table app-table--compact" max-height="420">
             <el-table-column label="代码" width="100">
               <template #default="{ row }">
@@ -862,17 +781,21 @@
           <div class="block-head">
             <span class="block-title"><el-icon><Histogram /></el-icon> 定量统计</span>
             <div class="block-actions">
+              <span v-if="weekly" class="block-hint">数据周 {{ weekly.week_start }} ~ {{ weekly.week_end }}<template v-if="!isCurrentWeek">（历史周）</template></span>
               <el-button v-if="!weekly" size="small" type="primary" :loading="genWeeklyLoading" @click="generateWeekly">
                 生成周报
               </el-button>
               <el-button v-else size="small" :icon="Refresh" :loading="genWeeklyLoading" @click="generateWeekly">
-                重新生成
+                {{ isCurrentWeek ? '重新生成' : '生成本周复盘' }}
               </el-button>
             </div>
           </div>
+          <el-alert v-if="weekly && !isCurrentWeek" type="warning" :closable="false" show-icon style="margin-bottom: 12px">
+            当前展示为 {{ weekly.week_start }} 起的复盘（本周复盘尚未生成），可点右上角「生成本周复盘」，或等待周五 17:30 自动生成。
+          </el-alert>
           <template v-if="weekly">
             <div class="kpi-row">
-              <div class="kpi-cell">
+              <div class="kpi-cell" title="本周已实现盈亏 ÷ 当前总权益（近似口径，未计浮动盈亏变动）">
                 <div class="kpi-label">本周收益率</div>
                 <div class="kpi-value" :class="clsByVal(weekly.quant?.weekly_return, '')">{{ fmtPct(weekly.quant?.weekly_return) }}</div>
               </div>
@@ -938,6 +861,102 @@
         </section>
       </el-tab-pane>
     </el-tabs>
+
+    <!-- 全局背景数据区（外围市场 / 财经日历 / 重要快讯）：四个时段 Tab 均可见，盘前/盘后参考通用 -->
+    <template v-if="macro">
+      <div class="global-bg-head">
+        <span class="global-bg-title">全局背景 · 全天参考</span>
+        <span class="block-hint">快照生成于 {{ fmtClock(macro.created_at) }}，可点「刷新」更新</span>
+      </div>
+      <!-- 外围市场快照（指数 / 美股 / 港股分类，样式仿大盘看板全球市场） -->
+      <section class="block">
+        <div class="block-head">
+          <span class="block-title"><el-icon><Position /></el-icon> 外围市场快照</span>
+          <div class="block-actions">
+            <span class="block-hint">指数 / 美股 / 港股 · 截至 {{ fmtClock(macro.created_at) }}</span>
+            <el-button size="small" :icon="Refresh" :loading="macroRefreshing || foreignStocksLoading" @click="refreshForeignMarket">刷新</el-button>
+          </div>
+        </div>
+
+        <div class="sub-block">
+          <div class="sub-title"><el-icon><DataLine /></el-icon> 指数</div>
+          <div class="grid grid-4">
+            <el-card v-for="idx in macro.indices || []" :key="idx.key" shadow="never" class="idx-card">
+              <div class="idx-name">{{ idx.name }}<span class="region">{{ idx.region }}</span></div>
+              <div class="idx-price">{{ idx.price != null ? idx.price.toFixed(2) : '—' }}</div>
+              <div class="idx-pct" :class="clsByVal(idx.change_pct, '')">{{ fmtPct(idx.change_pct) }}</div>
+            </el-card>
+            <el-empty v-if="!macro.indices?.length" :image-size="48" description="暂无指数数据" />
+          </div>
+        </div>
+
+        <div class="sub-block">
+          <div class="sub-title"><el-icon><DataLine /></el-icon> 美股</div>
+          <div class="grid grid-4">
+            <el-card v-for="s in foreignUsStocks" :key="s.secid" shadow="never" class="idx-card">
+              <div class="idx-name">{{ s.name }}<span class="region">美股</span></div>
+              <div class="idx-price">{{ s.price != null ? s.price.toFixed(2) : '—' }}</div>
+              <div class="idx-pct" :class="clsByVal(s.change_pct, '')">{{ fmtPct(s.change_pct) }}</div>
+            </el-card>
+            <el-empty v-if="!foreignUsStocks.length" :image-size="48" description="暂无美股数据" />
+          </div>
+        </div>
+
+        <div class="sub-block">
+          <div class="sub-title"><el-icon><DataLine /></el-icon> 港股</div>
+          <div class="grid grid-4">
+            <el-card v-for="s in foreignHkStocks" :key="s.secid" shadow="never" class="idx-card">
+              <div class="idx-name">{{ s.name }}<span class="region">港股</span></div>
+              <div class="idx-price">{{ s.price != null ? s.price.toFixed(2) : '—' }}</div>
+              <div class="idx-pct" :class="clsByVal(s.change_pct, '')">{{ fmtPct(s.change_pct) }}</div>
+            </el-card>
+            <el-empty v-if="!foreignHkStocks.length" :image-size="48" description="暂无港股数据" />
+          </div>
+        </div>
+      </section>
+
+      <!-- 今日财经日历 -->
+      <section class="block">
+        <div class="block-head">
+          <span class="block-title"><el-icon><Calendar /></el-icon> 今日财经日历</span>
+          <span class="block-hint">未来 7 日（东财优先 · AKShare 兜底）</span>
+        </div>
+        <el-table v-loading="loading" :data="macro.calendar || []" stripe size="small" class="app-table app-table--compact">
+          <el-table-column label="日期" width="110">
+            <template #default="{ row }">{{ row.date }}</template>
+          </el-table-column>
+          <el-table-column label="地区" width="80">
+            <template #default="{ row }">{{ regionLabel(row.region) }}</template>
+          </el-table-column>
+          <el-table-column prop="event" label="事件" min-width="220" />
+          <el-table-column label="重要性" width="90">
+            <template #default="{ row }">
+              <el-tag size="small" :type="importanceTag(row.importance)">{{ importanceLabel(row.importance) }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="forecast" label="预期" width="90" />
+          <el-table-column prop="actual" label="实际" width="90" />
+        </el-table>
+        <el-empty v-if="!macro.calendar?.length" description="暂无财经日历数据" />
+      </section>
+
+      <!-- 重要快讯 -->
+      <section class="block">
+        <div class="block-head">
+          <span class="block-title"><el-icon><Bell /></el-icon> 重要快讯</span>
+          <span class="block-hint">近 24 小时 · 高/中重要性</span>
+        </div>
+        <div class="news-list">
+          <div v-for="(n, i) in macro.news_top || []" :key="i" class="news-row">
+            <el-tag size="small" :type="importanceTag(n.importance)">{{ importanceLabel(n.importance) }}</el-tag>
+            <a v-if="n.url" class="news-title" :href="n.url" target="_blank" rel="noopener noreferrer">{{ n.title }}</a>
+            <span v-else class="news-title">{{ n.title }}</span>
+            <span class="news-time">{{ newsTime(n.publish_time) }}</span>
+          </div>
+          <el-empty v-if="!macro.news_top?.length" :image-size="48" description="暂无快讯" />
+        </div>
+      </section>
+    </template>
 
     <!-- 添加计划弹窗 -->
     <el-dialog v-model="planDialog" title="添加当日计划" width="520px">
@@ -1009,7 +1028,7 @@
         <div class="qt-grid">
           <div class="fld"><span class="k">触发价</span><span class="v">{{ buyTradeRow.trigger_price ?? '—' }}</span></div>
           <div class="fld"><span class="k">实时价</span><span class="v">{{ buyTradeRow.last_price ?? '—' }}</span></div>
-          <div class="fld"><span class="k">偏离</span><span class="v" :class="clsByVal(-(buyTradeRow.distance_pct ?? 0), '')">{{ fmtPct(buyTradeRow.distance_pct) }}</span></div>
+          <div class="fld"><span class="k">距触发价</span><span class="v" :class="clsByVal(-(buyTradeRow.distance_pct ?? 0), '')">{{ fmtPct(buyTradeRow.distance_pct) }}</span></div>
         </div>
         <el-form label-width="90px" class="qt-form">
           <el-form-item label="买入数量">
@@ -1136,6 +1155,19 @@ const flowSegments = computed(() => [
 const tabIndexMap: Record<string, string> = { pre_market: 'pre_market', intraday: 'intraday', post_market: 'post_market', weekly: 'weekly' }
 const currentPeriod = computed(() => todayData.value?.current_period || 'pre_market')
 
+// 待办合计构成说明（悬浮提示，避免数字来源不可解释）
+const todoTooltip = computed(() => {
+  const d = todayData.value
+  if (!d) return ''
+  const parts = [
+    `盘前 ${d.pre_market?.todo ?? 0}（待确认计划 ${d.pre_market?.plan_pending ?? 0} + 宏观快照未生成）`,
+    `盘中 ${d.intraday?.todo ?? 0}（已确认待执行计划 ${d.intraday?.plan_confirmed_pending ?? 0} + 待确认指令 ${d.intraday?.pending_orders ?? 0}）`,
+    `盘后 ${d.post_market?.todo ?? 0}（待验证信号 ${d.post_market?.signal_pending ?? 0}）`,
+    `周度 ${d.weekly?.todo ?? 0}（周五 17:30 后且复盘未生成）`,
+  ]
+  return `待办合计 = ${parts.join('；')}`
+})
+
 // 将含编号（①.../1. 1、1)）的 LLM 解读文本切分为独立行，便于逐条阅读。
 // 用「编号后不紧跟数字」排除百分比/小数（如 1.14%、0.94%）误切分。
 function splitItems(text?: string | string[]): string[] {
@@ -1261,36 +1293,16 @@ function stopTodayRefresh() {
   if (todayRefreshTimer) { window.clearInterval(todayRefreshTimer); todayRefreshTimer = null }
 }
 
-async function loadMacro(retry = true) {
+async function loadMacro() {
   loading.value = true
   try {
-    const data = await warRoomApi.getMacroOverview()
-    macro.value = data
-    // Debug 标记：成功时写入 generated_at
-    if (data && typeof document !== 'undefined') {
-      document.body.setAttribute('data-macro-state', 'ok-' + (data.created_at ? 'has-created_at' : 'no-created_at'))
-    }
+    // 纯读取今日已生成快照（后端缺失时不再请求内现场生成，避免页面冻结 100-200s）；
+    // 快照未生成保持空态，用户点「立即生成」走 POST /macro/refresh。
+    macro.value = await warRoomApi.getMacroOverview()
   } catch (e: any) {
     macro.value = null
     if (typeof document !== 'undefined') {
       document.body.setAttribute('data-macro-error', String(e?.message || e).slice(0, 200))
-    }
-  }
-  // 兜底：读取返回空（快照尚未生成/后端生成延迟）时自动重试一次，
-  // 避免进入盘前就撞上空态，之后仍为空再由用户点「立即生成」。
-  if (macro.value === null && retry) {
-    await new Promise(r => setTimeout(r, 1500))
-    try {
-      const data = await warRoomApi.getMacroOverview()
-      macro.value = data
-      if (data && typeof document !== 'undefined') {
-        document.body.setAttribute('data-macro-state', 'ok-retry')
-      }
-    } catch (e: any) {
-      macro.value = null
-      if (typeof document !== 'undefined') {
-        document.body.setAttribute('data-macro-error', 'retry:' + String(e?.message || e).slice(0, 200))
-      }
     }
   }
   loading.value = false
@@ -1412,6 +1424,12 @@ async function loadWeekly() {
   }
 }
 
+// 周度是否为本期（week_start 与 /today 的 week_start 一致）；历史周数据需明示提醒
+const isCurrentWeek = computed(() => {
+  const wk = weekly.value?.week_start
+  return !!wk && !!todayData.value?.week_start && wk === todayData.value.week_start
+})
+
 async function loadFavorites() {
   try {
     const res: any = await favoritesApi.list()
@@ -1422,6 +1440,16 @@ async function loadFavorites() {
 }
 
 async function runScan() {
+  // 重操作确认：全市场扫描约需数分钟，避免误触发起重复重型任务
+  if (scanLoading.value) return
+  try {
+    await ElMessageBox.confirm(
+      '全市场三买三卖扫描约需数分钟（扫描约 5000 只），完成后信号自动落库「信号跟踪」。',
+      '运行盘后信号扫描', { type: 'warning', confirmButtonText: '开始扫描', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
   scanLoading.value = true
   try {
     const res: any = await screeningApi.scanThreeBuysThreeSells({ top_n: 30, limit: 20 })
@@ -1442,14 +1470,31 @@ function stockHref(code?: string): string {
   return `https://www.cloudsea.tech:8443/stocks/${code}`
 }
 
+// 次日计划预填：取「信号跟踪」中待验证的买点信号（16:00 自动扫描 / 手动扫描均落库，
+// 与本次会话是否手动扫描解耦，保证刷新/重进页面后预填仍可用）
+const prefillItems = computed(() =>
+  (signals.value || []).filter(s => s.status !== 'filled').slice(0, 6)
+)
+// 今日已自动落库的信号数（盘后 16:00 自动扫描 / 手动扫描），提示避免重复全市场扫描
+const scanTodaysCount = computed(() => {
+  const today = todayData.value?.today
+  return today ? (signals.value || []).filter(s => (s.trigger_date || '').slice(0, 10) === today).length : 0
+})
+
 function addScanToPlan(row: any) {
+  // 兼容两种来源：三买三卖扫描结果（signals[0].trigger_price / stop_price / primary_signal_label）
+  // 与 signal_tracking 记录（signal_price / snapshot.stop_price / signal_label）
+  const trigger = row.signal_price ?? row.signals?.[0]?.trigger_price ?? row.close ?? row.snapshot?.close
+  const stop = row.snapshot?.stop_price ?? row.stop_price
+  const sigLabel = row.signal_label || row.primary_signal_label || '三买三卖'
+  const ma60 = row.snapshot?.ma60_direction ?? row.ma60_direction ?? ''
   planForm.value = {
     code: row.code,
     name: row.name,
     direction: 'buy',
-    trigger_price: row.signals?.[0]?.trigger_price ?? row.close,
-    stop_loss: row.stop_price ?? undefined,
-    sell_condition: `${row.primary_signal_label ?? '三买三卖'} · MA60 ${row.ma60_direction ?? ''}`.trim()
+    trigger_price: trigger ?? undefined,
+    stop_loss: stop ?? undefined,
+    sell_condition: `${sigLabel} · MA60 ${ma60}`.trim()
   }
   planDialog.value = true
 }
@@ -1458,6 +1503,11 @@ function addScanToPlan(row: any) {
 const guide = ref<any>(null)
 const guideBuys = computed(() => guide.value?.buys || [])
 const guideSells = computed(() => guide.value?.sells || [])
+// 实时行情整体不可用：卖出建议回退为信号快照价（无止损/止盈实时触发），向用户明示
+const quotesUnavailable = computed(() =>
+  !!guide.value && guideSells.value.length > 0
+  && guideSells.value.every((s: any) => s.last_price == null)
+)
 
 async function loadIntradayGuide() {
   guideLoading.value = true
@@ -1528,22 +1578,37 @@ async function confirmSellCandidate(ci: number) {
     confirmingSellIdx.value = -1
   }
 }
-function removeSellCandidate(ci: number) {
+async function removeSellCandidate(ci: number) {
   const c = planGen.value?.sell_candidates?.[ci]
   if (!c) return
+  const code = String(c.code || '').trim()
   planGen.value.sell_candidates.splice(ci, 1)
   planGen.value.sell_count = planGen.value.sell_candidates.length
   ElMessage.success(`已否决卖出观测 ${c.name || c.code}`)
+  // 持久化否决：切页/重进不还原（与候选一致）
+  if (code) {
+    try {
+      await _fetchJSON('/api/war-room/daily-plan/dismiss', {
+        method: 'POST',
+        body: JSON.stringify({ code, kind: 'sell', dismissed: true }),
+      }, 10000)
+    } catch (e) { /* 持久化失败不阻塞 UI */ }
+  }
 }
 
 // ---- 盘中实时（SSE 订阅 + 30s 轮询兜底）----
 // SSE 订阅买卖点标的实时价：买入候选按触发价高亮"可执行"，持仓实时判定止损/止盈触发
 let stopQuotes: (() => void) | null = null
 let intradayPoll: number | null = null
+// 最近一次实时行情推送时间（持仓追踪 / 自选重点头部展示数据新鲜度）
+const quoteTs = ref('')
 
 function onQuotesUpdate(signal: QuotesUpdateSignal) {
   const qs = signal.quotes
   if (!qs) return
+  if (Object.keys(qs).length) {
+    quoteTs.value = new Date().toTimeString().slice(0, 8)
+  }
   // 买入建议：更新现价 + 重新判定触达/偏离
   if (guide.value?.buys) {
     guide.value.buys = guide.value.buys.map((p: any) => {
@@ -1560,7 +1625,7 @@ function onQuotesUpdate(signal: QuotesUpdateSignal) {
         triggered: !!triggered,
         advice: triggered
           ? `已回落至 ${tp} 下方，时间点成立，可执行买入`
-          : (dist != null && dist <= 2 ? `接近触发价（偏离 ${dist}%），可提前挂单` : p.advice)
+          : (dist != null && dist <= 2 ? `接近触发价（距触发价 ${dist}%），可提前挂单` : p.advice)
       }
     })
   }
@@ -1593,6 +1658,28 @@ function onQuotesUpdate(signal: QuotesUpdateSignal) {
       }
     })
   }
+  // 持仓追踪 / 自选重点：同步实时价/盈亏率，避免表格停留在进入 Tab 时的静态快照
+  if (posSummary.value?.positions?.length) {
+    posSummary.value.positions = posSummary.value.positions.map((pos: any) => {
+      const code = String(pos.symbol || pos.code || '')
+      const q = code ? qs[code] : null
+      if (!q || q.close == null) return pos
+      const cost = pos.avg_cost
+      return {
+        ...pos,
+        current_price: q.close,
+        profit_loss_rate: cost ? Math.round((q.close / Number(cost) - 1) * 10000) / 100 : pos.profit_loss_rate,
+      }
+    })
+  }
+  if (favorites.value.length) {
+    favorites.value = favorites.value.map((f: any) => {
+      const code = String(f.symbol || f.stock_code || '')
+      const q = code ? qs[code] : null
+      if (!q) return f
+      return { ...f, current_price: q.close, change_percent: q.pct_chg ?? f.change_percent }
+    })
+  }
 }
 
 function startIntradayLive() {
@@ -1600,7 +1687,11 @@ function startIntradayLive() {
   stopQuotes = subscribeQuotesUpdate(onQuotesUpdate, (status) => {
     // connected / degraded：由轮询兜底，无需额外提示
   })
-  intradayPoll = window.setInterval(() => { loadIntradayGuide() }, 30000)
+  // 30s 轮询：买卖指导 + 今日预警列表（角标只更新计数，列表需随行刷新，保证盘中新预警可见）
+  intradayPoll = window.setInterval(() => {
+    loadIntradayGuide()
+    loadTodayAlerts()
+  }, 30000)
 }
 
 function stopIntradayLive() {
@@ -1719,18 +1810,13 @@ const confirmingIdx = ref<number>(-1)
 const genPlanJobId = ref<string>('')
 const genPlanProgress = ref(0)
 const genPlanStage = ref('')
-let planStreamController: AbortController | null = null
 let planCompletionTimer: ReturnType<typeof setInterval> | null = null
 
-// 清理所有计划生成相关的后台任务（看门狗 + SSE）
+// 清理计划生成的后台看门狗轮询
 function _clearPlanWatchdog() {
   if (planCompletionTimer) {
     clearInterval(planCompletionTimer)
     planCompletionTimer = null
-  }
-  if (planStreamController) {
-    planStreamController.abort()
-    planStreamController = null
   }
 }
 
@@ -1743,181 +1829,6 @@ function pipelineKey(k?: string) {
 function keptPct(st: any) {
   if (!st || !st.scanned) return 0
   return Math.round((st.kept / st.scanned) * 100)
-}
-
-function stopPlanStream() {
-  if (planCompletionTimer) { clearInterval(planCompletionTimer); planCompletionTimer = null }
-  if (planStreamController) {
-    planStreamController.abort()
-    planStreamController = null
-  }
-}
-
-function planStreamError(msg?: string) {
-  ElMessage.error(msg || '计划生成中断，请稍后重试')
-  stopPlanStream()
-  genPlanLoading.value = false
-}
-
-// 同步一次任务当前状态（SSE 连接后兜底，防止漏掉已完成的进度事件）
-async function syncPlanJobState(jobId: string) {
-  try {
-    const st = await _planStatus(jobId)
-    if (!st) return
-    if (st.status === 'done') {
-      const r = await _planResult(jobId)
-      if (r) {
-        planGen.value = r
-        genPlanProgress.value = 100
-        genPlanStage.value = ''
-        ElMessage.success(`已生成 ${r.candidates_count ?? 0} 条计划候选，请人工确认`)
-      }
-      genPlanLoading.value = false
-    } else if (st.status === 'error') {
-      planStreamError(st.error || '计划生成失败')
-    } else {
-      genPlanProgress.value = st.progress ?? genPlanProgress.value
-      genPlanStage.value = st.stage || ''
-      // 竞态兜底：connected 触发本函数为"未 await 的异步回查"，其 GET /status 可能在
-      // SSE done 事件之后才以 running 返回；此时 planGen 可能已含完整候选结果，
-      // 必须保留，禁止用空占位覆盖（否则已完成的候选列表被清空、前端不渲染）。
-      if (!planGen.value?.candidates?.length) {
-        planGen.value = {
-          candidates: [], candidates_count: 0,
-          audit: { steps: planGen.value?.audit?.steps || [], total: planGen.value?.audit?.steps?.length || 0 }
-        }
-      }
-    }
-  } catch (e) {
-    genPlanLoading.value = false
-  }
-}
-
-async function watchPlanJob(jobId: string) {
-  const token = localStorage.getItem('auth-token')
-  const baseUrl = (import.meta.env.VITE_API_BASE_URL as string) || ''
-  const controller = new AbortController()
-  planStreamController = controller
-  let finished = false
-  // ── 完成判定兜底（看门狗）────────────────────────────
-  // 根因：本函数此前完全依赖 SSE 判定"完成"。但浏览器端 SSE 连接一旦异常
-  // （ERR_CONNECTION_CLOSED / ERR_ABORTED，均已在真实环境捕获），reader.read()
-  // 会永久挂起，导致 genPlanLoading 永不复位、按钮永远转圈、结果不渲染。
-  // 解决：并行走一个 2s 轮询 status 的"完成通道"，done 即拉 result 呈现；并设
-  // 120s 硬超时兜底——无论任意路径，按钮都必在有限时间内复位、结果必被展示。
-  let done = false
-  const deadline = Date.now() + 120000
-  planCompletionTimer = setInterval(() => {
-    (async () => {
-      try {
-        if (done || Date.now() > deadline) {
-          clearInterval(planCompletionTimer!)
-          planCompletionTimer = null
-          if (done) return
-          // 硬超时：强制结束，并按需最后一次拉取结果
-          try {
-            const r = await _planResult(jobId)
-            if (r && !planGen.value?.candidates?.length) { planGen.value = r; genPlanProgress.value = 100; genPlanStage.value = '' }
-          } catch { /* 忽略 */ }
-          try { controller.abort() } catch { /* 忽略 */ }
-          genPlanLoading.value = false
-          return
-        }
-        const st = await _planStatus(jobId)
-        if (st?.status === 'done') {
-          done = true
-          clearInterval(planCompletionTimer!)
-          planCompletionTimer = null
-          const r = await _planResult(jobId)
-          if (r && !planGen.value?.candidates?.length) { planGen.value = r; genPlanProgress.value = 100; genPlanStage.value = '' }
-          genPlanLoading.value = false
-          try { controller.abort() } catch { /* 忽略 */ }
-        } else if (st?.status === 'error') {
-          done = true
-          clearInterval(planCompletionTimer!)
-          planCompletionTimer = null
-          planStreamError(st.error || '计划生成失败')
-        }
-      } catch { /* 下一轮重试 */ }
-    })()
-  }, 2000)
-  // ── 结束看门狗 ─────────────────────────────────────
-  // 先探一次状态（任务可能已快速完成）
-  try {
-    const st = await _planStatus(jobId)
-    if (st?.status === 'done') { await syncPlanJobState(jobId); return }
-    if (st?.status === 'error') { planStreamError(st.error || '计划生成失败'); return }
-  } catch { /* 继续走 SSE */ }
-
-  try {
-    const resp = await fetch(`${baseUrl}/api/war-room/daily-plan/stream/${jobId}`, {
-      headers: { Authorization: `Bearer ${token}` },
-      signal: controller.signal,
-    })
-    if (!resp.ok || !resp.body) { planStreamError(`进度流连接失败(${resp.status})`); return }
-    const reader = resp.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
-    let event = 'message'
-    const dataBuffer: string[] = []
-    const dispatch = () => {
-      const raw = dataBuffer.join('\n')
-      dataBuffer.length = 0
-      if (event === 'progress' && raw) {
-        try {
-          const evt = JSON.parse(raw)
-          if (evt.status === 'done') {
-            finished = true
-            done = true
-            planGen.value = evt.result
-            genPlanProgress.value = 100
-            genPlanStage.value = ''
-            genPlanLoading.value = false
-            ElMessage.success(`已生成 ${evt.result?.candidates_count ?? 0} 条计划候选，请人工确认`)
-            stopPlanStream()
-          } else if (evt.status === 'error') {
-            finished = true
-            done = true
-            planStreamError(evt.message || '计划生成失败')
-          } else {
-            // running：逐段点亮审计漏斗
-            genPlanProgress.value = evt.progress ?? 0
-            genPlanStage.value = evt.stage || ''
-            const steps = Array.isArray(evt.steps) ? evt.steps : []
-            planGen.value = { candidates: [], candidates_count: 0, audit: { steps, total: steps.length } }
-          }
-        } catch { /* 忽略坏包 */ }
-      } else if (event === 'connected') {
-        syncPlanJobState(jobId)
-      }
-      event = 'message'
-    }
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() ?? ''
-      for (const line of lines) {
-        const t = line.replace(/\r$/, '')
-        if (t === '') dispatch()
-        else if (t.startsWith(':')) continue
-        else if (t.startsWith('event:')) event = t.slice(6).trim()
-        else if (t.startsWith('data:')) dataBuffer.push(t.slice(5).replace(/^ /, ''))
-      }
-      if (finished) break
-    }
-    // 流结束但未 done → 兜底刷新
-    if (!finished && !controller.signal.aborted) {
-      await syncPlanJobState(jobId)
-      if (planGen.value?.candidates_count) ElMessage.success(`已生成 ${planGen.value.candidates_count} 条计划候选，请人工确认`)
-      genPlanLoading.value = false
-      done = true
-      stopPlanStream()
-    }
-  } catch (e) {
-    if ((e as any)?.name !== 'AbortError') planStreamError()
-  }
 }
 
 async function generatePlan() {
@@ -1942,8 +1853,10 @@ async function generatePlan() {
     genPlanJobId.value = jobId
     genPlanProgress.value = 50
     genPlanStage.value = '计划'
-    // 直接轮询（绕开 SSE 流挂起问题）：每 300ms 查 status，done 就拉 result
-    const deadline = Date.now() + 60000
+    // 直接轮询：每 300ms 查 status，done 就拉 result。
+    // 后端四段流水线冷算约 50-150s，轮询窗口至少 180s，避免任务尚未完成就被判"超时"，
+    // 造成按钮复位但结果无声无息（用户误以为失败、再点会叠加重型任务）。
+    const deadline = Date.now() + 180000
     let done = false
     let failCount = 0
     while (!done && Date.now() < deadline) {
@@ -1978,11 +1891,13 @@ async function generatePlan() {
       }
     }
     if (!done) {
-      // 超时兜底：直接拉 result（可能后端已完成）
+      // 极慢速兜底（>180s 仍 running）：后端任务仍会在完成后自动落库为「今日计划快照」，
+      // 告知而非让用户误以为失败；快照在刷新 / daily-plan/today 时自动呈现。
       try {
         const result = await _planResult(jobId)
         if (result) { planGen.value = result; genPlanProgress.value = 100; genPlanStage.value = '' }
       } catch {}
+      ElMessage.warning('生成仍在后台进行（耗时较长），完成后会自动保存，可稍后刷新查看')
       genPlanLoading.value = false
       genPlanJobId.value = ''
     } else {
@@ -2063,12 +1978,22 @@ function editCandidate(ci: number) {
   editDialog.value = true
 }
 
-function removeCandidate(ci: number) {
+async function removeCandidate(ci: number) {
   const c = planGen.value?.candidates?.[ci]
   if (!c) return
+  const code = String(c.code || '').trim()
   planGen.value.candidates.splice(ci, 1)
   planGen.value.candidates_count = planGen.value.candidates.length
   ElMessage.success(`已否决候选 ${c.name || c.code}`)
+  // 持久化否决：切页/重进不还原（后端快照读取时按 plan_overrides 过滤）
+  if (code) {
+    try {
+      await _fetchJSON('/api/war-room/daily-plan/dismiss', {
+        method: 'POST',
+        body: JSON.stringify({ code, kind: 'candidate', dismissed: true }),
+      }, 10000)
+    } catch (e) { /* 持久化失败不阻塞 UI */ }
+  }
 }
 
 // ---- 5.4 已写计划的人工可改 ----
@@ -2104,6 +2029,20 @@ async function saveEdit() {
       if (editForm.value.trigger_price != null) c.trigger_price = editForm.value.trigger_price
       if (editForm.value.stop_loss != null) c.stop_loss = editForm.value.stop_loss
       c.sell_condition = editForm.value.sell_condition || c.sell_condition
+      // 持久化改价：确认写库 / 切页 / 重进均按已改价格为准
+      if (c.code) {
+        try {
+          await _fetchJSON('/api/war-room/daily-plan/override', {
+            method: 'POST',
+            body: JSON.stringify({
+              code: String(c.code).trim(),
+              trigger_price: c.trigger_price ?? undefined,
+              stop_loss: c.stop_loss ?? undefined,
+              sell_condition: c.sell_condition || undefined,
+            }),
+          }, 10000)
+        } catch (e) { /* 持久化失败不阻塞 UI */ }
+      }
     } else {
       const payload: Record<string, any> = {}
       if (editForm.value.trigger_price != null) payload.trigger_price = editForm.value.trigger_price
@@ -2271,6 +2210,9 @@ onMounted(async () => {
             if (cp && tabIndexMap[cp]) activeTab.value = cp
           }
           refreshCurrent()
+          // 全局背景数据区（外围/日历/快讯）依赖宏观快照：无论初始 Tab 是哪段都确保加载（纯读）
+          ensureMacroAuto()
+          loadGlobalStocks()
           // 打开即读：加载今日计划快照（盘前预生成成品），无需点击生成
           await loadTodayPlan()
           // 角标实时刷新定时器（每 60s 更新待办数字）
@@ -2304,6 +2246,21 @@ onUnmounted(() => {
 
 <style lang="scss" scoped>
 .war-room {
+  // 全局背景数据区（四个时段 Tab 均可见）
+  .global-bg-head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: 8px 0 12px;
+    padding-top: 4px;
+
+    .global-bg-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--el-text-color-primary);
+    }
+  }
+
   // 流程引导条
   .flow-bar {
     display: flex;

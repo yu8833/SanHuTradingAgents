@@ -840,6 +840,43 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"🚨 宏观快扫定时任务注册失败: {e}", exc_info=True)
 
+        # ==================== 盘后全市场三买三卖扫描落库（信号跟踪） ====================
+        # 设计文档「盘后 Step2 信号扫描落库」：16:00 收盘后全市场扫描一次，
+        # 把买点信号写入 signal_tracking（「次日计划预填」/ 周度「信号有效性」依赖该数据，
+        # 不依赖用户手动点击扫描）。任务内部自判交易日。
+        try:
+            async def run_postmarket_signal_scan():
+                try:
+                    from app.utils.trading_time import is_trading_day
+                    from app.utils.timezone import now_tz
+                    if not is_trading_day(now_tz()):
+                        logger.info("⏭️ 非交易日，跳过盘后全市场信号扫描")
+                        return
+                    from app.services.three_buys_three_sells_service import (
+                        get_three_buys_three_sells_service,
+                    )
+                    from app.services.signal_tracking_service import save_scan_signals
+                    svc = get_three_buys_three_sells_service()
+                    result = await svc.scan_three_buys_three_sells({"top_n": 30, "limit": 20})
+                    await save_scan_signals(result.get("items") or [])
+                    logger.info(
+                        f"✅ [APScheduler] 盘后全市场信号扫描完成: 命中 {result.get('total')} 只, "
+                        f"扫描 {result.get('scanned_count')} 只, 信号已落库"
+                    )
+                except Exception as e:
+                    logger.error(f"❌ [APScheduler] 盘后全市场信号扫描失败: {e}", exc_info=True)
+
+            scheduler.add_job(
+                run_postmarket_signal_scan,
+                cron_trigger("0 16 * * 1-5", timezone=get_tz()),
+                id="postmarket_signal_scan",
+                name="盘后全市场信号扫描落库（16:00）",
+                replace_existing=True,
+            )
+            logger.info("✅ 盘后全市场信号扫描任务已注册: 工作日 16:00")
+        except Exception as e:
+            logger.error(f"🚨 盘后全市场信号扫描任务注册失败: {e}", exc_info=True)
+
         # ==================== 信号跟踪有效性回填（每日盘后） ====================
         # 设计文档 P1（§4 缺口1）：每日回填「触发已满 5 个交易日」的信号实际表现，
         # 供周度复盘验证信号有效性。任务内部自判交易日。
