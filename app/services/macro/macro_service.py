@@ -311,6 +311,129 @@ async def _llm_interpretation(indices: list[dict], calendar: list[dict],
 
 
 # ---------------------------------------------------------------------------
+# 日历事件增强：已公布事件 → 快讯流提取实际值 + LLM 逐条解读（AI 分析）
+# ---------------------------------------------------------------------------
+def _calendar_news_keyword(event: str) -> str | None:
+    """从事件名映射快讯检索关键词（用于在公开快讯流中提取实际值）。"""
+    for key in ("初请", "非农", "失业", "CPI", "PPI", "PMI", "ISM", "LPR", "MLF", "社融"):
+        if key in event:
+            return key
+    return None
+
+
+def _extract_news_value(ev: dict, news: list[dict]) -> float | None:
+    """从公开快讯流（近 24h）提取已公布事件的实际值。
+
+    典型快讯如「美国上周初请失业金人数 24.3 万人」；AKShare/东财宏观序列常缺失或陈旧，
+    快讯流即"公开可查"的数据来源。提取失败返回 None（交给 LLM 定性）。
+    """
+    kw = _calendar_news_keyword(str(ev.get("event") or ""))
+    if not kw:
+        return None
+    for n in news or []:
+        blob = f"{n.get('title') or ''} {n.get('content') or ''}"
+        if kw not in blob:
+            continue
+        for unit in ("万人", "万", "亿", "%", "个百分点"):
+            m = __import__("re").search(rf"([0-9]+(?:\.[0-9]+)?)\s*{unit}", blob)
+            if m:
+                try:
+                    return float(m.group(1))
+                except ValueError:
+                    continue
+    return None
+
+
+def _call_llm_calendar(cfg: dict, prompt: str) -> str:
+    """同步调用 chat/completions，返回日历事件逐条解读文本。"""
+    import requests
+    api_base = cfg["api_base"].rstrip("/")
+    if not api_base.endswith("/chat/completions"):
+        api_base += "/chat/completions"
+    resp = requests.post(
+        api_base,
+        json={
+            "model": cfg["model"],
+            "messages": [
+                {"role": "system",
+                 "content": "你是宏观数据解读助手。针对列表中的已公布财经事件，逐条输出一行解读，"
+                            "格式严格为「事件名：解读（1-2 句）」。只做定性分析（对 A 股情绪/风格/"
+                            "货币政策的含义），可引用快讯；不得编造任何具体数值；数据缺失项明确写"
+                            "『实际值未获取』。每条一行，不要输出其它内容。"},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.2,
+            "max_tokens": 800,
+            "stream": False,
+        },
+        headers={"Authorization": f"Bearer {cfg['api_key']}",
+                 "Content-Type": "application/json"},
+        timeout=60,
+    )
+    resp.raise_for_status()
+    return resp.json()["choices"][0]["message"]["content"]
+
+
+def _calendar_fallback_analysis(ev: dict) -> str:
+    """LLM 不可用时保留的可读兜底解读。"""
+    actual = ev.get("actual")
+    if actual is not None:
+        return f"已公布 · 实际 {actual}（公开快讯流提取）；对市场的解读请结合下方宏观方向判断与快讯"
+    return "已公布（公开数据源暂未取到实际值，可到快讯流/行情中确认）"
+
+
+async def _calendar_ai_analysis(calendar: list[dict], news: list[dict]) -> list[dict]:
+    """对已公布事件做增强：①快讯流提取实际值 ②LLM 逐条解读（失败静默回退兜底文案）。
+
+    数据 ≠ 编造：实际值只来自 AKShare/快讯流等公开来源；LLM 只做定性分析，
+    prompt 明确禁止输出未提供的数值。
+    """
+    announced = [e for e in calendar if e.get("announced")]
+    if not announced:
+        return calendar
+    # ① 快讯流提取已公布事件实际值（覆盖 AKShare 序列缺失/陈旧）
+    for ev in announced:
+        if ev.get("actual") is None:
+            val = _extract_news_value(ev, news)
+            if val is not None:
+                ev["actual"] = val
+    # ② LLM 逐条解读（核心分析能力；失败不影响快照构建）
+    cfg = _get_llm_cfg()
+    if cfg:
+        try:
+            import asyncio
+            lines = ["【已公布财经事件】"]
+            for e in announced:
+                lines.append(f"- {e.get('date')} {e.get('event')}："
+                             f"实际={e.get('actual') or '未获取'} 预期={e.get('forecast') or '未提供'} "
+                             f"前值={e.get('previous') or '未提供'}")
+            lines.append("\n【近24小时相关快讯】")
+            for n in (news or [])[:15]:
+                lines.append(f"- {n.get('title')}")
+            text = await asyncio.to_thread(_call_llm_calendar, cfg, "\n".join(lines))
+            mapping: dict[str, str] = {}
+            for line in text.splitlines():
+                line = line.strip()
+                if not line or ("：" not in line and ":" not in line):
+                    continue
+                sep = "：" if "：" in line else ":"
+                key, val = line.split(sep, 1)
+                mapping[key.strip()] = val.strip()
+            for ev in announced:
+                for key, val in mapping.items():
+                    if key and (key in ev["event"] or ev["event"] in key):
+                        ev["analysis"] = f"AI解读：{val}"
+                        break
+        except Exception as e:
+            logger.warning(f"日历事件 LLM 解读失败（保留兜底文案）: {e}")
+    # ③ 兜底文案（LLM 未覆盖项）
+    for ev in announced:
+        if not ev.get("analysis"):
+            ev["analysis"] = _calendar_fallback_analysis(ev)
+    return calendar
+
+
+# ---------------------------------------------------------------------------
 # 快照构建 / 读取 / 刷新
 # ---------------------------------------------------------------------------
 async def build_macro_snapshot(days: int = 7) -> dict:
@@ -326,6 +449,9 @@ async def build_macro_snapshot(days: int = 7) -> dict:
     # 5.1：为每条信号补充"判定"（利多/利空/中性），便于面板逐条复核
     for sig in rule.get("signals", []):
         sig["judge"] = "利多" if sig.get("score", 0) > 0 else ("利空" if sig.get("score", 0) < 0 else "中性")
+
+    # 已公布事件：快讯流提取实际值 + LLM 逐条解读（参考 Tab 直接呈现分析）
+    calendar = await _calendar_ai_analysis(calendar, news)
 
     llm = await _llm_interpretation(indices, calendar, news, rule)
 

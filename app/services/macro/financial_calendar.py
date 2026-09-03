@@ -152,7 +152,7 @@ _HIGH_FREQ_EVENTS = (
     {"event": "美国 PPI", "region": "美国", "importance": "medium",
      "rule": _us_ppi_rule, "release_time": "20:30", "akshare": "macro_usa_ppi"},
     {"event": "美国初请失业金", "region": "美国", "importance": "medium",
-     "rule": _jobless_rule, "release_time": "20:30", "akshare": None},
+     "rule": _jobless_rule, "release_time": "20:30", "akshare": "macro_usa_initial_jobless"},
     {"event": "美国 ISM 制造业 PMI", "region": "美国", "importance": "medium",
      "rule": _ism_rule, "release_time": "22:00", "akshare": "macro_usa_ism_pmi"},
     {"event": "美联储 FOMC 利率决议", "region": "美国", "importance": "high",
