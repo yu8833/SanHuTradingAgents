@@ -63,10 +63,6 @@
                   </span>
                 </div>
                 <div class="dash-right">
-                  <div class="dash-lock" :class="{ pending: !basis?.locked_at }">
-                    <el-icon><Lock /></el-icon>
-                    <span>{{ basis?.locked_at ? `当日锁定于 ${lockTime}` : '盘中不重算 · 以盘前基准为准' }}</span>
-                  </div>
                   <span class="dash-scale-hint">刻度 = 状态区间 · 指针 = 基准 score 定位</span>
                 </div>
               </div>
@@ -85,36 +81,47 @@
                   <span class="g-scale bear-zone">偏空 · 减仓避离</span>
                   <span class="g-scale neutral-zone">观望 · 不做多空断言</span>
                   <span class="g-scale bull-zone">偏多 · 可进取</span>
-                  <span class="g-score">规则总分 <b>{{ rule?.score ?? 0 }}</b></span>
                 </div>
               </div>
 
               <!-- 低置信度 / 观望解释 -->
-              <div v-if="basis?.low_confidence || basis?.status === '中性(观望)'" class="dash-note">
+              <div v-if="basis?.low_confidence" class="dash-note">
                 <el-icon><WarningFilled /></el-icon>
-                置信度 {{ basis?.confidence ?? 0 }}% &lt; 阈值 {{ basis?.confidence_threshold ?? 30 }}% → 指针停在「观望」，明确不做多空强断言；若执行，仓位减半。
+                置信度 {{ basis?.confidence ?? 0 }}% &lt; 阈值 {{ basis?.confidence_threshold ?? 30 }}%，信号不足以形成强多空断言 → 指针停在「观望」；若执行，仓位减半。
+              </div>
+              <div v-else-if="basis?.status === '中性(观望)'" class="dash-note" :class="{ reminder: true }">
+                <el-icon><WarningFilled /></el-icon>
+                各维度信号多空均衡、方向呈中性 → 观望，不做多空强断言；若执行，仓位减半。
               </div>
               <div v-else-if="basis?.status === '数据不足'" class="dash-note"><el-icon><WarningFilled /></el-icon>数据不足，不足以形成方向基准。</div>
             </el-card>
 
-            <!-- 5.1 方向拆解面板（信号溯源） -->
-            <div v-if="rule?.signals?.length" class="signal-panel">
-              <div class="panel-head">
-                <span class="panel-title"><el-icon><Magnet /></el-icon> 方向拆解 · 信号溯源</span>
-                <span class="panel-hint">每只信号：数值 / 权重 / 判定 / 如何影响方向，全部直接展示</span>
-              </div>
-              <div v-for="(s, i) in signalRows" :key="i" class="signal-row">
-                <span class="sig-name">{{ s.name }}</span>
-                <span class="sig-value" :class="sigValueClass(s)">{{ sigValueText(s) }}</span>
-                <span class="sig-weight">权重 {{ s.weight ?? 0 }}</span>
-                <span class="sig-judge" :class="judgeClass(s.judge)">{{ judgeLabel(s.judge) }}</span>
-                <span class="sig-score" :class="s.score > 0 ? 'up' : s.score < 0 ? 'down' : ''">
-                  {{ s.score > 0 ? `+${s.score}` : s.score }}
-                </span>
-                <span class="sig-explain">{{ s.detail || '—' }}</span>
-              </div>
-            </div>
-            <el-empty v-else :image-size="40" description="暂无规则依据" />
+            <!-- 5.1 方向拆解面板（信号溯源，可折叠：先看结论，需要时再逐条复核依据） -->
+            <el-collapse v-model="signalCollapse" class="signal-collapse">
+              <el-collapse-item name="signals">
+                <template #title>
+                  <span class="panel-collapse-title">
+                    <el-icon><Magnet /></el-icon>
+                    <span class="panel-title-inline">方向拆解 · 信号溯源</span>
+                    <span class="panel-score">规则总分 <b>{{ rule?.score ?? 0 }}</b></span>
+                    <span class="panel-hint">每只信号：数值 / 权重 / 判定 / 如何影响方向</span>
+                  </span>
+                </template>
+                <div v-if="rule?.signals?.length" class="signal-panel">
+                  <div v-for="(s, i) in signalRows" :key="i" class="signal-row">
+                    <span class="sig-name">{{ s.name }}</span>
+                    <span class="sig-value" :class="sigValueClass(s)">{{ sigValueText(s) }}</span>
+                    <span class="sig-weight">权重 {{ s.weight ?? 0 }}</span>
+                    <span class="sig-judge" :class="judgeClass(s.judge)">{{ judgeLabel(s.judge) }}</span>
+                    <span class="sig-score" :class="s.score > 0 ? 'up' : s.score < 0 ? 'down' : ''">
+                      {{ s.score > 0 ? `+${s.score}` : s.score }}
+                    </span>
+                    <span class="sig-explain">{{ s.detail || '—' }}</span>
+                  </div>
+                </div>
+                <el-empty v-else :image-size="40" description="暂无规则依据" />
+              </el-collapse-item>
+            </el-collapse>
             <div v-if="llm" class="llm-card">
               <div class="llm-sec">
                 <div class="llm-tag">今日关键词</div>
@@ -148,7 +155,224 @@
               </div>
             </div>
           </section>
+        </template>
 
+        <template v-else-if="macroRefreshing">
+          <el-empty loading description="正在生成今日宏观快照…" />
+        </template>
+        <el-empty v-else-if="!loading" description="今日宏观快照未生成">
+          <el-button size="small" type="primary" :icon="Refresh" :loading="macroRefreshing" @click="refreshMacro">立即生成</el-button>
+        </el-empty>
+
+        <!-- ⑤ 当日计划生成流水线（5.3 带审计痕迹） -->
+        <section class="block">
+          <div class="block-head">
+            <span class="block-title"><el-icon><Operation /></el-icon> 当日计划生成流水线</span>
+            <div class="block-actions">
+              <span v-if="planGen && (planGen.candidates_count ?? 0) > 0" class="block-hint">候选 {{ planGen.candidates_count }} 条 · 待人工确认</span>
+              <span v-else-if="planGen?.filtered_count > 0" class="block-hint">已自动生成 · 候选已全部确认/过滤（{{ planGen.filtered_count }} 条）</span>
+              <span v-else-if="planGen" class="block-hint">今日快照已生成 · 暂无候选</span>
+              <el-button size="small" type="primary" :icon="MagicStick" :class="{ 'is-generating': genPlanLoading }" @click="generatePlan">
+                {{ genPlanLoading ? '生成中…' : (planGen ? '重新生成' : '生成当日计划') }}
+              </el-button>
+            </div>
+          </div>
+
+          <template v-if="planGen?.audit?.steps?.length">
+            <el-collapse v-model="planAuditCollapse" class="plan-audit-collapse">
+              <el-collapse-item name="audit">
+                <template #title>
+                  <span class="audit-collapse-title">
+                    五段决策漏斗（环境 → 行业 → 个股 → 计划 → 卖出）
+                    <span class="audit-summary" v-if="planGen.generated_at">生成于 {{ fmtClock(planGen.generated_at) }}</span>
+                  </span>
+                </template>
+                <div class="pipeline">
+                  <template v-for="(st, i) in planGen.audit.steps" :key="i">
+                    <div class="pipeline-step" :class="'p-step-' + pipelineKey(st.step)">
+                      <div class="p-step-top">
+                        <span class="p-step-name">{{ stepLabel(st.step) }}</span>
+                        <span class="p-step-count">
+                          扫描 <b>{{ st.scanned }}</b>
+                          <template v-if="st.dropped"> → 保留 <b class="kept">{{ st.kept }}</b></template>
+                        </span>
+                      </div>
+                      <div class="p-step-rule">{{ st.rule }}</div>
+                      <div class="p-step-bar">
+                        <span class="fill" :style="{ width: keptPct(st) + '%' }"></span>
+                      </div>
+                      <div class="p-step-reasons">
+                        <span v-for="(r, ri) in st.reasons" :key="ri" class="p-reason">
+                          <span class="r-dot"></span>{{ r }}
+                        </span>
+                      </div>
+                    </div>
+                    <div v-if="i < planGen.audit.steps.length - 1" class="pipeline-arrow">
+                      <el-icon><Right /></el-icon>
+                    </div>
+                  </template>
+                </div>
+                <p class="pipeline-tip">
+                  <el-icon><InfoFilled /></el-icon>
+                  四段从「环境 → 行业 → 个股 → 计划」，每段展示扫描与过滤漏斗；宏观方向显式标注为过滤条件，非黑箱。
+                </p>
+                <!-- 行业方向预测 → 当日预测行业池（Stage2/Stage3 产品化展示） -->
+                <div v-if="planGen?.industries?.length" class="ind-strip">
+                  <span class="ind-strip-label">预测行业池</span>
+                  <el-tag v-for="(ind, ii) in planGen.industries" :key="ii" size="small" type="info" effect="plain" class="ind-tag">
+                    {{ ind.industry }} · {{ ind.confidence }}%
+                  </el-tag>
+                </div>
+                <!-- 快照已自动生成、但候选被「当日计划去重」全部过滤时，明确说明而非让用户误以为没自动执行 -->
+                <div v-if="planGen?.filtered_count > 0 && !planGen?.candidates?.length" class="plan-filtered-note">
+                  <el-icon><InfoFilled /></el-icon>
+                  盘前 8:15 已自动生成当日计划（共 {{ planGen.filtered_count }} 条候选），因其中标的已在你当日计划中确认/添加，此处不再重复展示。
+                  如需重新运行流水线，可点右上角「重新生成」。
+                </div>
+              </el-collapse-item>
+            </el-collapse>
+          </template>
+          <el-empty v-else :image-size="48" description="点击「生成当日计划」，查看 环境 → 行业 → 个股 → 计划 → 卖出 五段决策过程与过滤漏斗" />
+        </section>
+
+        <!-- ⑥ 待确认计划候选（5.4 来源 + 人工最后一道闸） -->
+        <section class="block" v-if="planGen?.candidates?.length">
+          <div class="block-head">
+            <span class="block-title"><el-icon><Checked /></el-icon> 待确认计划候选</span>
+            <span class="block-hint">自动生成 ≠ 自动下单 · 确认后写入当日计划</span>
+          </div>
+          <div class="cand-grid">
+            <el-card v-for="(c, ci) in planGen.candidates" :key="c.code + ci" shadow="never" class="cand-card">
+              <div class="cand-head">
+                <span class="cand-name">
+                  <a :href="stockHref(c.code)" target="_blank" rel="noopener" class="stock-link stock-code">{{ c.code }}</a>
+                  <a :href="stockHref(c.code)" target="_blank" rel="noopener" class="stock-link">{{ c.name || c.code }}</a>
+                </span>
+                <span class="cand-sig" v-if="c.signal_label">{{ c.signal_label }}</span>
+              </div>
+              <div class="cand-source" v-if="c.source?.label">
+                <span class="src-dot"></span>{{ c.source.label }}
+              </div>
+              <div class="cand-fields">
+                <div class="fld"><span class="k">触发价</span><span class="v">{{ c.trigger_price }}</span></div>
+                <div class="fld"><span class="k">止损</span><span class="v down">{{ c.stop_loss }}</span></div>
+                <div class="fld"><span class="k">卖出</span><span class="v">{{ shortSell(c.sell_condition) }}</span></div>
+                <div class="fld"><span class="k">仓位</span><span class="v">{{ positionText(c.position) }}</span></div>
+              </div>
+              <div class="cand-actions">
+                <el-button size="small" type="primary" :loading="confirmingIdx === ci" @click="confirmCandidate(ci)">确认写库</el-button>
+                <el-button size="small" @click="editCandidate(ci)">改价</el-button>
+                <el-button size="small" type="danger" plain @click="removeCandidate(ci)">删</el-button>
+              </div>
+            </el-card>
+          </div>
+        </section>
+
+        <!-- ⑦ 今日卖出观测（持仓卖出评估：哪些需要卖 / 减仓 / 止损止盈） -->
+        <section class="block" v-if="planGen?.sell_candidates?.length">
+          <div class="block-head">
+            <span class="block-title"><el-icon><Sell /></el-icon> 今日卖出观测</span>
+            <span class="block-hint">持仓卖出评估（止损/止盈 + 三买三卖卖点）· 确认后写入当日计划</span>
+          </div>
+          <el-table v-loading="genPlanLoading" :data="planGen.sell_candidates" stripe size="small" class="app-table app-table--compact">
+            <el-table-column label="代码" width="100">
+              <template #default="{ row }">
+                <a :href="stockHref(row.code)" target="_blank" rel="noopener" class="stock-link stock-code">{{ row.code }}</a>
+              </template>
+            </el-table-column>
+            <el-table-column label="名称" min-width="110">
+              <template #default="{ row }">
+                <a :href="stockHref(row.code)" target="_blank" rel="noopener" class="stock-link">{{ row.name || row.code }}</a>
+              </template>
+            </el-table-column>
+            <el-table-column label="建议" width="110">
+              <template #default="{ row }">
+                <span class="sell-advice" :class="sellAdviceTagClass(row)">{{ row.signal_label || row.advice_label || '卖出' }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="现价" width="90">
+              <template #default="{ row }">{{ row.last_price ?? '—' }}</template>
+            </el-table-column>
+            <el-table-column label="盈亏率" width="100">
+              <template #default="{ row }">
+                <span v-if="row.profit_loss_rate != null" :class="clsByVal(row.profit_loss_rate, '')">{{ fmtPct(row.profit_loss_rate) }}</span>
+                <span v-else>—</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="卖出触发价" width="100">
+              <template #default="{ row }">{{ row.trigger_price ?? '—' }}</template>
+            </el-table-column>
+            <el-table-column label="原因" min-width="170" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.reason || row.sell_condition || '—' }}</template>
+            </el-table-column>
+            <el-table-column label="操作" width="150" fixed="right">
+              <template #default="{ row, $index }">
+                <el-button size="small" type="danger" plain :loading="confirmingSellIdx === $index" @click="confirmSellCandidate($index)">确认卖出</el-button>
+                <el-button size="small" @click="removeSellCandidate($index)">否</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </section>
+
+        <!-- ⑧ 当日计划 -->
+        <section class="block">
+          <div class="block-head">
+            <span class="block-title"><el-icon><Tickets /></el-icon> 当日计划</span>
+            <el-button size="small" type="primary" :icon="Plus" @click="openPlanDialog">添加计划</el-button>
+          </div>
+          <el-table v-loading="plansLoading" :data="plans" stripe size="small" class="app-table app-table--compact">
+            <el-table-column label="代码" width="100">
+              <template #default="{ row }">
+                <a :href="stockHref(row.code)" target="_blank" rel="noopener" class="stock-link stock-code">{{ row.code }}</a>
+              </template>
+            </el-table-column>
+            <el-table-column label="名称" min-width="100">
+              <template #default="{ row }">
+                <a :href="stockHref(row.code)" target="_blank" rel="noopener" class="stock-link">{{ row.name || row.code }}</a>
+              </template>
+            </el-table-column>
+            <el-table-column label="来源" min-width="150">
+              <template #default="{ row }">
+                <span v-if="row.source?.label" class="plan-source">
+                  <span class="src-dot"></span>{{ row.source.label }}
+                </span>
+                <span v-else class="plan-source manual"><span class="src-dot"></span>手动添加</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="方向" width="70">
+              <template #default="{ row }">
+                <span :class="row.direction === 'buy' ? 'up' : 'down'">{{ row.direction_label }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="触发价" width="90">
+              <template #default="{ row }">{{ row.trigger_price ?? '—' }}</template>
+            </el-table-column>
+            <el-table-column label="仓位" width="100">
+              <template #default="{ row }">{{ positionText(row.position) }}</template>
+            </el-table-column>
+            <el-table-column prop="stop_loss" label="止损" width="90">
+              <template #default="{ row }">{{ row.stop_loss ?? '—' }}</template>
+            </el-table-column>
+            <el-table-column prop="sell_condition" label="卖出条件" min-width="140" show-overflow-tooltip />
+            <el-table-column label="状态" width="90">
+              <template #default="{ row }">
+                <el-tag size="small" :type="planStatusTag(row)">{{ planStatusLabel(row) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="150" fixed="right">
+              <template #default="{ row }">
+                <el-button v-if="row.status === 'pending'" size="small" link type="primary" @click="editPlan(row)">改价</el-button>
+                <el-button v-if="row.status === 'pending' && !row.confirmed" size="small" link type="primary" :loading="confirmingPlanId === row.id" @click="confirmPlanWrite(row)">确认</el-button>
+                <el-button v-if="row.status === 'pending'" size="small" link type="danger" @click="removePlan(row)">删除</el-button>
+                <span v-if="row.status !== 'pending'" class="no-op">—</span>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-empty v-if="!plans.length" description="今日暂无计划：可点「生成当日计划」自动装配，或手动添加" />
+        </section>
+
+        <!-- 背景数据区（外围市场 / 财经日历 / 重要快讯） -->
+        <template v-if="macro">
           <!-- ② 外围市场快照（指数 / 美股 / 港股分类，样式仿大盘看板全球市场） -->
           <section class="block">
             <div class="block-head">
@@ -238,287 +462,10 @@
             </div>
           </section>
         </template>
-        <template v-else-if="macroRefreshing">
-          <el-empty loading description="正在生成今日宏观快照…" />
-        </template>
-        <el-empty v-else-if="!loading" description="今日宏观快照未生成">
-          <el-button size="small" type="primary" :icon="Refresh" :loading="macroRefreshing" @click="refreshMacro">立即生成</el-button>
-        </el-empty>
-
-        <!-- ⑤ 当日计划生成流水线（5.3 带审计痕迹） -->
-        <section class="block">
-          <div class="block-head">
-            <span class="block-title"><el-icon><Operation /></el-icon> 当日计划生成流水线</span>
-            <div class="block-actions">
-              <span v-if="planGen" class="block-hint">候选 {{ planGen.candidates_count ?? 0 }} 条 · 待人工确认</span>
-              <el-button size="small" type="primary" :icon="MagicStick" :class="{ 'is-generating': genPlanLoading }" @click="generatePlan">
-                {{ genPlanLoading ? '生成中…' : (planGen ? '重新生成' : '生成当日计划') }}
-              </el-button>
-            </div>
-          </div>
-
-          <template v-if="planGen?.audit?.steps?.length">
-            <div class="pipeline">
-              <template v-for="(st, i) in planGen.audit.steps" :key="i">
-                <div class="pipeline-step" :class="'p-step-' + pipelineKey(st.step)">
-                  <div class="p-step-top">
-                    <span class="p-step-name">{{ stepLabel(st.step) }}</span>
-                    <span class="p-step-count">
-                      扫描 <b>{{ st.scanned }}</b>
-                      <template v-if="st.dropped"> → 保留 <b class="kept">{{ st.kept }}</b></template>
-                    </span>
-                  </div>
-                  <div class="p-step-rule">{{ st.rule }}</div>
-                  <div class="p-step-bar">
-                    <span class="fill" :style="{ width: keptPct(st) + '%' }"></span>
-                  </div>
-                  <div class="p-step-reasons">
-                    <span v-for="(r, ri) in st.reasons" :key="ri" class="p-reason">
-                      <span class="r-dot"></span>{{ r }}
-                    </span>
-                  </div>
-                </div>
-                <div v-if="i < planGen.audit.steps.length - 1" class="pipeline-arrow">
-                  <el-icon><Right /></el-icon>
-                </div>
-              </template>
-            </div>
-            <p class="pipeline-tip">
-              <el-icon><InfoFilled /></el-icon>
-              四段从「环境 → 行业 → 个股 → 计划」，每段展示扫描与过滤漏斗；宏观方向显式标注为过滤条件，非黑箱。
-            </p>
-            <!-- 行业方向预测 → 当日预测行业池（Stage2/Stage3 产品化展示） -->
-            <div v-if="planGen?.industries?.length" class="ind-strip">
-              <span class="ind-strip-label">预测行业池</span>
-              <el-tag v-for="(ind, ii) in planGen.industries" :key="ii" size="small" type="info" effect="plain" class="ind-tag">
-                {{ ind.industry }} · {{ ind.confidence }}%
-              </el-tag>
-            </div>
-          </template>
-          <el-empty v-else :image-size="48" description="点击「生成当日计划」，查看 环境 → 行业 → 个股 → 计划 四段决策过程与过滤漏斗" />
-        </section>
-
-        <!-- ⑥ 待确认计划候选（5.4 来源 + 人工最后一道闸） -->
-        <section class="block" v-if="planGen?.candidates?.length">
-          <div class="block-head">
-            <span class="block-title"><el-icon><Checked /></el-icon> 待确认计划候选</span>
-            <span class="block-hint">自动生成 ≠ 自动下单 · 确认后写入当日计划</span>
-          </div>
-          <div class="cand-grid">
-            <el-card v-for="(c, ci) in planGen.candidates" :key="c.code + ci" shadow="never" class="cand-card">
-              <div class="cand-head">
-                <span class="cand-name">{{ c.name || c.code }} <span class="fav-code">{{ c.code }}</span></span>
-                <span class="cand-sig" v-if="c.signal_label">{{ c.signal_label }}</span>
-              </div>
-              <div class="cand-source" v-if="c.source?.label">
-                <span class="src-dot"></span>{{ c.source.label }}
-              </div>
-              <div class="cand-fields">
-                <div class="fld"><span class="k">触发价</span><span class="v">{{ c.trigger_price }}</span></div>
-                <div class="fld"><span class="k">止损</span><span class="v down">{{ c.stop_loss }}</span></div>
-                <div class="fld"><span class="k">卖出</span><span class="v">{{ shortSell(c.sell_condition) }}</span></div>
-                <div class="fld"><span class="k">仓位</span><span class="v">{{ positionText(c.position) }}</span></div>
-              </div>
-              <div class="cand-actions">
-                <el-button size="small" type="primary" :loading="confirmingIdx === ci" @click="confirmCandidate(ci)">确认写库</el-button>
-                <el-button size="small" @click="editCandidate(ci)">改价</el-button>
-                <el-button size="small" type="danger" plain @click="removeCandidate(ci)">删</el-button>
-              </div>
-            </el-card>
-          </div>
-        </section>
-
-        <!-- ⑦ 今日卖出观测（持仓卖出评估：哪些需要卖 / 减仓 / 止损止盈） -->
-        <section class="block" v-if="planGen?.sell_candidates?.length">
-          <div class="block-head">
-            <span class="block-title"><el-icon><Sell /></el-icon> 今日卖出观测</span>
-            <span class="block-hint">持仓卖出评估（止损/止盈 + 三买三卖卖点）· 确认后写入当日计划</span>
-          </div>
-          <el-table v-loading="genPlanLoading" :data="planGen.sell_candidates" stripe size="small" class="app-table app-table--compact">
-            <el-table-column label="标的" min-width="120">
-              <template #default="{ row }">{{ row.name }} <span class="fav-code">{{ row.code }}</span></template>
-            </el-table-column>
-            <el-table-column label="建议" width="110">
-              <template #default="{ row }">
-                <span class="sell-advice" :class="sellAdviceTagClass(row)">{{ row.signal_label || row.advice_label || '卖出' }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="现价" width="90">
-              <template #default="{ row }">{{ row.last_price ?? '—' }}</template>
-            </el-table-column>
-            <el-table-column label="盈亏率" width="100">
-              <template #default="{ row }">
-                <span v-if="row.profit_loss_rate != null" :class="clsByVal(row.profit_loss_rate, '')">{{ fmtPct(row.profit_loss_rate) }}</span>
-                <span v-else>—</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="卖出触发价" width="100">
-              <template #default="{ row }">{{ row.trigger_price ?? '—' }}</template>
-            </el-table-column>
-            <el-table-column label="原因" min-width="170" show-overflow-tooltip>
-              <template #default="{ row }">{{ row.reason || row.sell_condition || '—' }}</template>
-            </el-table-column>
-            <el-table-column label="操作" width="150" fixed="right">
-              <template #default="{ row, $index }">
-                <el-button size="small" type="danger" plain :loading="confirmingSellIdx === $index" @click="confirmSellCandidate($index)">确认卖出</el-button>
-                <el-button size="small" @click="removeSellCandidate($index)">否</el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-        </section>
-
-        <!-- ⑧ 当日计划 -->
-        <section class="block">
-          <div class="block-head">
-            <span class="block-title"><el-icon><Tickets /></el-icon> 当日计划</span>
-            <el-button size="small" type="primary" :icon="Plus" @click="openPlanDialog">添加计划</el-button>
-          </div>
-          <el-table v-loading="plansLoading" :data="plans" stripe size="small" class="app-table app-table--compact">
-            <el-table-column prop="name" label="标的" min-width="110">
-              <template #default="{ row }">{{ row.name || row.code }}</template>
-            </el-table-column>
-            <el-table-column label="来源" min-width="150">
-              <template #default="{ row }">
-                <span v-if="row.source?.label" class="plan-source">
-                  <span class="src-dot"></span>{{ row.source.label }}
-                </span>
-                <span v-else class="plan-source manual"><span class="src-dot"></span>手动添加</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="方向" width="70">
-              <template #default="{ row }">
-                <span :class="row.direction === 'buy' ? 'up' : 'down'">{{ row.direction_label }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="触发价" width="90">
-              <template #default="{ row }">{{ row.trigger_price ?? '—' }}</template>
-            </el-table-column>
-            <el-table-column label="仓位" width="100">
-              <template #default="{ row }">{{ positionText(row.position) }}</template>
-            </el-table-column>
-            <el-table-column prop="stop_loss" label="止损" width="90">
-              <template #default="{ row }">{{ row.stop_loss ?? '—' }}</template>
-            </el-table-column>
-            <el-table-column prop="sell_condition" label="卖出条件" min-width="140" show-overflow-tooltip />
-            <el-table-column label="状态" width="80">
-              <template #default="{ row }">
-                <el-tag size="small" :type="planStatusTag(row.status)">{{ planStatusLabel(row.status) }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="150" fixed="right">
-              <template #default="{ row }">
-                <el-button v-if="row.status === 'pending'" size="small" link type="primary" @click="editPlan(row)">改价</el-button>
-                <el-button v-if="row.status === 'pending'" size="small" link type="primary" @click="confirmPlanWrite(row)">确认</el-button>
-                <el-button v-if="row.status === 'pending'" size="small" link type="danger" @click="removePlan(row)">删除</el-button>
-                <span v-else class="no-op">—</span>
-              </template>
-            </el-table-column>
-          </el-table>
-          <el-empty v-if="!plans.length" description="今日暂无计划：可点「生成当日计划」自动装配，或手动添加" />
-        </section>
       </el-tab-pane>
 
       <!-- ============ 盘中 ============ -->
       <el-tab-pane label="盘中" name="intraday">
-        <section class="block">
-          <div class="block-head">
-            <span class="block-title"><el-icon><Odometer /></el-icon> 大盘状态条</span>
-          </div>
-          <div v-if="regime" class="regime-bar" :class="'regime-' + regime.trend">
-            <div class="regime-chip">
-              <el-icon><TrendCharts v-if="regime.trend === 'bull'" /><Bottom v-else-if="regime.trend === 'bear'" /><Minus v-else /></el-icon>
-              <span class="regime-label">{{ regime.trend_label }}</span>
-              <span class="regime-vol">· {{ regime.volatility_label }}</span>
-            </div>
-            <div v-if="regime.advice" class="regime-advice">
-              <el-icon><InfoFilled /></el-icon>
-              <span>{{ regime.advice }}</span>
-            </div>
-            <span v-if="regime.as_of" class="regime-asof">{{ regime.as_of }}</span>
-          </div>
-          <el-empty v-else :image-size="48" description="暂无市场环境数据" />
-        </section>
-
-        <!-- ①.5 今日预警（角标数字对应本列表行数，顶部「盘中」待办） -->
-        <section class="block">
-          <div class="block-head">
-            <span class="block-title"><el-icon><Bell /></el-icon> 今日预警
-              <span class="block-hint">今日触发 {{ todayData?.intraday?.alert_count ?? todayAlerts.length }} 条</span>
-            </span>
-            <router-link to="/stock-alerts" class="more-link">监控中心页 →</router-link>
-          </div>
-          <el-table v-loading="alertsLoading" :data="todayAlerts" stripe size="small" class="app-table app-table--compact" max-height="360">
-            <el-table-column label="标的" min-width="110">
-              <template #default="{ row }">{{ row.name }} <span class="fav-code">{{ row.symbol }}</span></template>
-            </el-table-column>
-            <el-table-column label="级别" width="80">
-              <template #default="{ row }">
-                <el-tag size="small" :type="row.severity === 'critical' ? 'danger' : row.severity === 'warn' ? 'warning' : 'info'">{{ severityLabel(row.severity) }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column prop="rule_name" label="触发规则" min-width="170" show-overflow-tooltip />
-            <el-table-column label="现价 / 涨跌" min-width="110">
-              <template #default="{ row }">
-                <span>{{ row.price ?? '—' }}</span>
-                <span v-if="row.change_pct != null" :class="clsByVal(row.change_pct, '')" class="sep">{{ fmtPct(row.change_pct) }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="时间" width="80">
-              <template #default="{ row }">{{ alertTime(row.ts) }}</template>
-            </el-table-column>
-          </el-table>
-          <el-empty v-if="!todayAlerts.length && !alertsLoading" :image-size="48" description="今日暂无触发预警" />
-        </section>
-
-        <!-- ② 监控中心（复用现有组件：价格/涨跌幅/持仓退出信号预警） -->
-        <section class="block">
-          <div class="block-head">
-            <span class="block-title"><el-icon><Lightning /></el-icon> 监控中心</span>
-            <router-link to="/stock-alerts" class="more-link">监控中心页 →</router-link>
-          </div>
-          <MonitorCenter />
-        </section>
-
-        <section class="block">
-          <div class="block-head">
-            <span class="block-title"><el-icon><Coin /></el-icon> 持仓追踪</span>
-            <router-link to="/portfolio" class="more-link">持仓追踪页 →</router-link>
-          </div>
-          <div class="kpi-row" v-if="posSummary">
-            <div class="kpi-cell">
-              <div class="kpi-label">持仓数</div>
-              <div class="kpi-value">{{ posSummary.total_positions }}</div>
-            </div>
-            <div class="kpi-cell">
-              <div class="kpi-label">总市值</div>
-              <div class="kpi-value">{{ fmtMoney(posSummary.total_market_value, '¥') }}</div>
-            </div>
-            <div class="kpi-cell">
-              <div class="kpi-label">浮动盈亏</div>
-              <div class="kpi-value" :class="clsByVal(posSummary.total_profit_loss, '')">{{ fmtSigned(posSummary.total_profit_loss) }} 元</div>
-            </div>
-          </div>
-          <el-table v-loading="plansLoading" :data="posSummary?.positions || []" stripe size="small" class="app-table app-table--compact" max-height="360">
-            <el-table-column prop="stock_name" label="名称" min-width="120" />
-            <el-table-column label="现价" width="100">
-              <template #default="{ row }">{{ row.current_price ?? '—' }}</template>
-            </el-table-column>
-            <el-table-column label="盈亏率" width="110">
-              <template #default="{ row }">
-                <span :class="clsByVal(row.profit_loss_rate, '')">{{ fmtPct(row.profit_loss_rate) }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="止损 / 止盈" min-width="150">
-              <template #default="{ row }">
-                <span>{{ row.stop_loss_price ?? '—' }}</span>
-                <span class="sep">/</span>
-                <span>{{ row.take_profit_price ?? '—' }}</span>
-              </template>
-            </el-table-column>
-          </el-table>
-          <el-empty v-if="!posSummary?.positions?.length" :image-size="48" description="暂无持仓" />
-        </section>
-
         <section class="block">
           <div class="block-head">
             <span class="block-title"><el-icon><Odometer /></el-icon> 买卖点实时指导</span>
@@ -534,8 +481,15 @@
               <span v-if="guideBuys.length" class="guide-count">{{ guideBuys.length }}</span>
             </div>
             <el-table v-loading="guideLoading" :data="guideBuys" stripe size="small" class="app-table app-table--compact" max-height="320">
-              <el-table-column label="标的" min-width="120">
-                <template #default="{ row }">{{ row.name }} <span class="fav-code">{{ row.code }}</span></template>
+              <el-table-column label="代码" width="100">
+                <template #default="{ row }">
+                  <a :href="stockHref(row.code)" target="_blank" rel="noopener" class="stock-link stock-code">{{ row.code }}</a>
+                </template>
+              </el-table-column>
+              <el-table-column label="名称" min-width="110">
+                <template #default="{ row }">
+                  <a :href="stockHref(row.code)" target="_blank" rel="noopener" class="stock-link">{{ row.name || row.code }}</a>
+                </template>
               </el-table-column>
               <el-table-column label="信号" width="90">
                 <template #default="{ row }">{{ row.signal_label || '计划' }}</template>
@@ -554,14 +508,15 @@
               </el-table-column>
               <el-table-column label="状态" width="90">
                 <template #default="{ row }">
-                  <el-tag v-if="row.triggered" type="danger" size="small">可执行</el-tag>
+                  <el-tag v-if="row.confirmed === false" type="warning" size="small">待确认</el-tag>
+                  <el-tag v-else-if="row.triggered" type="danger" size="small">可执行</el-tag>
                   <el-tag v-else type="info" size="small">待触达</el-tag>
                 </template>
               </el-table-column>
               <el-table-column prop="advice" label="建议" min-width="170" show-overflow-tooltip />
               <el-table-column label="操作" width="100">
                 <template #default="{ row }">
-                  <el-button v-if="row.triggered" size="small" type="primary" @click="goTrade(row)">去交易</el-button>
+                  <el-button v-if="row.triggered && row.confirmed !== false" size="small" type="primary" @click="goTrade(row)">去交易</el-button>
                 </template>
               </el-table-column>
             </el-table>
@@ -574,8 +529,15 @@
               <span v-if="guideSells.length" class="guide-count">{{ guideSells.length }}</span>
             </div>
             <el-table v-loading="guideLoading" :data="guideSells" stripe size="small" class="app-table app-table--compact" max-height="360">
-              <el-table-column label="标的" min-width="130">
-                <template #default="{ row }">{{ row.name }} <span class="fav-code">{{ row.code }}</span></template>
+              <el-table-column label="代码" width="100">
+                <template #default="{ row }">
+                  <a :href="stockHref(row.code)" target="_blank" rel="noopener" class="stock-link stock-code">{{ row.code }}</a>
+                </template>
+              </el-table-column>
+              <el-table-column label="名称" min-width="120">
+                <template #default="{ row }">
+                  <a :href="stockHref(row.code)" target="_blank" rel="noopener" class="stock-link">{{ row.name || row.code }}</a>
+                </template>
               </el-table-column>
               <el-table-column label="现价" width="90">
                 <template #default="{ row }">{{ row.last_price ?? '—' }}</template>
@@ -604,9 +566,90 @@
             </el-table>
             <el-empty v-if="!guideSells.length" :image-size="48" description="暂无持仓，无需卖出评估" />
           </div>
-        </section>
-
-        <!-- ⑤ 自选重点（≤5 只实时行情） -->
+        </section><section class="block">
+          <div class="block-head">
+            <span class="block-title"><el-icon><Coin /></el-icon> 持仓追踪</span>
+            <router-link to="/portfolio" class="more-link">持仓追踪页 →</router-link>
+          </div>
+          <div class="kpi-row" v-if="posSummary">
+            <div class="kpi-cell">
+              <div class="kpi-label">持仓数</div>
+              <div class="kpi-value">{{ posSummary.total_positions }}</div>
+            </div>
+            <div class="kpi-cell">
+              <div class="kpi-label">总市值</div>
+              <div class="kpi-value">{{ fmtMoney(posSummary.total_market_value, '¥') }}</div>
+            </div>
+            <div class="kpi-cell">
+              <div class="kpi-label">浮动盈亏</div>
+              <div class="kpi-value" :class="clsByVal(posSummary.total_profit_loss, '')">{{ fmtSigned(posSummary.total_profit_loss) }} 元</div>
+            </div>
+          </div>
+          <el-table v-loading="plansLoading" :data="posSummary?.positions || []" stripe size="small" class="app-table app-table--compact" max-height="360">
+            <el-table-column label="代码" width="100">
+              <template #default="{ row }">
+                <a :href="stockHref(row.symbol ?? row.code)" target="_blank" rel="noopener" class="stock-link stock-code">{{ row.symbol || row.code }}</a>
+              </template>
+            </el-table-column>
+            <el-table-column label="名称" min-width="110">
+              <template #default="{ row }">
+                <a :href="stockHref(row.symbol ?? row.code)" target="_blank" rel="noopener" class="stock-link">{{ row.stock_name || row.symbol || row.code }}</a>
+              </template>
+            </el-table-column>
+            <el-table-column label="现价" width="100">
+              <template #default="{ row }">{{ row.current_price ?? '—' }}</template>
+            </el-table-column>
+            <el-table-column label="盈亏率" width="110">
+              <template #default="{ row }">
+                <span :class="clsByVal(row.profit_loss_rate, '')">{{ fmtPct(row.profit_loss_rate) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="止损 / 止盈" min-width="150">
+              <template #default="{ row }">
+                <span>{{ row.stop_loss_price ?? '—' }}</span>
+                <span class="sep">/</span>
+                <span>{{ row.take_profit_price ?? '—' }}</span>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-empty v-if="!posSummary?.positions?.length" :image-size="48" description="暂无持仓" />
+        </section><!-- ①.5 今日预警（角标数字对应本列表行数，顶部「盘中」待办） -->
+        <section class="block">
+          <div class="block-head">
+            <span class="block-title"><el-icon><Bell /></el-icon> 今日预警
+              <span class="block-hint">今日触发 {{ todayData?.intraday?.alert_count ?? todayAlerts.length }} 条</span>
+            </span>
+            <router-link to="/stock-alerts" class="more-link">监控中心页 →</router-link>
+          </div>
+          <el-table v-loading="alertsLoading" :data="todayAlerts" stripe size="small" class="app-table app-table--compact" max-height="360">
+            <el-table-column label="代码" width="100">
+              <template #default="{ row }">
+                <a :href="stockHref(row.symbol ?? row.code)" target="_blank" rel="noopener" class="stock-link stock-code">{{ row.symbol }}</a>
+              </template>
+            </el-table-column>
+            <el-table-column label="名称" min-width="100">
+              <template #default="{ row }">
+                <a :href="stockHref(row.symbol ?? row.code)" target="_blank" rel="noopener" class="stock-link">{{ row.name || row.symbol }}</a>
+              </template>
+            </el-table-column>
+            <el-table-column label="级别" width="80">
+              <template #default="{ row }">
+                <el-tag size="small" :type="row.severity === 'critical' ? 'danger' : row.severity === 'warn' ? 'warning' : 'info'">{{ severityLabel(row.severity) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="rule_name" label="触发规则" min-width="170" show-overflow-tooltip />
+            <el-table-column label="现价 / 涨跌" min-width="110">
+              <template #default="{ row }">
+                <span>{{ row.price ?? '—' }}</span>
+                <span v-if="row.change_pct != null" :class="clsByVal(row.change_pct, '')" class="sep">{{ fmtPct(row.change_pct) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="时间" width="80">
+              <template #default="{ row }">{{ alertTime(row.ts) }}</template>
+            </el-table-column>
+          </el-table>
+          <el-empty v-if="!todayAlerts.length && !alertsLoading" :image-size="48" description="今日暂无触发预警" />
+        </section><!-- ⑤ 自选重点（≤5 只实时行情） -->
         <section class="block">
           <div class="block-head">
             <span class="block-title"><el-icon><Star /></el-icon> 自选重点</span>
@@ -614,12 +657,39 @@
           </div>
           <div class="grid grid-4">
             <el-card v-for="f in favorites.slice(0, 5)" :key="f.symbol || f.stock_code" shadow="never" class="idx-card">
-              <div class="idx-name">{{ f.stock_name }} <span class="fav-code">{{ f.symbol || f.stock_code }}</span></div>
+              <div class="idx-name">
+                  <a :href="stockHref(f.symbol || f.stock_code)" target="_blank" rel="noopener" class="stock-link stock-code">{{ f.symbol || f.stock_code }}</a>
+                  <a :href="stockHref(f.symbol || f.stock_code)" target="_blank" rel="noopener" class="stock-link">{{ f.stock_name }}</a>
+                </div>
               <div class="idx-price">{{ f.current_price != null ? f.current_price.toFixed(2) : '—' }}</div>
               <div class="idx-pct" :class="clsByVal(f.change_percent, '')">{{ fmtPct(f.change_percent) }}</div>
             </el-card>
             <el-empty v-if="!favorites.length" :image-size="48" description="暂无自选重点，去自选页添加" />
           </div>
+        </section><section class="block">
+          <div class="block-head">
+            <span class="block-title"><el-icon><Odometer /></el-icon> 大盘状态条</span>
+          </div>
+          <div v-if="regime" class="regime-bar" :class="'regime-' + regime.trend">
+            <div class="regime-chip">
+              <el-icon><TrendCharts v-if="regime.trend === 'bull'" /><Bottom v-else-if="regime.trend === 'bear'" /><Minus v-else /></el-icon>
+              <span class="regime-label">{{ regime.trend_label }}</span>
+              <span class="regime-vol">· {{ regime.volatility_label }}</span>
+            </div>
+            <div v-if="regime.advice" class="regime-advice">
+              <el-icon><InfoFilled /></el-icon>
+              <span>{{ regime.advice }}</span>
+            </div>
+            <span v-if="regime.as_of" class="regime-asof">{{ regime.as_of }}</span>
+          </div>
+          <el-empty v-else :image-size="48" description="暂无市场环境数据" />
+        </section><!-- ② 监控中心（复用现有组件：价格/涨跌幅/持仓退出信号预警） -->
+        <section class="block">
+          <div class="block-head">
+            <span class="block-title"><el-icon><Lightning /></el-icon> 监控中心</span>
+            <router-link to="/stock-alerts" class="more-link">监控中心页 →</router-link>
+          </div>
+          <MonitorCenter />
         </section>
       </el-tab-pane>
 
@@ -628,107 +698,19 @@
         <!-- ① 信号扫描结果（三买三卖，扫描后自动落库 signal_tracking） -->
         <section class="block">
           <div class="block-head">
-            <span class="block-title"><el-icon><MagicStick /></el-icon> 信号扫描结果</span>
-            <el-button size="small" type="primary" :icon="Search" :loading="scanLoading" @click="runScan">
-              运行三买三卖扫描（自动落库）
-            </el-button>
-          </div>
-          <div v-if="scanResult" class="scan-summary">
-            <span>共 <b>{{ scanResult.total }}</b> 只命中<template v-if="scanResult.scanned_count"> · 扫描 {{ scanResult.scanned_count }} 只</template></span>
-            <span v-if="scanResult.market_trend"> · 大盘趋势 {{ scanResult.market_trend }}</span>
-          </div>
-          <el-table v-loading="scanLoading" :data="scanResult?.items || []" stripe size="small" class="app-table app-table--compact" max-height="420">
-            <el-table-column label="标的" min-width="120">
-              <template #default="{ row }">{{ row.name }} <span class="fav-code">{{ row.code }}</span></template>
-            </el-table-column>
-            <el-table-column prop="primary_signal_label" label="信号" width="100" />
-            <el-table-column label="收盘" width="90">
-              <template #default="{ row }">{{ row.close ?? '—' }}</template>
-            </el-table-column>
-            <el-table-column label="BIAS60" width="90">
-              <template #default="{ row }">{{ row.bias60?.toFixed(2) ?? '—' }}</template>
-            </el-table-column>
-            <el-table-column prop="ma60_direction" label="MA60" width="80" />
-            <el-table-column label="触发价" width="90">
-              <template #default="{ row }">{{ row.signals?.[0]?.trigger_price ?? '—' }}</template>
-            </el-table-column>
-            <el-table-column label="操作" width="120">
-              <template #default="{ row }">
-                <el-button size="small" :icon="Plus" @click="addScanToPlan(row)">加入计划</el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-          <el-empty v-if="!scanResult" :image-size="48" description="点击上方按钮运行盘后信号扫描，命中信号自动写入「信号跟踪」" />
-        </section>
-
-        <section class="block">
-          <div class="block-head">
-            <span class="block-title"><el-icon><Search /></el-icon> 信号跟踪</span>
-            <div class="block-actions">
-              <el-button size="small" :icon="Refresh" :loading="signalsLoading" @click="loadSignals">刷新</el-button>
-              <el-button size="small" type="primary" :loading="backfillLoading" @click="triggerBackfill">回填到期信号</el-button>
-            </div>
-          </div>
-          <div class="kpi-row" v-if="signalStats?.total">
-            <div class="kpi-cell">
-              <div class="kpi-label">已回填</div>
-              <div class="kpi-value">{{ signalStats.total.count ?? signalStats.total?.count ?? 0 }}</div>
-            </div>
-            <div class="kpi-cell">
-              <div class="kpi-label">胜率</div>
-              <div class="kpi-value up">{{ fmtPct(signalStats.total.win_rate) }}</div>
-            </div>
-            <div class="kpi-cell">
-              <div class="kpi-label">待验证</div>
-              <div class="kpi-value">{{ signalStats.pending_count ?? 0 }}</div>
-            </div>
-          </div>
-          <el-table v-loading="signalsLoading" :data="signals" stripe size="small" class="app-table app-table--compact" max-height="420">
-            <el-table-column prop="signal_type" label="信号" width="90" />
-            <el-table-column label="标的代码" width="100">
-              <template #default="{ row }">
-                <router-link :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
-              </template>
-            </el-table-column>
-            <el-table-column label="标的名称" min-width="110">
-              <template #default="{ row }">
-                <router-link :to="`/stocks/${row.code}`" class="stock-name">{{ row.name || row.code }}</router-link>
-              </template>
-            </el-table-column>
-            <el-table-column prop="trigger_date" label="触发日" width="110" />
-            <el-table-column label="状态" width="90">
-              <template #default="{ row }">
-                <el-tag size="small" :type="row.status === 'filled' ? 'success' : 'info'">
-                  {{ row.status === 'filled' ? '已回填' : '待验证' }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="实际表现" min-width="140">
-              <template #default="{ row }">
-                <template v-if="row.filled">
-                  <span :class="clsByVal(row.filled.ret, '')">{{ fmtPct(row.filled.ret) }}</span>
-                  <span class="sep">·</span>
-                  <span :class="row.filled.outcome === 'win' ? 'up' : row.filled.outcome === 'loss' ? 'down' : ''">{{ outcomeLabel(row.filled.outcome) }}</span>
-                  <span v-if="row.filled.hit_stop" class="hit-stop">触止损</span>
-                </template>
-                <span v-else>—</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="快照" min-width="180" show-overflow-tooltip>
-              <template #default="{ row }">{{ snapshotText(row.snapshot) }}</template>
-            </el-table-column>
-          </el-table>
-          <el-empty v-if="!signals.length" :image-size="48" description="暂无信号记录，三买三卖扫描后自动落库" />
-        </section>
-
-        <section class="block">
-          <div class="block-head">
             <span class="block-title"><el-icon><Document /></el-icon> 交易复盘 · 当日成交</span>
             <router-link to="/paper/review" class="more-link">交易复盘页 →</router-link>
           </div>
           <el-table v-loading="tradesLoading" :data="todayTrades" stripe size="small" class="app-table app-table--compact" max-height="360">
-            <el-table-column label="标的" min-width="120">
-              <template #default="{ row }">{{ row.name }} <span class="fav-code">{{ row.code }}</span></template>
+            <el-table-column label="代码" width="100">
+              <template #default="{ row }">
+                <a :href="stockHref(row.code)" target="_blank" rel="noopener" class="stock-link stock-code">{{ row.code }}</a>
+              </template>
+            </el-table-column>
+            <el-table-column label="名称" min-width="120">
+              <template #default="{ row }">
+                <a :href="stockHref(row.code)" target="_blank" rel="noopener" class="stock-link">{{ row.name || row.code }}</a>
+              </template>
             </el-table-column>
             <el-table-column label="方向" width="80">
               <template #default="{ row }">
@@ -757,9 +739,7 @@
           </el-table>
           <el-empty v-if="!todayTrades.length" :image-size="48" description="今日暂无成交记录" />
           <p class="block-tip" style="margin-top: 10px">盘后 Step1 更新数据 · Step2 信号扫描落库 · Step3 次日计划预填，见上方信号跟踪与盘前 Tab 计划。</p>
-        </section>
-
-        <!-- ④ 次日计划预填（接近买点标的 → 一键加入计划） -->
+        </section><!-- ④ 次日计划预填（接近买点标的 → 一键加入计划） -->
         <section class="block" v-if="scanResult?.items?.length">
           <div class="block-head">
             <span class="block-title"><el-icon><Tickets /></el-icon> 次日计划预填</span>
@@ -767,11 +747,112 @@
           </div>
           <div class="scan-prefill-grid">
             <div v-for="row in scanResult.items.slice(0, 6)" :key="row.code" class="prefill-card" @click="addScanToPlan(row)">
-              <div class="prefill-name">{{ row.name }} <span class="fav-code">{{ row.code }}</span></div>
+              <div class="prefill-name">
+                <a :href="stockHref(row.code)" target="_blank" rel="noopener" class="stock-link stock-code">{{ row.code }}</a>
+                <a :href="stockHref(row.code)" target="_blank" rel="noopener" class="stock-link">{{ row.name }}</a>
+              </div>
               <div class="prefill-line">触发 <b>{{ row.signals?.[0]?.trigger_price ?? row.close }}</b> · 止损 {{ row.stop_price ?? '—' }}</div>
               <div class="prefill-line sub">{{ row.primary_signal_label }} · BIAS60 {{ row.bias60?.toFixed(2) }}</div>
             </div>
           </div>
+        </section><section class="block">
+          <div class="block-head">
+            <span class="block-title"><el-icon><Search /></el-icon> 信号跟踪</span>
+            <div class="block-actions">
+              <el-button size="small" :icon="Refresh" :loading="signalsLoading" @click="loadSignals">刷新</el-button>
+              <el-button size="small" type="primary" :loading="backfillLoading" @click="triggerBackfill">回填到期信号</el-button>
+            </div>
+          </div>
+          <div class="kpi-row" v-if="signalStats?.total">
+            <div class="kpi-cell">
+              <div class="kpi-label">已回填</div>
+              <div class="kpi-value">{{ signalStats.total.count ?? signalStats.total?.count ?? 0 }}</div>
+            </div>
+            <div class="kpi-cell">
+              <div class="kpi-label">胜率</div>
+              <div class="kpi-value up">{{ fmtPct(signalStats.total.win_rate) }}</div>
+            </div>
+            <div class="kpi-cell">
+              <div class="kpi-label">待验证</div>
+              <div class="kpi-value">{{ signalStats.pending_count ?? 0 }}</div>
+            </div>
+          </div>
+          <el-table v-loading="signalsLoading" :data="signals" stripe size="small" class="app-table app-table--compact" max-height="420">
+            <el-table-column prop="signal_type" label="信号" width="90" />
+            <el-table-column label="代码" width="100">
+              <template #default="{ row }">
+                <a :href="stockHref(row.code)" target="_blank" rel="noopener" class="stock-link stock-code">{{ row.code }}</a>
+              </template>
+            </el-table-column>
+            <el-table-column label="名称" min-width="110">
+              <template #default="{ row }">
+                <a :href="stockHref(row.code)" target="_blank" rel="noopener" class="stock-link">{{ row.name || row.code }}</a>
+              </template>
+            </el-table-column>
+            <el-table-column prop="trigger_date" label="触发日" width="110" />
+            <el-table-column label="状态" width="90">
+              <template #default="{ row }">
+                <el-tag size="small" :type="row.status === 'filled' ? 'success' : 'info'">
+                  {{ row.status === 'filled' ? '已回填' : '待验证' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="实际表现" min-width="140">
+              <template #default="{ row }">
+                <template v-if="row.filled">
+                  <span :class="clsByVal(row.filled.ret, '')">{{ fmtPct(row.filled.ret) }}</span>
+                  <span class="sep">·</span>
+                  <span :class="row.filled.outcome === 'win' ? 'up' : row.filled.outcome === 'loss' ? 'down' : ''">{{ outcomeLabel(row.filled.outcome) }}</span>
+                  <span v-if="row.filled.hit_stop" class="hit-stop">触止损</span>
+                </template>
+                <span v-else>—</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="快照" min-width="180" show-overflow-tooltip>
+              <template #default="{ row }">{{ snapshotText(row.snapshot) }}</template>
+            </el-table-column>
+          </el-table>
+          <el-empty v-if="!signals.length" :image-size="48" description="暂无信号记录，三买三卖扫描后自动落库" />
+        </section><section class="block">
+          <div class="block-head">
+            <span class="block-title"><el-icon><MagicStick /></el-icon> 信号扫描结果</span>
+            <el-button size="small" type="primary" :icon="Search" :loading="scanLoading" @click="runScan">
+              运行三买三卖扫描（自动落库）
+            </el-button>
+          </div>
+          <div v-if="scanResult" class="scan-summary">
+            <span>共 <b>{{ scanResult.total }}</b> 只命中<template v-if="scanResult.scanned_count"> · 扫描 {{ scanResult.scanned_count }} 只</template></span>
+            <span v-if="scanResult.market_trend"> · 大盘趋势 {{ scanResult.market_trend }}</span>
+          </div>
+          <el-table v-loading="scanLoading" :data="scanResult?.items || []" stripe size="small" class="app-table app-table--compact" max-height="420">
+            <el-table-column label="代码" width="100">
+              <template #default="{ row }">
+                <a :href="stockHref(row.code)" target="_blank" rel="noopener" class="stock-link stock-code">{{ row.code }}</a>
+              </template>
+            </el-table-column>
+            <el-table-column label="名称" min-width="110">
+              <template #default="{ row }">
+                <a :href="stockHref(row.code)" target="_blank" rel="noopener" class="stock-link">{{ row.name || row.code }}</a>
+              </template>
+            </el-table-column>
+            <el-table-column prop="primary_signal_label" label="信号" width="100" />
+            <el-table-column label="收盘" width="90">
+              <template #default="{ row }">{{ row.close ?? '—' }}</template>
+            </el-table-column>
+            <el-table-column label="BIAS60" width="90">
+              <template #default="{ row }">{{ row.bias60?.toFixed(2) ?? '—' }}</template>
+            </el-table-column>
+            <el-table-column prop="ma60_direction" label="MA60" width="80" />
+            <el-table-column label="触发价" width="90">
+              <template #default="{ row }">{{ row.signals?.[0]?.trigger_price ?? '—' }}</template>
+            </el-table-column>
+            <el-table-column label="操作" width="120">
+              <template #default="{ row }">
+                <el-button size="small" :icon="Plus" @click="addScanToPlan(row)">加入计划</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-empty v-if="!scanResult" :image-size="48" description="点击上方按钮运行盘后信号扫描，命中信号自动写入「信号跟踪」" />
         </section>
       </el-tab-pane>
 
@@ -820,9 +901,13 @@
             </div>
           </template>
           <el-empty v-else :image-size="48" description="本周复盘待生成（顶部「周度」待办 1）：周五盘后自动生成，或点右上角立即生成" />
-        </section>
-
-        <section class="block">
+        </section><section class="block">
+          <div class="block-head">
+            <span class="block-title"><el-icon><Calendar /></el-icon> 下周计划</span>
+            <router-link to="/war-room?tab=pre_market" class="more-link">去盘前写计划 →</router-link>
+          </div>
+          <p class="block-tip">大盘趋势判断 + 关注标的 + 预期操作，在盘前 Tab 的「当日计划」中落地。</p>
+        </section><section class="block">
           <div class="block-head">
             <span class="block-title"><el-icon><Coin /></el-icon> 信号有效性（P1 回填聚合）</span>
           </div>
@@ -844,22 +929,12 @@
             </el-table-column>
           </el-table>
           <el-empty v-if="!weekly?.signal_stats?.by_type?.length" :image-size="48" description="暂无已回填信号统计" />
-        </section>
-
-        <section class="block">
+        </section><section class="block">
           <div class="block-head">
             <span class="block-title"><el-icon><EditPen /></el-icon> 定性回顾</span>
             <router-link to="/paper/review" class="more-link">写复盘笔记 →</router-link>
           </div>
           <p class="block-tip">做对了什么 / 做错了什么 / 有没有违反系统规则 / 三系统信号一致性 —— 在交易复盘页记录。</p>
-        </section>
-
-        <section class="block">
-          <div class="block-head">
-            <span class="block-title"><el-icon><Calendar /></el-icon> 下周计划</span>
-            <router-link to="/war-room?tab=pre_market" class="more-link">去盘前写计划 →</router-link>
-          </div>
-          <p class="block-tip">大盘趋势判断 + 关注标的 + 预期操作，在盘前 Tab 的「当日计划」中落地。</p>
         </section>
       </el-tab-pane>
     </el-tabs>
@@ -899,7 +974,10 @@
     <el-dialog v-model="editDialog" :title="editMode === 'candidate' ? '调整候选计划' : '调整当日计划'" width="480px">
       <el-form :model="editForm" label-width="90px">
         <el-form-item label="标的">
-          <span class="edit-target">{{ editTargetText }}</span>
+          <span class="edit-target">
+            <a :href="stockHref(editTargetCode)" target="_blank" rel="noopener" class="stock-link stock-code">{{ editTargetCode }}</a>
+            <a :href="stockHref(editTargetCode)" target="_blank" rel="noopener" class="stock-link">{{ editTargetName }}</a>
+          </span>
         </el-form-item>
         <el-form-item label="触发价">
           <el-input-number v-model="editForm.trigger_price" :controls="false" :precision="2" style="width: 100%" />
@@ -916,6 +994,39 @@
         <el-button type="primary" :loading="savingEdit" @click="saveEdit">保存</el-button>
       </template>
     </el-dialog>
+
+    <!-- 盘中买入·快速交易（同页直接成交，不再跳转模拟交易页） -->
+    <el-dialog v-model="buyTradeDialog" title="盘中买入 · 快速交易" width="460px">
+      <div v-if="buyTradeRow" class="quick-trade">
+        <div class="qt-head">
+          <a :href="stockHref(buyTradeRow.code)" target="_blank" rel="noopener" class="fav-code stock-link stock-code">{{ buyTradeRow.code }}</a>
+          <a :href="stockHref(buyTradeRow.code)" target="_blank" rel="noopener" class="qt-name stock-link">{{ buyTradeRow.name }}</a>
+          <el-tag size="small" :type="buyTradeRow.triggered ? 'danger' : 'info'">
+            {{ buyTradeRow.triggered ? '可执行' : '待触达' }}
+          </el-tag>
+        </div>
+        <p class="qt-advice">{{ buyTradeRow.advice }}</p>
+        <div class="qt-grid">
+          <div class="fld"><span class="k">触发价</span><span class="v">{{ buyTradeRow.trigger_price ?? '—' }}</span></div>
+          <div class="fld"><span class="k">实时价</span><span class="v">{{ buyTradeRow.last_price ?? '—' }}</span></div>
+          <div class="fld"><span class="k">偏离</span><span class="v" :class="clsByVal(-(buyTradeRow.distance_pct ?? 0), '')">{{ fmtPct(buyTradeRow.distance_pct) }}</span></div>
+        </div>
+        <el-form label-width="90px" class="qt-form">
+          <el-form-item label="买入数量">
+            <el-input-number v-model="buyTradeQty" :min="100" :step="100" :precision="0" style="width: 100%" />
+          </el-form-item>
+          <el-form-item label="预计金额">
+            <span class="qt-amount">≈ {{ fmtMoney((buyTradeRow.last_price ?? 0) * buyTradeQty) }} 元</span>
+            <span v-if="!buyTradeRow.triggered" class="qt-warn">尚未触达触发价，当前为非推荐价格</span>
+          </el-form-item>
+        </el-form>
+        <p class="qt-tip">按实时价市价成交；成交后自动关联当日计划并标记「已执行」。</p>
+      </div>
+      <template #footer>
+        <el-button @click="buyTradeDialog = false">取消</el-button>
+        <el-button type="primary" :loading="buyTradeLoading" :disabled="!canQuickBuy" @click="submitQuickBuy">确认买入</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -927,10 +1038,11 @@ import {
   Aim, Refresh, Setting, Compass, Position, Calendar, Bell, Tickets, Plus,
           Odometer, TrendCharts, Bottom, Minus, InfoFilled, Coin, AlarmClock,
           Search, Document, Histogram, Warning, EditPen, Star, Lightning, MagicStick, DataLine,
-          Lock, Magnet, Operation, Checked, Right, WarningFilled, Sell, ShoppingCart
+          Magnet, Operation, Checked, Right, WarningFilled, Sell, ShoppingCart
 } from '@element-plus/icons-vue'
 import { warRoomApi, type WarRoomToday } from '@/api/warRoom'
 import { portfolioApi } from '@/api/portfolio'
+import { paperApi } from '@/api/paper'
 import { favoritesApi } from '@/api/favorites'
 import { screeningApi } from '@/api/screening'
 import MonitorCenter from '@/components/Dashboard/MonitorCenter.vue'
@@ -1039,9 +1151,12 @@ function splitItems(text?: string | string[]): string[] {
 // 快照生成时间格式化：今日显示「今日 HH:MM」，否则「M/D HH:MM」
 function fmtClock(iso?: string): string {
   if (!iso) return '—'
+  let s = String(iso).trim()
+  // 兼容部分浏览器（Safari）对 >3 位微秒（如 .007000+00:00）的解析失败：截断到 3 位
+  s = s.replace(/\.(\d{3})\d+(Z|[+-]\d{2}:?\d{2})$/, '.$1$2')
   // 兜底：后端可能返回无时区的 naive ISO（如旧缓存），一律视为 UTC，避免按本地时区解析导致时间倒退
-  if (!/([Z]|[+-]\d{2}:?\d{2} ?\(.+\))$/.test(iso.trim())) iso += 'Z'
-  const d = new Date(iso)
+  if (!/([Z]|[+-]\d{2}:?\d{2} ?\(.+\))$/.test(s)) s += 'Z'
+  const d = new Date(s)
   if (isNaN(d.getTime())) return '—'
   const pad = (n: number) => String(n).padStart(2, '0')
   const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`
@@ -1054,6 +1169,10 @@ function fmtClock(iso?: string): string {
 const basis = computed(() => macro.value?.basis || null)
 // 状态是否锁定（盘前基准语义）：有 locked_at 即锁定
 const gaugeLocked = computed(() => !!basis.value?.locked_at)
+
+// 盘前信息密度控制：信号溯源 / 计划审计默认收起，第一眼只保留「方向结论 + 行动清单」
+const signalCollapse = ref<string[]>([])
+const planAuditCollapse = ref<string[]>([])
 
 function statusLabel(s?: string) {
   return s || ruleDirection() || '—'
@@ -1081,7 +1200,6 @@ function confidenceLabel() {
   if (c >= 50) return '中置信'
   return '低置信'
 }
-const lockTime = computed(() => fmtClock(basis.value?.locked_at))
 // 指针位置：低置信/数据不足 → 锁定在中心「观望」；否则按 score 映射到 [-46%, +46%]
 const gaugePos = computed(() => {
   if (basis.value?.low_confidence || basis.value?.status === '数据不足' || basis.value?.status === '中性(观望)') {
@@ -1130,6 +1248,17 @@ async function loadToday() {
   } catch (e) {
     console.warn('[WarRoom] loadToday', e)
   }
+}
+
+// 流程引导条角标实时刷新：每 60s 拉取一次 /today 聚合，保证盘前/盘中/盘后/周度
+// 待办数字（以及当前时段 ● 标记）持续反映实际状态，而不只在挂载/切 Tab/操作后刷新。
+let todayRefreshTimer: number | null = null
+function startTodayRefresh() {
+  stopTodayRefresh()
+  todayRefreshTimer = window.setInterval(() => { loadToday() }, 60000)
+}
+function stopTodayRefresh() {
+  if (todayRefreshTimer) { window.clearInterval(todayRefreshTimer); todayRefreshTimer = null }
 }
 
 async function loadMacro(retry = true) {
@@ -1307,6 +1436,12 @@ async function runScan() {
   }
 }
 
+// 个股外部链接：跳转云海终端对应股票页面
+function stockHref(code?: string): string {
+  if (!code) return ''
+  return `https://www.cloudsea.tech:8443/stocks/${code}`
+}
+
 function addScanToPlan(row: any) {
   planForm.value = {
     code: row.code,
@@ -1378,9 +1513,11 @@ async function confirmSellCandidate(ci: number) {
       trigger_price: c.trigger_price,
       stop_loss: undefined,
       sell_condition: c.reason || c.sell_condition || undefined,
-      source: c.source || undefined
+      source: c.source || undefined,
+      // 卖出观测写库为「待确认」：需在当日计划表格点击「确认」后进入盘中提醒
+      confirmed: false
     })
-    ElMessage.success(`${c.name || c.code} 已写入卖出计划`)
+    ElMessage.success(`${c.name || c.code} 已写入卖出计划（待确认），请在当日计划中点「确认」进入盘中提醒`)
     planGen.value.sell_candidates.splice(ci, 1)
     planGen.value.sell_count = planGen.value.sell_candidates.length
     await loadPlans()
@@ -1520,7 +1657,9 @@ async function submitPlan() {
       direction: planForm.value.direction,
       trigger_price: planForm.value.trigger_price,
       stop_loss: planForm.value.stop_loss,
-      sell_condition: planForm.value.sell_condition || undefined
+      sell_condition: planForm.value.sell_condition || undefined,
+      // 手动添加即用户拍板 → 直接已确认，进入盘中提醒
+      confirmed: true
     })
     ElMessage.success('计划已保存')
     planDialog.value = false
@@ -1533,8 +1672,44 @@ async function submitPlan() {
   }
 }
 
+// ---- 盘中买入·快速交易（同页直接成交，不跳转模拟交易页）----
+const buyTradeDialog = ref(false)
+const buyTradeRow = ref<any>(null)
+const buyTradeQty = ref(100)
+const buyTradeLoading = ref(false)
+const canQuickBuy = computed(() => !!buyTradeRow.value?.triggered && buyTradeQty.value > 0)
+
 function goTrade(row: any) {
-  router.push(`/paper?code=${encodeURIComponent(row.code)}`)
+  // 同页快速交易：弹出买入确认，成交后自动关联当日计划，不再跳转 /paper
+  buyTradeRow.value = row
+  buyTradeQty.value = 100
+  buyTradeDialog.value = true
+}
+
+async function submitQuickBuy() {
+  const row = buyTradeRow.value
+  if (!row || !canQuickBuy.value) return
+  buyTradeLoading.value = true
+  try {
+    await paperApi.placeOrder({
+      code: row.code,
+      side: 'buy',
+      quantity: buyTradeQty.value,
+      stock_name: row.name,
+      analysis_id: row.plan_id || undefined,
+    })
+    ElMessage.success(`${row.name || row.code} 买入成交，当日计划已标记已执行`)
+    buyTradeDialog.value = false
+    // 成交后：计划自动关联为已执行 → 刷新盘中指导 / 当日计划 / 角标 / 持仓
+    await loadIntradayGuide()
+    await loadPlans()
+    await loadToday()
+    loadPositions()
+  } catch (err: any) {
+    ElMessage.error(err?.response?.data?.detail || '买入失败，请检查模拟账户资金是否充足')
+  } finally {
+    buyTradeLoading.value = false
+  }
 }
 
 // ---- 5.3 计划生成流水线（四段审计痕迹，异步 + SSE 实时进度）----
@@ -1828,7 +2003,10 @@ async function generatePlan() {
 async function loadTodayPlan() {
   try {
     const d = await _fetchJSON<any>('/api/war-room/daily-plan/today', {}, 15000)
-    if (d?.generated && d.result && d.result.candidates?.length) {
+    if (d?.generated && d.result) {
+      // 快照已生成：即使候选被「已计划去重」全部过滤（filtered_count>0），也保留
+      // 快照结果给 UI 展示五段审计痕迹（证明流水线已由盘前 8:15 自动执行），
+      // 而不是退化成「点击生成当日计划」的空态让用户误以为没有自动执行。
       planGen.value = d.result
       genPlanProgress.value = 100
       genPlanStage.value = ''
@@ -1852,9 +2030,11 @@ async function confirmCandidate(ci: number) {
       trigger_price: c.trigger_price,
       stop_loss: c.stop_loss,
       sell_condition: c.sell_condition || undefined,
-      source: c.source || undefined
+      source: c.source || undefined,
+      // 候选写库为「待确认」：需在当日计划表格点击「确认」后进入盘中执行提醒
+      confirmed: false
     })
-    ElMessage.success(`${c.name || c.code} 已写入当日计划`)
+    ElMessage.success(`${c.name || c.code} 已写入当日计划（待确认），请在当日计划中点「确认」进入盘中提醒`)
     // 从候选移除 → 前端本地刷新（不重取，避免 pending 漂移）
     planGen.value.candidates.splice(ci, 1)
     planGen.value.candidates_count = planGen.value.candidates.length
@@ -1873,7 +2053,8 @@ function editCandidate(ci: number) {
   editMode.value = 'candidate'
   editCandidateIdx.value = ci
   editTargetId.value = ''
-  editTargetText.value = `${c.name || c.code} ${c.code}`
+  editTargetCode.value = c.code
+  editTargetName.value = c.name || c.code
   editForm.value = {
     trigger_price: c.trigger_price ?? undefined,
     stop_loss: c.stop_loss ?? undefined,
@@ -1894,7 +2075,8 @@ function removeCandidate(ci: number) {
 const editDialog = ref(false)
 const editMode = ref<'candidate' | 'plan'>('plan')
 const editTargetId = ref('')
-const editTargetText = ref('')
+const editTargetCode = ref('')
+const editTargetName = ref('')
 const editCandidateIdx = ref(-1)
 const savingEdit = ref(false)
 const editForm = ref({ trigger_price: undefined as number | undefined, stop_loss: undefined as number | undefined, sell_condition: '' })
@@ -1902,7 +2084,8 @@ const editForm = ref({ trigger_price: undefined as number | undefined, stop_loss
 function editPlan(row: any) {
   editMode.value = 'plan'
   editTargetId.value = row.id
-  editTargetText.value = `${row.name || row.code} ${row.code}`
+  editTargetCode.value = row.code
+  editTargetName.value = row.name || row.code
   editCandidateIdx.value = -1
   editForm.value = {
     trigger_price: row.trigger_price ?? undefined,
@@ -1938,10 +2121,20 @@ async function saveEdit() {
   }
 }
 
-// 确认已写计划（编辑后落定；pending 已是默认，主要做触发/确认入口）
+// 当日计划「确认」：把计划从「待确认」置为「已确认」，此后进入盘中执行提醒
+const confirmingPlanId = ref<string>('')
 async function confirmPlanWrite(row: any) {
-  if (row.status !== 'pending') return
-  ElMessage.success(`${row.name || row.code} 计划已就绪，盘中价格触达将提醒`)
+  if (row.status !== 'pending' || row.confirmed) return
+  confirmingPlanId.value = row.id
+  try {
+    await warRoomApi.updatePlanDetail(row.id, { confirmed: true })
+    ElMessage.success(`${row.name || row.code} 已确认，盘中价格触达将提醒`)
+    await loadPlans()
+  } catch (e) {
+    ElMessage.error('确认失败')
+  } finally {
+    confirmingPlanId.value = ''
+  }
 }
 
 async function removePlan(row: any) {
@@ -2039,11 +2232,16 @@ function alertTime(ts?: number) {
   const p = (n: number) => String(n).padStart(2, '0')
   return `${p(d.getHours())}:${p(d.getMinutes())}`
 }
-function planStatusLabel(s: string) {
-  return { pending: '待执行', executed: '已执行', cancelled: '已取消' }[s] || s
+// 三态计划：待确认(pending&!confirmed) / 已确认(pending&confirmed) / 已执行 / 已取消
+function planStatusLabel(row: any) {
+  const s = row.status
+  if (s === 'pending') return row.confirmed ? '已确认' : '待确认'
+  return { executed: '已执行', cancelled: '已取消' }[s] || s
 }
-function planStatusTag(s: string): TagType {
-  return { pending: 'warning', executed: 'success', cancelled: 'info' }[s] as TagType || 'info'
+function planStatusTag(row: any): TagType {
+  const s = row.status
+  if (s === 'pending') return row.confirmed ? 'success' : 'warning'
+  return { executed: 'success', cancelled: 'info' }[s] as TagType || 'info'
 }
 function positionText(p: any) {
   if (!p) return '—'
@@ -2075,6 +2273,8 @@ onMounted(async () => {
           refreshCurrent()
           // 打开即读：加载今日计划快照（盘前预生成成品），无需点击生成
           await loadTodayPlan()
+          // 角标实时刷新定时器（每 60s 更新待办数字）
+          startTodayRefresh()
         })
 
 // keep-alive 激活钩子：每次组件被复用时强制清空全部计划生成相关状态。
@@ -2091,9 +2291,15 @@ onActivated(() => {
   _clearPlanWatchdog()
   // 每次从缓存返回都重新读今日快照（盘前预生成成品，秒回），保证最新
   loadTodayPlan()
+  // 重新激活时立即刷新一次角标，并重启实时刷新定时器
+  loadToday()
+  startTodayRefresh()
 })
 
-onUnmounted(() => { stopIntradayLive() })
+onUnmounted(() => {
+  stopIntradayLive()
+  stopTodayRefresh()
+})
 </script>
 
 <style lang="scss" scoped>
@@ -2183,12 +2389,6 @@ onUnmounted(() => { stopIntradayLive() })
       &.low .conf-num { color: var(--el-text-color-secondary); }
       .conf-label { font-size: 12px; color: var(--el-text-color-secondary); white-space: nowrap; }
     }
-    .dash-lock {
-      display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600;
-      color: var(--el-color-success);
-      .el-icon { font-size: 15px; }
-      &.pending { color: var(--el-text-color-secondary); font-weight: 500; }
-    }
     .dash-scale-hint { font-size: 12px; color: var(--el-text-color-placeholder); }
   }
 
@@ -2224,7 +2424,6 @@ onUnmounted(() => { stopIntradayLive() })
       .bear-zone { color: var(--el-color-success); }
       .neutral-zone { color: var(--el-text-color-secondary); }
       .bull-zone { color: var(--el-color-danger); }
-      .g-score { margin-left: 14px; color: var(--el-text-color-secondary); white-space: nowrap; b { color: var(--el-text-color-primary); } }
     }
   }
 
@@ -2235,13 +2434,28 @@ onUnmounted(() => { stopIntradayLive() })
     .el-icon { margin-top: 2px; }
   }
 
-  // 5.1 方向拆解面板（信号溯源）
-  .signal-panel {
-    margin-top: 12px; padding: 12px 14px;
+  // 5.1 方向拆解面板（信号溯源，折叠）
+  .signal-collapse {
+    margin-top: 12px;
     border: 1px solid var(--el-border-color-lighter); border-radius: 8px;
-    .panel-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-    .panel-title { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 600; color: var(--el-text-color-primary); .el-icon { color: var(--el-color-primary); } }
-    .panel-hint { font-size: 12px; color: var(--el-text-color-secondary); }
+    :deep(.el-collapse-item__header) {
+      height: auto; padding: 8px 14px; line-height: 1.6;
+      border-bottom: none; background: var(--el-fill-color-light); border-radius: 8px 8px 0 0;
+    }
+    :deep(.el-collapse-item__wrap) { border-bottom: none; }
+    .panel-collapse-title {
+      display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+      font-size: 13px; font-weight: 600; color: var(--el-text-color-primary);
+      .el-icon { color: var(--el-color-primary); }
+      .panel-hint { font-size: 12px; color: var(--el-text-color-secondary); font-weight: 400; }
+      .panel-score {
+        font-size: 12px; font-weight: 600; color: var(--el-text-color-regular); white-space: nowrap;
+        b { color: var(--el-color-primary); }
+      }
+    }
+  }
+  .signal-panel {
+    padding: 4px 2px;
     .signal-row {
       display: grid;
       grid-template-columns: minmax(140px, 190px) 72px 78px 72px 40px 1fr;
@@ -2291,6 +2505,20 @@ onUnmounted(() => { stopIntradayLive() })
     }
     .pipeline-arrow { display: flex; align-items: center; color: var(--el-text-color-placeholder); font-size: 18px; align-self: center; }
   }
+  // 计划审计漏斗（折叠，默认收起）
+  .plan-audit-collapse {
+    margin-top: 12px; border: 1px solid var(--el-border-color-lighter); border-radius: 8px;
+    :deep(.el-collapse-item__header) {
+      height: auto; padding: 8px 14px; line-height: 1.6;
+      background: var(--el-fill-color-light); border-radius: 8px 8px 0 0;
+    }
+    :deep(.el-collapse-item__wrap) { padding: 10px 14px; border-bottom: none; }
+    .audit-collapse-title {
+      display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+      font-size: 13px; font-weight: 600; color: var(--el-text-color-primary);
+      .audit-summary { font-size: 12px; font-weight: 400; color: var(--el-text-color-secondary); }
+    }
+  }
   .pipeline-tip { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 12px; color: var(--el-text-color-secondary); }
   // 预测行业池（Stage2 行业方向预测产物）
   .ind-strip { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 10px;
@@ -2327,6 +2555,29 @@ onUnmounted(() => { stopIntradayLive() })
     display: inline-block; margin-left: 4px; padding: 0 7px;
     font-size: 11px; line-height: 18px; border-radius: 10px;
     background: var(--el-color-primary-light-9); color: var(--el-color-primary); font-weight: 600;
+  }
+  // 快照已自动生成但候选被过滤时的说明条
+  .plan-filtered-note {
+    display: flex; align-items: flex-start; gap: 6px; margin-top: 10px;
+    padding: 8px 12px; font-size: 13px; line-height: 1.6;
+    background: var(--el-color-primary-light-9); color: var(--el-color-primary); border-radius: 6px;
+    .el-icon { margin-top: 2px; }
+  }
+
+  // 盘中买入·快速交易弹窗
+  .quick-trade {
+    .qt-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+      .qt-name { font-size: 15px; font-weight: 700; } }
+    .qt-advice { font-size: 13px; color: var(--el-text-color-regular); line-height: 1.6; margin-bottom: 10px; }
+    .qt-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px;
+      .fld { display: flex; flex-direction: column; gap: 2px; text-align: center; padding: 8px 6px;
+        background: var(--el-fill-color-light); border-radius: 6px;
+        .k { font-size: 11px; color: var(--el-text-color-secondary); }
+        .v { font-size: 14px; font-weight: 700; color: var(--el-text-color-primary); } } }
+    .qt-form { margin-bottom: 4px; }
+    .qt-amount { font-size: 14px; font-weight: 700; color: var(--el-color-danger); }
+    .qt-warn { margin-left: 10px; font-size: 12px; color: var(--el-color-warning); }
+    .qt-tip { margin: 4px 0 0; font-size: 12px; color: var(--el-text-color-secondary); }
   }
 
   .llm-card {
@@ -2410,6 +2661,12 @@ onUnmounted(() => { stopIntradayLive() })
   }
 
   .fav-code { color: var(--el-text-color-secondary); font-size: 12px; font-weight: 400; }
+
+  .stock-link {
+    color: var(--el-color-primary); text-decoration: none;
+    &:hover { text-decoration: underline; }
+    &.stock-code { font-family: monospace; color: var(--el-text-color-secondary); }
+  }
 
   .scan-summary {
     display: flex; gap: 16px; align-items: center; flex-wrap: wrap;

@@ -10,16 +10,23 @@ export interface WarRoomToday {
   week_start: string
   pre_market: {
     macro_snapshot_ready: boolean
+    // 待确认计划数（confirmed=false；缺省视为已确认，与 list_plans 序列化口径一致）
     plan_pending: number
     plan_total: number
+    todo: number
   }
   intraday: {
     holding_count: number
     alert_count: number
+    pending_orders: number
+    // 已确认待执行的买入计划数（动作 = 盘中「去交易」）
+    plan_confirmed_pending: number
+    todo: number
   }
   post_market: {
     signal_pending: number
     signal_total: number
+    todo: number
   }
   weekly: { done: boolean; todo: number }
   total_todo: number
@@ -61,6 +68,8 @@ export interface PlanItem {
   stop_loss?: number | null
   sell_condition?: string | null
   status: 'pending' | 'executed' | 'cancelled'
+  // 三态确认：False=待确认 / True=已确认（已确认才进入盘中执行提醒）
+  confirmed?: boolean
   position?: Record<string, any> | null
   source?: PlanSource | null
 }
@@ -105,6 +114,8 @@ export interface PlanGenerateResult {
   // 当日卖出观测（持仓卖出评估：清仓/减仓/止损/止盈 → 人工确认写入当日计划）
   sell_candidates?: SellCandidate[]
   sell_count?: number
+  // 快照按用户过滤后，被「当日计划去重」剔除的候选数量（>0 表示已自动生成但候选已全部确认/过滤）
+  filtered_count?: number
   audit?: { steps: PlanAuditStep[]; total: number }
   generated_at?: string
 }

@@ -145,8 +145,8 @@
                 <div :class="['tbs-dir', o.direction]">{{ o.direction === 'buy' ? '买' : '卖' }}</div>
                 <div class="tbs-main">
                   <div class="tbs-top">
-                    <router-link :to="`/stocks/${o.symbol}`" class="tbs-symbol">{{ o.symbol }}</router-link>
-                    <router-link :to="`/stocks/${o.symbol}`" class="tbs-name">{{ o.name }}</router-link>
+                    <a :href="stockHref(o.symbol)" target="_blank" rel="noopener" class="tbs-symbol">{{ o.symbol }}</a>
+                    <a :href="stockHref(o.symbol)" target="_blank" rel="noopener" class="tbs-name">{{ o.name }}</a>
                     <el-tag size="small" :type="o.direction === 'buy' ? 'danger' : 'success'" effect="dark">
                       {{ o.signal_label }}
                     </el-tag>
@@ -309,9 +309,9 @@
                 <div :class="['alert-severity-bar', alert.severity || 'info']" />
                 <div class="alert-main">
                   <div class="alert-top">
-                    <router-link v-if="alert.symbol" :to="`/stocks/${alert.symbol}`" class="alert-symbol">{{ alert.symbol }}</router-link>
+                    <a v-if="alert.symbol" :href="stockHref(alert.symbol)" target="_blank" rel="noopener" class="alert-symbol">{{ alert.symbol }}</a>
                     <span v-else class="alert-symbol">{{ alert.symbol || '—' }}</span>
-                    <router-link v-if="alert.name && alert.symbol" :to="`/stocks/${alert.symbol}`" class="alert-name">{{ alert.name }}</router-link>
+                    <a v-if="alert.name && alert.symbol" :href="stockHref(alert.symbol)" target="_blank" rel="noopener" class="alert-name">{{ alert.name }}</a>
                     <span v-else class="alert-name">{{ alert.name }}</span>
                     <span v-if="alert.price != null" class="alert-price" :class="(alert.change_pct ?? 0) >= 0 ? 'up' : 'down'">
                       {{ fmtPrice(alert.price) }}
@@ -475,8 +475,8 @@
           <div :class="['p-dir', o.direction]">{{ o.direction === 'buy' ? '买入' : '卖出' }}</div>
           <div class="p-main">
             <div class="p-top">
-              <router-link :to="`/stocks/${o.symbol}`" class="p-symbol">{{ o.symbol }}</router-link>
-              <router-link :to="`/stocks/${o.symbol}`" class="p-name">{{ o.name }}</router-link>
+              <a :href="stockHref(o.symbol)" target="_blank" rel="noopener" class="p-symbol">{{ o.symbol }}</a>
+              <a :href="stockHref(o.symbol)" target="_blank" rel="noopener" class="p-name">{{ o.name }}</a>
               <el-tag size="small" :type="o.direction === 'buy' ? 'danger' : 'success'" effect="dark">{{ o.signal_label }}</el-tag>
               <el-tag size="small" effect="plain" type="info">{{ o.rule_name }}</el-tag>
             </div>
@@ -538,6 +538,12 @@ import { favoritesApi } from '@/api/favorites'
 import { strategyApi } from '@/api/strategy'
 import { fmtPct, fmtPrice } from '@/utils/format'
 import { todayStartEpoch, formatDateTime } from '@/utils/datetime'
+
+// 个股外部链接：跳转云海终端对应股票页面
+function stockHref(code?: string): string {
+  if (!code) return ''
+  return `https://www.cloudsea.tech:8443/stocks/${code}`
+}
 
 // ── 状态 ────────────────────────────────────────────────
 const checking = ref(false)

@@ -35,6 +35,7 @@ class PlanCreateRequest(BaseModel):
     notes: str | None = Field(None, description="备注")
     date: str | None = Field(None, description="计划日期 YYYY-MM-DD，默认当日")
     source: dict | None = Field(None, description="5.4 来源标签 {type, ref, label}")
+    confirmed: bool | None = Field(None, description="三态确认：False=待确认 / True=已确认（手动添加/已拍板为 True，候选写库为 False）")
 
 
 class PlanDetailUpdateRequest(BaseModel):
@@ -43,6 +44,7 @@ class PlanDetailUpdateRequest(BaseModel):
     sell_condition: str | None = Field(None, description="卖出条件")
     name: str | None = Field(None, description="标的名称")
     notes: str | None = Field(None, description="备注")
+    confirmed: bool | None = Field(None, description="人工确认：False=待确认 / True=已确认（进入盘中提醒）")
 
 
 class PlanStatusRequest(BaseModel):

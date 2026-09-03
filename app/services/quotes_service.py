@@ -66,6 +66,8 @@ class QuotesService:
                     "source": q.get("source", "unknown"),
                     "age_seconds": age_seconds,
                     "data_timestamp": q.get("data_timestamp"),
+                    # 名称透传（供盘中卖出建议等场景在持仓缺名字时兜底）
+                    "name": q.get("name"),
                 }
             return result
         except Exception as e:

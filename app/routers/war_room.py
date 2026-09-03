@@ -71,18 +71,41 @@ async def war_room_today_trades(user: dict = Depends(get_current_user)):
                 {"trade_date": today},
             ],
         }).sort("timestamp", -1).limit(50).to_list(length=50)
+
+        # 批量补全缺失股票名称（stock_basic_info）+ 策略英文 → 中文
+        from app.strategy_system.strategies import _STRATEGY_MAP
+        # 补充散户策略族 / 默认值等非内置筛选策略（中文展示兜底）
+        _STRAFEGY_EXTRA_ZH = {
+            "default": "默认",
+            "extreme_reversal": "极端反转",
+            "convertible_arbitrage": "转债博弈",
+        }
+
+        name_falls = [str(t.get("code")).strip() for t in docs
+                      if not (t.get("stock_name") or "").strip() and (t.get("code") or "").strip()]
+        stock_names: dict[str, str] = {}
+        if name_falls:
+            cursor = db["stock_basic_info"].find(
+                {"code": {"$in": name_falls}}, {"_id": 0, "code": 1, "name": 1})
+            stock_names = {str(d.get("code")): str(d.get("name")) for d in await cursor.to_list(None)}
+
         items = []
         for t in docs:
             ts = t.get("timestamp")
+            code = str(t.get("code") or "").strip()
+            name = (t.get("stock_name") or "").strip() or stock_names.get(code) or code
+            strategy_raw = t.get("strategy") or "default"
+            strat = _STRATEGY_MAP.get(strategy_raw, {})
+            strategy_cn = strat.get("name") or _STRAFEGY_EXTRA_ZH.get(strategy_raw) or strategy_raw
             items.append({
-                "code": t.get("code", ""),
-                "name": t.get("stock_name") or t.get("code", ""),
+                "code": code,
+                "name": name,
                 "side": t.get("side"),
                 "quantity": int(t.get("quantity") or 0),
                 "price": t.get("price"),
                 "amount": t.get("amount"),
                 "pnl": t.get("pnl"),
-                "strategy": t.get("strategy"),
+                "strategy": strategy_cn,
                 "timestamp": ts.isoformat() if hasattr(ts, "isoformat") else str(ts),
             })
         return ok({"total": len(items), "items": items})
@@ -166,10 +189,31 @@ async def war_room_today_daily_plan(user: dict = Depends(get_current_user)):
 
     快照未生成（如尚未到盘前任务 / 冷启动）返回 generated=false，前端再走 POST generate。
     """
-    from app.services.plan_generation_service import load_daily_plan_snapshot
+    from app.services.plan_generation_service import load_daily_plan_snapshot, _today_planned_codes
     today = now_tz().strftime("%Y-%m-%d")
     try:
         result = await load_daily_plan_snapshot()
+        # 快照为跨用户共享（盘前 8:15 预生成）：按当前用户过滤，已写入当日计划的标的
+        # 不再出现在「待确认计划候选」/「卖出观测」中，避免已确认/已添加的标的重复显示。
+        if result:
+            planned = await _today_planned_codes(user["id"])
+            if planned:
+                total_cand = len(result.get("candidates") or [])
+                total_sell = len(result.get("sell_candidates") or [])
+                cands = [c for c in (result.get("candidates") or [])
+                         if (c.get("code") or "").strip() not in planned]
+                sells = [s for s in (result.get("sell_candidates") or [])
+                         if (s.get("code") or "").strip() not in planned]
+                result = {
+                    **result,
+                    "candidates": cands,
+                    "candidates_count": len(cands),
+                    "sell_candidates": sells,
+                    "sell_count": len(sells),
+                    # 供前端区分「快照未生成」与「快照已生成但候选全部被确认/过滤」：
+                    # filtered_count>0 表示流水线已自动执行、结果被用户已计划去重清理。
+                    "filtered_count": (total_cand - len(cands)) + (total_sell - len(sells)),
+                }
         return ok({"generated": result is not None, "date": today, "result": result})
     except Exception as e:
         logger.error(f"今日计划快照读取失败: {e}", exc_info=True)
@@ -302,9 +346,17 @@ async def war_room_today(user: dict = Depends(_get_optional_user)):
             plan_total = await db["daily_plans"].count_documents(
                 {"user_id": uid, "date": today}
             )
+            # 「待确认」才需要用户在盘前 Tab 点「确认」：confirmed 显式为 false 才计入。
+            # 缺省（存量旧计划无该字段）视为已确认，与 plan_service.list_plans 序列化口径一致，
+            # 避免「盘前角标显示 1 但当日计划里没有确认按钮」的错位。
+            plan_unconfirmed = await db["daily_plans"].count_documents(
+                {"user_id": uid, "date": today, "status": "pending",
+                 "confirmed": {"$eq": False}}
+            )
         else:
             plan_pending = 0
             plan_total = 0
+            plan_unconfirmed = 0
 
         # 盘中：当前持仓数（非空仓）
         if uid:
@@ -355,8 +407,11 @@ async def war_room_today(user: dict = Depends(_get_optional_user)):
         weekly_todo = 0 if (weekly_done or not weekly_due) else 1
 
         # 各段待办计数（与前端 flowSegments 角标口径完全一致，保证「待办合计」= 四段角标之和）
-        pre_todo = plan_pending + (0 if bool(macro_snap) else 1)
-        intra_todo = pending_orders
+        # 盘前待办 = 待确认计划（需在盘前点「确认」）+ 宏观快照缺失；
+        # 已确认待执行的买入计划属于「盘中待办」（动作是盘中「去交易」），不再挂盘前角标。
+        plan_confirmed_pending = plan_pending - plan_unconfirmed
+        pre_todo = plan_unconfirmed + (0 if bool(macro_snap) else 1)
+        intra_todo = plan_confirmed_pending + pending_orders
         post_todo = signal_pending
         total_todo = pre_todo + intra_todo + post_todo + weekly_todo
 
@@ -366,7 +421,8 @@ async def war_room_today(user: dict = Depends(_get_optional_user)):
             "week_start": week_start,
             "pre_market": {
                 "macro_snapshot_ready": bool(macro_snap),
-                "plan_pending": plan_pending,
+                # 待确认计划数（角标同口径）：需在盘前点「确认」才销账
+                "plan_pending": plan_unconfirmed,
                 "plan_total": plan_total,
                 "todo": pre_todo,
             },
@@ -374,6 +430,8 @@ async def war_room_today(user: dict = Depends(_get_optional_user)):
                 "holding_count": holding_count,
                 "alert_count": alert_count,
                 "pending_orders": pending_orders,
+                # 已确认待执行的买入计划数（动作 = 盘中「去交易」）
+                "plan_confirmed_pending": plan_confirmed_pending,
                 "todo": intra_todo,
             },
             "post_market": {

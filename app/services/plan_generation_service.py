@@ -402,14 +402,39 @@ def _source_for(it: dict, strategy: str | None) -> dict:
 _SELL_SIGNAL_TYPES = {"S1", "S2", "S3", "SafetyNet", "TrailingStop"}
 
 
-async def _build_stock_step(direction: str | None, basis: dict | None,
+async def _today_planned_codes(user_id: str) -> set[str]:
+    """查询用户当日已写入 daily_plans 的代码集合（buy+sell）。
+
+    用于候选去重：已确认/已手动添加的计划不再重复出现在「待确认计划候选」/「卖出观测」。
+    user_id 为空（盘前定时任务无用户上下文）返回空集，保持共享快照原样。
+    """
+    if not user_id:
+        return set()
+    try:
+        from app.core.database import get_mongo_db
+        from app.utils.timezone import now_tz
+        db = get_mongo_db()
+        today = now_tz().strftime("%Y-%m-%d")
+        docs = await db["daily_plans"].find(
+            {"user_id": user_id, "date": today},
+            {"_id": 0, "code": 1},
+        ).to_list(None)
+        return {str(d.get("code") or "").strip() for d in docs if d.get("code")}
+    except Exception as e:
+        logger.warning(f"当日已计划代码读取失败（跳过去重）: {e}")
+        return set()
+
+
+async def _build_stock_step(user_id: str, direction: str | None, basis: dict | None,
                             industry_pool: list[dict]) -> tuple[dict, list[dict]]:
     """个股段：候选池+已验证信号 **硬绑定** 当日预测行业池（Stage3）。
 
     行业池由 Stage2 行业方向预测产出（含行业置信度）；本段只保留
-    industry ∈ 行业池 的个股，并按行业限流（每行业上限默认3只）+ 方向过滤。
+    industry ∈ 行业池 的个股，并按行业限流（每行业上限默认3只）+ 方向过滤，
+    且剔除「当日计划中已存在」的代码（避免已确认/已添加的标的重复出现在候选）。
     """
     allowed = {x.get("industry") for x in (industry_pool or []) if x.get("industry")}
+    planned_codes = await _today_planned_codes(user_id)
     try:
         pool_items = await _collect_pool_items()
     except Exception as e:
@@ -447,6 +472,10 @@ async def _build_stock_step(direction: str | None, basis: dict | None,
         if not industry and code:
             industry = code_industry.get(str(code), "")
         it["industry"] = industry
+        # 去重：已在当日计划中的标的（人工确认/手动添加）不再重复推荐
+        if code and str(code).strip() in planned_codes:
+            dropped_reasons.append(f"{code} 已在当日计划中，跳过重复候选")
+            continue
         # 风控：已触发卖出预警（S1/S2/S3 等）的个股不纳入买入候选
         if sig_type in _SELL_SIGNAL_TYPES:
             dropped_reasons.append(f"{code} 处于 {sig_type} 卖出预警区，不宜买入")
@@ -470,6 +499,8 @@ async def _build_stock_step(direction: str | None, basis: dict | None,
 
     kept = len(kept_items)
     rule_desc = f"行业硬绑定当日预测行业池({len(allowed)}个) + 剔除卖出预警区个股"
+    if planned_codes:
+        rule_desc += f"；剔除当日已计划 {len(planned_codes)} 只"
     if "空" in str(direction):
         rule_desc += "；偏空 → 剔除 B1 追涨"
     if strategy:
@@ -558,6 +589,10 @@ async def _build_sell_step(user_id: str, basis: dict | None) -> tuple[dict, list
     except Exception as e:
         logger.warning(f"卖出观测生成失败（降级为空）: {e}")
         items = []
+    # 去重：已写入当日计划的持仓（人工确认卖出/手动添加）不再重复出现在卖出观测
+    planned_codes = await _today_planned_codes(user_id)
+    if planned_codes:
+        items = [it for it in items if (it.get("code") or "").strip() not in planned_codes]
     rule_desc = "持仓卖出评估：止损/止盈触发 + 三买三卖卖点（S1减仓/S2主减/S3清仓/安全网/移动止损）"
     if "空" in str((basis or {}).get("status") or ""):
         rule_desc += "；偏空 → 卖出观测从严，减仓优先"
@@ -630,7 +665,7 @@ async def generate_daily_plan(user_id: str,
     industry_pool = (ind_step.get("meta") or {}).get("industries") or []
 
     stock_step, kept_items = await run_step(
-        "个股", lambda: _build_stock_step(direction, basis, industry_pool)
+        "个股", lambda: _build_stock_step(user_id, direction, basis, industry_pool)
     )
     steps.append(stock_step)
     await emit("个股")

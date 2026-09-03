@@ -124,7 +124,9 @@ def _get_llm_cfg() -> dict | None:
             "api_base": backend_url,
             "api_key": api_key,
             "temperature": 0.3,
-            "max_tokens": 800,
+            # 模型带隐式推理（如 deepseek-v4-flash 有 reasoning_tokens，实测一次思考约 250-300 token），
+            # 800 会被推理占满导致 content 截断为空 → 提高到 2048，给「推理 + 四段 JSON」留足空间
+            "max_tokens": 2048,
         }
     except Exception as e:
         logger.warning(f"获取 LLM 配置失败（解读将降级）: {e}")
@@ -159,24 +161,79 @@ def _call_llm_interpretation(cfg: dict, prompt: str) -> dict:
     return _parse_llm_json(content)
 
 
+def _re_clean_trailing_comma(s: str) -> str:
+    """剔除 JSON 对象/数组尾部多余逗号（常见 LLM 输出瑕疵）。"""
+    import re as _re
+    return _re.sub(r",\s*([}\]])", r"\1", s)
+
+
+def _extract_balanced_json(text: str) -> str | None:
+    """从含前/后散文的文本中，按括号配平截取首个完整 JSON 子串。"""
+    import re as _re
+    cleaned = _re.sub(r",\s*([}\]])", r"\1", text)  # 容忍对象尾部多余逗号
+    for start_c, end_c in (("{", "}"), ("[", "]")):
+        start = cleaned.find(start_c)
+        if start < 0:
+            continue
+        depth = 0
+        in_str = False
+        esc = False
+        for i in range(start, len(cleaned)):
+            ch = cleaned[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    in_str = False
+                continue
+            if ch == '"':
+                in_str = True
+            elif ch == start_c:
+                depth += 1
+            elif ch == end_c:
+                depth -= 1
+                if depth == 0:
+                    return cleaned[start:i + 1]
+    return None
+
+
 def _parse_llm_json(content: str) -> dict:
-    """容错解析 LLM JSON 输出（去 ```json 包裹，必要时截取首个 { } 段）。"""
-    text = (content or "").strip()
+    """容错解析 LLM JSON 输出（多数供应商会把 JSON 包在 markdown 围栏/引号/散文里）。
+
+    逐级兜底：
+    1) 直接 json.loads（先剥 BOM / 空白 / ```json 围栏）；
+    2) 包裹成 JSON 字符串（'"{...}"'）时解一层引号；
+    3) 括号配平截取首个完整 JSON（容忍前后散文）；
+    4) 剔除对象尾部多余逗号后重试。
+    全部失败抛 ValueError（由调用方降级/重试）。
+    """
+    text = (content or "").strip().lstrip("\ufeff")
+    candidates: list[str] = [text]
     if text.startswith("```"):
-        text = text.strip("`")
-        if text.lower().startswith("json"):
-            text = text[4:]
-        text = text.strip()
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        start, end = text.find("{"), text.rfind("}")
-        if start >= 0 and end > start:
+        cleaned = text.strip("`")
+        if cleaned.lower().startswith("json"):
+            cleaned = cleaned[4:]
+        candidates.append(cleaned.strip())
+    if len(text) >= 2 and text[0] in ('"', "'") and text[-1] == text[0]:
+        try:
+            candidates.append(json.loads(text))
+        except (json.JSONDecodeError, TypeError):
+            pass
+    for cand in candidates:
+        try:
+            return json.loads(cand)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    sub = _extract_balanced_json(text)
+    if sub is not None:
+        for cand in (sub, _re_clean_trailing_comma(sub)):
             try:
-                return json.loads(text[start:end + 1])
-            except json.JSONDecodeError:
+                return json.loads(cand)
+            except (json.JSONDecodeError, TypeError):
                 pass
-        raise ValueError("LLM 输出不是合法 JSON")
+    raise ValueError("LLM 输出不是合法 JSON")
 
 
 def _build_llm_prompt(indices: list[dict], calendar: list[dict],
@@ -219,27 +276,38 @@ def _build_llm_prompt(indices: list[dict], calendar: list[dict],
 
 async def _llm_interpretation(indices: list[dict], calendar: list[dict],
                               news: list[dict], rule: dict) -> dict:
-    """LLM 解读（带降级）。返回 {available, interpretation}；不可用返回 available=False。"""
+    """LLM 解读（带降级 + 失败重试）。返回 {available, interpretation}；不可用返回 available=False。
+
+    保障解读可用：单次失败先重试一次（追加「只输出 JSON」的强约束），
+    两次仍失败才降级为「仅规则结果」。JSON 解析已做多层容错（见 _parse_llm_json）。
+    """
     cfg = _get_llm_cfg()
     if not cfg:
         return {"available": False, "interpretation": None}
-    try:
-        import asyncio
-        prompt = _build_llm_prompt(indices, calendar, news, rule)
-        result = await asyncio.to_thread(_call_llm_interpretation, cfg, prompt)
-        # 结构规整：只保留设计文档要求的四段，缺字段补空
-        return {
-            "available": True,
-            "interpretation": {
-                "keywords": result.get("keywords") or [],
-                "event_impact": result.get("event_impact") or "",
-                "style_tendency": result.get("style_tendency") or "",
-                "risk_tips": result.get("risk_tips") or "",
-            },
-        }
-    except Exception as e:
-        logger.warning(f"LLM 宏观解读失败（降级为仅规则结果）: {e}")
-        return {"available": False, "interpretation": None}
+    retry_tail = (
+        "\n\n【重要】直接输出符合上述 JSON 结构的原始 JSON："
+        "不要输出任何解释文字，不要使用 markdown 代码块（不要以 ``` 开头），结尾不要追加说明。"
+    )
+    for attempt in (1, 2):
+        try:
+            prompt = _build_llm_prompt(indices, calendar, news, rule)
+            if attempt == 2:
+                prompt += retry_tail
+            import asyncio
+            result = await asyncio.to_thread(_call_llm_interpretation, cfg, prompt)
+            # 结构规整：只保留设计文档要求的四段，缺字段补空
+            return {
+                "available": True,
+                "interpretation": {
+                    "keywords": result.get("keywords") or [],
+                    "event_impact": result.get("event_impact") or "",
+                    "style_tendency": result.get("style_tendency") or "",
+                    "risk_tips": result.get("risk_tips") or "",
+                },
+            }
+        except Exception as e:
+            logger.warning(f"LLM 宏观解读第 {attempt}/2 次失败（降级为仅规则结果）: {e}")
+    return {"available": False, "interpretation": None}
 
 
 # ---------------------------------------------------------------------------
@@ -318,19 +386,42 @@ async def get_macro_snapshot(date_str: str | None = None) -> dict | None:
 async def refresh_macro_snapshot() -> dict:
     """生成今日快照并落库（手动刷新 / 8:15 调度共用）。返回快照。
 
-    5.2 盘前锁定：当日方向基准一旦锁定（存在 locked_at），盘中刷新只更新
-    事实数据（指数/日历/快讯/信号值），沿用盘前基准，避免方向盘中横跳
-    （对应文档 §3.2"盘中不重算标签，只展示基准"、§5.2 指针仅在盘前定位一次）。
+    5.2 盘前锁定：当日方向基准一旦在「盘前窗口」锁定（当日 >=08:00 产生的 locked_at），
+    盘中刷新只更新事实数据（指数/日历/快讯/信号值），沿用盘前基准，
+    避免方向盘中横跳（对应文档 §3.2"盘中不重算标签，只展示基准"、
+    §5.2 指针仅在盘前定位一次）。
+
+    锁定有效性窗口：凌晨（08:00 前）由服务重启/夜间任务抢先生成的基准，
+    外围数据不完整、置信度失真（如 14%），不视为有效锁定 —— 允许盘前正式计算覆盖，
+    保证「今日置信度」不是被凌晨的半成品锁死的。
     """
     snap = await build_macro_snapshot()
-    # 今日是否已存在锁定基准 → 若已锁定则保留原基准
+    # 今日是否已存在有效锁定基准 → 已锁定则保留原基准（覆盖方向/置信度之外的其余数据）
     try:
+        from datetime import datetime as _dt, timezone as _dt_tz
+        from zoneinfo import ZoneInfo
         from app.core.database import get_mongo_db
         db = get_mongo_db()
         existing = await db[SNAPSHOT_COLLECTION].find_one({"date": snap["date"]})
         old_basis = (existing or {}).get("basis") or {}
-        if old_basis.get("locked_at"):
-            snap["basis"] = old_basis
+        lock = old_basis.get("locked_at")
+        # 新快照数据是否齐全：外围指数到位且置信度 > 0。
+        # 数据源瞬时失败（如行情接口限频）时 rule 会退化（置信度 0），
+        # 此时不应把「凌晨/历史基准」换成更糟的空数据。
+        new_data_ok = bool((snap.get("indices") or [])) and float((snap.get("rule") or {}).get("confidence") or 0) > 0
+        if lock:
+            if not isinstance(lock, _dt):
+                try:
+                    lock = _dt.fromisoformat(str(lock))
+                except ValueError:
+                    lock = None
+            if lock is not None:
+                lock_aware = lock if lock.tzinfo else lock.replace(tzinfo=_dt_tz.utc)
+                lock_bj = lock_aware.astimezone(ZoneInfo("Asia/Shanghai"))
+                if lock_bj.hour >= 8 or not new_data_ok:
+                    # 盘前窗口（>=08:00）产生的锁定一律保留（盘中不横跳）；
+                    # 凌晨的半成品锁定，仅在新数据齐全时才允许被覆盖。
+                    snap["basis"] = old_basis
     except Exception as e:
         logger.warning(f"盘前基准锁定判断跳过: {e}")
     await _persist_snapshot(snap)

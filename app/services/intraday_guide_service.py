@@ -211,6 +211,9 @@ async def build_premarket_sell_candidates(user_id: str) -> list[dict]:
     items: list[dict] = []
     for pos in positions[: _SELL_LIMIT]:
         sig = await _eval_sell_signal(pos["code"])
+        # 名称兜底：持仓未存 stock_name 时用信号评估返回的名称
+        if not pos.get("name") or pos.get("name") == pos["code"]:
+            pos = {**pos, "name": (sig or {}).get("name") or pos["name"]}
         advice = _advice_for(pos, sig.get("close") if sig else None, sig)
         if advice.get("advice") == "持有":
             continue
@@ -241,7 +244,7 @@ async def build_intraday_guide(user_id: str) -> dict:
       sells: 持仓逐只评估（卖点信号 + 止损止盈 + 实时价 → 持有/减仓/清仓/止损/止盈）
     """
     from app.services import plan_service
-    from app.services.plan_generation_service import load_daily_plan_snapshot
+    from app.services.plan_generation_service import load_daily_plan_snapshot, _today_planned_codes
     from app.services.quotes_service import get_quotes_service
 
     today = now_tz().strftime("%Y-%m-%d")
@@ -253,11 +256,17 @@ async def build_intraday_guide(user_id: str) -> dict:
         for p in plans:
             if p.get("direction") == "buy" and p.get("code"):
                 buys_src[p["code"]] = {"type": "plan", "plan_id": p.get("id"), "item": p}
+        # 今日已写入当日计划的代码（无论状态：待确认/已确认/已执行）：
+        # 已在计划中覆盖的标的不再从快照候选重复加入，避免「已执行」的股票仍在盘中显示可执行。
+        planned_today = await _today_planned_codes(user_id)
         snap = await load_daily_plan_snapshot(today)
         for c in (snap or {}).get("candidates") or []:
             if c.get("direction") != "buy" or not c.get("code"):
                 continue
-            buys_src.setdefault(c["code"], {"type": "candidate", "plan_id": None, "item": c})
+            code = str(c["code"]).strip()
+            if code in planned_today:
+                continue
+            buys_src.setdefault(code, {"type": "candidate", "plan_id": None, "item": c})
     except Exception as e:
         logger.warning(f"盘中买入数据源读取失败（降级）: {e}")
 
@@ -284,8 +293,13 @@ async def build_intraday_guide(user_id: str) -> dict:
             tp_f = None
         price = (quotes.get(code) or {}).get("close")
         dist = round((float(price) / tp_f - 1) * 100, 2) if price is not None and tp_f else None
-        triggered = bool(tp_f is not None and price is not None and float(price) <= tp_f)
-        if triggered:
+        # 三态确认闸门：仅 confirmed=True（已确认）的计划进入"可执行/触达"判定；
+        # 候选（无 plan_id）默认可按已确认处理（用户在候选卡已人工拍板）。
+        confirmed = bool(item.get("confirmed", True)) if src.get("type") == "plan" else True
+        triggered = bool(confirmed and tp_f is not None and price is not None and float(price) <= tp_f)
+        if not confirmed:
+            advice = "待确认：请先在当日计划中确认该计划，确认后进入盘中提醒"
+        elif triggered:
             advice = f"已回落至 {tp_f} 下方，时间点成立，可执行买入"
         elif dist is not None and dist <= 2:
             advice = f"接近触发价（偏离 {dist}%），可提前挂单等待成交"
@@ -301,6 +315,7 @@ async def build_intraday_guide(user_id: str) -> dict:
             "last_price": price,
             "distance_pct": dist,
             "triggered": triggered,
+            "confirmed": confirmed,
             "signal_label": item.get("signal_label"),
             "source": item.get("source"),
             "plan_id": src.get("plan_id"),
@@ -312,6 +327,10 @@ async def build_intraday_guide(user_id: str) -> dict:
         code = pos["code"]
         sig = await _eval_sell_signal(code)
         price = (quotes.get(code) or {}).get("close")  # 实时价优先
+        # 名称兜底：持仓未存 stock_name（如 null）时，用信号评估/实时行情返回的名称补全
+        if not pos.get("name") or pos.get("name") == code:
+            pos = {**pos, "name": (sig or {}).get("name")
+                   or (quotes.get(code) or {}).get("name") or pos["name"]}
         advice = _advice_for(pos, price, sig)
         sells.append({
             **advice,

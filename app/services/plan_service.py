@@ -40,6 +40,8 @@ def _serialize(doc: dict) -> dict:
     _id = doc.pop("_id", None)
     if _id is not None:
         doc["id"] = str(_id)
+    # 三态：confirmed=False=待确认 / True=已确认（存量旧计划无该字段视为已确认）
+    doc.setdefault("confirmed", True)
     doc["status_label"] = _STATUS_LABELS.get(doc.get("status"), doc.get("status", ""))
     return doc
 
@@ -145,6 +147,9 @@ async def create_plan(user_id: str, data: dict) -> dict:
         "stop_loss": data.get("stop_loss"),
         "sell_condition": data.get("sell_condition"),
         "status": STATUS_PENDING,
+        # 三态确认：False=待确认（候选/卖出观测写库后需在当日计划中确认），True=已确认。
+        # 手动添加计划视为已确认；盘中"可执行/触达提醒"仅对 confirmed=True 的计划生效。
+        "confirmed": bool(data.get("confirmed", False)),
         "executed_trade_id": None,
         # 5.4 来源标签：{type, ref, label}，标注该条计划的来源（已验证信号/候选池/手动），便于审计与人工可改
         "source": data.get("source"),
@@ -214,7 +219,7 @@ async def update_plan_detail(user_id: str, plan_id: str, fields: dict) -> dict |
         if not existing:
             return None
 
-        allowed = {"trigger_price", "stop_loss", "sell_condition", "name", "notes", "source"}
+        allowed = {"trigger_price", "stop_loss", "sell_condition", "name", "notes", "source", "confirmed"}
         update = {
             k: v for k, v in fields.items()
             if k in allowed and v is not None

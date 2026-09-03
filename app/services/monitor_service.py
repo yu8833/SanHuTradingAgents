@@ -1076,9 +1076,11 @@ class MonitorService:
             if qty <= 0:
                 raise ValueError("可用资金不足，无法买入一手")
         else:
-            pos = await db["paper_positions"].find_one(
-                {"user_id": target_user, "code": symbol})
-            avail = int((pos or {}).get("available_qty", (pos or {}).get("quantity", 0)))
+            # 卖出可用量必须以 paper_executor 的动态口径为准（总持仓 − 今日买入量 T+1），
+            # 不能读持仓里的 available_qty 字段——该字段仅在买入当天置 0，跨天后从不恢复，
+            # 会误判"昨天/更早买入的持仓不可卖"（如北交所 920 段），导致"可用持仓不足"假报错。
+            from app.services.paper_executor import _get_available_quantity
+            avail = await _get_available_quantity(target_user, symbol, "CN")
             if order.get("signal_type") == "S3" or position_pct >= 1.0:
                 qty = max(0, avail)
             else:

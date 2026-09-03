@@ -546,7 +546,10 @@ async def execute_market_order(
                     }}
                 )
             else:
-                new_available = max(0, pos.get("available_qty", old_qty) - qty)
+                # 卖出后同步 available_qty 字段：以动态口径（总持仓−今日买入）卖出前可用量 − qty。
+                # 该字段在买入当天被置 0（T+1 锁定），跨天后不会自动恢复；这里随卖出修正，
+                # 避免其他读取该字段的路径（如前端展示、卖出指令执行）拿到过期的 0。
+                new_available = max(0, await _get_available_quantity(user_id, normalized_code, market) - qty)
                 await db["paper_positions"].update_one(
                     {"_id": pos["_id"]},
                     {"$set": {
