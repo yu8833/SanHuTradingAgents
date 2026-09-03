@@ -1164,7 +1164,9 @@ const flowSegments = computed(() => [
   { key: 'pre_market', label: '盘前', count: todayData.value?.pre_market?.todo ?? 0 },
   { key: 'intraday', label: '盘中', count: todayData.value?.intraday?.todo ?? 0 },
   { key: 'post_market', label: '盘后', count: todayData.value?.post_market?.todo ?? 0 },
-  { key: 'weekly', label: '周度', count: todayData.value?.weekly?.todo ?? 0 }
+  { key: 'weekly', label: '周度', count: todayData.value?.weekly?.todo ?? 0 },
+  // 「参考」非时段（无待办角标），仅作为全局背景数据入口
+  { key: 'reference', label: '参考', count: 0 }
 ])
 const tabIndexMap: Record<string, string> = { pre_market: 'pre_market', intraday: 'intraday', post_market: 'post_market', weekly: 'weekly', reference: 'reference' }
 const currentPeriod = computed(() => todayData.value?.current_period || 'pre_market')
