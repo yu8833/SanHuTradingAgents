@@ -29,7 +29,8 @@ COPY assets /app/frontend/public/assets
 COPY docs /app/docs
 
 # 构建生产版本（跳过类型检查以加快构建速度，避免依赖问题）
-RUN yarn vite build
+# 构建前强制清空 dist：防止容器内残留旧 bundle 导致 index.html/新 hash 不一致（旧的灰色 bundle 被新入口引用）
+RUN rm -rf dist && yarn vite build
 
 # 运行阶段：使用Nginx提供静态文件服务
 FROM nginx:alpine AS runtime

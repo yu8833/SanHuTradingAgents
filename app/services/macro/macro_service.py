@@ -15,7 +15,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from app.services.cache_layer import cached
+from app.services.cache_layer import cached, clear_cache
 from app.services.macro.financial_calendar import get_financial_calendar
 from app.services.macro.macro_scorer import score_macro
 from app.services.macro.news_classifier import get_macro_news
@@ -510,6 +510,36 @@ async def get_macro_snapshot(date_str: str | None = None) -> dict | None:
 
     key = f"macro:snapshot:{date_str}"
     return await cached(key, _load, category="market", valid=lambda v: v is not None)
+
+
+async def get_macro_reference(refresh: bool = False) -> dict:
+    """参考 Tab 独立实时数据：外围指数 / 财经日历 / 重要快讯。
+
+    与宏观快照解耦：不落库、不跑 LLM 逐条解读、不依赖快照是否生成。
+    三块数据各自复用已有短 TTL 缓存（指数 market 级、日历 1 天、快讯 5min/1h），
+    秒级返回；refresh=True 仅强制重建外围指数（2-5s），快讯因 5min/1h TTL
+    已足够新鲜且重建 108 个 RSS 源耗时 30s+（超过前端等待阈值），故沿用缓存。
+    日历解读采用规则化 analysis（financial_calendar 内置，秒回）；LLM 解读保留在盘前快照。
+    """
+    # ① 外围指数：market 级缓存（交易 3min / 非交易 30min）；refresh 先清缓存强制重建
+    if refresh:
+        await clear_cache("macro:ref:indices:v1")
+    indices = await cached(
+        "macro:ref:indices:v1",
+        _collect_indices,
+        category="market",
+        valid=bool,
+    )
+    # ② 财经日历：复用 1 天 TTL 缓存（含 announced/actual/规则化 analysis）
+    calendar = await get_financial_calendar(8)
+    # ③ 重要快讯：复用 5min/1h 缓存（与快照同键 top_n=40，命中已有缓存；不强制重建）
+    news = await get_macro_news(hours_back=24, top_n=40)
+    return {
+        "indices": indices,
+        "calendar": calendar,
+        "news_top": news,
+        "generated_at": datetime.now(timezone.utc),
+    }
 
 
 async def refresh_macro_snapshot() -> dict:

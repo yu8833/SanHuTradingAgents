@@ -63,3 +63,21 @@ async def refresh(current_user: dict = Depends(get_optional_current_user)):
     except Exception as e:
         logger.error(f"宏观快照刷新失败: {e}", exc_info=True)
         return ok(None, message="宏观快照刷新失败，请稍后重试")
+
+
+@router.get("/reference")
+async def macro_reference(
+    refresh: bool = Query(default=False, description="是否强制重建指数/快讯缓存"),
+    current_user: dict = Depends(get_optional_current_user),
+):
+    """参考 Tab 独立实时数据（外围指数 / 财经日历 / 重要快讯）。
+
+    不依赖宏观快照是否生成、不落库、不跑 LLM 逐条解读；
+    三块数据各自带短 TTL 缓存，秒回。refresh=True 时强制重建外围指数缓存。
+    """
+    try:
+        data = await macro_service.get_macro_reference(refresh=refresh)
+        return ok(data)
+    except Exception as e:
+        logger.error(f"参考数据获取失败: {e}", exc_info=True)
+        return ok(None, message="参考数据获取失败，请稍后重试")

@@ -860,16 +860,16 @@
           <p class="block-tip">做对了什么 / 做错了什么 / 有没有违反系统规则 / 三系统信号一致性 —— 在交易复盘页记录。</p>
         </section>
       </el-tab-pane>
-    <!-- ============ 参考（全局背景数据区：外围市场 / 财经日历 / 重要快讯） ============ -->
+    <!-- ============ 参考（全局背景数据区：外围市场 / 财经日历 / 重要快讯，独立实时数据） ============ -->
       <el-tab-pane label="参考" name="reference">
-        <template v-if="macro">
+        <template v-if="reference">
       <el-collapse v-model="bgCollapse" class="bg-collapse">
         <el-collapse-item name="bg">
           <template #title>
             <span class="bg-collapse-title">
               <el-icon><Position /></el-icon>
               <span class="bg-title-text">全局背景 · 全天参考</span>
-              <span class="block-hint">外围市场 / 财经日历 / 重要快讯 · 快照生成于 {{ fmtClock(macro.created_at) }}，可点开在外围市场卡「刷新」更新</span>
+              <span class="block-hint">外围市场 / 财经日历 / 重要快讯 · 更新于 {{ fmtClock(reference.generated_at) }}，可点「刷新」更新</span>
             </span>
           </template>
 
@@ -878,20 +878,20 @@
             <div class="block-head">
               <span class="block-title"><el-icon><Position /></el-icon> 外围市场快照</span>
               <div class="block-actions">
-                <span class="block-hint">指数 / 美股 / 港股 · 截至 {{ fmtClock(macro.created_at) }}</span>
-                <el-button size="small" :icon="Refresh" :loading="macroRefreshing || foreignStocksLoading" @click="refreshForeignMarket">刷新</el-button>
+                <span class="block-hint">指数 / 美股 / 港股 · 更新于 {{ fmtClock(reference.generated_at) }}</span>
+                <el-button size="small" :icon="Refresh" :loading="referenceRefreshing || foreignStocksLoading" @click="refreshReference">刷新</el-button>
               </div>
             </div>
 
             <div class="sub-block">
               <div class="sub-title"><el-icon><DataLine /></el-icon> 指数</div>
               <div class="grid grid-4">
-                <el-card v-for="idx in macro.indices || []" :key="idx.key" shadow="never" class="idx-card">
+                <el-card v-for="idx in reference.indices || []" :key="idx.key" shadow="never" class="idx-card">
                   <div class="idx-name">{{ idx.name }}<span class="region">{{ idx.region }}</span></div>
                   <div class="idx-price">{{ idx.price != null ? idx.price.toFixed(2) : '—' }}</div>
                   <div class="idx-pct" :class="clsByVal(idx.change_pct, '')">{{ fmtPct(idx.change_pct) }}</div>
                 </el-card>
-                <el-empty v-if="!macro.indices?.length" :image-size="48" description="暂无指数数据" />
+                <el-empty v-if="!reference.indices?.length" :image-size="48" description="暂无指数数据" />
               </div>
             </div>
 
@@ -926,7 +926,7 @@
               <span class="block-title"><el-icon><Calendar /></el-icon> 今日财经日历</span>
               <span class="block-hint">昨天 + 未来 7 日 · 已公布事件带实际值与解读</span>
             </div>
-            <el-table v-loading="loading" :data="macro.calendar || []" stripe size="small" class="app-table app-table--compact" max-height="420">
+            <el-table v-loading="referenceLoading" :data="reference.calendar || []" stripe size="small" class="app-table app-table--compact" max-height="420">
               <el-table-column label="日期" width="104">
                 <template #default="{ row }">
                   <span :class="{ 'cal-announced': row.announced }">{{ row.date }}</span>
@@ -958,7 +958,7 @@
                 </template>
               </el-table-column>
             </el-table>
-            <el-empty v-if="!macro.calendar?.length" description="暂无财经日历数据" />
+            <el-empty v-if="!reference.calendar?.length" description="暂无财经日历数据" />
           </section>
 
           <!-- 重要快讯：多源（财联社/东财 + 资讯雷达）· 仅保留宏观/市场级与自选/持仓/当日计划相关个股 -->
@@ -975,7 +975,7 @@
                 <span v-else class="news-title">{{ n.title }}</span>
                 <span class="news-time">{{ newsTime(n.publish_time) }}</span>
               </div>
-              <el-empty v-if="!macro.news_top?.length" :image-size="48" description="暂无快讯" />
+              <el-empty v-if="!reference.news_top?.length" :image-size="48" description="暂无快讯" />
               <p v-else-if="!relevantNews.length" class="block-tip">快讯均为无关个股/非市场级内容，已按相关性过滤（可在自选/持仓/当日计划中添加标的后再看）</p>
             </div>
             <p v-if="filteredNewsCount > 0" class="block-tip">已过滤 {{ filteredNewsCount }} 条与自选/持仓/当日计划无关的个股快讯</p>
@@ -983,8 +983,8 @@
         </el-collapse-item>
       </el-collapse>
         </template>
-        <el-empty v-else-if="!loading" :image-size="48" description="全局背景数据（外围市场 / 财经日历 / 重要快讯）依赖盘前宏观快照：快照未生成时暂为空，可先到盘前 Tab 点「立即生成」" />
-        <p class="block-tip" style="margin: 12px 0 0">外围市场 / 财经日历 / 重要快讯为全天参考信息：快照生成后此处可见，可在外围市场卡点「刷新」更新。</p>
+        <el-empty v-else-if="!referenceLoading" :image-size="48" description="参考数据暂不可用（外围市场 / 财经日历 / 重要快讯），可点「刷新」重试" />
+        <p class="block-tip" style="margin: 12px 0 0">外围市场 / 财经日历 / 重要快讯为全天参考信息：独立实时获取，不依赖盘前宏观快照，可点「刷新」更新。</p>
       </el-tab-pane>
     </el-tabs>
 
@@ -1155,6 +1155,10 @@ const alertsUnread = computed(() => {
 
 const todayData = ref<WarRoomToday | null>(null)
 const macro = ref<any>(null)
+// 参考 Tab 独立实时数据（外围指数 / 财经日历 / 重要快讯）：与盘前宏观快照解耦，不依赖快照是否生成
+const reference = ref<any>(null)
+const referenceLoading = ref(false)
+const referenceRefreshing = ref(false)
 // 全局背景区折叠状态（默认展开，用户可收起减少滚动）
 const bgCollapse = ref<string[]>(['bg'])
 const foreignStocksLoading = ref(false)
@@ -1344,6 +1348,37 @@ async function loadMacro() {
   loading.value = false
 }
 
+// 参考 Tab：独立实时数据（指数/日历/快讯）——轻量接口、短缓存、秒回，与宏观快照解耦。
+// 请求 main 数据（refresh=false 时后端命中缓存），失败保持空态由模板提示「刷新」重试。
+async function loadReference() {
+  referenceLoading.value = true
+  try {
+    reference.value = await warRoomApi.getMacroReference()
+  } catch (e) {
+    console.warn('[WarRoom] loadReference', e)
+    if (!reference.value) reference.value = null
+  } finally {
+    referenceLoading.value = false
+  }
+}
+
+// 参考 Tab「刷新」：强制重建指数/快讯缓存（不动宏观快照、不跑 LLM），并同步刷新美股/港股行情
+async function refreshReference() {
+  referenceRefreshing.value = true
+  try {
+    await Promise.all([
+      warRoomApi.getMacroReference(true).then(d => { reference.value = d }),
+      loadGlobalStocks()
+    ])
+    ElMessage.success('参考数据已刷新')
+  } catch (e) {
+    console.warn('[WarRoom] refreshReference', e)
+    ElMessage.error('参考数据刷新失败，请稍后重试')
+  } finally {
+    referenceRefreshing.value = false
+  }
+}
+
 async function loadGlobalStocks() {
   foreignStocksLoading.value = true
   try {
@@ -1355,11 +1390,6 @@ async function loadGlobalStocks() {
   } finally {
     foreignStocksLoading.value = false
   }
-}
-
-async function refreshForeignMarket() {
-  // 外围市场快照刷新：宏观快照（含外围指数）+ 美股/港股个股行情
-  await Promise.all([refreshMacro(), loadGlobalStocks()])
 }
 
 async function loadPlans() {
@@ -1556,10 +1586,10 @@ function isRelevantNews(n: any, related: { codes: Set<string>; names: Set<string
   return true
 }
 const relevantNews = computed(() =>
-  (macro.value?.news_top || []).filter(n => isRelevantNews(n, newsRelated.value))
+  (reference.value?.news_top || []).filter(n => isRelevantNews(n, newsRelated.value))
 )
 const filteredNewsCount = computed(() =>
-  (macro.value?.news_top || []).length - relevantNews.value.length
+  (reference.value?.news_top || []).length - relevantNews.value.length
 )
 // 资讯源徽标：资讯雷达的 RSS 源名过长，统一裁短
 function sourceShort(src?: string): string {
@@ -2212,8 +2242,8 @@ function onTabChange(name: string | number) {
   if (name === 'intraday') { loadTodayAlerts(); loadRegime(); loadPositions(); loadIntradayGuide(); loadFavorites(); startIntradayLive() }
   if (name === 'post_market') { loadSignals(); loadTodayTrades() }
   if (name === 'weekly') loadWeekly()
-  // 参考 Tab：加载自选/持仓/当日计划，用于重要快讯相关性过滤
-  if (name === 'reference') { loadFavorites(); loadPositions(); loadPlans() }
+  // 参考 Tab：加载自选/持仓/当日计划（用于重要快讯相关性过滤）+ 独立实时参考数据
+  if (name === 'reference') { loadFavorites(); loadPositions(); loadPlans(); loadReference() }
   // 离开盘中 → 关闭 SSE 订阅与轮询
   if (name !== 'intraday') stopIntradayLive()
 }
@@ -2300,7 +2330,8 @@ onMounted(async () => {
             if (cp && tabIndexMap[cp]) activeTab.value = cp
           }
           refreshCurrent()
-          // 全局背景数据区（外围/日历/快讯）依赖宏观快照：无论初始 Tab 是哪段都确保加载（纯读）
+          // 全局背景数据区（外围/日历/快讯）独立实时获取（不再依赖宏观快照，轻量秒回）
+          loadReference()
           ensureMacroAuto()
           loadGlobalStocks()
           // 打开即读：加载今日计划快照（盘前预生成成品），无需点击生成

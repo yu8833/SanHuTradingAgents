@@ -260,6 +260,14 @@ export const warRoomApi = {
     return res.data
   },
 
+  // 参考 Tab：独立实时数据（指数/日历/快讯，不依赖宏观快照；refresh=true 强制重建指数缓存）
+  async getMacroReference(refresh = false) {
+    const res = await ApiClient.get<any>('/api/macro/reference', {
+      refresh: refresh || undefined
+    }, { timeout: 60000 })
+    return res.data
+  },
+
   // 盘中：今日触发预警列表（与今日聚合角标同口径）
   async getTodayAlerts() {
     const res = await ApiClient.get<{ total: number; items: TodayAlert[] }>('/api/war-room/today-alerts')
