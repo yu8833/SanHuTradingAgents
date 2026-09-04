@@ -94,7 +94,7 @@ async def task_progress_generator(task_id: str, user_id: str):
 
         while idle_elapsed < max_idle_seconds:
             try:
-                message = await asyncio.wait_for(pubsub.get_message(ignore_subscribe_messages=True), timeout=poll_timeout)
+                message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=poll_timeout)
                 if message and message['type'] == 'message':
                     # Reset idle timer on valid message
                     idle_elapsed = 0.0
@@ -337,10 +337,7 @@ async def quotes_update_generator(user_id: str):
 
         while idle_elapsed < max_idle_seconds:
             try:
-                message = await asyncio.wait_for(
-                    pubsub.get_message(ignore_subscribe_messages=True),
-                    timeout=poll_timeout
-                )
+                message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=poll_timeout)
                 if message and message['type'] == 'message':
                     idle_elapsed = 0.0
                     try:
@@ -434,10 +431,7 @@ async def monitor_orders_generator(user_id: str):
 
         while idle_elapsed < max_idle_seconds:
             try:
-                message = await asyncio.wait_for(
-                    pubsub.get_message(ignore_subscribe_messages=True),
-                    timeout=poll_timeout
-                )
+                message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=poll_timeout)
                 if message and message['type'] == 'message':
                     idle_elapsed = 0.0
                     try:
