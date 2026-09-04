@@ -2,12 +2,12 @@
   <span class="stock-link-wrap" :class="{ column }">
     <router-link
       v-if="name"
-      :to="`/stocks/${code}`"
+      target="_blank" rel="noopener" :to="`/stocks/${code}`"
       class="s-name"
       :title="name"
     >{{ name }}</router-link>
     <router-link
-      :to="`/stocks/${code}`"
+      target="_blank" rel="noopener" :to="`/stocks/${code}`"
       class="s-code"
     >{{ code }}</router-link>
   </span>

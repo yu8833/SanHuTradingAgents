@@ -92,12 +92,12 @@
       <el-table :data="positions" v-loading="loading" stripe class="app-table app-table--trades">
         <el-table-column label="代码" width="100" prop="symbol">
           <template #default="{ row }">
-            <router-link :to="`/stocks/${row.symbol}`" class="stock-code">{{ row.symbol }}</router-link>
+            <router-link target="_blank" rel="noopener" :to="`/stocks/${row.symbol}`" class="stock-code">{{ row.symbol }}</router-link>
           </template>
         </el-table-column>
         <el-table-column label="名称" width="100" prop="stock_name">
           <template #default="{ row }">
-            <router-link :to="`/stocks/${row.symbol}`" class="stock-name">{{ row.stock_name }}</router-link>
+            <router-link target="_blank" rel="noopener" :to="`/stocks/${row.symbol}`" class="stock-name">{{ row.stock_name }}</router-link>
           </template>
         </el-table-column>
         <el-table-column label="策略" width="120">
@@ -272,7 +272,7 @@
       <div v-if="reviewTarget" class="review-trade-summary">
         <el-descriptions :column="3" border size="small">
           <el-descriptions-item label="股票">
-            <router-link :to="`/stocks/${reviewTarget.code}`" class="stock-name">{{ reviewTarget.stock_name }} ({{ reviewTarget.code }})</router-link>
+            <router-link target="_blank" rel="noopener" :to="`/stocks/${reviewTarget.code}`" class="stock-name">{{ reviewTarget.stock_name }} ({{ reviewTarget.code }})</router-link>
           </el-descriptions-item>
           <el-descriptions-item label="策略">{{ strategyLabel(reviewTarget.strategy || 'default') }}</el-descriptions-item>
           <el-descriptions-item label="盈亏">

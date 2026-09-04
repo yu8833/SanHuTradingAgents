@@ -903,13 +903,13 @@
 
         <el-table-column prop="code" label="股票代码" width="110">
           <template #default="{ row }">
-            <router-link :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
+            <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
           </template>
         </el-table-column>
 
         <el-table-column prop="name" label="股票名称" width="120">
           <template #default="{ row }">
-            <router-link :to="`/stocks/${row.code}`" class="stock-name">{{ row.name || row.code }}</router-link>
+            <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-name">{{ row.name || row.code }}</router-link>
           </template>
         </el-table-column>
 

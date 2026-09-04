@@ -122,8 +122,8 @@
               @click="viewStockDetail(stock)"
             >
               <div class="stock-info">
-                <router-link :to="`/stocks/${stock.stock_code}`" class="stock-code" @click.stop>{{ stock.stock_code }}</router-link>
-                <router-link :to="`/stocks/${stock.stock_code}`" class="stock-name" @click.stop>{{ stock.stock_name }}</router-link>
+                <router-link target="_blank" rel="noopener" :to="`/stocks/${stock.stock_code}`" class="stock-code" @click.stop>{{ stock.stock_code }}</router-link>
+                <router-link target="_blank" rel="noopener" :to="`/stocks/${stock.stock_code}`" class="stock-name" @click.stop>{{ stock.stock_name }}</router-link>
               </div>
               <div class="stock-price">
                 <div class="current-price">¥{{ stock.current_price }}</div>

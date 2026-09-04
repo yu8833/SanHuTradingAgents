@@ -152,12 +152,12 @@
                       :default-sort="{ prop: 'entry_date', order: 'ascending' }" class="app-table app-table--trades trade-table">
               <el-table-column prop="symbol" label="代码" width="90">
                 <template #default="{ row }">
-                  <router-link :to="`/stocks/${row.symbol}`" class="stock-code">{{ row.symbol }}</router-link>
+                  <router-link target="_blank" rel="noopener" :to="`/stocks/${row.symbol}`" class="stock-code">{{ row.symbol }}</router-link>
                 </template>
               </el-table-column>
               <el-table-column prop="name" label="名称" min-width="110">
                 <template #default="{ row }">
-                  <router-link :to="`/stocks/${row.symbol}`" class="stock-name">{{ row.name }}</router-link>
+                  <router-link target="_blank" rel="noopener" :to="`/stocks/${row.symbol}`" class="stock-name">{{ row.name }}</router-link>
                 </template>
               </el-table-column>
               <el-table-column prop="entry_date" label="买入日期" min-width="110" sortable />
@@ -552,12 +552,12 @@
                       :default-sort="{ prop: 'buy_date', order: 'ascending' }" class="app-table app-table--trades trade-table">
               <el-table-column prop="symbol" label="代码" width="90">
                 <template #default="{ row }">
-                  <router-link :to="`/stocks/${row.symbol || row.code}`" class="stock-code">{{ row.symbol || row.code }}</router-link>
+                  <router-link target="_blank" rel="noopener" :to="`/stocks/${row.symbol || row.code}`" class="stock-code">{{ row.symbol || row.code }}</router-link>
                 </template>
               </el-table-column>
               <el-table-column prop="name" label="名称" min-width="110">
                 <template #default="{ row }">
-                  <router-link :to="`/stocks/${row.symbol || row.code}`" class="stock-name">{{ row.name }}</router-link>
+                  <router-link target="_blank" rel="noopener" :to="`/stocks/${row.symbol || row.code}`" class="stock-name">{{ row.name }}</router-link>
                 </template>
               </el-table-column>
               <el-table-column prop="buy_date" label="买入日期" min-width="110" sortable />

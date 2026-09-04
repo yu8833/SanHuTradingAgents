@@ -729,12 +729,12 @@
             <el-table class="app-table app-table--compact" :data="sectorData.sector_stocks" size="small" style="width: 100%" max-height="240">
               <el-table-column label="代码" prop="code" min-width="120">
                 <template #default="{ row }">
-                  <router-link :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
+                  <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
                 </template>
               </el-table-column>
               <el-table-column label="名称" prop="name" min-width="160">
                 <template #default="{ row }">
-                  <router-link :to="`/stocks/${row.code}`" class="stock-name">{{ row.name }}</router-link>
+                  <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-name">{{ row.name }}</router-link>
                 </template>
               </el-table-column>
               <el-table-column label="最新价" prop="price" min-width="120" align="right" sortable>

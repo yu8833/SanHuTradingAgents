@@ -410,7 +410,7 @@
           <el-table :data="exitResult.signals" size="small" class="app-table app-table--compact">
             <el-table-column label="代码" prop="symbol" width="120">
               <template #default="{ row }">
-                <router-link :to="`/stocks/${row.symbol}`" class="stock-code">{{ row.symbol }}</router-link>
+                <router-link target="_blank" rel="noopener" :to="`/stocks/${row.symbol}`" class="stock-code">{{ row.symbol }}</router-link>
               </template>
             </el-table-column>
             <el-table-column label="是否退出" width="100">

@@ -131,12 +131,12 @@
         >
           <el-table-column prop="code" label="代码" width="90">
             <template #default="{ row }">
-              <router-link :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
+              <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
             </template>
           </el-table-column>
           <el-table-column prop="name" label="名称" min-width="100">
             <template #default="{ row }">
-              <router-link :to="`/stocks/${row.code}`" class="stock-name">{{ row.name }}</router-link>
+              <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-name">{{ row.name }}</router-link>
             </template>
           </el-table-column>
           <el-table-column label="行业" min-width="90">

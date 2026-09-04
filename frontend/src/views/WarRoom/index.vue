@@ -1530,10 +1530,10 @@ async function runScan() {
   }
 }
 
-// 个股外部链接：跳转云海终端对应股票页面
+// 个股外部链接：新标签页打开本应用股票详情页（相对路径，跟随当前部署域名）
 function stockHref(code?: string): string {
   if (!code) return ''
-  return `https://www.cloudsea.tech:8443/stocks/${code}`
+  return `/stocks/${code}`
 }
 
 // 次日计划预填：取「信号跟踪」中待验证的买点信号（16:00 自动扫描 / 手动扫描均落库，

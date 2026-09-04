@@ -111,13 +111,13 @@
         <el-table-column type="selection" width="55" />
         <el-table-column prop="stock_code" label="股票代码" min-width="120">
           <template #default="{ row }">
-            <router-link :to="`/stocks/${row.stock_code}`" class="stock-code">{{ row.stock_code }}</router-link>
+            <router-link target="_blank" rel="noopener" :to="`/stocks/${row.stock_code}`" class="stock-code">{{ row.stock_code }}</router-link>
           </template>
         </el-table-column>
 
         <el-table-column prop="stock_name" label="股票名称" min-width="150">
           <template #default="{ row }">
-            <router-link :to="`/stocks/${row.stock_code}`" class="stock-name">{{ row.stock_name }}</router-link>
+            <router-link target="_blank" rel="noopener" :to="`/stocks/${row.stock_code}`" class="stock-name">{{ row.stock_name }}</router-link>
           </template>
         </el-table-column>
         <el-table-column prop="current_price" label="当前价格" min-width="100" sortable align="right">
@@ -1065,11 +1065,11 @@ const deleteFavoritesBatch = async () => {
   }
 }
 
+// 查看股票详情（新标签页打开）
 const viewStockDetail = (row: any) => {
-  router.push({
-    name: 'StockDetail',
-    params: { code: String(row.stock_code || '').toUpperCase() }
-  })
+  const code = String(row.stock_code || '').toUpperCase()
+  if (!code) return
+  window.open(router.resolve({ name: 'StockDetail', params: { code } }).href, '_blank', 'noopener')
 }
 
 // 处理表格选择变化

@@ -57,7 +57,7 @@
             <span class="rank-idx">{{ i + 1 }}</span>
             <span class="rank-name">{{ c.name }}</span>
             <span class="rank-lead">
-              <router-link v-if="c.lead_code" :to="`/stocks/${c.lead_code}`" class="stock-name">{{ c.lead_name }}</router-link>
+              <router-link v-if="c.lead_code" target="_blank" rel="noopener" :to="`/stocks/${c.lead_code}`" class="stock-name">{{ c.lead_name }}</router-link>
               <template v-else>{{ c.lead_name }}</template>
             </span>
             <span class="rank-pct up">{{ fmtPct(c.pct_chg) }}</span>
@@ -71,7 +71,7 @@
             <span class="rank-idx">{{ i + 1 }}</span>
             <span class="rank-name">{{ c.name }}</span>
             <span class="rank-lead">
-              <router-link v-if="c.lead_code" :to="`/stocks/${c.lead_code}`" class="stock-name">{{ c.lead_name }}</router-link>
+              <router-link v-if="c.lead_code" target="_blank" rel="noopener" :to="`/stocks/${c.lead_code}`" class="stock-name">{{ c.lead_name }}</router-link>
               <template v-else>{{ c.lead_name }}</template>
             </span>
             <span class="rank-pct down">{{ fmtPct(c.pct_chg) }}</span>
@@ -85,7 +85,7 @@
             <span class="rank-idx">{{ i + 1 }}</span>
             <span class="rank-name">{{ c.name }}</span>
             <span class="rank-lead">
-              <router-link v-if="c.lead_code" :to="`/stocks/${c.lead_code}`" class="stock-name">{{ c.lead_name }}</router-link>
+              <router-link v-if="c.lead_code" target="_blank" rel="noopener" :to="`/stocks/${c.lead_code}`" class="stock-name">{{ c.lead_name }}</router-link>
               <template v-else>{{ c.lead_name }}</template>
             </span>
             <span class="rank-pct up">{{ fmtSigned(c.money_flow) }}亿</span>
@@ -127,7 +127,7 @@
         </el-table-column>
         <el-table-column label="领涨股" min-width="120">
           <template #default="{ row }">
-            <router-link v-if="row.lead_code" :to="`/stocks/${row.lead_code}`" class="col-lead stock-name">{{ row.lead_name || '—' }}</router-link>
+            <router-link v-if="row.lead_code" target="_blank" rel="noopener" :to="`/stocks/${row.lead_code}`" class="col-lead stock-name">{{ row.lead_name || '—' }}</router-link>
             <span v-else class="col-lead">{{ row.lead_name || '—' }}</span>
           </template>
         </el-table-column>

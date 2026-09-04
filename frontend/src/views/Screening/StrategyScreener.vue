@@ -203,12 +203,12 @@
       <el-table :data="displayRows" stripe size="default" style="width: 100%" class="hit-table app-table app-table--ranking">
         <el-table-column prop="code" label="代码" min-width="110">
           <template #default="{ row }">
-            <router-link class="stock-code" :to="`/stocks/${row.code}`">{{ row.code }}</router-link>
+            <router-link class="stock-code" target="_blank" rel="noopener" :to="`/stocks/${row.code}`">{{ row.code }}</router-link>
           </template>
         </el-table-column>
         <el-table-column prop="name" label="名称" min-width="130">
           <template #default="{ row }">
-            <router-link class="stock-name" :to="`/stocks/${row.code}`">{{ row.name || row.code }}</router-link>
+            <router-link class="stock-name" target="_blank" rel="noopener" :to="`/stocks/${row.code}`">{{ row.name || row.code }}</router-link>
           </template>
         </el-table-column>
         <el-table-column prop="close" label="收盘价" min-width="110" align="right" sortable>

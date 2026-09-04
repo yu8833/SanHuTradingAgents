@@ -209,7 +209,7 @@
         <el-table-column prop="model_name" label="模型" width="150" />
         <el-table-column prop="stock_symbol" label="股票代码" width="100">
           <template #default="{ row }">
-            <router-link :to="`/stocks/${row.stock_symbol}`" class="stock-code">{{ row.stock_symbol }}</router-link>
+            <router-link target="_blank" rel="noopener" :to="`/stocks/${row.stock_symbol}`" class="stock-code">{{ row.stock_symbol }}</router-link>
           </template>
         </el-table-column>
         <el-table-column prop="input_tokens" label="输入Token" width="100" align="right" sortable />

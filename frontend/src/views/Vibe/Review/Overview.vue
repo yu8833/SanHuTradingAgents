@@ -224,7 +224,7 @@
           <div v-for="(r, idx) in col.rows" :key="key + '-' + r.code" class="list-item">
             <span class="list-no">{{ idx + 1 }}</span>
             <div class="list-main">
-              <router-link :to="`/stocks/${r.code}`" class="list-name stock-name" :title="r.name">{{ r.name }}</router-link>
+              <router-link target="_blank" rel="noopener" :to="`/stocks/${r.code}`" class="list-name stock-name" :title="r.name">{{ r.name }}</router-link>
               <div class="list-code">{{ r.code }}</div>
             </div>
             <div class="list-right">

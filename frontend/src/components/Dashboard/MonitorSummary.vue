@@ -40,11 +40,11 @@
             <div class="summary-link">
               <router-link
                 v-if="a.symbol"
-                :to="`/stocks/${a.symbol}`"
+                target="_blank" rel="noopener" :to="`/stocks/${a.symbol}`"
                 :class="['summary-symbol', (a.change_pct ?? 0) >= 0 ? 'up' : 'down']"
               >{{ a.symbol }}</router-link>
               <span v-else :class="['summary-symbol', (a.change_pct ?? 0) >= 0 ? 'up' : 'down']">{{ a.symbol || '—' }}</span>
-              <router-link v-if="a.name && a.symbol" :to="`/stocks/${a.symbol}`" class="summary-name">{{ a.name }}</router-link>
+              <router-link v-if="a.name && a.symbol" target="_blank" rel="noopener" :to="`/stocks/${a.symbol}`" class="summary-name">{{ a.name }}</router-link>
               <span v-else-if="a.name" class="summary-name">{{ a.name }}</span>
             </div>
             <span class="summary-msg">{{ a.message }}</span>

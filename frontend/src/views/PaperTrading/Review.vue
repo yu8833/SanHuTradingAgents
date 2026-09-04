@@ -52,12 +52,12 @@
         <el-table :data="cycles" v-loading="loading" stripe empty-text="暂无已平仓交易" class="app-table app-table--trades">
           <el-table-column label="代码" width="100">
             <template #default="{ row }">
-              <router-link :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
+              <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
             </template>
           </el-table-column>
           <el-table-column label="名称" min-width="120">
             <template #default="{ row }">
-              <router-link :to="`/stocks/${row.code}`" class="stock-name">{{ row.name || '-' }}</router-link>
+              <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-name">{{ row.name || '-' }}</router-link>
             </template>
           </el-table-column>
           <el-table-column prop="strategy" label="策略" width="110">

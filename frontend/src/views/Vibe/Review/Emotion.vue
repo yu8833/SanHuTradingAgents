@@ -123,8 +123,8 @@
             <el-table-column label="名称 / 代码" min-width="170">
               <template #default="{ row }">
                 <div class="stock-cell">
-                  <router-link :to="`/stocks/${row.code}`" class="stock-name">{{ row.name }}</router-link>
-                  <router-link :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
+                  <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-name">{{ row.name }}</router-link>
+                  <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
                 </div>
               </template>
             </el-table-column>

@@ -7,10 +7,10 @@
   >
     <el-form :model="form" label-width="110px" size="default">
       <el-form-item label="股票代码">
-        <router-link :to="`/stocks/${form.code}`" class="stock-code">{{ form.code }}</router-link>
+        <router-link target="_blank" rel="noopener" :to="`/stocks/${form.code}`" class="stock-code">{{ form.code }}</router-link>
       </el-form-item>
       <el-form-item label="股票名称">
-        <router-link :to="`/stocks/${form.code}`" class="stock-name">{{ form.stock_name }}</router-link>
+        <router-link target="_blank" rel="noopener" :to="`/stocks/${form.code}`" class="stock-name">{{ form.stock_name }}</router-link>
       </el-form-item>
       <el-form-item label="当前价">
         <span style="font-weight:600;color:#2b6cb0;">¥{{ fmtNum(form.price) }}</span>

@@ -95,12 +95,12 @@
         <el-table-column prop="task_id" label="任务ID" width="220" />
         <el-table-column prop="stock_code" label="股票代码" width="120">
           <template #default="{ row }">
-            <router-link :to="`/stocks/${row.stock_code}`" class="stock-code">{{ row.stock_code }}</router-link>
+            <router-link target="_blank" rel="noopener" :to="`/stocks/${row.stock_code}`" class="stock-code">{{ row.stock_code }}</router-link>
           </template>
         </el-table-column>
         <el-table-column prop="stock_name" label="股票名称" width="150">
           <template #default="{ row }">
-            <router-link :to="`/stocks/${row.stock_code}`" class="stock-name">{{ row.stock_name }}</router-link>
+            <router-link target="_blank" rel="noopener" :to="`/stocks/${row.stock_code}`" class="stock-name">{{ row.stock_name }}</router-link>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="110">

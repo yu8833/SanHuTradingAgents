@@ -145,12 +145,12 @@
           >
             <el-table-column prop="code" label="代码" width="90" fixed="left">
               <template #default="{ row }">
-                <router-link :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
+                <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
               </template>
             </el-table-column>
             <el-table-column prop="name" label="名称" width="110" fixed="left">
               <template #default="{ row }">
-                <router-link :to="`/stocks/${row.code}`" class="stock-name">{{ row.name }}</router-link>
+                <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-name">{{ row.name }}</router-link>
               </template>
             </el-table-column>
             <el-table-column prop="industry" label="行业" width="110" />
@@ -355,12 +355,12 @@
             <el-table :data="backtestResult.top_trades" stripe style="width: 100%" class="app-table app-table--trades">
               <el-table-column prop="code" label="代码" width="90">
                 <template #default="{ row }">
-                  <router-link :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
+                  <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
                 </template>
               </el-table-column>
               <el-table-column prop="name" label="名称" width="100">
                 <template #default="{ row }">
-                  <router-link :to="`/stocks/${row.code}`" class="stock-name">{{ row.name }}</router-link>
+                  <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-name">{{ row.name }}</router-link>
                 </template>
               </el-table-column>
               <el-table-column prop="buy_date" label="买入日期" width="110" />
@@ -386,12 +386,12 @@
             <el-table :data="backtestResult.worst_trades" stripe style="width: 100%" class="app-table app-table--trades">
               <el-table-column prop="code" label="代码" width="90">
                 <template #default="{ row }">
-                  <router-link :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
+                  <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
                 </template>
               </el-table-column>
               <el-table-column prop="name" label="名称" width="100">
                 <template #default="{ row }">
-                  <router-link :to="`/stocks/${row.code}`" class="stock-name">{{ row.name }}</router-link>
+                  <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-name">{{ row.name }}</router-link>
                 </template>
               </el-table-column>
               <el-table-column prop="buy_date" label="买入日期" width="110" />

@@ -193,17 +193,17 @@
           >
             <el-table-column label="转债代码" width="100" fixed="left">
               <template #default="{ row }">
-                <router-link :to="`/stocks/${row.bond_code}`" class="stock-code">{{ row.bond_code }}</router-link>
+                <router-link target="_blank" rel="noopener" :to="`/stocks/${row.bond_code}`" class="stock-code">{{ row.bond_code }}</router-link>
               </template>
             </el-table-column>
             <el-table-column label="转债名称" width="120" fixed="left">
               <template #default="{ row }">
-                <router-link :to="`/stocks/${row.bond_code}`" class="stock-name">{{ row.bond_name }}</router-link>
+                <router-link target="_blank" rel="noopener" :to="`/stocks/${row.bond_code}`" class="stock-name">{{ row.bond_name }}</router-link>
               </template>
             </el-table-column>
             <el-table-column label="正股" width="100">
               <template #default="{ row }">
-                <router-link :to="`/stocks/${row.stock_code || row.code}`" class="stock-name">{{ row.stock_name || '-' }}</router-link>
+                <router-link target="_blank" rel="noopener" :to="`/stocks/${row.stock_code || row.code}`" class="stock-name">{{ row.stock_name || '-' }}</router-link>
               </template>
             </el-table-column>
             <el-table-column prop="bond_price" label="转债现价" width="100" sortable align="right">
@@ -447,12 +447,12 @@
             <el-table :data="backtestResult.top_trades" stripe style="width: 100%" class="app-table app-table--compact">
               <el-table-column label="转债代码" width="110">
                 <template #default="{ row }">
-                  <router-link :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
+                  <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
                 </template>
               </el-table-column>
               <el-table-column label="转债名称" width="140">
                 <template #default="{ row }">
-                  <router-link :to="`/stocks/${row.code}`" class="stock-name">{{ row.name || '-' }}</router-link>
+                  <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-name">{{ row.name || '-' }}</router-link>
                 </template>
               </el-table-column>
               <el-table-column prop="buy_date" label="买入日期" width="110" />
@@ -477,12 +477,12 @@
             <el-table :data="backtestResult.worst_trades" stripe style="width: 100%" class="app-table app-table--compact">
               <el-table-column label="转债代码" width="110">
                 <template #default="{ row }">
-                  <router-link :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
+                  <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
                 </template>
               </el-table-column>
               <el-table-column label="转债名称" width="140">
                 <template #default="{ row }">
-                  <router-link :to="`/stocks/${row.code}`" class="stock-name">{{ row.name || '-' }}</router-link>
+                  <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-name">{{ row.name || '-' }}</router-link>
                 </template>
               </el-table-column>
               <el-table-column prop="buy_date" label="买入日期" width="110" />

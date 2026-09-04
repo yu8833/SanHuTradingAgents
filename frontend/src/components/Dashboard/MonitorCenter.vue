@@ -539,10 +539,10 @@ import { strategyApi } from '@/api/strategy'
 import { fmtPct, fmtPrice } from '@/utils/format'
 import { todayStartEpoch, formatDateTime } from '@/utils/datetime'
 
-// 个股外部链接：跳转云海终端对应股票页面
+// 个股外部链接：新标签页打开本应用股票详情页（相对路径，跟随当前部署域名）
 function stockHref(code?: string): string {
   if (!code) return ''
-  return `https://www.cloudsea.tech:8443/stocks/${code}`
+  return `/stocks/${code}`
 }
 
 // ── 状态 ────────────────────────────────────────────────

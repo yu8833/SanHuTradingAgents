@@ -88,12 +88,12 @@
           <el-table :data="filteredPositions" size="small" v-loading="loading.positions" class="app-table app-table--trades">
             <el-table-column label="代码" width="100">
               <template #default="{ row }">
-                <router-link :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
+                <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
               </template>
             </el-table-column>
             <el-table-column label="名称" width="100">
               <template #default="{ row }">
-                <router-link :to="`/stocks/${row.code}`" class="stock-name">{{ row.name || '-' }}</router-link>
+                <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-name">{{ row.name || '-' }}</router-link>
               </template>
             </el-table-column>
             <el-table-column label="市场" width="70">
@@ -157,12 +157,12 @@
             </el-table-column>
             <el-table-column label="代码" width="100">
               <template #default="{ row }">
-                <router-link :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
+                <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
               </template>
             </el-table-column>
             <el-table-column label="名称" width="100">
               <template #default="{ row }">
-                <router-link :to="`/stocks/${row.code}`" class="stock-name">{{ row.name || '-' }}</router-link>
+                <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-name">{{ row.name || '-' }}</router-link>
               </template>
             </el-table-column>
             <el-table-column prop="price" label="成交价" width="100" align="right" sortable>
@@ -487,11 +487,10 @@ function getMarketByCode(code: string): string {
   return '美股'
 }
 
-// 查看股票详情（跳转到股票详情页）
+// 查看股票详情（新标签页打开）
 function viewStockDetail(stockCode: string) {
   if (!stockCode) return
-  // 跳转到股票详情页
-  router.push({ name: 'StockDetail', params: { code: stockCode } })
+  window.open(router.resolve({ name: 'StockDetail', params: { code: stockCode } }).href, '_blank', 'noopener')
 }
 
 // 卖出持仓
