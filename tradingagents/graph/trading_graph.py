@@ -5,9 +5,16 @@ import os
 from pathlib import Path
 import json
 from datetime import datetime, timedelta
-from typing import Dict, Any, Tuple, List, Optional
+from typing import Any, Dict, Tuple, List, Optional
 
 import yfinance as yf
+
+from tradingagents.dataflows.index_daily import (
+    HS300_INDEX_CODE,
+    get_index_daily_series,
+    get_stock_daily_series,
+    resolve_market,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -236,26 +243,46 @@ class TradingAgentsGraph:
         Returns (raw_return, alpha_return, actual_holding_days) or
         (None, None, None) if price data is unavailable (too recent, delisted,
         or network error).
+
+        A 股标的：个股与沪深300基准均走 tradingagents.dataflows.index_daily
+        （Tushare 指数日线优先、AKShare 兜底），不再依赖 yfinance；
+        非 A 股标的（美股/港股等）保留 yfinance，基准按市场映射（^GSPC/^HSI）。
         """
         try:
             start = datetime.strptime(trade_date, "%Y-%m-%d")
             end = start + timedelta(days=holding_days + 7)  # buffer for weekends/holidays
             end_str = end.strftime("%Y-%m-%d")
 
-            stock = yf.Ticker(ticker).history(start=trade_date, end=end_str)
-            benchmark = yf.Ticker("000300.SS").history(start=trade_date, end=end_str)
+            market = resolve_market(ticker)
+            if market == "A":
+                stock_rows = get_stock_daily_series(ticker, trade_date, end_str)
+                bench_rows = get_index_daily_series(HS300_INDEX_CODE, trade_date, end_str)
+                # rows: [(date_iso, close)] 升序
+                if len(stock_rows) < 2 or len(bench_rows) < 2:
+                    return None, None, None
+            else:
+                bench_symbol = {"US": "^GSPC", "HK": "^HSI"}.get(market, "000300.SS")
+                stock_df = yf.Ticker(ticker).history(start=trade_date, end=end_str)
+                bench_df = yf.Ticker(bench_symbol).history(start=trade_date, end=end_str)
+                if len(stock_df) < 2 or len(bench_df) < 2:
+                    return None, None, None
+                stock_rows = [
+                    (d.isoformat()[:10], float(c))
+                    for d, c in zip(stock_df.index, stock_df["Close"])
+                ]
+                bench_rows = [
+                    (d.isoformat()[:10], float(c))
+                    for d, c in zip(bench_df.index, bench_df["Close"])
+                ]
 
-            if len(stock) < 2 or len(benchmark) < 2:
-                return None, None, None
-
-            actual_days = min(holding_days, len(stock) - 1, len(benchmark) - 1)
+            actual_days = min(holding_days, len(stock_rows) - 1, len(bench_rows) - 1)
             raw = float(
-                (stock["Close"].iloc[actual_days] - stock["Close"].iloc[0])
-                / stock["Close"].iloc[0]
+                (stock_rows[actual_days][1] - stock_rows[0][1])
+                / stock_rows[0][1]
             )
             bench_ret = float(
-                (benchmark["Close"].iloc[actual_days] - benchmark["Close"].iloc[0])
-                / benchmark["Close"].iloc[0]
+                (bench_rows[actual_days][1] - bench_rows[0][1])
+                / bench_rows[0][1]
             )
             alpha = raw - bench_ret
             return raw, alpha, actual_days
@@ -384,6 +411,7 @@ class TradingAgentsGraph:
             ticker=company_name,
             trade_date=trade_date,
             final_trade_decision=final_state["final_trade_decision"],
+            rating=final_state.get("final_rating"),  # 结构化归一评级，缺省回退文本解析
         )
 
         # Clear checkpoint on successful completion to avoid stale state.
@@ -392,7 +420,10 @@ class TradingAgentsGraph:
                 self.config["data_cache_dir"], company_name, str(trade_date)
             )
 
-        return self.process_signal(final_state["final_trade_decision"])
+        return self.process_signal(
+            final_state["final_trade_decision"],
+            final_state.get("final_rating"),
+        )
 
     def close_graph_run(self) -> None:
         """Close the active checkpointer context, if any."""
@@ -592,6 +623,9 @@ class TradingAgentsGraph:
         with open(log_path, "w", encoding="utf-8") as f:
             json.dump(self.log_states_dict[str(trade_date)], f, indent=4)
 
-    def process_signal(self, full_signal):
-        """Process a signal to extract the core decision."""
-        return self.signal_processor.process_signal(full_signal)
+    def process_signal(self, full_signal, rating=None):
+        """Process a signal to extract the core decision.
+
+        rating: 结构化归一评级（买入/增持/持有/减持/卖出）优先；缺省回退文本解析。
+        """
+        return self.signal_processor.process_signal(full_signal, rating)

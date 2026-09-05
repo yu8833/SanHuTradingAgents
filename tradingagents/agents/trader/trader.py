@@ -10,7 +10,7 @@ from tradingagents.agents.schemas import TraderProposal, render_trader_proposal
 from tradingagents.agents.utils.agent_utils import build_instrument_context, get_language_instruction
 from tradingagents.agents.utils.structured import (
     bind_structured,
-    invoke_structured_or_freetext,
+    invoke_structured_dual,
 )
 
 
@@ -128,7 +128,7 @@ def create_trader(llm):
 {get_language_instruction()}
 """
 
-        trader_plan = invoke_structured_or_freetext(
+        proposal, trader_plan = invoke_structured_dual(
             structured_llm,
             llm,
             prompt,
@@ -139,6 +139,8 @@ def create_trader(llm):
         return {
             "messages": [AIMessage(content=trader_plan)],
             "trader_investment_plan": trader_plan,
+            # 双写：结构化对象供消费端直接读取，字符串保留兼容
+            "trader_plan_object": proposal.model_dump() if proposal is not None else None,
             "sender": name,
         }
 

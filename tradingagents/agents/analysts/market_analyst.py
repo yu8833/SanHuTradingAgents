@@ -1,6 +1,7 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
+    get_formula_score_baseline,
     get_indicators,
     get_language_instruction,
     get_stock_data,
@@ -19,6 +20,9 @@ def create_market_analyst(llm):
         # 获取速览分析上下文（如果存在）
         quick_scan_context = get_quick_analysis_context(state)
 
+        # 公式化硬打分基线（确定性 signal_score 数值）
+        formula_baseline = get_formula_score_baseline(state, "market")
+
         tools = [
             get_stock_data,
             get_indicators,
@@ -27,6 +31,7 @@ def create_market_analyst(llm):
         system_message = (
             f"""你是一位专注于 A 股市场的技术分析师。你的任务是从以下技术指标中选择最多 **8 个**最相关的指标，为给定的 A 股标的提供技术面分析。选择时应注重指标间的互补性，避免冗余。
 {quick_scan_context}
+{formula_baseline}
 
 ⚠️ A 股市场特殊规则（分析时必须纳入考量）：
 - **涨跌停制度**：主板 ±10%，科创板/创业板 ±20%，ST 股 ±5%。触及涨跌停后流动性骤降，技术指标可能失真。

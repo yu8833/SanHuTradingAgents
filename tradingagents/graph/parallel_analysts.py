@@ -107,6 +107,8 @@ def run_single_analyst(
     report = ""
     error_msg = ""
     tool_errors: List[str] = []  # 跟踪工具调用失败
+    tool_outputs: Dict[str, list] = {}  # 拦截工具原始输出 {tool_name: [str]}（供公式分计算）
+    formula_scores: Dict[str, dict] = {}  # 本分析师的公式化硬打分（to_dict）
 
     try:
         for i in range(max_iterations):
@@ -161,6 +163,9 @@ def run_single_analyst(
                     if tool:
                         try:
                             tool_output = tool.invoke(tool_args)
+
+                            # 拦截原始输出（供公式化硬打分使用）
+                            tool_outputs.setdefault(tool_name, []).append(str(tool_output))
 
                             # 检查输出是否为空或无效
                             if tool_output and str(tool_output).strip():
@@ -227,6 +232,35 @@ def run_single_analyst(
         if not report and error_msg:
             report = f"[分析未能完成: {error_msg}]"
 
+        # === 公式化硬打分闭环（改造二） ===
+        # 仅对已有公式分的分析师（market/fundamentals）在报告产出后做：
+        # 公式分计算 → LLM 分解析 → 偏差>阈值且未说明理由 → 报告加偏差标注
+        if analyst_type in ("market", "fundamentals") and report and not report.startswith("[分析"):
+            try:
+                from tradingagents.agents.utils.hard_score import (
+                    compute_analyst_formula_scores,
+                    extract_report_score,
+                    score_deviation_tag,
+                )
+
+                computed = compute_analyst_formula_scores(
+                    current_state,
+                    {analyst_type: tool_outputs},
+                )
+                fs = computed.get(analyst_type)
+                if fs is not None and fs.available:
+                    formula_scores[analyst_type] = fs.to_dict()
+                    formula_score = fs.score
+                    llm_score = extract_report_score(report, analyst_type)
+                    tag = score_deviation_tag(formula_score, llm_score, report)
+                    if tag:
+                        report = f"{tag}\n{report}"
+                        logger.warning(
+                            f"⚠️ [{analyst_type}] {tag}（公式分={formula_score}，LLM={llm_score}）"
+                        )
+            except Exception as e:  # 公式分计算失败不影响主流程
+                logger.warning(f"⚠️ [{analyst_type}] 公式化硬打分失败（忽略）: {e}")
+
     except Exception as e:
         report = f"[分析异常: {str(e)}]"
         logger.error(f"❌ [{analyst_type}] 执行异常: {e}", exc_info=True)
@@ -258,6 +292,8 @@ def run_single_analyst(
     return {
         report_field: report,
         "_integrity_report": integrity_report,
+        "_formula_scores": formula_scores,            # {analyst_type: FormulaScore.to_dict()}
+        "_analyst_tool_data": {analyst_type: tool_outputs},  # {analyst_type: {tool_name: [str]}}
     }
 
 
@@ -308,6 +344,17 @@ def create_parallel_analysts_node(
                 analyst_type = future_to_analyst[future]
                 try:
                     result = future.result()
+
+                    # 摘出公式分 / 工具数据（按分析师合并进 results，避免同名键覆盖）
+                    formula_scores = result.get("_formula_scores") or {}
+                    analyst_tool_data = result.get("_analyst_tool_data") or {}
+                    result.pop("_formula_scores", None)
+                    result.pop("_analyst_tool_data", None)
+                    if formula_scores:
+                        results.setdefault("_formula_scores", {}).update(formula_scores)
+                    if analyst_tool_data:
+                        results.setdefault("_analyst_tool_data", {}).update(analyst_tool_data)
+
                     results.update(result)
 
                     # 收集完整性报告

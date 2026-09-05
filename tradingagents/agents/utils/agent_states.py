@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Optional
 from typing_extensions import TypedDict
 from langgraph.graph import MessagesState
 
@@ -92,3 +92,19 @@ class AgentState(MessagesState):
 
     # data integrity reports
     _integrity_reports: Annotated[dict, "Data integrity reports from batch integrity manager"]
+
+    # formula-based hard scoring (rework 2)
+    _formula_scores: Annotated[dict, "Formula-based hard scores per analyst {analyst_type: {score, available, source}}"]
+    _analyst_tool_data: Annotated[dict, "Raw tool outputs per analyst {analyst_type: {tool_name: [str]}}"]
+
+    # structured decision objects (dual-write, rework 3)
+    # 生产端节点同时产出渲染字符串（investment_plan 等）与结构化对象（model_dump dict），
+    # 消费端优先读对象、空则回退字符串正则解析，避免多处重复解析同一信息。
+    research_plan_object: Annotated[Optional[dict], "ResearchPlan.model_dump()"]
+    trader_plan_object: Annotated[Optional[dict], "TraderProposal.model_dump()"]
+    risk_control_object: Annotated[Optional[dict], "RiskControlDecision.model_dump()"]
+    final_decision_object: Annotated[Optional[dict], "PortfolioDecision.model_dump()"]
+    final_rating: Annotated[Optional[str], "Normalized rating: 买入/增持/持有/减持/卖出"]
+    final_confidence: Annotated[Optional[float], "Normalized confidence 0-1 (conviction/100)"]
+    max_position_size: Annotated[Optional[float], "Risk control max position (%)"]
+    recommended_position_size: Annotated[Optional[float], "Risk control recommended position (%)"]

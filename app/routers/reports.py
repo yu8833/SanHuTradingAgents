@@ -455,13 +455,18 @@ def extract_structured_fields(reports: dict[str, Any]) -> dict[str, Any]:
             if isinstance(v, str):
                 yield v
 
-    # 从优先级最高的模块开始提取，找到第一个非空的评级
+    # 结构化归一评级优先（来自组合经理双写字段，改造三）：最高优先级，缺省回退文本正则解析
     text_rating = None
-    for module_text in _priority_texts():
-        val = _match_rating(module_text, ["决策", "操作建议", "评级", "投资建议", "建议", "行动评级"])
-        if val:
-            text_rating = _normalize_rating(val)
-            break
+    structured_rating = reports.get("final_rating")
+    if structured_rating and isinstance(structured_rating, str) and structured_rating.strip():
+        text_rating = _normalize_rating(structured_rating.strip())
+    else:
+        # 从优先级最高的模块开始提取，找到第一个非空的评级
+        for module_text in _priority_texts():
+            val = _match_rating(module_text, ["决策", "操作建议", "评级", "投资建议", "建议", "行动评级"])
+            if val:
+                text_rating = _normalize_rating(val)
+                break
 
     # 1) 从 decision 字典取值（来自 trading_graph 的结构化输出）
     decision_obj = reports.get("decision")

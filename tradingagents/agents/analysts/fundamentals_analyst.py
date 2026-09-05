@@ -3,6 +3,7 @@ from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
     get_balance_sheet,
     get_cashflow,
+    get_formula_score_baseline,
     get_fundamentals,
     get_income_statement,
     get_industry_comparison,
@@ -19,6 +20,9 @@ def create_fundamentals_analyst(llm):
         current_date = state["trade_date"]
         company = state["company_of_interest"]
         instrument_context = build_instrument_context(company)
+
+        # 量化口径约束（公式化硬打分：基本面评分须与财务指标口径一致）
+        formula_baseline = get_formula_score_baseline(state, "fundamentals")
 
         tools = [
             get_fundamentals,
@@ -91,6 +95,7 @@ def create_fundamentals_analyst(llm):
             "\n- 禁止编造或篡改任何财务数值"
             "\n- 如发现数据缺失，请标注 [数据缺失: xxx]"
             "\n- 相对估值分析必须有具体的可比公司数据支撑，不能泛泛而谈"
+            + formula_baseline
             + get_language_instruction()
         )
 

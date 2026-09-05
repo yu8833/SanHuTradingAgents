@@ -546,7 +546,8 @@ class AccuracyGuardian:
         # 提取评级
         investment_rating = self._extract_rating(investment_plan)
         trader_rating = self._extract_rating(trader_plan)
-        final_rating = self._extract_rating(final_decision)
+        # 结构化归一评级优先（来自组合经理双写字段），缺省回退文本正则解析
+        final_rating = state.get("final_rating") or self._extract_rating(final_decision)
 
         # 检查冲突
         if investment_rating and trader_rating:
@@ -571,10 +572,10 @@ class AccuracyGuardian:
                 score *= 0.5
                 recommendations.append("最终决策与投资建议方向相反，需仔细确认投资逻辑")
 
-        # 检查风险控制是否被违反
+        # 检查仓位限制是否被遵守
         if risk_control and final_decision:
             # 检查仓位限制是否被遵守
-            max_position = self._extract_max_position(risk_control)
+            max_position = self._structured_max_position(state) or self._extract_max_position(risk_control)
             final_position = self._extract_position(final_decision)
 
             if max_position and final_position:
@@ -590,6 +591,18 @@ class AccuracyGuardian:
             weight=self.risk_consistency_weight,
             recommendations=recommendations,
         )
+
+    def _structured_max_position(self, state: Dict[str, Any]) -> Optional[float]:
+        """从结构化风险控制对象读取最大仓位上限（%），不可用时返回 None。"""
+        risk_obj = state.get("risk_control_object")
+        if isinstance(risk_obj, dict):
+            val = risk_obj.get("max_position_size")
+            if val is not None:
+                try:
+                    return float(val)
+                except (TypeError, ValueError):
+                    return None
+        return None
 
     def _extract_rating(self, text: str) -> Optional[str]:
         """从文本中提取评级（更准确的匹配逻辑）"""

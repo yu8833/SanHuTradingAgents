@@ -19,7 +19,7 @@ all three agents log the same warnings when fallback fires.
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, Callable, Optional, Tuple, TypeVar
 
 from pydantic import BaseModel
 
@@ -71,3 +71,30 @@ def invoke_structured_or_freetext(
 
     response = plain_llm.invoke(prompt)
     return response.content
+
+
+def invoke_structured_dual(
+    structured_llm: Optional[Any],
+    plain_llm: Any,
+    prompt: Any,
+    render: Callable[[T], str],
+    agent_name: str,
+) -> Tuple[Optional[T], str]:
+    """Dual-write variant: return ``(structured_object|None, rendered_text)``.
+
+    与 invoke_structured_or_freetext 行为一致，但额外保留结构化对象本身
+    （供消费端直接读取，替代对渲染文本的正则重复解析）。结构化调用失败时
+    回退自由文本，此时返回 (None, fallback_text)，消费端应退化到文本解析。
+    """
+    if structured_llm is not None:
+        try:
+            result = structured_llm.invoke(prompt)
+            return result, render(result)
+        except Exception as exc:
+            logger.warning(
+                "%s: structured-output invocation failed (%s); retrying once as free text",
+                agent_name, exc,
+            )
+
+    response = plain_llm.invoke(prompt)
+    return None, response.content

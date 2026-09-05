@@ -14,6 +14,57 @@ from typing import Any
 
 from app.utils.timezone import now_tz, to_display_iso
 
+# 中文评级关键词（_CN_RATING_KEYWORDS 内为从长到短，正则交替时先匹配长词）
+_CN_RATING_KEYWORDS = (
+    "强烈买入", "强烈卖出", "买入", "增持", "减持", "卖出", "持有", "观望", "做多", "做空", "规避",
+)
+
+
+def _normalize_cn_rating(raw: str) -> str:
+    """把中文评论文本归一为五档（买入/增持/持有/减持/卖出），无法识别返回空串。"""
+    if any(k in raw for k in ("强烈买入", "买入", "做多")):
+        return "买入"
+    if "增持" in raw:
+        return "增持"
+    if any(k in raw for k in ("强烈卖出", "卖出", "做空", "规避")):
+        return "卖出"
+    if "减持" in raw:
+        return "减持"
+    if any(k in raw for k in ("持有", "观望")):
+        return "持有"
+    return ""
+
+
+def _extract_cn_rating(final_decision_markdown: str) -> str:
+    """从中文最终决策文本提取评级。
+
+    优先级：
+      1) 结构化标签：**评级：持有** / **投资评级：持有**
+      2) 标题行评级词：`最终交易决策：卖出` / `交易方向：增持`
+         —— 捕获组限定在评级关键词集合内，避免把标题里的股票代码
+            （如 `# 最终交易决策：600519`）误当成评级。
+    返回五档评级；无法识别返回空串（调用方保持默认值）。
+    """
+    if not final_decision_markdown:
+        return ""
+    # 1) 结构化标签（最可靠），兼容两种写法：
+    #    **评级：持有**（冒号在星号内） / **评级**：持有（星号只包住标签）
+    label_match = re.search(
+        r"\*\*(?:投资)?评级\s*[：:]\s*([^*\n]{1,20}?)\s*\*\*", final_decision_markdown
+    ) or re.search(
+        r"\*\*(?:投资)?评级\s*\*\*\s*[：:]\s*([^*\n]{1,20})", final_decision_markdown
+    )
+    if label_match:
+        return _normalize_cn_rating(label_match.group(1).strip())
+    # 2) 标题/结论行：限定评级词，规避股票代码误抓
+    title_match = re.search(
+        r"(?:最终交易决策|交易方向)[^：\n]{0,20}?[：:]\s*[\*]*\s*(" + "|".join(_CN_RATING_KEYWORDS) + r")",
+        final_decision_markdown,
+    )
+    if title_match:
+        return _normalize_cn_rating(title_match.group(1))
+    return ""
+
 # 添加项目根目录到路径
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
@@ -1711,6 +1762,25 @@ class SimpleAnalysisService:
             # 需要从final_trade_decision markdown中解析完整信息
             formatted_decision = {}
             try:
+                # 结构化优先（组合经理双写字段，改造三）：缺省回退 markdown 正则解析
+                structured = None
+                if isinstance(state, dict):
+                    structured = state.get("final_decision_object")
+                elif hasattr(state, "final_decision_object"):
+                    structured = getattr(state, "final_decision_object", None)
+
+                structured_rating = None
+                if isinstance(state, dict):
+                    structured_rating = state.get("final_rating")
+                elif hasattr(state, "final_rating"):
+                    structured_rating = getattr(state, "final_rating", None)
+
+                structured_confidence = None
+                if isinstance(state, dict):
+                    structured_confidence = state.get("final_confidence")
+                elif hasattr(state, "final_confidence"):
+                    structured_confidence = getattr(state, "final_confidence", None)
+
                 # 从final_trade_decision markdown中解析信息
                 final_decision_markdown = ""
                 if hasattr(state, 'final_trade_decision'):
@@ -1742,26 +1812,10 @@ class SimpleAnalysisService:
                         }
                         action = action_translation.get(rating, '持有')
                     else:
-                        # 中文格式：最终交易决策/交易方向
-                        cn_rating_match = re.search(
-                            r'(?:最终交易决策|交易方向)[^：]*[：:]\s*[\*]*\s*(\S+?)(?:\s*[\*]*\s*[/／]|\n|$)',
-                            final_decision_markdown
-                        )
-                        if cn_rating_match:
-                            raw_action = cn_rating_match.group(1).strip()
-                            # 标准化动作映射
-                            if '买入' in raw_action or '做多' in raw_action:
-                                action = '买入'
-                            elif '增持' in raw_action:
-                                action = '增持'
-                            elif '卖出' in raw_action or '做空' in raw_action or '规避' in raw_action:
-                                action = '卖出'
-                            elif '减持' in raw_action:
-                                action = '减持'
-                            elif '持有' in raw_action or '观望' in raw_action:
-                                action = '持有'
-                            else:
-                                action = raw_action[:4] if len(raw_action) > 4 else raw_action
+                        # 中文格式：结构化标签/标题行评级（限定评级词，防股票代码误抓）
+                        cn_action = _extract_cn_rating(final_decision_markdown)
+                        if cn_action:
+                            action = cn_action
 
                 # 如果final_decision_markdown为空，使用decision字符串
                 if not final_decision_markdown and isinstance(decision, str):
@@ -1800,6 +1854,26 @@ class SimpleAnalysisService:
                                 confidence = conf_val / 100.0
                         except (ValueError, TypeError):
                             pass
+
+                # 结构化覆盖（组合经理双写字段优先于 markdown 正则解析）
+                if structured_rating:
+                    action = {
+                        '买入': '买入', '增持': '增持', '持有': '持有',
+                        '减持': '减持', '卖出': '卖出',
+                    }.get(structured_rating, structured_rating)
+                if structured_confidence is not None:
+                    try:
+                        confidence = max(0.0, min(float(structured_confidence), 1.0))
+                    except (TypeError, ValueError):
+                        pass
+                if isinstance(structured, dict):
+                    if structured.get("price_target") is not None:
+                        try:
+                            target_price = float(structured["price_target"])
+                        except (TypeError, ValueError):
+                            pass
+                    if structured.get("executive_summary"):
+                        reasoning = str(structured["executive_summary"])[:500]
 
                 formatted_decision = {
                     'action': action,

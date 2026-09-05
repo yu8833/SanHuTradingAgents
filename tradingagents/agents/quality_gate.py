@@ -1,5 +1,10 @@
 from typing import Annotated
 
+from tradingagents.agents.utils.hard_score import (
+    extract_report_score,
+    score_deviation_tag,
+)
+
 REPORT_FIELDS = {
     "market": "market_report",
     "social": "sentiment_report",
@@ -31,8 +36,12 @@ FAILURE_MARKERS = [
 ]
 
 
-def _hard_check_report(analyst_type: str, report: str) -> tuple:
-    """Run hard checks on a single report. Returns (grade, detail)."""
+def _hard_check_report(analyst_type: str, report: str, formula_entry: dict | None = None) -> tuple:
+    """Run hard checks on a single report. Returns (grade, detail).
+
+    formula_entry: state._formula_scores[analyst_type]（公式化硬打分结果，None 表示无公式分）。
+        当公式分可用且 LLM 评分偏差 > 阈值时，降一级并把偏差写入 detail。
+    """
     if not report or not report.strip():
         return ("F", "报告为空")
 
@@ -56,12 +65,29 @@ def _hard_check_report(analyst_type: str, report: str) -> tuple:
     if missing_count > 0:
         issues.append(f"{missing_count} 处数据缺失")
 
+    # 公式化硬打分一致性（公式分可用且 LLM 分偏差 > 阈值时降级）
+    formula_issue = _formula_deviation_issue(analyst_type, report, formula_entry)
+    if formula_issue:
+        issues.append(formula_issue)
+
     if missing_count >= 3:
         return ("C", "；".join(issues))
-    if not has_table or missing_count > 0:
+    if not has_table or missing_count > 0 or formula_issue:
         return ("B", "；".join(issues) if issues else "基本合格")
 
     return ("A", f"完整 ({length} chars)")
+
+
+def _formula_deviation_issue(
+    analyst_type: str, report: str, formula_entry: dict | None
+) -> str:
+    """公式分可用且 LLM 评分偏差 > 阈值 → 返回问题文案（如 '公式分偏差：LLM=85 vs 公式=60'）。"""
+    if not formula_entry or not formula_entry.get("available"):
+        return ""
+    formula_score = formula_entry.get("score")
+    llm_score = extract_report_score(report, analyst_type)
+    tag = score_deviation_tag(formula_score, llm_score, report)
+    return tag or ""
 
 
 def _build_review_prompt(
@@ -131,9 +157,13 @@ def create_quality_gate(llm):
         for analyst_type, field in REPORT_FIELDS.items():
             reports[field] = state.get(field, "")
 
+        formula_scores = state.get("_formula_scores") or {}
+
         hard_results = {}
         for analyst_type, field in REPORT_FIELDS.items():
-            grade, detail = _hard_check_report(analyst_type, reports[field])
+            grade, detail = _hard_check_report(
+                analyst_type, reports[field], formula_scores.get(analyst_type)
+            )
             hard_results[analyst_type] = (grade, detail)
 
         hard_summary_lines = []

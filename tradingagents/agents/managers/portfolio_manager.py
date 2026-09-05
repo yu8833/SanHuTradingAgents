@@ -22,7 +22,7 @@ from tradingagents.agents.utils.agent_utils import (
 )
 from tradingagents.agents.utils.structured import (
     bind_structured,
-    invoke_structured_or_freetext,
+    invoke_structured_dual,
 )
 
 
@@ -99,7 +99,7 @@ def create_portfolio_manager(llm):
 每个约束都必须基于辩论中的具体证据。
 {get_language_instruction()}"""
 
-        risk_control_decision = invoke_structured_or_freetext(
+        risk_control_obj, risk_control_decision = invoke_structured_dual(
             risk_llm,
             llm,
             risk_judge_prompt,
@@ -162,7 +162,7 @@ def create_portfolio_manager(llm):
 你的止损必须 ≥ 风控经理的止损水平（即更紧或相等）。
 {get_language_instruction()}"""
 
-        final_trade_decision = invoke_structured_or_freetext(
+        final_decision_obj, final_trade_decision = invoke_structured_dual(
             portfolio_llm,
             llm,
             final_decision_prompt,
@@ -187,6 +187,51 @@ def create_portfolio_manager(llm):
             "risk_debate_state": new_risk_debate_state,
             "risk_control_decision": risk_control_decision,
             "final_trade_decision": final_trade_decision,
+            # 双写：结构化对象供消费端直接读取，字符串保留兼容
+            "risk_control_object": risk_control_obj.model_dump() if risk_control_obj is not None else None,
+            "final_decision_object": final_decision_obj.model_dump() if final_decision_obj is not None else None,
+            # 归一化字段：消费端（accuracy_guardian / app 层 / 记忆）优先读取，替代文本重复解析
+            **_flatten_decision_fields(risk_control_obj, final_decision_obj),
         }
 
     return portfolio_manager_node
+
+
+# 归一评级 / 置信度 / 仓位：从结构化对象落盘为纯字段（不可用时静默跳过）。
+_RATING_CN = {
+    "Buy": "买入",
+    "Overweight": "增持",
+    "Hold": "持有",
+    "Underweight": "减持",
+    "Sell": "卖出",
+}
+
+
+def _flatten_decision_fields(risk_obj, final_obj) -> dict:
+    """从风控/最终决策结构化对象提取归一字段：final_rating/final_confidence/仓位。"""
+    out: dict = {}
+    if final_obj is not None:
+        rating = getattr(final_obj, "rating", None)
+        if rating is not None:
+            value = getattr(rating, "value", rating)
+            out["final_rating"] = _RATING_CN.get(value, value)
+        conviction = getattr(final_obj, "conviction_score", None)
+        if conviction is not None:
+            try:
+                out["final_confidence"] = round(
+                    max(0.0, min(float(conviction) / 100.0, 1.0)), 4
+                )
+            except (TypeError, ValueError):
+                pass
+    if risk_obj is not None:
+        for attr, key in (
+            ("max_position_size", "max_position_size"),
+            ("recommended_position_size", "recommended_position_size"),
+        ):
+            value = getattr(risk_obj, attr, None)
+            if value is not None:
+                try:
+                    out[key] = float(value)
+                except (TypeError, ValueError):
+                    pass
+    return out

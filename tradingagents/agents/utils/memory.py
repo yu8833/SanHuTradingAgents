@@ -33,8 +33,13 @@ class TradingMemoryLog:
         ticker: str,
         trade_date: str,
         final_trade_decision: str,
+        rating: Optional[str] = None,
     ) -> None:
-        """Append pending entry at end of propagate(). No LLM call."""
+        """Append pending entry at end of propagate(). No LLM call.
+
+        rating: 归一评级（买入/增持/持有/减持/卖出，来自结构化输出 final_rating）。
+            为空时退回对 final_trade_decision 文本的正则解析（parse_rating）。
+        """
         if not self._log_path:
             return
         # Idempotency guard: fast raw-text scan instead of full parse
@@ -43,8 +48,8 @@ class TradingMemoryLog:
             for line in raw.splitlines():
                 if line.startswith(f"[{trade_date} | {ticker} |") and line.endswith("| pending]"):
                     return
-        rating = parse_rating(final_trade_decision)
-        tag = f"[{trade_date} | {ticker} | {rating} | pending]"
+        rating_str = (rating or "").strip() or parse_rating(final_trade_decision)
+        tag = f"[{trade_date} | {ticker} | {rating_str} | pending]"
         entry = f"{tag}\n\nDECISION:\n{final_trade_decision}{self._SEPARATOR}"
         with open(self._log_path, "a", encoding="utf-8") as f:
             f.write(entry)

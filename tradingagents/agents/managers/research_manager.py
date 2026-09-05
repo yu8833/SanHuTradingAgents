@@ -6,7 +6,7 @@ from tradingagents.agents.schemas import ResearchPlan, render_research_plan
 from tradingagents.agents.utils.agent_utils import build_instrument_context, get_language_instruction
 from tradingagents.agents.utils.structured import (
     bind_structured,
-    invoke_structured_or_freetext,
+    invoke_structured_dual,
 )
 
 
@@ -119,7 +119,7 @@ def create_research_manager(llm):
 {history}
 {get_language_instruction()}"""
 
-        investment_plan = invoke_structured_or_freetext(
+        plan, investment_plan = invoke_structured_dual(
             structured_llm,
             llm,
             prompt,
@@ -139,6 +139,8 @@ def create_research_manager(llm):
         return {
             "investment_debate_state": new_investment_debate_state,
             "investment_plan": investment_plan,
+            # 双写：结构化对象（model_dump）供消费端直接读取，字符串保留兼容
+            "research_plan_object": plan.model_dump() if plan is not None else None,
         }
 
     return research_manager_node
