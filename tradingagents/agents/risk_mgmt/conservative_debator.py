@@ -4,22 +4,24 @@ from tradingagents.agents.utils.agent_utils import get_language_instruction
 
 def create_conservative_debator(llm):
     def conservative_node(state) -> dict:
+        from tradingagents.agents.utils.prompt_compression import compact_markdown
+
         risk_debate_state = state["risk_debate_state"]
-        history = risk_debate_state.get("history", "")
+        history = compact_markdown(risk_debate_state.get("history", ""), keep=1100)
         conservative_history = risk_debate_state.get("conservative_history", "")
 
         current_aggressive_response = risk_debate_state.get("current_aggressive_response", "")
         current_neutral_response = risk_debate_state.get("current_neutral_response", "")
 
-        market_research_report = state["market_report"]
-        sentiment_report = state["sentiment_report"]
-        news_report = state["news_report"]
-        fundamentals_report = state["fundamentals_report"]
-        policy_report = state.get("policy_report", "")
-        hot_money_report = state.get("hot_money_report", "")
-        lockup_report = state.get("lockup_report", "")
+        market_research_report = compact_markdown(state["market_report"], keep=650)
+        sentiment_report = compact_markdown(state["sentiment_report"], keep=650)
+        news_report = compact_markdown(state["news_report"], keep=650)
+        fundamentals_report = compact_markdown(state["fundamentals_report"], keep=650)
+        policy_report = compact_markdown(state.get("policy_report", ""), keep=650)
+        hot_money_report = compact_markdown(state.get("hot_money_report", ""), keep=650)
+        lockup_report = compact_markdown(state.get("lockup_report", ""), keep=650)
 
-        trader_decision = state["trader_investment_plan"]
+        trader_decision = compact_markdown(state["trader_investment_plan"], keep=1000)
 
         prompt = f"""你是一位专注于 A 股市场的**保守风控分析师**。你的首要目标是**限制仓位和收紧止损**以保护资产安全。
 

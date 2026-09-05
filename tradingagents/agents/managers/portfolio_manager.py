@@ -31,12 +31,14 @@ def create_portfolio_manager(llm):
     portfolio_llm = bind_structured(llm, PortfolioDecision, "组合经理")
 
     def portfolio_manager_node(state) -> dict:
+        from tradingagents.agents.utils.prompt_compression import compact_markdown
+
         instrument_context = build_instrument_context(state["company_of_interest"])
 
-        history = state["risk_debate_state"]["history"]
+        history = compact_markdown(state["risk_debate_state"]["history"], keep=1100)
         risk_debate_state = state["risk_debate_state"]
-        research_plan = state["investment_plan"]
-        trader_plan = state["trader_investment_plan"]
+        research_plan = compact_markdown(state["investment_plan"], keep=1200)
+        trader_plan = compact_markdown(state["trader_investment_plan"], keep=1000)
 
         past_context = state.get("past_context", "")
         lessons_line = (

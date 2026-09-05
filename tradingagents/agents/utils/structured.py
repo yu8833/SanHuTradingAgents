@@ -28,6 +28,36 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
 
 
+def _thinking_off_clone(llm: Any) -> Any:
+    """DeepSeek V4：structured 输出需要 tool_choice，而 thinking 模式不着用该参数（官方 400
+    'Thinking mode does not support this tool_choice'）。克隆一个关闭 thinking 的同模型实例，
+    使 with_structured_output(function_calling) 可用且更快；非 DeepSeek 或克隆失败时原样返回。
+    """
+    try:
+        from tradingagents.llm_clients.openai_client import DeepSeekChatOpenAI
+
+        if not isinstance(llm, DeepSeekChatOpenAI):
+            return llm
+        kwargs: dict = {
+            "model": getattr(llm, "model_name", None),
+            "api_key": getattr(llm, "openai_api_key", None),
+            "temperature": getattr(llm, "temperature", 0.2),
+            "extra_body": {"thinking": {"type": "disabled"}},
+        }
+        base_url = getattr(llm, "openai_api_base", None) or getattr(llm, "openai_api_base_url", None)
+        if base_url:
+            kwargs["base_url"] = base_url
+        max_tokens = getattr(llm, "max_tokens", None)
+        if max_tokens:
+            kwargs["max_tokens"] = max_tokens
+        clone = DeepSeekChatOpenAI(**kwargs)
+        logger.info("DeepSeek structured：克隆 thinking-disabled 实例 model=%s", kwargs["model"])
+        return clone
+    except Exception as e:
+        logger.warning("structured thinking-off 克隆失败，退回原 llm: %s", e)
+        return llm
+
+
 def bind_structured(llm: Any, schema: type[T], agent_name: str) -> Optional[Any]:
     """Return ``llm.with_structured_output(schema)`` or ``None`` if unsupported.
 
@@ -35,7 +65,7 @@ def bind_structured(llm: Any, schema: type[T], agent_name: str) -> Optional[Any]
     will use free-text generation for every call instead of one-shot fallback.
     """
     try:
-        return llm.with_structured_output(schema)
+        return _thinking_off_clone(llm).with_structured_output(schema)
     except (NotImplementedError, AttributeError) as exc:
         logger.warning(
             "%s: provider does not support with_structured_output (%s); "
