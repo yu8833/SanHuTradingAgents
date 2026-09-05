@@ -147,7 +147,13 @@ def create_quality_gate(llm):
     Sits between the last analyst Msg Clear and Bull Researcher.
     Layer 1: hard checks (code). Layer 2: LLM review (one call).
     Writes data_quality_summary to state for downstream consumers.
+
+    LLM 复审仅做结构审核/缺失检查，不需要深度推理：对 DeepSeek 改用
+    thinking-off 实例（秒级返回），避免一次 thinking 调用拖慢整个流程。
     """
+    from tradingagents.agents.utils.structured import _thinking_off_clone
+
+    llm = _thinking_off_clone(llm)
 
     def quality_gate_node(state) -> dict:
         trade_date = state["trade_date"]

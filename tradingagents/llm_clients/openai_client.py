@@ -182,6 +182,16 @@ class OpenAIClient(BaseLLMClient):
         if self.provider == "openai":
             llm_kwargs["use_responses_api"] = True
 
+        # DeepSeek V4：思考强度全局开关（默认 low，可用 DEEPSEEK_REASONING_EFFORT
+        # 调整/关闭：low/high/max）。thinking 默认开启且 effort 默认 high（官方文档），
+        # 下调到 low 可显著缩短每次调用耗时（风控/辩论/分析师是主要耗时来源）；
+        # 需要深度推理时设 DEEPSEEK_REASONING_EFFORT=high 即可回滚。
+        if self.provider == "deepseek":
+            effort = os.environ.get("DEEPSEEK_REASONING_EFFORT", "low")
+            if effort in ("low", "high", "max"):
+                llm_kwargs.setdefault("extra_body", {})
+                llm_kwargs["extra_body"].setdefault("reasoning_effort", effort)
+
         # DeepSeek's thinking-mode quirks live in their own subclass so the
         # base NormalizedChatOpenAI stays free of provider-specific branches.
         chat_cls = DeepSeekChatOpenAI if self.provider == "deepseek" else NormalizedChatOpenAI
