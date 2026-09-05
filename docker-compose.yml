@@ -11,6 +11,7 @@ services:
       dockerfile: Dockerfile.backend
     image: tradingagents-backend:latest
     container_name: tradingagents-backend
+    mem_limit: 3g
     ports:
       - "8000:8000"
     volumes:
@@ -73,6 +74,7 @@ services:
       dockerfile: Dockerfile.backend
     image: tradingagents-backend:latest
     container_name: tradingagents-worker
+    mem_limit: 2g
     volumes:
       # 日志目录映射
       - ./logs:/app/logs
@@ -128,6 +130,11 @@ services:
       dockerfile: Dockerfile.backend
     image: tradingagents-backend:latest
     container_name: tradingagents-backtest-worker
+    # 按需启动：回测任务时才通过 `docker compose --profile backtest up -d backtest_worker` 拉起，
+    # 平时不常驻，避免长期空转占用资源。
+    profiles:
+      - backtest
+    mem_limit: 2g
     volumes:
       # 日志目录映射
       - ./logs:/app/logs

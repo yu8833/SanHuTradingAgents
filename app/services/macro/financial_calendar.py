@@ -14,7 +14,7 @@ AKShare 的 `macro_info_ws` 周历数据停在 2024-05 为陈旧数据。故以�
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 
 from app.services.cache_layer import cached
 
@@ -22,6 +22,13 @@ logger = logging.getLogger(__name__)
 
 # 日历窗口：昨天 + 今天 + 未来数天（已公布事件也纳入，供盘前/参考解读）
 _CALENDAR_DAYS = 8  # 含昨天（昨天 + 未来 7 天）
+
+# 缓存 TTL 回退值（24h）：窗口内没有任何可精确解析发布时点的事件时使用。
+_DEFAULT_CALENDAR_TTL = 86400
+# 发布时点后追加的重建缓冲：事件公布后缓存再存活 5 分钟即过期重建，
+# 让"当天早于发布时点生成的快照"（如 9/4 20:30 非农、白天生成显示"待发布"）
+# 在公布后自动翻为"已公布"，而非等到次日窗口重建。
+_ANNOUNCE_GRACE = 5 * 60
 
 # FOMC 2026 议息会议（决议公布日 = 会议第 2 天，北京时间通常次日凌晨）。
 # 手工维护：每年年初按美联储官方日程更新一次（2026-08-31 据 fomccalendars.htm 核实）。
@@ -261,6 +268,11 @@ def _manual_events(start: date, days: int) -> list[dict]:
     return out
 
 
+def _is_hhmm(s: str) -> bool:
+    """是否为 HH:MM 格式（如 09:15 / 20:30），用于发布时点的精确判定。"""
+    return len(s) == 5 and s[2] == ":" and s[:2].isdigit() and s[3:].isdigit()
+
+
 def _is_announced(ev: dict, today: date) -> bool:
     """事件是否已公布：日期早于今天视为已公布；今天的事件按发布时点判定（HH:MM 格式）。"""
     try:
@@ -379,13 +391,54 @@ def _build_calendar(days: int = _CALENDAR_DAYS) -> list[dict]:
     return events
 
 
+def _next_publish_ttl(now: datetime | None = None) -> int:
+    """计算日历缓存存活秒数 = 距下一个已计划发布时点 + 缓冲。
+
+    对每类事件用规则表推算其下一次发布时间（date + release_time，北京时区），
+    取"下一个尚未到来"的发布时刻。缓存存活到该时刻 + _ANNOUNCE_GRACE 后过期重建，
+    从而修复「当天早于发布时点生成的快照，在公布后不会自动失效」的缺陷
+    （例：9/4 白天生成日历 → 非农标记『待发布』→ 20:30 公布后缓存仍存活 1 天）。
+
+    支持 HH:MM（如 09:15/20:30）与"次日HH:MM"（如 FOMC 决议"次日02:00"）；
+    "中旬"等无精确时点的事件跳过。窗口内无任何可解析事件时回退 24h。
+    """
+    now = now or datetime.now()
+    next_ts: datetime | None = None
+    for ev in _HIGH_FREQ_EVENTS:
+        try:
+            dt = ev["rule"](now.date())
+        except Exception:
+            continue
+        if dt is None:
+            continue
+        rt = str(ev.get("release_time") or "")
+        if rt.startswith("次日") and len(rt) == 7 and rt[2:5] == ":":
+            base, hh, mm = dt + timedelta(days=1), rt[2:4], rt[5:7]
+        elif _is_hhmm(rt):
+            base, hh, mm = dt, rt[:2], rt[3:5]
+        else:
+            continue  # "中旬" 等无精确时点
+        if not (hh.isdigit() and mm.isdigit()):
+            continue
+        t = datetime.combine(base, time(int(hh), int(mm)))
+        if t > now and (next_ts is None or t < next_ts):
+            next_ts = t
+    if next_ts is None:
+        return _DEFAULT_CALENDAR_TTL
+    delay = int((next_ts - now).total_seconds()) + _ANNOUNCE_GRACE
+    return max(min(delay, _DEFAULT_CALENDAR_TTL), 60)
+
+
 async def get_financial_calendar(days: int = _CALENDAR_DAYS) -> list[dict]:
-    """财经日历（昨天 + 未来 7 天），Redis 1 天 TTL 缓存（设计文档 §5.3-B / A.5）。
+    """财经日历（昨天 + 未来 7 天），缓存 TTL 动态化（设计文档 §5.3-B / A.5）。
 
     缓存键必须含参考日期：日历窗口随日期滑动，若只用 {days} 作键，
     前一天生成的窗口会被次日复用（如 08-31 的日历被 09-01 命中，
     导致快照里出现 08-31 的事件）。按日期分键后，每天窗口独立、次日自动重建。
     v2：日历加入 已公布事件实际值+解读（announced/actual/analysis），键升级避免旧缓存残留。
+    v3：TTL 从固定 1 天改为动态（相邻计划发布时点 + 5 分钟，见 _next_publish_ttl），
+        保证当天晚些时候发布的事件（如 20:30 非农）公布后缓存自动过期重建，
+        「待发布」能在当天翻为「已公布」，无需等到次日。
     """
     today = date.today().isoformat()
     return await cached(
@@ -393,5 +446,5 @@ async def get_financial_calendar(days: int = _CALENDAR_DAYS) -> list[dict]:
         lambda: _build_calendar(days),
         category="financial",
         valid=bool,
-        ttl=86400,
+        ttl=_next_publish_ttl(),
     )
