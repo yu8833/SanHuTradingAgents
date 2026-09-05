@@ -1101,10 +1101,14 @@ class SimpleAnalysisService:
                 input_tokens = tokens_used // 2 if tokens_used > 0 else 2000
                 output_tokens = tokens_used - input_tokens if tokens_used > 0 else 1000
 
-                # 获取模型信息
-                model_info = result.get("model_info", "Unknown") if isinstance(result, dict) else "Unknown"
-                if model_info == "Unknown":
-                    model_info = request.parameters.quick_analysis_model if request.parameters else "qwen-plus"
+                # 获取模型信息（result.model_info → 请求参数模型 → 默认模型，任何一层缺失都继续兜底，
+                # 避免 UsageRecord.model_name 为 None 触发校验失败）
+                model_info = result.get("model_info") if isinstance(result, dict) else None
+                if not model_info or model_info == "Unknown":
+                    params = request.parameters
+                    model_info = params.quick_analysis_model if (params and params.quick_analysis_model) else None
+                if not model_info:
+                    model_info = "qwen-plus"
 
                 # 估算成本（简化处理）
                 cost = 0.0
