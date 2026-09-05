@@ -17,6 +17,7 @@
     - 修复后 market_quotes 的 amount/volume 与 stock_daily_quotes 一致
 """
 import os
+
 import pytest
 
 _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -30,6 +31,7 @@ _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 def test_bug_013_backfill_force_parameter_exists():
     """backfill_from_historical_data 必须接受 force 参数"""
     import inspect
+
     from app.services.quotes_ingestion_service import QuotesIngestionService
 
     sig = inspect.signature(QuotesIngestionService.backfill_from_historical_data)
@@ -123,7 +125,8 @@ async def test_bug_013_market_quotes_consistency_with_daily_quotes():
     此测试会失败。
     """
     try:
-        from app.core.database import init_database, get_mongo_db, close_database
+        from app.core.database import close_database, get_mongo_db, init_database
+        from app.services.quotes_ingestion_service import QuotesIngestionService
     except ImportError:
         pytest.skip("数据库模块不可用")
 
@@ -143,6 +146,11 @@ async def test_bug_013_market_quotes_consistency_with_daily_quotes():
         if not latest_doc:
             pytest.skip("stock_daily_quotes 为空")
         latest_td = latest_doc.get("trade_date")
+
+        # 数据治理（bug-013 日终校准）：非交易时段先清掉收盘前滞留快照
+        # （updated_at 早于当日 15:00 的盘中最后快照），避免抽样误报。
+        # 交易时段内 calibrate 自动跳过（实时快照与日线口径不一致属正常）。
+        await QuotesIngestionService().calibrate_to_daily_close(latest_td)
 
         # 抽样检查 5 只股票
         sample_codes = ["688669", "000001", "600519", "300750", "000002"]
@@ -217,7 +225,7 @@ async def test_bug_013_688669_market_quotes_correct():
     if not mongo_url:
         pytest.skip("非容器环境，跳过 DB 集成测试")
 
-    from app.core.database import init_database, get_mongo_db, close_database
+    from app.core.database import close_database, get_mongo_db, init_database
 
     await init_database()
     try:
@@ -260,5 +268,127 @@ async def test_bug_013_688669_market_quotes_correct():
         assert volume is not None and 3e6 < volume < 5e6, (
             f"688669 market_quotes volume={volume} 不在正确量级（应在 3.96 万手=396 万股 附近）"
         )
+    finally:
+        await close_database()
+
+
+# ========================================================================
+# Axiom 8：日终校准（bug-013 数据治理）——收盘前滞留快照校准为日线收盘值
+# ========================================================================
+
+@pytest.mark.regression
+@pytest.mark.asyncio
+async def test_bug_013_calibrate_repairs_stale_snapshot():
+    """收盘前滞留快照（updated_at < 当日15:00 的盘中最后快照）应被校准为日线收盘值"""
+    mongo_url = os.getenv("TRADINGAGENTS_MONGODB_URL", "")
+    if not mongo_url:
+        pytest.skip("非容器环境，跳过 DB 集成测试")
+
+    from datetime import datetime, timezone
+
+    from app.core.database import close_database, get_mongo_db, init_database
+    from app.services.quotes_ingestion_service import QuotesIngestionService
+
+    await init_database()
+    try:
+        db = get_mongo_db()
+        latest_doc = await db["stock_daily_quotes"].find_one(
+            {"period": "daily"}, sort=[("trade_date", -1)]
+        )
+        if not latest_doc:
+            pytest.skip("stock_daily_quotes 为空")
+        latest_td = latest_doc.get("trade_date")
+        sq = await db["stock_daily_quotes"].find_one({"code": "300750", "trade_date": latest_td})
+        if not sq or not sq.get("amount"):
+            pytest.skip("300750 无当日日线数据")
+
+        # 人为制造滞留快照：amount/volume 缩水 ~1.7%，updated_at 设为北京 14:59（UTC 06:59）
+        td_date = latest_td.replace("-", "")
+        stale_updated = datetime(
+            int(td_date[:4]), int(td_date[4:6]), int(td_date[6:8]), 6, 59, 0,
+            tzinfo=timezone.utc,
+        )
+        await db["market_quotes"].update_one(
+            {"code": "300750"},
+            {"$set": {
+                "amount": round(sq["amount"] * 0.983, 2),
+                "volume": int(sq["volume"] * 0.983),
+                "updated_at": stale_updated,
+            }},
+        )
+
+        svc = QuotesIngestionService()
+        svc._is_trading_time = lambda: False  # 绕过盘中跳过，强制走校准分支
+        calibrated = await svc.calibrate_to_daily_close(latest_td)
+        assert calibrated >= 1, "应至少校准 1 只滞留股票"
+
+        mq = await db["market_quotes"].find_one({"code": "300750"})
+        assert abs(mq["amount"] / sq["amount"] - 1) < 1e-6, (
+            f"校准后 amount 应等于日线值: {mq['amount']} vs {sq['amount']}"
+        )
+        assert abs(mq["volume"] / sq["volume"] - 1) < 1e-6, (
+            f"校准后 volume 应等于日线值: {mq['volume']} vs {sq['volume']}"
+        )
+    finally:
+        await close_database()
+
+
+@pytest.mark.regression
+@pytest.mark.asyncio
+async def test_bug_013_calibrate_skips_during_trading_hours():
+    """交易时段内实时快照正确，校准必须跳过（不得覆盖实时数据）"""
+    from app.services.quotes_ingestion_service import QuotesIngestionService
+
+    svc = QuotesIngestionService()
+    svc._is_trading_time = lambda: True  # 模拟交易时段
+    n = await svc.calibrate_to_daily_close("2026-09-04")
+    assert n == 0, "交易时段内不得校准"
+
+
+@pytest.mark.regression
+@pytest.mark.asyncio
+async def test_bug_013_calibrate_idempotent():
+    """校准后 updated_at 更新为收盘后，再次校准不应命中（幂等）"""
+    mongo_url = os.getenv("TRADINGAGENTS_MONGODB_URL", "")
+    if not mongo_url:
+        pytest.skip("非容器环境，跳过 DB 集成测试")
+
+    from datetime import datetime, timezone
+
+    from app.core.database import close_database, get_mongo_db, init_database
+    from app.services.quotes_ingestion_service import QuotesIngestionService
+
+    await init_database()
+    try:
+        db = get_mongo_db()
+        latest_doc = await db["stock_daily_quotes"].find_one(
+            {"period": "daily"}, sort=[("trade_date", -1)]
+        )
+        if not latest_doc:
+            pytest.skip("stock_daily_quotes 为空")
+        latest_td = latest_doc.get("trade_date")
+        sq = await db["stock_daily_quotes"].find_one({"code": "300750", "trade_date": latest_td})
+        if not sq or not sq.get("amount"):
+            pytest.skip("300750 无当日日线数据")
+
+        # 构造「已校准」状态：amount=日线值、updated_at=收盘后（北京 16:00 = UTC 08:00）
+        td_date = latest_td.replace("-", "")
+        calibrated_updated = datetime(
+            int(td_date[:4]), int(td_date[4:6]), int(td_date[6:8]), 8, 0, 0,
+            tzinfo=timezone.utc,
+        )
+        await db["market_quotes"].update_one(
+            {"code": "300750"},
+            {"$set": {
+                "amount": sq["amount"],
+                "volume": sq["volume"],
+                "updated_at": calibrated_updated,
+            }},
+        )
+
+        svc = QuotesIngestionService()
+        svc._is_trading_time = lambda: False
+        n2 = await svc.calibrate_to_daily_close(latest_td)
+        assert n2 == 0, "已校准过的数据不应再次命中"
     finally:
         await close_database()

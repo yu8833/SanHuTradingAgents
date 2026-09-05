@@ -5,13 +5,13 @@ import logging
 import time
 from collections import deque
 from datetime import datetime, timedelta
+from datetime import time as dtime
 from zoneinfo import ZoneInfo
 
 from pymongo import UpdateOne
 
 from app.core.config import settings
 from app.core.database import get_mongo_db
-from app.utils.timezone import get_tz
 from app.core.numeric_sanitizer import (
     sanitize_amount as _s_amount,
 )
@@ -27,9 +27,10 @@ from app.core.numeric_sanitizer import (
 from app.core.numeric_sanitizer import (
     sanitize_volume as _s_volume,
 )
-from app.utils.trading_time import prev_trading_day
-from app.services.data_sources.manager import DataSourceManager
 from app.models.stock_models import MarketQuotesDB, detect_db_extra_fields
+from app.services.data_sources.manager import DataSourceManager
+from app.utils.timezone import get_tz
+from app.utils.trading_time import prev_trading_day
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,8 @@ class QuotesIngestionService:
             max_workers=1, thread_name_prefix="quotes-fetch"
         )
         self._running = False  # 防重入：单次抓取未结束时不重复执行
+        # 日终校准标记：记录已校准的「日线最新交易日」（YYYY-MM-DD），同一交易日不重复校准
+        self._last_close_calibrated: str | None = None
 
     def __del__(self) -> None:
         with contextlib.suppress(Exception):
@@ -917,6 +920,10 @@ class QuotesIngestionService:
         若发现系统性单位偏差（如 bug-012 遗留的 amount÷100000、volume×100），
         自动触发 force rebuild 修复。
 
+        非交易时段额外执行「日终校准」：收盘前滞留的盘中快照（updated_at 早于
+        当日 15:00）会被逐条校准为日线收盘值（bug-013 数据治理，见
+        calibrate_to_daily_close）。
+
         Returns:
             True: 一致（或修复后一致）；False: 无法修复
         """
@@ -930,6 +937,17 @@ class QuotesIngestionService:
                 logger.warning("⚠️ stock_daily_quotes 为空，跳过一致性校验")
                 return True
             latest_td = latest_doc.get("trade_date")  # "2026-07-31"
+
+            # 非交易时段：先做日终校准（收盘前滞留快照 → 日线收盘值）
+            if not self._is_trading_time():
+                try:
+                    calibrated = await self.calibrate_to_daily_close(latest_td)
+                    if calibrated:
+                        logger.info(f"✅ 启动日终校准完成：{calibrated} 只股票已校准为日线收盘值")
+                except Exception as e:
+                    logger.warning(f"⚠️ 日终校准失败（忽略，不影响抽样校验）: {e}")
+            else:
+                logger.info("⏭️ 交易时段内，跳过日终校准（实时快照与日线口径不一致属正常）")
 
             # 抽样 20 只股票对比
             sample_mq = await db["market_quotes"].find({}, {"_id": 0}).limit(20).to_list(length=20)
@@ -970,6 +988,104 @@ class QuotesIngestionService:
             logger.error(f"❌ market_quotes 一致性校验失败: {e}")
             return False
 
+    async def calibrate_to_daily_close(self, latest_td: str | None = None) -> int:
+        """日终校准（bug-013 数据治理）：收盘前滞留快照 → 日线收盘值。
+
+        背景：盘中最后一轮实时采集通常停在 14:59 左右。收盘后 market_quotes 的
+        trade_date 已为当日（不触发 backfill 陈旧判断），若日线同步已完成而行情
+        不再更新，这些 amount/volume 会永久停留在盘中累计值（比日终少 1.5%~2%），
+        导致 market_quotes 与 stock_daily_quotes 一致性校验失败。
+
+        规则（幂等）：
+        - 仅非交易时段（收盘缓冲期之后）执行，交易时段实时快照正确、绝不覆盖；
+        - 仅校准 trade_date == 日线最新交易日、且 updated_at(北京时间) 早于当日
+          15:00 的记录（即「收盘前写入、收盘后未再更新」的滞留快照）；
+        - 校准后 updated_at=now(>15:00)，后续不再命中 → 天然幂等；
+        - stock_daily_quotes 尚无当日数据时（日线未同步完成）不校准任何记录，
+          返回 0，由调用方下轮重试。
+
+        Args:
+            latest_td: 日线最新交易日（"YYYY-MM-DD" 或 "YYYYMMDD"），缺省自动查询。
+
+        Returns:
+            本次校准的股票数量
+        """
+        if self._is_trading_time():
+            return 0
+        db = get_mongo_db()
+        if not latest_td:
+            latest_doc = await db["stock_daily_quotes"].find_one(
+                {"period": "daily"}, sort=[("trade_date", -1)]
+            )
+            if not latest_doc:
+                return 0
+            latest_td = latest_doc.get("trade_date")
+        if not latest_td:
+            return 0
+        td_compact = str(latest_td).replace("-", "")  # "2026-09-04" -> "20260904"
+        if len(td_compact) != 8:
+            return 0
+        try:
+            td_date = datetime.strptime(td_compact, "%Y%m%d").date()
+        except ValueError:
+            return 0
+        close_time = datetime.combine(td_date, dtime(15, 0), tzinfo=self.tz)
+
+        # 找出 trade_date == 最新交易日、且 updated_at 早于收盘时刻的滞留记录
+        cursor = db[self.collection_name].find(
+            {"trade_date": td_compact},
+            {"_id": 0, "code": 1, "updated_at": 1},
+        )
+        docs = await cursor.to_list(length=None)
+        stale_codes: list[str] = []
+        for doc in docs:
+            code = doc.get("code")
+            upd = doc.get("updated_at")
+            if not code or upd is None or isinstance(upd, str):
+                continue
+            try:
+                upd_beijing = upd.astimezone(self.tz) if upd.tzinfo else upd.replace(tzinfo=self.tz)
+            except Exception:
+                continue
+            if upd_beijing < close_time:
+                stale_codes.append(str(code))
+
+        if not stale_codes:
+            logger.info(f"✅ 日终校准：{td_compact} 无收盘前滞留快照（已一致）")
+            return 0
+
+        # 批量取对应日线收盘数据，构造与 backfill 相同的 quotes_map 走统一入库
+        daily_cursor = db["stock_daily_quotes"].find(
+            {"trade_date": str(latest_td), "code": {"$in": stale_codes}},
+            {
+                "_id": 0, "code": 1, "symbol": 1, "close": 1, "pct_chg": 1,
+                "amount": 1, "volume": 1, "vol": 1, "open": 1, "high": 1,
+                "low": 1, "pre_close": 1,
+            },
+        )
+        quotes_map: dict[str, dict] = {}
+        async for sq in daily_cursor:
+            code6 = str(sq.get("symbol") or sq.get("code") or "").zfill(6)
+            volume_value = sq.get("volume") or sq.get("vol")
+            quotes_map[code6] = {
+                "close": sq.get("close"),
+                "pct_chg": sq.get("pct_chg"),
+                "amount": sq.get("amount"),
+                "volume": volume_value,
+                "open": sq.get("open"),
+                "high": sq.get("high"),
+                "low": sq.get("low"),
+                "pre_close": sq.get("pre_close"),
+            }
+
+        if not quotes_map:
+            logger.info(f"⏳ 日终校准：{td_compact} 日线数据尚未同步完成，跳过本轮")
+            return 0
+
+        await self._bulk_upsert(quotes_map, td_compact, "daily_close_calibrate")
+        logger.info(f"✅ 日终校准完成：{len(quotes_map)} 只股票已从收盘前快照校准为日线收盘值")
+        return len(quotes_map)
+
     async def backfill_last_close_snapshot(self) -> None:
         """一次性补齐上一笔收盘快照（用于冷启动或数据陈旧）。允许在休市期调用。"""
         try:
@@ -1004,6 +1120,20 @@ class QuotesIngestionService:
             if await self._collection_stale(latest_td):
                 logger.info("🔁 触发休市期/启动期 backfill 以填充最新收盘数据")
                 await self.backfill_last_close_snapshot()
+
+            # 日终校准（bug-013 数据治理）：收盘后若集合已有当日 trade_date（不陈旧，
+            # 上述 backfill 不触发），盘中最后一轮 14:59 左右的快照会滞留为最终值。
+            # 这里把 trade_date == 最新交易日、updated_at 早于收盘 15:00 的记录
+            # 校准为日线收盘值。校准以「日线最新交易日」为标记（而非自然日），
+            # 当日线尚未同步完成时 calibrate 返回 0、不设标记，下轮自动重试。
+            try:
+                if self._last_close_calibrated != str(latest_td or ""):
+                    calibrated = await self.calibrate_to_daily_close(latest_td)
+                    if calibrated:
+                        logger.info(f"✅ 收盘后日终校准完成：{calibrated} 只股票已校准为日线收盘值")
+                        self._last_close_calibrated = str(latest_td)
+            except Exception as e:
+                logger.warning(f"⚠️ 收盘后日终校准失败（忽略）: {e}")
         except Exception as e:
             logger.warning(f"backfill 触发检查失败（忽略）: {e}")
 
