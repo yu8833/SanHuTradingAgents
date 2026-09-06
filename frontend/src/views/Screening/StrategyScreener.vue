@@ -1,5 +1,8 @@
 <template>
   <div class="strategy-screener app-page">
+    <!-- 页签：策略筛选 / 策略说明 -->
+    <el-tabs v-model="screenerTab" class="screener-tabs">
+      <el-tab-pane label="策略筛选" name="filter">
     <!-- 顶部横幅（全局统一） -->
     <div class="page-hero">
       <div class="page-hero-main">
@@ -265,12 +268,23 @@
     </el-card>
 
     <el-empty v-else-if="!loading && !runningAll" description="点击策略卡片查看选股结果" :image-size="160" />
+    </el-tab-pane>
+
+    <!-- 策略说明（由散户策略中心转移而来：适配矩阵 + 快速入口 + 表现统计 + 详细说明） -->
+    <el-tab-pane label="策略说明" name="explain">
+      <StrategyExplainPanel />
+    </el-tab-pane>
+    </el-tabs>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
+import StrategyExplainPanel from '@/components/Strategy/StrategyExplainPanel.vue'
+
+// 页签：策略筛选 / 策略说明
+const screenerTab = ref('filter')
 import {
   TrendCharts, Refresh, Loading, Connection, Star, Clock,
   Histogram, DataAnalysis, Odometer, Aim, MagicStick, Sunny, Cpu, Coin, Files, DataBoard,
