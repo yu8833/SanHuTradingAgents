@@ -181,6 +181,16 @@ const routes: RouteRecordRaw[] = [
           requiresAuth: true,
           hidden: true // 高级变体，折叠保留
         }
+      },
+      {
+        path: 'retail-center',
+        name: 'RetailCenter',
+        component: () => import('@/views/Screening/RetailCenter.vue'),
+        meta: {
+          title: '散户策略中心',
+          parentTitle: '策略',
+          requiresAuth: true
+        }
       }
     ]
   },
