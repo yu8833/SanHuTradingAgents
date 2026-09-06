@@ -40,7 +40,6 @@
       <el-menu-item index="/candidate">三买三卖</el-menu-item>
       <el-menu-item index="/screening/common">常用策略</el-menu-item>
       <el-menu-item index="/screening/backtest">策略回测</el-menu-item>
-      <el-menu-item index="/screening/retail-center">散户策略中心</el-menu-item>
       <!-- 转债博弈（资产类型独立，单独保留入口） -->
       <el-menu-item index="/screening/convertible-arbitrage">转债博弈</el-menu-item>
       <!-- 高级变体（折叠，保留但不并列展示） -->

@@ -1,8 +1,5 @@
 <template>
   <div class="strategy-screener app-page">
-    <!-- 页签：策略筛选 / 策略说明 -->
-    <el-tabs v-model="screenerTab" class="screener-tabs">
-      <el-tab-pane label="策略筛选" name="filter">
     <!-- 顶部横幅（全局统一） -->
     <div class="page-hero">
       <div class="page-hero-main">
@@ -58,20 +55,31 @@
       <span>盘中预警 · 当前为暂定信号（盘中数据未完全定格），15:00 收盘定格后再做最终判断。</span>
     </div>
 
-    <!-- 大盘行情上下文：直接告诉用户该用哪些策略 -->
-    <div class="market-bar" :class="'trend-' + marketTrend">
+    <!-- 大盘行情上下文：四维判断（趋势/波动/宽度/情绪）+ 内部折叠「策略说明」 -->
+    <div class="market-bar" :class="'trend-' + regimeTrend">
       <div class="market-left">
-        <div class="verdict-chip" :class="'trend-' + marketTrend">
+        <div class="verdict-chip" :class="'trend-' + regimeTrend">
           <span class="verdict-icon">
-            <el-icon v-if="marketTrend === 'bull'"><TrendCharts /></el-icon>
-            <el-icon v-else-if="marketTrend === 'bear'"><Bottom /></el-icon>
-            <el-icon v-else-if="marketTrend === 'sideways'"><Minus /></el-icon>
+            <el-icon v-if="regimeTrend === 'bull'"><TrendCharts /></el-icon>
+            <el-icon v-else-if="regimeTrend === 'bear'"><Bottom /></el-icon>
+            <el-icon v-else-if="regimeTrend === 'sideways'"><Minus /></el-icon>
             <el-icon v-else><QuestionFilled /></el-icon>
           </span>
-          <span class="verdict-label">{{ trendText.label }}</span>
-          <span v-if="!marketLoading && marketCtx" class="verdict-vol">· {{ volText.label }}</span>
+          <span class="verdict-label">{{ regimeTrendLabel }}</span>
+          <span v-if="regimeData" class="verdict-vol">· {{ regimeVolLabel }}</span>
         </div>
-        <div v-if="!marketLoading && marketCtx" class="verdict-advice">
+        <!-- 四维徽章：与策略说明矩阵的四个维度一致 -->
+        <div v-if="regimeData" class="verdict-dims">
+          <el-tag size="small" :type="regimeDimType('trend')" effect="plain">{{ regimeDimLabel('trend') }}</el-tag>
+          <el-tag size="small" :type="regimeDimType('vol')" effect="plain">{{ regimeDimLabel('vol') }}</el-tag>
+          <el-tag size="small" :type="regimeDimType('breadth')" effect="plain">{{ regimeDimLabel('breadth') }}</el-tag>
+          <el-tag size="small" :type="regimeDimType('sentiment')" effect="plain">{{ regimeDimLabel('sentiment') }}</el-tag>
+        </div>
+        <div v-if="!regimeLoading && regimeData" class="verdict-advice">
+          <span class="advice-icon"><el-icon><Opportunity /></el-icon></span>
+          <span class="advice-text">{{ regimeSummary }}</span>
+        </div>
+        <div v-else-if="!marketLoading && marketCtx" class="verdict-advice">
           <span class="advice-icon"><el-icon><Opportunity /></el-icon></span>
           <span class="advice-text">{{ adviceText }}</span>
         </div>
@@ -85,6 +93,13 @@
           :disabled="marketLoading"
         />
       </div>
+
+      <!-- 策略说明：折叠项（矩阵 + 快速入口 + 表现统计 + 详细说明） -->
+      <el-collapse v-model="adviceCollapse" class="market-collapse">
+        <el-collapse-item title="策略说明" name="explain">
+          <StrategyExplainPanel />
+        </el-collapse-item>
+      </el-collapse>
     </div>
 
     <!-- 策略卡片 -->
@@ -268,13 +283,6 @@
     </el-card>
 
     <el-empty v-else-if="!loading && !runningAll" description="点击策略卡片查看选股结果" :image-size="160" />
-    </el-tab-pane>
-
-    <!-- 策略说明（由散户策略中心转移而来：适配矩阵 + 快速入口 + 表现统计 + 详细说明） -->
-    <el-tab-pane label="策略说明" name="explain">
-      <StrategyExplainPanel />
-    </el-tab-pane>
-    </el-tabs>
   </div>
 </template>
 
@@ -282,15 +290,13 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import StrategyExplainPanel from '@/components/Strategy/StrategyExplainPanel.vue'
-
-// 页签：策略筛选 / 策略说明
-const screenerTab = ref('filter')
 import {
   TrendCharts, Refresh, Loading, Connection, Star, Clock,
   Histogram, DataAnalysis, Odometer, Aim, MagicStick, Sunny, Cpu, Coin, Files, DataBoard,
   CircleCheckFilled, WarningFilled, RemoveFilled, QuestionFilled,
   Opportunity, Promotion, Warning, Bottom, Minus,
 } from '@element-plus/icons-vue'
+import { retailApi } from '@/api/retail'
 import { strategyApi, type StrategyMeta, type StrategyRunItem, type StrategyRunAllItem } from '@/api/strategy'
 import {
   marketFitLevel, type MarketContext, type FitResult,
@@ -343,12 +349,6 @@ const allStrategyRunning = ref(false)
 const marketCtx = ref<MarketContext | null>(null)
 const marketLoading = ref(false)
 
-// 趋势态兜底归一化
-const marketTrend = computed<MarketContext['trend']>(() => {
-  const t = marketCtx.value?.trend
-  return t === 'bull' || t === 'bear' || t === 'sideways' ? t : 'unknown'
-})
-
 // 某策略当前行情适配三态（适合 / 中性 / 慎用）
 const fitResultCache = new Map<string, FitResult>()
 const fit = (s: StrategyMeta): FitResult => {
@@ -365,21 +365,6 @@ const fit = (s: StrategyMeta): FitResult => {
 }
 const fitIcon = (f: FitResult) =>
   f.level === 1 ? CircleCheckFilled : f.level === -1 ? WarningFilled : RemoveFilled
-
-// 顶部行情条展示文案
-const TREND_TEXT: Record<string, { label: string; dir: 'up' | 'down' | 'flat'; tip: string }> = {
-  bull: { label: '偏强', dir: 'up', tip: '大盘整体上涨，多头趋势为宜' },
-  bear: { label: '偏弱', dir: 'down', tip: '大盘整体下跌，宜谨慎' },
-  sideways: { label: '中性', dir: 'flat', tip: '大盘窄幅震荡，区间操作为主' },
-  unknown: { label: '待研判', dir: 'flat', tip: '暂无大盘行情数据' },
-}
-const trendText = computed(() => TREND_TEXT[marketTrend.value] || TREND_TEXT.unknown)
-const volText = computed(() => {
-  const v = marketCtx.value?.volatility
-  if (v === 'high') return { label: '高波动' }
-  if (v === 'low') return { label: '低波动' }
-  return { label: '波动待研判' }
-})
 
 // 简洁的操作建议文案（优先使用后端下发的统一文案，与大盘看板保持一致）
 const adviceText = computed(() => {
@@ -409,6 +394,70 @@ const filteredStrategies = computed(() => {
   if (!showRecommendedOnly.value || !marketCtx.value) return strategies.value
   return strategies.value.filter(s => fit(s).level === 1)
 })
+
+// ── 大盘四维判断（趋势/波动率/市场宽度/情绪，对齐策略说明矩阵） ──────
+const regimeData = ref<Record<string, any> | null>(null)
+const regimeLoading = ref(false)
+const adviceCollapse = ref<string[]>([])
+
+const loadMarketRegime = async () => {
+  regimeLoading.value = true
+  try {
+    const res: any = await retailApi.detectRegimeAuto()
+    regimeData.value = {
+      trend: res.trend, volatility: res.volatility,
+      breadth: res.breadth, sentiment: res.sentiment,
+      summary: res.summary, active_strategies: res.active_strategies || [],
+    }
+  } catch (e) {
+    console.warn('加载大盘四维判断失败', e)
+    regimeData.value = null
+  } finally {
+    regimeLoading.value = false
+  }
+}
+
+const _TREND_LABEL: Record<string, string> = { bull: '牛市', bear: '熊市', sideways: '震荡' }
+const regimeTrend = computed(() => {
+  const t = regimeData.value?.trend
+  if (t === 'bull') return 'bull'
+  if (t === 'bear') return 'bear'
+  return 'sideways'
+})
+const regimeTrendLabel = computed(() => _TREND_LABEL[regimeTrend.value] || '待研判')
+const regimeVolLabel = computed(() => ({ high: '高波动', normal: '正常', low: '低波动' }[regimeData.value?.volatility || ''] || '—'))
+
+// 四维徽章：值 → {label, type}（与矩阵维度枚举一致；vol 值取 volatility 字段）
+const _DIMMAP: Record<string, Record<string, { label: string; type: string }>> = {
+  trend: {
+    bull: { label: '趋势：牛市', type: 'success' },
+    bear: { label: '趋势：熊市', type: 'danger' },
+    sideways: { label: '趋势：震荡', type: 'warning' },
+    range: { label: '趋势：震荡', type: 'warning' },
+  },
+  vol: {
+    high: { label: '波动：高波动', type: 'danger' },
+    normal: { label: '波动：正常', type: 'info' },
+    low: { label: '波动：低波动', type: 'success' },
+  },
+  breadth: { broad: { label: '宽度：普涨', type: 'success' }, normal: { label: '宽度：中性', type: 'warning' }, narrow: { label: '宽度：分化', type: 'danger' } },
+  sentiment: { euphoric: { label: '情绪：狂热', type: 'danger' }, neutral: { label: '情绪：中性', type: 'info' }, panic: { label: '情绪：恐慌', type: 'danger' } },
+}
+const regimeDimValue = (key: string) => {
+  const d = regimeData.value
+  if (!d) return ''
+  if (key === 'vol') return d.volatility
+  return d[key]
+}
+const regimeDimLabel = (key: string) => {
+  const g = _DIMMAP[key]?.[regimeDimValue(key) || '']
+  return g?.label || ''
+}
+const regimeDimType = (key: string) => {
+  const g = _DIMMAP[key]?.[regimeDimValue(key) || '']
+  return g?.type || 'info'
+}
+const regimeSummary = computed(() => regimeData.value?.summary || '')
 
 const loadMarketContext = async () => {
   marketLoading.value = true
@@ -678,6 +727,7 @@ onMounted(() => {
   loadStrategies()
   loadMonitorStatus()
   loadMarketContext()
+  loadMarketRegime()
   // 盘中预警开启时，交易时段内每 5 分钟自动刷新一次（个人分析用，不需要秒级；15:00 后自动定格）
   realtimeTimer = window.setInterval(() => {
     if (realtimeScan.value && !runningAll.value) {
@@ -885,6 +935,33 @@ let realtimeTimer: number | undefined
 
     .market-right {
       flex-shrink: 0;
+    }
+
+    /* 四维判断徽章行（趋势/波动/宽度/情绪） */
+    .verdict-dims {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    /* 策略说明折叠项 */
+    .market-collapse {
+      margin-top: 10px;
+      border: 1px solid var(--el-border-color-lighter);
+      border-radius: 10px;
+      background: var(--el-bg-color);
+
+      :deep(.el-collapse-item__header) {
+        font-weight: 600;
+        padding-left: 14px;
+      }
+      :deep(.el-collapse-item__wrap) {
+        background: var(--el-bg-color-page);
+      }
+      :deep(.el-collapse-item__content) {
+        padding: 4px 14px 14px;
+      }
     }
   }
 
