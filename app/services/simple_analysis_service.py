@@ -14,6 +14,8 @@ from typing import Any
 
 from app.utils.timezone import now_tz, to_display_iso
 
+from app.services.analysis.analyst_catalog import REPORT_FIELDS as _REPORT_FIELDS
+
 # 中文评级关键词（_CN_RATING_KEYWORDS 内为从长到短，正则交替时先匹配长词）
 _CN_RATING_KEYWORDS = (
     "强烈买入", "强烈卖出", "买入", "增持", "减持", "卖出", "持有", "观望", "做多", "做空", "规避",
@@ -1608,20 +1610,8 @@ class SimpleAnalysisService:
             # 从state中提取reports字段
             reports = {}
             try:
-                # 定义所有可能的报告字段
-                report_fields = [
-                    'market_report',
-                    'sentiment_report',
-                    'news_report',
-                    'fundamentals_report',
-                    'policy_report',
-                    'hot_money_report',
-                    'lockup_report',
-                    'investment_plan',
-                    'trader_investment_plan',
-                    'risk_control_decision',
-                    'final_trade_decision'
-                ]
+                # 报告字段统一从分析师目录派生（新增分析师只需改 catalog，无需动此处）
+                report_fields = _REPORT_FIELDS
 
                 # 从state中提取报告内容
                 for field in report_fields:
@@ -2656,20 +2646,8 @@ class SimpleAnalysisService:
                 try:
                     state = result['state']
 
-                    # 定义所有可能的报告字段（7个分析师报告 + 其他报告）
-                    report_fields = [
-                        'market_report',
-                        'sentiment_report',
-                        'news_report',
-                        'fundamentals_report',
-                        'policy_report',
-                        'hot_money_report',
-                        'lockup_report',
-                        'investment_plan',
-                        'trader_investment_plan',
-                        'risk_control_decision',
-                        'final_trade_decision'
-                    ]
+                    # 定义所有可能的报告字段（从分析师目录派生，与第一处一致）
+                    report_fields = _REPORT_FIELDS
 
                     # 从state中提取报告内容
                     for field in report_fields:

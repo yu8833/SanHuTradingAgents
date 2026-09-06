@@ -42,6 +42,7 @@ from app.services.config_provider import provider as config_provider
 from app.services.queue import DEFAULT_USER_CONCURRENT_LIMIT, GLOBAL_CONCURRENT_LIMIT, VISIBILITY_TIMEOUT_SECONDS
 from app.services.queue_service import QueueService
 from app.services.redis_progress_tracker import RedisProgressTracker
+from app.services.analysis.analyst_catalog import ANALYST_KEYS, ANALYST_KEYS_SET
 from app.services.simple_analysis_service import create_analysis_config, get_provider_by_model_name
 from app.services.usage_statistics_service import UsageStatisticsService
 from tradingagents.graph.trading_graph import TradingAgentsGraph
@@ -52,8 +53,8 @@ logger = logging.getLogger(__name__)
 # 公共工具函数（消除 analysis_service 内部的重复代码）
 # ---------------------------------------------------------------------------
 
-_SUPPORTED_ANALYSTS = {"market", "social", "news", "fundamentals", "policy", "hot_money", "lockup"}
-_ALL_ANALYSTS = ["market", "social", "news", "fundamentals", "policy", "hot_money", "lockup"]
+_SUPPORTED_ANALYSTS = ANALYST_KEYS_SET
+_ALL_ANALYSTS = ANALYST_KEYS
 
 
 def _fill_analysts(raw_analysts: list[str] | None) -> list[str]:
@@ -69,49 +70,38 @@ def _fill_analysts(raw_analysts: list[str] | None) -> list[str]:
 
 
 def _read_model_configs_from_mongo(quick_model: str, deep_model: str) -> tuple:
-    """从 MongoDB 读取快速模型和深度模型的配置参数
+    """从系统配置读取快速/深度模型的配置参数（经 config_service，避免自开 MongoClient 旁路）。
 
     Returns:
         (quick_model_config, deep_model_config) 各为 dict 或 None
     """
-    # 修复：使用 with 上下文管理器确保 MongoClient 正确关闭，避免连接泄漏
-    from pymongo import MongoClient
-
-    from app.core.config import settings
-
     try:
-        with MongoClient(settings.MONGO_URI) as client:
-            db = client[settings.MONGO_DB]
-            collection = db.system_configs
-            doc = collection.find_one({"is_active": True}, sort=[("version", -1)])
+        import asyncio
 
-            if not doc or "llm_configs" not in doc:
-                logger.warning("⚠️ MongoDB 中没有找到系统配置，将使用默认参数")
+        from app.services.config_service import config_service
+
+        async def _load():
+            cfg = await config_service.get_system_config()
+            if not cfg:
                 return None, None
-
-            llm_configs = doc["llm_configs"]
-            logger.info(f"✅ 从 MongoDB 读取到 {len(llm_configs)} 个模型配置")
-
-            quick_cfg = None
-            deep_cfg = None
-            for llm_config in llm_configs:
-                cfg = {
-                    "max_tokens": llm_config.get("max_tokens", 4000),
-                    "temperature": llm_config.get("temperature", 0.7),
-                    "timeout": llm_config.get("timeout", 180),
-                    "retry_times": llm_config.get("retry_times", 3),
-                    "api_base": llm_config.get("api_base"),
+            quick_cfg = deep_cfg = None
+            for llm in cfg.llm_configs or []:
+                item = {
+                    "max_tokens": llm.max_tokens,
+                    "temperature": llm.temperature,
+                    "timeout": getattr(llm, "timeout", None) or 180,
+                    "retry_times": llm.retry_times,
+                    "api_base": llm.api_base,
                 }
-                if llm_config.get("model_name") == quick_model:
-                    quick_cfg = cfg
-                    logger.info(f"✅ 读取快速模型配置: {quick_model} -> {cfg}")
-                if llm_config.get("model_name") == deep_model:
-                    deep_cfg = cfg
-                    logger.info(f"✅ 读取深度模型配置: {deep_model} -> {cfg}")
-
+                if llm.model_name == quick_model:
+                    quick_cfg = item
+                if llm.model_name == deep_model:
+                    deep_cfg = item
             return quick_cfg, deep_cfg
+
+        return asyncio.run(_load())
     except Exception as e:
-        logger.warning(f"⚠️ 从 MongoDB 读取模型配置失败: {e}，将使用默认参数")
+        logger.warning(f"⚠️ 从系统配置读取模型配置失败: {e}，将使用默认参数")
         return None, None
 
 
