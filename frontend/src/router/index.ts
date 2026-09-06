@@ -308,8 +308,8 @@ const routes: RouteRecordRaw[] = [
         name: 'ChatAgentHome',
         component: () => import('@/views/ChatAgent/index.vue'),
         meta: {
-          title: 'Agent问股',
-          parentTitle: '策略问股',
+          title: '策略问股',
+          parentTitle: '分析',
           requiresAuth: true
         }
       }
