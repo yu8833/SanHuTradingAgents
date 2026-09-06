@@ -1403,10 +1403,20 @@ def _strategy_sell_rules(m: dict) -> list[str]:
 
 
 def list_strategies() -> list[dict]:
-    """返回策略元信息，并附带人类可读的买卖规则（指导用户何时买/何时卖）。"""
+    """返回策略元信息（23 策略池，registry 派生），附带人类可读的买卖规则。
+
+    registry 是策略唯一注册源：新增策略只需 @strategy 注册，此接口即自动包含
+    market_regimes（大盘适配画像）、frontend（展示元数据）、source（执行通道）。
+    """
     metas = []
-    for m in get_strategies():
-        m = dict(m)
+    try:
+        import app.strategy_system.strategies  # noqa: F401 确保存量策略已注册进 registry
+        from app.strategy_system.registry import registry
+        items = registry.all()
+    except Exception:
+        items = []
+    for s in items:
+        m = s.to_dict()
         m["buy_rules"] = _strategy_buy_rules(m)
         m["sell_rules"] = _strategy_sell_rules(m)
         metas.append(m)

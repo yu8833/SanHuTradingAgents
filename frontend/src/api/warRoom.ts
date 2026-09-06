@@ -247,11 +247,18 @@ export const warRoomApi = {
 
   // 盘前：宏观快照（纯读，秒回；缺失返回 None，由前端提示走 POST /macro/refresh 生成）
   async getMacroOverview(date?: string, refresh = false) {
-    const res = await ApiClient.get<MacroSnapshot | null>('/api/macro/daily-overview', {
+    // 返回归一化结构 { snapshot, auto_generating }：
+    //   - 快照就绪 → snapshot=快照, auto_generating=false
+    //   - 快照缺失且后端已在后台自动补生成 → snapshot=null, auto_generating=true
+    const res = await ApiClient.get<any>('/api/macro/daily-overview', {
       date: date || undefined,
       refresh: refresh || undefined
     }, { timeout: 30000 })
-    return res.data
+    const data = res.data
+    if (data && typeof data === 'object' && 'snapshot' in data) {
+      return { snapshot: data.snapshot, auto_generating: !!data.auto_generating }
+    }
+    return { snapshot: data as MacroSnapshot | null, auto_generating: false }
   },
 
   // 盘前：手动刷新宏观快照（立即刷新，绕过 8:15 定时任务）

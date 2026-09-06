@@ -282,7 +282,6 @@ def _regime_quadrant(market_trend: str, ind: dict[str, Any], idx: int) -> tuple[
     stock_trend = str(_latest(ind, "stock_trend", idx, "neutral"))
     m = market_trend or "neutral"
 
-    quadrant = f"{m}盘·{stock_trend}"
     if m == "up" and stock_trend == "up":
         level, label, detail = CONFIRM, "大盘↑个股↑", "顺风共振，主信号确认，仓位可至 80-100%"
     elif m == "down" and stock_trend == "down":
@@ -302,6 +301,121 @@ def _regime_quadrant(market_trend: str, ind: dict[str, Any], idx: int) -> tuple[
         level, label, detail = NEUTRAL, "震荡观望", "大盘与个股均无明确方向"
     return {"triggered": level != NEUTRAL, "level": level, "label": label,
             "detail": detail}, warnings
+
+
+# ==================== 3.7 情绪周期（管道B · 7策略新增） ====================
+
+def _emotion_cycle(ind: dict[str, Any], idx: int) -> tuple[dict[str, Any], list[str]]:
+    """情绪周期：用量能热度代理换手率四档，识别 冷淡底 / 平稳 / 活跃 / 过热顶。
+
+    依据（对齐 LLM 模板要点，确定性公式）：
+    1. 热度 = 当日 volume_ratio（当日量/前5日均量，ind 已算）；
+    2. 换手趋势 = 近 5 日均 volume_ratio 相对前 5 日均值（升温启动/降温退潮）；
+    3. 过热顶（volume_ratio≥5 或 近5日均≥3 且 退潮迹象）→ 预警降权；
+       冷淡底（volume_ratio<0.5 连续 3 日 + 短期均线粘合）→ 潜在底部（配合抄底）。
+    """
+    warnings: list[str] = []
+    if idx < 11:
+        return {"triggered": False, "level": NEUTRAL, "label": "数据不足",
+                "detail": "K线长度不足，无法判断情绪周期"}, warnings
+    vratio = ind["volume_ratio"]
+    recent5 = float(np.mean(vratio[max(0, idx - 4): idx + 1]))
+    earlier5 = float(np.mean(vratio[max(0, idx - 9): max(0, idx - 4)]))
+    cur = float(vratio[idx])
+
+    # 过热顶：天量脉冲（≥5）或 量能持续高位后起手回落（退潮开始）
+    if cur >= 5.0 or (recent5 >= 3.0 and cur < recent5 * 0.7):
+        warnings.append("情绪过热（量能脉冲后回落），追高风险大，主信号降权")
+        return {"triggered": True, "level": WARN, "label": "情绪过热",
+                "detail": f"量比 {cur:.1f}，换手活跃度近 5 日均 {recent5:.1f}，情绪退潮迹象，追高需谨慎"}, warnings
+    # 升温启动：量能温和抬升（近5日>前5日 且 当日>1.5）
+    if recent5 > earlier5 * 1.3 and cur >= 1.5:
+        return {"triggered": True, "level": CONFIRM, "label": "情绪升温",
+                "detail": "量能温和放大（近 5 日放量），情绪启动，配合主信号确认"}, warnings
+    # 冷淡底：持续地量 + 短期均线粘合（潜在底部区域）
+    if cur < 0.5 and float(np.mean(vratio[idx - 2: idx + 1])) < 0.6:
+        sc = _latest(ind, "short_convergence", idx, 99.0)
+        if sc <= 2.0:
+            return {"triggered": True, "level": NEUTRAL, "label": "情绪地量",
+                    "detail": "量能萎缩至地量（近期均量比 < 0.6），情绪冰点，关注底部信号（不构成买点）"}, warnings
+        return {"triggered": False, "level": NEUTRAL, "label": "地量观察",
+                "detail": "量能萎缩但均线未粘合，底部未确认"}, warnings
+    return {"triggered": False, "level": NEUTRAL, "label": "情绪平稳",
+            "detail": "量能未现极端，情绪面中性"}, warnings
+
+
+# ==================== 3.8 事件驱动（管道B · 7策略新增） ====================
+
+def _event_driven(ind: dict[str, Any], idx: int) -> tuple[dict[str, Any], list[str]]:
+    """事件驱动：用价格/量能反应度代理"事件是否已被市场确认"（无新闻源时的确定性近似）。
+
+    依据（对齐 LLM 模板要点）：
+    1. 事件确认：放量突破（量比≥1.5 + 收在中阳 + 站上 MA20）→ 市场对利好做出确认反应；
+    2. 兑现压力：20 日涨幅大（≥15%）+ 近 5 日横盘收窄（振幅<4%）→ 利好已兑现、高位滞涨；
+    3. 跌破 MA20 后缩量阴跌 → 事件证伪（按失效条件）。
+    """
+    warnings: list[str] = []
+    if idx < 20:
+        return {"triggered": False, "level": NEUTRAL, "label": "数据不足",
+                "detail": "K线长度不足，无法判断事件反应"}, warnings
+    closes = ind["closes"]
+    opens = ind["opens"]
+    highs = ind["highs"]
+    lows = ind["lows"]
+    cur_close = float(closes[idx])
+    vol_ratio = float(ind["volume_ratio"][idx])
+    body = (cur_close - float(opens[idx])) / max(float(opens[idx]), 1e-9)
+    ret20 = cur_close / max(float(closes[idx - 20]), 1e-9) - 1.0
+    # 近 5 日振幅（横盘检测）
+    amp5 = float(np.max(highs[idx - 4: idx + 1]) - np.min(lows[idx - 4: idx + 1])) / max(cur_close, 1e-9)
+
+    if vol_ratio >= 1.5 and body >= 0.03 and cur_close > float(ind["ma20"][idx]):
+        return {"triggered": True, "level": CONFIRM, "label": "事件确认突破",
+                "detail": f"放量阳线（量比 {vol_ratio:.1f}、实体 {body:.1%}）站上 MA20，市场对催化兑现确认"}, warnings
+    if ret20 >= 0.15 and amp5 < 0.04:
+        warnings.append("高位滞涨（20 日涨幅较大且近 5 日横盘），利好兑现压力，不宜追高")
+        return {"triggered": True, "level": WARN, "label": "利好兑现压力",
+                "detail": f"20 日累计涨幅 {ret20:.0%} 但近 5 日振幅仅 {amp5:.1%}，横盘滞涨，事件可能已兑现"}, warnings
+    # 事件证伪：跌破 MA20 且缩量阴跌
+    if cur_close < float(ind["ma20"][idx]) and float(closes[idx]) < float(closes[idx - 1]):
+        return {"triggered": True, "level": WARN, "label": "事件证伪",
+                "detail": "价格跌破 MA20 且阴线，事件驱动逻辑可能被证伪，主信号降权"}, warnings
+    return {"triggered": False, "level": NEUTRAL, "label": "事件中性",
+            "detail": "价格尚未对事件产生明确反应"}, warnings
+
+
+# ==================== 3.9 预期重估（管道B · 7策略新增） ====================
+
+def _expectation_repricing(ind: dict[str, Any], idx: int) -> tuple[dict[str, Any], list[str]]:
+    """预期重估：用"动量由负转正 + 站上 MA20"识别预期修复；"利好不涨"识别预期转弱。
+
+    依据（对齐 LLM 模板要点，确定性公式，无硬估值源的代理口径）：
+    1. 预期修复：20 日动量由负转正（5 日前仍 <0、当日 >0）且收盘站上 MA20 → 资金开始修正预期；
+    2. 预期转弱：20 日涨幅≥10% 但近 5 日涨幅<0 且缩量（量比<0.8）→ 利好不涨、预期兑现转弱；
+    3. 中性：动量未明显转向。
+    """
+    warnings: list[str] = []
+    if idx < 25:
+        return {"triggered": False, "level": NEUTRAL, "label": "数据不足",
+                "detail": "K线长度不足，无法判断预期重估"}, warnings
+    closes = ind["closes"]
+    cur = float(closes[idx])
+    ret20 = cur / max(float(closes[idx - 20]), 1e-9) - 1.0
+    ret20_prev = float(closes[idx - 5]) / max(float(closes[idx - 25]), 1e-9) - 1.0
+    ret5 = cur / max(float(closes[idx - 5]), 1e-9) - 1.0
+    vol_ratio = float(ind["volume_ratio"][idx])
+
+    # 预期修复：动量由负转正 + 站上 MA20
+    if ret20 > 0 and ret20_prev < 0 and cur > float(ind["ma20"][idx]):
+        return {"triggered": True, "level": CONFIRM, "label": "预期修复",
+                "detail": f"20 日动量由负转正（{ret20_prev:.1%}→{ret20:.1%}）且站上 MA20，市场预期开始修复"}, warnings
+    # 预期转弱：中长期涨幅可观但短期滞涨缩量（利好不涨）
+    if ret20 >= 0.10 and ret5 < 0 and vol_ratio < 0.8:
+        warnings.append("利好不涨（20 日涨幅大但近 5 日回落缩量），预期转弱，不宜追入")
+        return {"triggered": True, "level": WARN, "label": "预期转弱",
+                "detail": f"20 日涨幅 {ret20:.0%} 但近 5 日 {ret5:.1%}、量比 {vol_ratio:.1f} 缩量回落，利好未获资金追认"}, warnings
+    return {"triggered": False, "level": NEUTRAL, "label": "预期中性",
+            "detail": "动量与量能未形成预期转向的明确证据"}, warnings
 
 
 # ==================== 综合 ====================
@@ -326,6 +440,9 @@ def compute_auxiliary(ind: dict[str, Any], market_trend: str = "neutral",
     washout = _washout(ind, idx)
     dense = _dense_break(ind, idx)
     regime, warn3 = _regime_quadrant(market_trend, ind, idx)
+    emotion, warn4 = _emotion_cycle(ind, idx)
+    event, warn5 = _event_driven(ind, idx)
+    expectation, warn6 = _expectation_repricing(ind, idx)
 
     details = {
         "qty_verification": qty,
@@ -334,8 +451,11 @@ def compute_auxiliary(ind: dict[str, Any], market_trend: str = "neutral",
         "washout": washout,
         "dense_break": dense,
         "regime_quadrant": regime,
+        "emotion_cycle": emotion,
+        "event_driven": event,
+        "expectation_repricing": expectation,
     }
-    warnings = list(dict.fromkeys(warn1 + warn2 + warn3))
+    warnings = list(dict.fromkeys(warn1 + warn2 + warn3 + warn4 + warn5 + warn6))
 
     # ---- 综合分 aux_score（0-100）：基准 50 + 确认加分 - 预警降权 ----
     score = 50.0

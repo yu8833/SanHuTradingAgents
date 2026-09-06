@@ -161,9 +161,43 @@
         <template v-else-if="macroRefreshing">
           <el-empty loading description="正在生成今日宏观快照…" />
         </template>
+        <el-empty v-else-if="macroAutoGenerating" loading description="今日宏观快照缺失，正在后台自动生成…" />
         <el-empty v-else-if="!loading" description="今日宏观快照未生成">
           <el-button size="small" type="primary" :icon="Refresh" :loading="macroRefreshing" @click="refreshMacro">立即生成</el-button>
         </el-empty>
+
+        <!-- ①½ 今日大盘情形 + 建议策略（盘前调度检测结果，不实时重算） -->
+        <section class="block" v-if="todayRegime">
+          <div class="block-head">
+            <span class="block-title"><el-icon><Compass /></el-icon> 今日大盘情形 · 建议策略</span>
+            <div class="block-actions">
+              <span class="block-hint">盘前调度检测结果（后端规则，非实时重算）</span>
+              <el-button size="small" :icon="Refresh" :loading="todayRegimeLoading" @click="loadTodayRegime">刷新</el-button>
+            </div>
+          </div>
+          <el-card shadow="never">
+            <div class="today-regime-top">
+              <div class="today-regime-tags">
+                <el-tag :type="todayRegimeTrendType" size="large" effect="dark">趋势：{{ todayRegimeTrendLabel }}</el-tag>
+                <el-tag :type="todayRegimeVolType" size="large" effect="dark">波动：{{ todayRegimeVolLabel }}</el-tag>
+                <el-tag :type="todayRegimeBreadthType" size="large" effect="dark">宽度：{{ todayRegimeBreadthLabel }}</el-tag>
+                <el-tag :type="todayRegimeSentType" size="large" effect="dark">情绪：{{ todayRegimeSentLabel }}</el-tag>
+              </div>
+              <div v-if="todayRegime.summary" class="today-regime-summary">
+                <el-icon><InfoFilled /></el-icon>
+                <span>{{ todayRegime.summary }}</span>
+              </div>
+            </div>
+            <el-divider content-position="left">今日建议策略</el-divider>
+            <div class="today-strategies" v-if="todayRegime.active_strategies?.length">
+              <el-tag
+                v-for="s in todayRegime.active_strategies" :key="s"
+                type="success" effect="dark" size="large" style="margin-right: 12px;"
+              >{{ getStrategyLabel(s) }} ✓</el-tag>
+            </div>
+            <p v-else class="block-hint" style="margin:0">暂无（检测数据不足或无明显方向）</p>
+          </el-card>
+        </section>
 
         <!-- ② 当日计划生成流水线（5.3 带审计痕迹） -->
         <section class="block">
@@ -1091,6 +1125,7 @@ import {
           Magnet, Operation, Checked, Right, WarningFilled, Sell, ShoppingCart
 } from '@element-plus/icons-vue'
 import { warRoomApi, type WarRoomToday } from '@/api/warRoom'
+import { retailApi } from '@/api/retail'
 import { portfolioApi } from '@/api/portfolio'
 import { paperApi } from '@/api/paper'
 import { favoritesApi } from '@/api/favorites'
@@ -1126,6 +1161,72 @@ const _planResult = (id: string) => _fetchJSON<any>('/api/war-room/daily-plan/re
 const route = useRoute()
 const router = useRouter()
 
+// ── 今日大盘情形 + 建议策略（盘前调度检测结果，不实时重算） ──
+const todayRegime = ref<any>(null)
+const todayRegimeLoading = ref(false)
+const loadTodayRegime = async () => {
+  if (todayRegimeLoading.value) return
+  todayRegimeLoading.value = true
+  try {
+    const res = await retailApi.detectRegimeAuto()
+    todayRegime.value = {
+      trend: res.trend, volatility: res.volatility,
+      breadth: res.breadth, sentiment: res.sentiment,
+      active_strategies: res.active_strategies || [],
+      summary: res.summary,
+    }
+  } catch (e: any) {
+    console.error('加载今日大盘情形失败', e)
+  } finally {
+    todayRegimeLoading.value = false
+  }
+}
+const todayRegimeTrendType = computed(() => {
+  const m: Record<string, string> = { bull: 'success', bear: 'danger', range: 'warning' }
+  return m[todayRegime.value?.trend || ''] || 'info'
+})
+const todayRegimeTrendLabel = computed(() => {
+  const m: Record<string, string> = { bull: '牛市', bear: '熊市', range: '震荡' }
+  return m[todayRegime.value?.trend || ''] || '—'
+})
+const todayRegimeVolType = computed(() => {
+  const m: Record<string, string> = { high: 'danger', normal: 'info', low: 'success' }
+  return m[todayRegime.value?.volatility || ''] || 'info'
+})
+const todayRegimeVolLabel = computed(() => {
+  const m: Record<string, string> = { high: '高波动', normal: '正常', low: '低波动' }
+  return m[todayRegime.value?.volatility || ''] || '—'
+})
+const todayRegimeBreadthType = computed(() => {
+  const m: Record<string, string> = { broad: 'success', narrow: 'danger', normal: 'warning' }
+  return m[todayRegime.value?.breadth || ''] || 'info'
+})
+const todayRegimeBreadthLabel = computed(() => {
+  const m: Record<string, string> = { broad: '普涨', narrow: '分化', normal: '中性' }
+  return m[todayRegime.value?.breadth || ''] || '—'
+})
+const todayRegimeSentType = computed(() => {
+  const m: Record<string, string> = { euphoric: 'danger', neutral: 'info', panic: 'danger' }
+  return m[todayRegime.value?.sentiment || ''] || 'info'
+})
+const todayRegimeSentLabel = computed(() => {
+  const m: Record<string, string> = { euphoric: '过热', neutral: '中性', panic: '恐慌' }
+  return m[todayRegime.value?.sentiment || ''] || '—'
+})
+const getStrategyLabel = (s: string) => {
+  const map: Record<string, string> = {
+    extreme_reversal: '极端反转', turnaround: '困境反转', small_cap_value: '小盘价值',
+    convertible_arbitrage: '转债博弈', ma_golden_cross: 'MA金叉', macd_golden: 'MACD金叉',
+    n_day_high_breakout: '创60日新高', n_day_low_reversal: 'N日低点反转', oversold_bounce: '超跌反弹',
+    trend_breakout: '趋势突破', boll_breakout: '布林突破', volume_price_surge: '量价齐升',
+    pullback_ma20_bounce: '回踩MA20反弹', strong_open: '强势高开', low_volatility_leader: '低波动龙头',
+    low_pe_high_div_leader: '低估值高股息龙头', bottom_volume: '底部放量', one_yang_three_yin: '一阳夹三阴',
+    chan_theory: '缠论', wave_theory: '波浪理论', event_driven: '事件驱动',
+    expectation_repricing: '预期重估', emotion_cycle: '情绪周期',
+  }
+  return map[s] || s
+}
+
 const activeTab = ref('pre_market')
 const loading = ref(false)
 const plansLoading = ref(false)
@@ -1135,6 +1236,8 @@ const backfillLoading = ref(false)
 const genWeeklyLoading = ref(false)
 const creatingPlan = ref(false)
 const macroRefreshing = ref(false)
+// 宏观快照缺失时后端已在后台自动补生成 → 展示"自动生成中…"，无需用户点「立即生成」
+const macroAutoGenerating = ref(false)
 const tradesLoading = ref(false)
 const todayTrades = ref<any[]>([])
 const todayAlerts = ref<any[]>([])
@@ -1333,12 +1436,33 @@ function stopTodayRefresh() {
   if (todayRefreshTimer) { window.clearInterval(todayRefreshTimer); todayRefreshTimer = null }
 }
 
+// 宏观快照缺失且后端已在后台自动补生成时，轻轮询等待就绪（快照缺失当日仅自动生成一次）
+let macroAutoTimer: number | null = null
+function stopMacroAuto() {
+  if (macroAutoTimer) { window.clearInterval(macroAutoTimer); macroAutoTimer = null }
+}
+
 async function loadMacro() {
   loading.value = true
   try {
-    // 纯读取今日已生成快照（后端缺失时不再请求内现场生成，避免页面冻结 100-200s）；
-    // 快照未生成保持空态，用户点「立即生成」走 POST /macro/refresh。
-    macro.value = await warRoomApi.getMacroOverview()
+    // 打开即读今日已生成快照。快照缺失时后端自动在后台补生成一次并携带
+    // auto_generating=true → 展示"自动生成中…"并轻轮询取回，而非空态催促点击。
+    const res: any = await warRoomApi.getMacroOverview()
+    macro.value = res?.snapshot || null
+    macroAutoGenerating.value = !!res?.auto_generating
+    if (macroAutoGenerating.value) {
+      stopMacroAuto()
+      macroAutoTimer = window.setInterval(async () => {
+        try {
+          const r: any = await warRoomApi.getMacroOverview()
+          if (r?.snapshot) {
+            macro.value = r.snapshot
+            macroAutoGenerating.value = false
+            stopMacroAuto()
+          }
+        } catch (e) { /* 轮询失败忽略，下轮重试 */ }
+      }, 15000)
+    }
   } catch (e: any) {
     macro.value = null
     if (typeof document !== 'undefined') {
@@ -1453,6 +1577,8 @@ async function refreshMacro() {
   macroRefreshing.value = true
   try {
     macro.value = await warRoomApi.refreshMacro()
+    macroAutoGenerating.value = false
+    stopMacroAuto()
     ElMessage.success('宏观快照已刷新')
     await loadToday()
   } catch (e) {
@@ -2334,6 +2460,8 @@ onMounted(async () => {
           loadReference()
           ensureMacroAuto()
           loadGlobalStocks()
+          // 今日大盘情形 + 建议策略（盘前调度检测结果）
+          loadTodayRegime()
           // 打开即读：加载今日计划快照（盘前预生成成品），无需点击生成
           await loadTodayPlan()
           // 角标实时刷新定时器（每 60s 更新待办数字）
@@ -2362,6 +2490,7 @@ onActivated(() => {
 onUnmounted(() => {
   stopIntradayLive()
   stopTodayRefresh()
+  stopMacroAuto()
 })
 </script>
 

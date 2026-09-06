@@ -14,6 +14,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, 
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from app.core.response import ok
 from app.models.analysis import (
     AnalysisParameters,
     AnalysisStatus,
@@ -134,6 +135,36 @@ async def test_route():
     """测试路由是否工作"""
     logger.info("🧪 测试路由被调用了！")
     return {"message": "测试路由工作正常", "timestamp": time.time()}
+
+
+@router.get("/report-schema", response_model=dict[str, Any])
+async def report_schema(user: dict = Depends(get_current_user)):
+    """分析报告 schema：分析师/报告字段/决策字段/前端页签（analyst_catalog 派生）。
+
+    前端页签、报告字段映射全部由此 API 驱动——新增分析师只需在
+    analyst_catalog.py 注册一条，前端自动出现新页签，零硬编码。
+    """
+    try:
+        from app.services.analysis.analyst_catalog import ANALYSTS, DECISION_FIELDS
+
+        return ok({
+            "analysts": [
+                {
+                    "key": a.key,
+                    "report_field": a.report_field,
+                    "zh_name": a.zh_name,
+                    "report_zh": a.report_zh,
+                    "order": a.order,
+                    "enabled": a.enabled,
+                    "tools": list(a.tools),
+                }
+                for a in ANALYSTS
+            ],
+            "decision_fields": list(DECISION_FIELDS),
+        })
+    except Exception as e:
+        logger.error(f"获取报告 schema 失败: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.get("/calibration", response_model=dict[str, Any])

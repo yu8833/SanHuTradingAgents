@@ -29,6 +29,60 @@ SNAPSHOT_COLLECTION = "macro_daily_snapshots"
 CONFIDENCE_THRESHOLD = 30
 _STRONG = {"偏多": "偏多", "偏空": "偏空", "多": "偏多", "空": "偏空"}
 
+# --- 宏观快照"缺失时后台自动补生成"的防并发单飞机制 ---
+# 冷启动/非交易日恢复后，快照可能缺失。作战室打开时不再空态等用户点「立即生成」，
+# 而是 GET 缺失时自动在后台起一次补生成（当日仅一次），前端展示"自动生成中…"并轻轮询取回。
+import asyncio  # noqa: E402
+
+_snapshot_gen_lock = asyncio.Lock()
+# 记录"当日是否已触发过后台补生成"，跨请求避免重复启动（进程内即可，重启即复位为重新允许）
+_snapshot_auto_attempted: set[str] = set()
+
+
+async def _ensure_snapshot_auto_generated() -> bool:
+    """快照缺失时后台自动补生成（幂等：当日仅触发一次，并发只进一个）。
+
+    Returns:
+        True 表示本次已捕获并启动（或复用进行中的）后台生成；False 表示无需/不可
+        （非交易日、已有快照、已在生成、或前序已触发过）。
+    """
+    today = datetime.now().strftime("%Y-%m-%d")
+    try:
+        from app.utils.trading_time import is_trading_day
+        if not is_trading_day(datetime.now()):
+            return False
+    except Exception:
+        pass  # 交易日判断失败不阻塞，仍尝试生成（快照缺失本身就是要补的）
+
+    # 快照已存在 → 无需补生成
+    try:
+        if await get_macro_snapshot(today) is not None:
+            return False
+    except Exception:
+        pass
+
+    async with _snapshot_gen_lock:
+        if today in _snapshot_auto_attempted:
+            return False
+        _snapshot_auto_attempted.add(today)
+        # 二次确认（锁内）：可能生成刚完成
+        try:
+            if await get_macro_snapshot(today) is not None:
+                return False
+        except Exception:
+            pass
+        logger.info("🌅 宏观快照缺失，自动在后台补生成（当日首次）…")
+        asyncio.create_task(_auto_generate_safely())
+        return True
+
+
+async def _auto_generate_safely() -> None:
+    """后台安全补生成：任何异常都不外抛，仅记录日志。"""
+    try:
+        await refresh_macro_snapshot()
+    except Exception as e:
+        logger.error(f"❌ 宏观快照后台自动补生成失败: {e}", exc_info=True)
+
 
 def _direction_status(direction: str | None, confidence: int, threshold: int = CONFIDENCE_THRESHOLD) -> str:
     """当日方向四态：偏多 / 偏空 / 中性(观望) / 数据不足。

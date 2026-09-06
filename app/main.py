@@ -77,6 +77,7 @@ from app.routers import stock_data as stock_data_router
 from app.routers import stock_sync as stock_sync_router
 from app.routers import stocks as stocks_router
 from app.routers import sync as sync_router
+from app.routers import chat_agent as chat_agent_router
 from app.routers import vibe_research as vibe_router
 from app.routers import websocket_notifications as websocket_notifications_router
 from app.services.multi_source_basics_sync_service import MultiSourceBasicsSyncService
@@ -1386,6 +1387,8 @@ app.include_router(operation_logs.router, prefix="/api/system", tags=["operation
 app.include_router(logs.router, prefix="/api/system", tags=["logs"])
 app.include_router(portfolio.router, prefix="/api/portfolio", tags=["portfolio"])
 app.include_router(retail.router, prefix="/api/retail", tags=["retail"])
+# Agent 策略问股（对话子系统，prefix 已在 router 内声明）
+app.include_router(chat_agent_router.router, tags=["chat-agent"])
 # 个股预警
 from app.routers import stock_alerts as stock_alerts_router
 

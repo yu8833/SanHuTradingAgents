@@ -20,67 +20,56 @@
       <!-- ============ Tab 1: 策略说明 ============ -->
       <el-tab-pane label="策略说明" name="strategies">
         <div v-loading="strategyLoading" class="dashboard-container">
-          <!-- 1. 市场环境概览卡片 -->
+          <!-- 1. 大盘×策略 静态适配矩阵（纯规则，无日期；当日情形见作战室盘前） -->
           <el-card shadow="never" class="dashboard-card market-overview-card">
             <template #header>
               <div class="card-header">
                 <el-icon><TrendCharts /></el-icon>
-                <span class="panel-title">市场环境概览</span>
-                <span class="header-hint">实时掌握市场状态，辅助策略选择</span>
-                <el-button type="success" size="small" :loading="autoRegimeLoading" @click="detectRegimeAuto" style="margin-left:auto;">
-                  <el-icon><Aim /></el-icon> 一键检测市场环境
-                </el-button>
+                <span class="panel-title">大盘×策略适配矩阵</span>
+                <span class="header-hint">静态规则：选择环境组合 → 查看适配策略（数据来自后端策略注册表）</span>
               </div>
             </template>
-            <el-row :gutter="16">
-              <el-col :span="6">
-                <div class="metric-card">
-                  <div class="metric-label">趋势</div>
-                  <div class="metric-value" v-if="regimeResult">
-                    <el-tag :type="getTrendType(regimeResult.trend)" size="large" effect="dark">
-                      {{ getTrendLabel(regimeResult.trend) }}
-                    </el-tag>
+            <el-row :gutter="16" class="matrix-dims">
+              <el-col :span="6" v-for="d in matrixDims" :key="d.key">
+                <div class="matrix-dim">
+                  <div class="matrix-dim-label">{{ d.label }}</div>
+                  <div class="matrix-dim-opts">
+                    <el-check-tag
+                      v-for="opt in d.options" :key="opt"
+                      :checked="regimeDims[d.key as keyof typeof regimeDims] === opt"
+                      @change="() => onPickDim(d.key, opt)"
+                    >{{ opt }}</el-check-tag>
                   </div>
-                  <div class="metric-empty" v-else>点击右侧一键检测</div>
-                </div>
-              </el-col>
-              <el-col :span="6">
-                <div class="metric-card">
-                  <div class="metric-label">波动率</div>
-                  <div class="metric-value" v-if="regimeResult">
-                    <el-tag :type="getVolType(regimeResult.volatility)" size="large" effect="dark">
-                      {{ getVolLabel(regimeResult.volatility) }}
-                    </el-tag>
-                  </div>
-                  <div class="metric-empty" v-else>点击右侧一键检测</div>
-                </div>
-              </el-col>
-              <el-col :span="6">
-                <div class="metric-card">
-                  <div class="metric-label">市场宽度</div>
-                  <div class="metric-value" v-if="regimeResult">
-                    <el-tag :type="getBreadthType(regimeResult.breadth)" size="large" effect="dark">
-                      {{ getBreadthLabel(regimeResult.breadth) }}
-                    </el-tag>
-                  </div>
-                  <div class="metric-empty" v-else>点击右侧一键检测</div>
-                </div>
-              </el-col>
-              <el-col :span="6">
-                <div class="metric-card">
-                  <div class="metric-label">情绪</div>
-                  <div class="metric-value" v-if="regimeResult">
-                    <el-tag :type="getSentimentType(regimeResult.sentiment)" size="large" effect="dark">
-                      {{ getSentimentLabel(regimeResult.sentiment) }}
-                    </el-tag>
-                  </div>
-                  <div class="metric-empty" v-else>点击右侧一键检测</div>
                 </div>
               </el-col>
             </el-row>
-            <div v-if="regimeResult" class="market-summary">
-              <el-icon><InfoFilled /></el-icon>
-              <span>{{ regimeResult.summary }}</span>
+            <el-divider />
+            <div class="matrix-result">
+              <div class="matrix-portrait">
+                <span class="matrix-portrait-label">当前组合画像</span>
+                <el-tag type="warning" effect="dark" size="large">{{ matchedPortrait }}</el-tag>
+                <span class="matrix-portrait-desc">{{ portraitDesc }}</span>
+              </div>
+              <div class="matrix-strategies">
+                <div class="matrix-strategies-hint">适配策略（{{ recommendedStrategies.length }}）——</div>
+                <el-empty v-if="!recommendedStrategies.length" description="无匹配策略（全适用策略兜底）" :image-size="60" />
+                <el-row v-else :gutter="12">
+                  <el-col :span="12" v-for="s in recommendedStrategies" :key="s.id" :style="{ marginBottom: '10px' }">
+                    <div class="matrix-strategy-card">
+                      <div class="matrix-strategy-head">
+                        <span class="matrix-strategy-icon">{{ (s.frontend && s.frontend.icon) || '📊' }}</span>
+                        <span class="matrix-strategy-name">{{ s.name }}</span>
+                        <el-tag v-if="s.source === 'retail'" size="small" type="primary" effect="plain">零售</el-tag>
+                        <el-tag v-else-if="s.source === 'template'" size="small" type="info" effect="plain">对话/辅助信号</el-tag>
+                      </div>
+                      <div class="matrix-strategy-desc">{{ s.description }}</div>
+                      <div v-if="s.buy_rules && s.buy_rules.length" class="matrix-strategy-rules">
+                        <span class="matrix-rule-buy">买：{{ s.buy_rules[0] }}</span>
+                      </div>
+                    </div>
+                  </el-col>
+                </el-row>
+              </div>
             </div>
           </el-card>
 
@@ -545,18 +534,19 @@
             <el-icon><InfoFilled /></el-icon>
             <span>{{ regimeResult.summary }}</span>
           </div>
-          <el-divider content-position="left">当前环境建议激活的策略</el-divider>
+          <el-divider content-position="left">当前环境建议激活的策略（后端检测结论）</el-divider>
           <div class="active-strategies">
-            <el-tag
-              v-for="s in ['extreme_reversal','turnaround','small_cap_value','convertible_arbitrage']"
-              :key="s"
-              :type="regimeResult.active_strategies.includes(s) ? 'success' : 'info'"
-              :effect="regimeResult.active_strategies.includes(s) ? 'dark' : 'plain'"
-              size="large"
-              style="margin-right: 12px;"
-            >
-              {{ getStrategyLabel(s) }}{{ regimeResult.active_strategies.includes(s) ? ' ✓' : ' ✗' }}
-            </el-tag>
+            <template v-if="regimeResult && regimeResult.active_strategies && regimeResult.active_strategies.length">
+              <el-tag
+                v-for="s in regimeResult.active_strategies"
+                :key="s"
+                type="success" effect="dark" size="large"
+                style="margin-right: 12px;"
+              >
+                {{ getStrategyLabel(s) }} ✓
+              </el-tag>
+            </template>
+            <span v-else class="active-strategies-empty">执行上方「手动检测」后展示</span>
           </div>
           <!-- 自动采集的原始数据 -->
           <template v-if="regimeRawData">
@@ -592,6 +582,7 @@ import {
   ArrowRight, ArrowDown
 } from '@element-plus/icons-vue'
 import { retailApi, type PositionAdvice, type ExitResp, type MarketRegime, type RegimeRawData, type StrategiesResp, type StrategiesPerformanceResp, type StrategyPerformance } from '@/api/retail'
+import { strategyApi } from '@/api/strategy'
 import { paperApi } from '@/api/paper'
 import { fmtNum, fmtPct, fmtPctFromFraction } from '@/utils/format'
 import { todayDateInBeijing, toDateStr } from '@/utils/datetime'
@@ -858,13 +849,73 @@ const detectRegimeAuto = async () => {
   }
 }
 
+// ---- 大盘×策略 静态适配矩阵（纯规则，无日期；当日情形见作战室盘前） ----
+const strategyApiList = ref<any[]>([])
+const matrixDims = [
+  { key: 'trend', label: '趋势', options: ['牛市', '震荡', '熊市'] },
+  { key: 'vol', label: '波动率', options: ['高波动', '正常', '低波动'] },
+  { key: 'breadth', label: '市场宽度', options: ['普涨', '中性', '分化'] },
+  { key: 'sentiment', label: '情绪', options: ['狂热', '中性', '恐慌'] },
+]
+const regimeDims = reactive({ trend: '震荡', vol: '正常', breadth: '中性', sentiment: '中性' })
+const onPickDim = (key: string, opt: string) => {
+  ;(regimeDims as any)[key] = opt
+}
+
+const matchedPortrait = computed(() => {
+  const d = regimeDims
+  if (d.vol === '高波动') return '高波动市'
+  if (d.trend === '牛市') return d.breadth === '普涨' ? '牛市普涨' : '牛市强趋势'
+  if (d.trend === '熊市') return (d.vol === '高波动' || d.sentiment === '恐慌') ? '熊市恐慌' : '熊市阴跌'
+  return d.breadth === '分化' ? '震荡分化' : '震荡蓄势'
+})
+const portraitDesc = computed(() => {
+  const p = matchedPortrait.value
+  const m: Record<string, string> = {
+    牛市强趋势: '趋势延续，强者恒强',
+    牛市普涨: '全面上涨，弹性优先',
+    熊市恐慌: '超跌反弹机会，快进快出',
+    熊市阴跌: '谨慎防御，低估值优先',
+    震荡蓄势: '低吸跟随，波段操作',
+    震荡分化: '结构性行情，精选个股',
+    高波动市: '快进快出，结构分析优先',
+  }
+  return m[p] || ''
+})
+const recommendedStrategies = computed(() => {
+  const p = matchedPortrait.value
+  return strategyApiList.value.filter((s: any) =>
+    (s.market_regimes || []).includes(p) || (s.market_regimes || []).includes('全面适用')
+  )
+})
+
+const loadStrategyCatalog = async () => {
+  try {
+    const data: any = await strategyApi.list()
+    const body: any = Array.isArray(data) ? data : (data?.data ?? data?.items ?? [])
+    strategyApiList.value = (Array.isArray(body) ? body : [])
+      .filter((s: any) => s && s.id && (s.market_regimes || []).length)
+  } catch (e: any) {
+    console.error('加载策略适配矩阵失败', e)
+  }
+}
+
 // ---- 辅助函数 ----
 const getStrategyTagType = (key: string) => {
   const map: Record<string, string> = { extreme_reversal: 'danger', turnaround: 'warning', small_cap_value: 'success', convertible_arbitrage: 'primary' }
   return map[key] || 'info'
 }
 const getStrategyLabel = (s: string) => {
-  const map: Record<string, string> = { extreme_reversal: '极端反转', turnaround: '困境反转', small_cap_value: '小盘价值', convertible_arbitrage: '转债博弈' }
+  const map: Record<string, string> = {
+    extreme_reversal: '极端反转', turnaround: '困境反转', small_cap_value: '小盘价值',
+    convertible_arbitrage: '转债博弈', ma_golden_cross: 'MA金叉', macd_golden: 'MACD金叉',
+    n_day_high_breakout: '创60日新高', n_day_low_reversal: 'N日低点反转', oversold_bounce: '超跌反弹',
+    trend_breakout: '趋势突破', boll_breakout: '布林突破', volume_price_surge: '量价齐升',
+    pullback_ma20_bounce: '回踩MA20反弹', strong_open: '强势高开', low_volatility_leader: '低波动龙头',
+    low_pe_high_div_leader: '低估值高股息龙头', bottom_volume: '底部放量', one_yang_three_yin: '一阳夹三阴',
+    chan_theory: '缠论', wave_theory: '波浪理论', event_driven: '事件驱动',
+    expectation_repricing: '预期重估', emotion_cycle: '情绪周期',
+  }
   return map[s] || s
 }
 const getExitReasonType = (reason: string) => {
@@ -887,6 +938,7 @@ const getSentimentLabel = (s: string) => ({ euphoric: '过热', neutral: '中性
 onMounted(() => {
   loadStrategies()
   loadPerformance()
+  loadStrategyCatalog()
 })
 </script>
 
@@ -992,4 +1044,27 @@ onMounted(() => {
 .strategy-quick-btn {
   align-self: flex-end;
 }
+
+/* 大盘×策略适配矩阵 */
+.matrix-dims { margin-bottom: 4px; }
+.matrix-dim { background: #f5f7fa; border-radius: 8px; padding: 12px 14px; height: 100%; }
+.matrix-dim-label { font-size: 13px; color: #606266; font-weight: 600; margin-bottom: 10px; }
+.matrix-dim-opts { display: flex; flex-wrap: wrap; gap: 6px; }
+.matrix-result { padding: 4px 0; }
+.matrix-portrait { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.matrix-portrait-label { font-size: 14px; color: #909399; }
+.matrix-portrait-desc { font-size: 13px; color: #606266; }
+.matrix-strategies-hint { font-size: 13px; color: #909399; margin-bottom: 12px; }
+.matrix-strategy-card {
+  border: 1px solid #e4e7ed; border-radius: 8px; padding: 12px 14px;
+  background: #fff; height: 100%; transition: box-shadow 0.25s ease;
+}
+.matrix-strategy-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+.matrix-strategy-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.matrix-strategy-icon { font-size: 16px; }
+.matrix-strategy-name { font-weight: 600; font-size: 14px; }
+.matrix-strategy-desc { font-size: 12px; color: #606266; line-height: 1.6; margin-bottom: 6px; }
+.matrix-strategy-rules { font-size: 12px; color: #909399; }
+.matrix-rule-buy { color: #67C23A; }
+.active-strategies-empty { font-size: 12px; color: #c0c4cc; font-style: italic; }
 </style>

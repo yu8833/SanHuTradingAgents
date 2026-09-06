@@ -39,15 +39,26 @@ async def daily_overview(
 ):
     """今日（或指定日期）宏观快照：方向结论 + 依据明细 + LLM 解读 + 外围/日历/快讯。
 
-    纯读取语义：快照缺失返回 None，**绝不请求内现场生成**（现场生成需拉外围指数 +
-    LLM 解读，实测 100-200s，会让盘前 Tab 打开即冻结 2 分钟）。
-    需要生成时走 POST /api/macro/refresh（用户点「立即生成」，前台等待可接受）。
+    读取语义：
+    - refresh=True：同步强制重新生成（100-200s，用户点「立即刷新」时接受等待）。
+    - refresh=False（默认）：纯读取。若快照缺失，**不再让前端空态等点击**——
+      自动在后台补生成一次（交易日、当日仅一次、并发单飞），立即返回 None 并携带
+      auto_generating=true，前端据此展示"自动生成中…"并轻轮询取回；快照就绪后
+      正常返回数据。这样作战室打开即"要么有货、要么正在自动生成"，无需手动触发。
     """
     try:
         if refresh:
             snap = await macro_service.refresh_macro_snapshot()
             return ok(snap)
         snap = await macro_service.get_macro_snapshot(date)
+        if snap is None:
+            auto_gen = await macro_service._ensure_snapshot_auto_generated()
+            if auto_gen:
+                # 快照缺失且已在后台自动补生成：返回 None + auto_generating=true，
+                # 前端据此展示"自动生成中…"并轻轮询取回，而非空态催促点击。
+                base = ok(None)
+                base["data"] = {"snapshot": None, "auto_generating": True}
+                return base
         return ok(snap)
     except Exception as e:
         logger.error(f"宏观快照读取失败: {e}", exc_info=True)
