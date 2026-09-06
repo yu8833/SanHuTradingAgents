@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from tradingagents.agents.schemas import (
     PortfolioDecision,
     RiskControlDecision,
@@ -25,6 +27,22 @@ from tradingagents.agents.utils.structured import (
     invoke_structured_dual,
 )
 
+logger = logging.getLogger(__name__)
+
+
+def _calibration_line() -> str:
+    """生成经验命中率注入文案（置信度统计校准）；无足够样本或出错时返回空串。"""
+    try:
+        from tradingagents.agents.utils.confidence_calibration import (
+            calibration_injection_text,
+            get_rating_stats,
+        )
+
+        return calibration_injection_text(get_rating_stats())
+    except Exception as e:
+        logger.warning("置信度校准注入文案生成失败（忽略）: %s", e)
+        return ""
+
 
 def create_portfolio_manager(llm):
     risk_llm = bind_structured(llm, RiskControlDecision, "风控经理")
@@ -34,6 +52,9 @@ def create_portfolio_manager(llm):
         from tradingagents.agents.utils.prompt_compression import compact_markdown
 
         instrument_context = build_instrument_context(state["company_of_interest"])
+
+        # 置信度统计校准：经验命中率注入（空串则不注入，无副作用）
+        calibration_line = _calibration_line()
 
         history = compact_markdown(state["risk_debate_state"]["history"], keep=1100)
         risk_debate_state = state["risk_debate_state"]
@@ -99,7 +120,7 @@ def create_portfolio_manager(llm):
 
 请输出结构化的风控决策，包含具体的数字（仓位%、止损%、最大亏损%）。
 每个约束都必须基于辩论中的具体证据。
-{get_language_instruction()}"""
+{get_language_instruction()}{calibration_line}"""
 
         risk_control_obj, risk_control_decision = invoke_structured_dual(
             risk_llm,
@@ -162,7 +183,7 @@ def create_portfolio_manager(llm):
 
 请做出最终决策。你的仓位必须 ≤ 风控经理的最大仓位上限。
 你的止损必须 ≥ 风控经理的止损水平（即更紧或相等）。
-{get_language_instruction()}"""
+{get_language_instruction()}{calibration_line}"""
 
         final_decision_obj, final_trade_decision = invoke_structured_dual(
             portfolio_llm,

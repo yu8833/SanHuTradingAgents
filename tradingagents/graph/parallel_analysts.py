@@ -232,10 +232,10 @@ def run_single_analyst(
         if not report and error_msg:
             report = f"[分析未能完成: {error_msg}]"
 
-        # === 公式化硬打分闭环（改造二） ===
-        # 仅对已有公式分的分析师（market/fundamentals）在报告产出后做：
-        # 公式分计算 → LLM 分解析 → 偏差>阈值且未说明理由 → 报告加偏差标注
-        if analyst_type in ("market", "fundamentals") and report and not report.startswith("[分析"):
+        # === 公式化硬打分闭环 ===
+        # 按公式分可用性（available）判断，自动覆盖所有已落公式的分析师
+        # （market/fundamentals/news/hot_money/social/lockup；policy 恒 unavailable 跳过）
+        if report and not report.startswith("[分析"):
             try:
                 from tradingagents.agents.utils.hard_score import (
                     compute_analyst_formula_scores,

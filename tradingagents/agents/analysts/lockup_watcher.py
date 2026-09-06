@@ -2,6 +2,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
     get_fundamentals,
+    get_formula_score_baseline,
     get_insider_transactions,
     get_language_instruction,
     get_lockup_expiry,
@@ -18,6 +19,9 @@ def create_lockup_watcher(llm):
         current_date = state["trade_date"]
         company = state["company_of_interest"]
         instrument_context = build_instrument_context(company)
+
+        # 公式化硬打分基线/量化口径约束（解禁面：待解禁日历为锚）
+        formula_baseline = get_formula_score_baseline(state, "lockup")
 
         tools = [
             get_insider_transactions,
@@ -70,6 +74,7 @@ def create_lockup_watcher(llm):
             "\n- 禁止编造或篡改任何减持数额和时间"
             "\n- 如发现数据缺失，请标注 [数据缺失: xxx]"
             + get_language_instruction()
+            + formula_baseline
         )
 
         prompt = ChatPromptTemplate.from_messages(

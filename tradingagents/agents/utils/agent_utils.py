@@ -158,19 +158,16 @@ You may confirm, supplement, or challenge these findings based on your specializ
 def get_formula_score_baseline(state: dict, analyst_type: str) -> str:
     """生成注入分析师 prompt 的「公式分基线/量化口径约束」文案。
 
-    market 注入确定性 signal_score 数值基线；fundamentals 注入行为约束；
-    其余分析师或无公式分时返回空串。公式分计算失败不影响主流程。
+    - market 注入确定性 signal_score 数值基线；其余已落公式分析师在 prompt 阶段
+      公式未算（工具数据尚未产生），注入行为约束；policy 及无公式分返回空串。
+      公式分计算失败不影响主流程。
     """
     try:
         from tradingagents.agents.utils.hard_score import (
-            _FUNDAMENTALS,
-            _MARKET,
             compute_analyst_formula_scores,
             formula_score_baseline_text,
         )
 
-        if analyst_type not in (_MARKET, _FUNDAMENTALS):
-            return ""
         computed = compute_analyst_formula_scores(state, {})
         fs = computed.get(analyst_type)
         formula = fs.score if (fs is not None and fs.available) else None

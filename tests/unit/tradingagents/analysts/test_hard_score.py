@@ -65,11 +65,17 @@ def test_fundamentals_unavailable_without_parsable_data():
     assert not fs.available
 
 
-def test_non_target_analysts_stay_llm_only():
+def test_all_analysts_have_entries_policy_unavailable():
     state = {"quick_analysis_result": {"signal_score": 60}}
     scores = compute_analyst_formula_scores(state, {})
-    # 仅 market/fundamentals 有公式分条目；其余分析师不进入 dict
-    assert set(scores.keys()) == {_MARKET, _FUNDAMENTALS}
+    # 全部 7 位分析师均进入 dict；policy 恒 unavailable，其余按数据可得性
+    from tradingagents.agents.utils.hard_score import (
+        _ALL_FORMULA_ANALYSTS,
+        _POLICY,
+    )
+
+    assert set(scores.keys()) == set(_ALL_FORMULA_ANALYSTS) | {_POLICY}
+    assert not scores[_POLICY].available
 
 
 # ---------------------------------------------------------------------------
@@ -133,7 +139,10 @@ def test_baseline_text_fundamentals_is_constraint():
 
 
 def test_baseline_text_other_empty():
-    assert formula_score_baseline_text("news", None) == ""
+    # news 等已落公式分析师注入行为约束；policy 无公式也无约束 → 空串
+    from tradingagents.agents.utils.hard_score import _POLICY
+
+    assert formula_score_baseline_text(_POLICY, None) == ""
 
 
 # ---------------------------------------------------------------------------

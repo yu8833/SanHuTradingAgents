@@ -1,5 +1,10 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from tradingagents.agents.utils.agent_utils import build_instrument_context, get_language_instruction, get_news
+from tradingagents.agents.utils.agent_utils import (
+    build_instrument_context,
+    get_formula_score_baseline,
+    get_language_instruction,
+    get_news,
+)
 from tradingagents.agents.utils.signal_data_tools import get_fund_flow, get_dragon_tiger_board, get_margin_trading, get_shareholder_concentration
 from tradingagents.dataflows.config import get_config
 
@@ -9,6 +14,9 @@ def create_social_media_analyst(llm):
         current_date = state["trade_date"]
         company = state["company_of_interest"]
         instrument_context = build_instrument_context(company)
+
+        # 公式化硬打分基线/量化口径约束（情绪面：资金方向+股东户数变化为锚）
+        formula_baseline = get_formula_score_baseline(state, "social")
 
         tools = [
             get_news,
@@ -68,6 +76,7 @@ def create_social_media_analyst(llm):
             "\n- 禁止编造或篡改任何数值"
             "\n- 如发现数据缺失，请标注 [数据缺失: xxx]"
             + get_language_instruction()
+            + formula_baseline
         )
 
         prompt = ChatPromptTemplate.from_messages(

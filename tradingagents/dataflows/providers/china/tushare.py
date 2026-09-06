@@ -59,9 +59,6 @@ class TushareProvider:
     async def get_stock_list(self, market: str = "CN") -> List[Dict[str, Any]]:
         """获取股票列表
 
-        Args:
-            market: 市场，默认 CN
-
         Returns:
             股票信息列表，每个元素包含 code, name 等字段
         """

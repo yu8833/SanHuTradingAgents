@@ -58,12 +58,21 @@ def load_daily_panel(
     start_dt,
     end_dt,
     period: str = "daily",
+    adjust: str = "none",
+    notes: list[str] | None = None,
 ) -> pd.DataFrame:
     """从 stock_daily_quotes 加载日线行情并转为 pandas 面板。
 
     - 按 (symbol, date) 去重，多数据源时优先保留 DATA_SOURCE_PRIORITY 靠前者。
     - 返回列: symbol, date, open, high, low, close, volume, amount, pct_chg。
     - 若某 symbol 无数据，返回空 DataFrame（不抛错）。
+
+    Args:
+        adjust: 复权方式，'none'=不复权 / 'hfq'=用 pct_chg 链重建后复权价格。
+            hfq 消除除权除息造成的价格断层（避免误触发 MA/突破类信号）：
+            pct_chg 缺失（停牌/首日）处按当日零涨跌处理（即回退 raw）；
+            混源（非 Tushare 口径）的 symbol 回退不复权，均写入 notes 标注。
+        notes: 可选，用于接收复权处理过程中的标注信息（如回退不复权的 symbol）。
     """
     collection = db["stock_daily_quotes"]
     start_s = _parse_date(start_dt)
@@ -100,8 +109,10 @@ def load_daily_panel(
     # 按 (symbol, date) 去重，保留优先级最高的数据源
     # 为降低大回测(数十万行)时的内存峰值：rows 只存一份最终行，best 只存 key->(rows下标, src_rank)，
     # 高优先级数据后到时覆盖 rows 中该行，避免行数据被重复持有两份。
+    # symbol_sources 记录每只 symbol 出现过的数据源集合，用于 hfq 复权的混源回退判断。
     best: dict[tuple, tuple[int, int]] = {}
     rows: list[dict] = []
+    symbol_sources: dict[str, set[str]] = {}
     cursor = collection.find(query, projection)
     for doc in cursor:
         code = doc.get("code") or doc.get("symbol")
@@ -111,6 +122,7 @@ def load_daily_panel(
             continue
         key = (code, trade_date)
         src = doc.get("data_source", "")
+        symbol_sources.setdefault(code, set()).add(src or "")
         try:
             src_rank = DATA_SOURCE_PRIORITY.index(src) if src else len(DATA_SOURCE_PRIORITY)
         except ValueError:
@@ -160,7 +172,72 @@ def load_daily_panel(
     if int(df["pct_chg"].notna().sum()) < len(df):
         computed = df.groupby("symbol")["close"].pct_change().astype("float32")
         df["pct_chg"] = df["pct_chg"].fillna(computed)
+
+    # === 复权治理（B3）：hfq 链重建 ===
+    if adjust == "hfq":
+        df = _apply_hfq_adjust(df, symbol_sources, notes=notes)
     return df
+
+
+def _apply_hfq_adjust(
+    df: pd.DataFrame,
+    symbol_sources: dict[str, set[str]],
+    notes: list[str] | None = None,
+) -> pd.DataFrame:
+    """按 symbol 用 pct_chg（小数口径）链式重建后复权价格。
+
+    hfq_close = close.ffill() * (1 + pct_chg).cumprod()（首行锚定 raw close），
+    scale = hfq_close / raw_close 应用到 open/high/low；volume/amount 保持原值。
+
+    边界：
+    - pct_chg 缺失（停牌/首日）按当日零涨跌处理（即回退 raw，价格平走）；
+    - 混源（symbol_sources 中该 symbol 出现多个数据源，pct_chg 口径可能不一致）
+      时整只回退不复权，并在 notes 标注。
+    """
+    if df.empty:
+        return df
+
+    mixed_syms = sorted(
+        sym for sym, sources in symbol_sources.items() if len(sources) > 1
+    )
+    if mixed_syms:
+        logger.warning(
+            f"⚠️ hfq 复权：{len(mixed_syms)} 只股票混源（pct_chg 口径可能不一致），回退不复权: "
+            f"{mixed_syms[:10]}{'…' if len(mixed_syms) > 10 else ''}"
+        )
+        if notes is not None:
+            notes.append(
+                f"hfq 混源回退不复权 {len(mixed_syms)} 只: {mixed_syms[:10]}"
+                f"{'…' if len(mixed_syms) > 10 else ''}"
+            )
+
+    parts: list[pd.DataFrame] = []
+    adjusted_count = 0
+    for symbol, g in df.groupby("symbol", sort=False):
+        if symbol in mixed_syms:
+            parts.append(g)
+            continue
+        g = g.copy()
+        close_f = g["close"].ffill()
+        # 缺失涨跌幅按 0 处理（价格平走 = 回退 raw）；首行 pct_chg 通常为 NaN
+        growth = (1.0 + g["pct_chg"].astype("float32").fillna(0.0)).astype(
+            "float32", copy=False
+        )
+        # 后复权链：hfq[t] = c0 × Π_{i=1..t}(1+r[i])，首行锚定 raw close。
+        # 除以 growth[0] 去掉首日自身涨跌的贡献（首日为 NaN→0 时等价于不除）。
+        # 保证 hfq[t]/hfq[t-1] = (1+pct_chg[t])，与涨跌幅口径一致，收益率不畸变。
+        g0 = growth.iloc[0]
+        hfq_close = close_f.iloc[0] * growth.cumprod() / g0
+        # 除 0 保护：raw close 为 0/NaN 时 scale 置 NaN，该行不缩放
+        scale = hfq_close / close_f.mask(close_f == 0)
+        g["close"] = hfq_close
+        for col in ("open", "high", "low"):
+            g[col] = g[col] * scale
+        parts.append(g)
+        adjusted_count += 1
+
+    logger.info(f"✅ hfq 复权完成：{adjusted_count} 只已复权，{len(mixed_syms)} 只回退不复权")
+    return pd.concat(parts, ignore_index=True) if parts else df
 
 
 def load_symbol_history(

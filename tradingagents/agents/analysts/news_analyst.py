@@ -1,6 +1,7 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
+    get_formula_score_baseline,
     get_global_news,
     get_language_instruction,
     get_news,
@@ -14,6 +15,9 @@ def create_news_analyst(llm):
         current_date = state["trade_date"]
         company = state["company_of_interest"]
         instrument_context = build_instrument_context(company)
+
+        # 公式化硬打分基线/量化口径约束（消息面：风险安全分为锚）
+        formula_baseline = get_formula_score_baseline(state, "news")
 
         tools = [
             get_news,
@@ -59,6 +63,7 @@ def create_news_analyst(llm):
             "\n- 禁止编造或篡改任何事件内容"
             "\n- 如发现数据缺失，请标注 [数据缺失: xxx]"
             + get_language_instruction()
+            + formula_baseline
         )
 
         prompt = ChatPromptTemplate.from_messages(

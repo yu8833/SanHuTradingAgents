@@ -328,6 +328,14 @@ class TradingAgentsGraph:
 
         if updates:
             self.memory_log.batch_update_with_outcomes(updates)
+            # 置信度校准缓存失效：memory log 已更新，下次命中率统计需重算
+            try:
+                from tradingagents.agents.utils.confidence_calibration import (
+                    invalidate_calibration_cache,
+                )
+                invalidate_calibration_cache()
+            except Exception as e:
+                logger.debug("置信度校准缓存失效失败（忽略）: %s", e)
 
     def propagate(self, company_name, trade_date, quick_analysis_result=None):
         """Run the trading agents graph for a company on a specific date.

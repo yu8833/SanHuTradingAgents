@@ -24,6 +24,7 @@ from datetime import date
 import numpy as np
 import pandas as pd
 
+from app.core.config import settings
 from app.strategy_system import data_adapter
 from app.strategy_system import screener
 from app.strategy_system.indicators import SIGNAL_INDICATOR_DEPS, compute_all
@@ -134,6 +135,13 @@ def _load_panel(db, config, end_extra_days: int = 0,
         if progress_cb:
             progress_cb(p, msg)
 
+    # 回测口径（B3 复权）：口径信息写入 panel.attrs["bt_scope"] 供结果标注（B4）
+    adjust = str(getattr(settings, "BACKTEST_ADJUST", "hfq") or "none").lower()
+    if adjust not in ("hfq", "none"):
+        logger.warning(f"⚠️ BACKTEST_ADJUST={adjust} 非法，回退不复权（none）")
+        adjust = "none"
+    scope_notes: list[str] = []
+
     start = _parse_date(config.get("start"))
     end = _parse_date(config.get("end"))
     end_dt = pd.to_datetime(end)
@@ -143,7 +151,8 @@ def _load_panel(db, config, end_extra_days: int = 0,
     _report(0.01, "正在加载行情数据…")
     symbols = config.get("symbols")
     df = data_adapter.load_daily_panel(
-        db, symbols, start_dt, load_end.strftime("%Y-%m-%d")
+        db, symbols, start_dt, load_end.strftime("%Y-%m-%d"),
+        adjust=adjust, notes=scope_notes,
     )
     if df.empty:
         return df
@@ -174,7 +183,26 @@ def _load_panel(db, config, end_extra_days: int = 0,
     float64_cols = [c for c in df.columns if df[c].dtype == "float64"]
     if float64_cols:
         df[float64_cols] = df[float64_cols].astype("float32")
+    # 记录回测口径（B4 标注）：adjust + 过程备注
+    df.attrs["bt_scope"] = {
+        "adjust": adjust,
+        "notes": scope_notes,
+    }
     return df
+
+
+def _scope_tags(panel: pd.DataFrame) -> dict:
+    """从 panel.attrs 读取回测口径（B4 标注），返回 adjust/notes。
+
+    无 attrs（旧调用/外部传入 panel）时返回 none 的保守默认。
+    """
+    scope = getattr(panel, "attrs", {}).get("bt_scope") if hasattr(panel, "attrs") else None
+    if not isinstance(scope, dict):
+        return {"adjust": "none", "notes": []}
+    return {
+        "adjust": scope.get("adjust", "none"),
+        "notes": scope.get("notes") or [],
+    }
 
 
 def _enrich_panel_fundamentals(db, df: pd.DataFrame,
@@ -543,6 +571,7 @@ def run_strategy_backtest(db, config: StrategyBtConfig, panel: pd.DataFrame | No
     _report(0.98, "正在生成报告…")
 
     elapsed = round((time.perf_counter() - t0) * 1000, 1)
+    _scope = _scope_tags(panel)
     return {
         "run_id": run_id,
         "success": True,
@@ -557,6 +586,9 @@ def run_strategy_backtest(db, config: StrategyBtConfig, panel: pd.DataFrame | No
             "max_positions": config.max_positions,
             "initial_capital": config.initial_capital,
             "position_sizing": config.position_sizing,
+            # 回测口径标注（B4）：adjust=hfq/none
+            "adjust": _scope["adjust"],
+            "scope_notes": _scope["notes"],
         },
         "stats": sim["stats"],
         "equity_curve": sim["equity_curve"],
@@ -1061,6 +1093,7 @@ def run_factor_backtest(db, config: dict, progress_cb: Callable[[float, str], No
 
     _report(1.0, "完成")
 
+    _scope = _scope_tags(panel)
     return {
         "run_id": run_id,
         "success": True,
@@ -1070,6 +1103,9 @@ def run_factor_backtest(db, config: dict, progress_cb: Callable[[float, str], No
             "end": end_s,
             "n_groups": n_groups,
             "rebalance": rebalance,
+            # 回测口径标注（B4）：adjust=hfq/none
+            "adjust": _scope["adjust"],
+            "scope_notes": _scope["notes"],
         },
         "stats": {
             "ic_mean": round(float(ic.mean()), 4) if len(ic) else 0.0,
@@ -1265,6 +1301,7 @@ def run_optimizer(db, config: dict, panel: pd.DataFrame | None = None,
             })
 
     results.sort(key=lambda x: -(x["value"] if isinstance(x["value"], (int, float)) else 0.0))
+    _scope = _scope_tags(panel)
     return {
         "run_id": run_id,
         "success": True,
@@ -1274,6 +1311,9 @@ def run_optimizer(db, config: dict, panel: pd.DataFrame | None = None,
             "param_grid": param_grid,
             "start": config.get("start"),
             "end": config.get("end"),
+            # 回测口径标注（B4）：adjust=hfq/none
+            "adjust": _scope["adjust"],
+            "scope_notes": _scope["notes"],
         },
         "n_trials": len(results),
         "results": results,
@@ -1381,6 +1421,7 @@ def run_walkforward(db, config: dict,
     # 汇总测试期表现
     test_total_returns = [f["stats"].get("total_return", 0) for f in fold_results if f.get("success")]
     avg_test_return = float(np.mean(test_total_returns)) if test_total_returns else 0.0
+    _scope = _scope_tags(panel)
     return {
         "run_id": run_id,
         "success": True,
@@ -1391,6 +1432,9 @@ def run_walkforward(db, config: dict,
             "train_days": train_days,
             "test_days": test_days,
             "param_grid": param_grid,
+            # 回测口径标注（B4）：adjust=hfq/none
+            "adjust": _scope["adjust"],
+            "scope_notes": _scope["notes"],
         },
         "n_folds": len(fold_results),
         "avg_test_return": round(avg_test_return, 4),

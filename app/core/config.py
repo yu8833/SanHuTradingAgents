@@ -283,6 +283,10 @@ class Settings(BaseSettings):
     TUSHARE_INIT_BATCH_SIZE: int = Field(default=100, ge=10, le=1000, description="初始化批处理大小")
     TUSHARE_INIT_AUTO_START: bool = Field(default=False, description="应用启动时自动检查并初始化数据")
 
+    # ==================== 回测口径配置 ====================
+    # 复权方式：'hfq'=用 pct_chg 链重建后复权价格（默认，消除除权除息价格断层）/ 'none'=不复权
+    BACKTEST_ADJUST: str = Field(default="hfq", description="回测复权方式（hfq/none）")
+
     # AKShare统一数据同步配置
     AKSHARE_UNIFIED_ENABLED: bool = Field(default=True, description="启用AKShare统一数据同步")
     AKSHARE_BASIC_INFO_SYNC_ENABLED: bool = Field(default=True, description="启用基础信息同步")

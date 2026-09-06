@@ -4,6 +4,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_concept_blocks,
     get_dragon_tiger_board,
     get_fund_flow,
+    get_formula_score_baseline,
     get_hot_stocks,
     get_industry_comparison,
     get_insider_transactions,
@@ -22,6 +23,9 @@ def create_hot_money_tracker(llm):
         current_date = state["trade_date"]
         company = state["company_of_interest"]
         instrument_context = build_instrument_context(company)
+
+        # 公式化硬打分基线/量化口径约束（资金面：主力/北向/龙虎榜为锚）
+        formula_baseline = get_formula_score_baseline(state, "hot_money")
 
         tools = [
             get_stock_data,
@@ -114,6 +118,7 @@ def create_hot_money_tracker(llm):
             "\n- 如发现数据缺失，请标注 [数据缺失: xxx]"
             "\n- 板块轮动分析必须基于真实的行业涨跌幅数据，不能主观臆断"
             + get_language_instruction()
+            + formula_baseline
         )
 
         prompt = ChatPromptTemplate.from_messages(

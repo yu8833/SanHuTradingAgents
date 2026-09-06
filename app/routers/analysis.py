@@ -135,6 +135,81 @@ async def test_route():
     logger.info("🧪 测试路由被调用了！")
     return {"message": "测试路由工作正常", "timestamp": time.time()}
 
+
+@router.get("/calibration", response_model=dict[str, Any])
+async def get_confidence_calibration(
+    user: dict = Depends(get_current_user),
+):
+    """置信度统计校准：按评级分桶命中率 + 按置信度分桶校准曲线。
+
+    命中率统计主源为 memory log（决策复盘）；置信度校准曲线从
+    analysis_reports 反查 confidence_score（key=(stock_symbol, analysis_date)）。
+    返回 {"success", "data": {generated_at, per_rating, overall, calibration_curve}, "message"}。
+    """
+    import re
+
+    try:
+        from tradingagents.agents.utils.confidence_calibration import (
+            compute_calibration_curve,
+            get_rating_stats,
+            load_entries,
+        )
+
+        stats = get_rating_stats()
+        entries = load_entries()
+
+        def _norm_code(s) -> str:
+            m = re.match(r"^(\d{6})", str(s or ""))
+            return m.group(1) if m else str(s or "")
+
+        # 从 analysis_reports 反查置信度（分块 $or 查询，避免超大查询条件）
+        conf_map: dict[tuple, float] = {}
+        if entries:
+            keys = {(e.get("ticker"), e.get("date")) for e in entries}
+            keys = {k for k in keys if k[0] and k[1]}
+            key_list = sorted(keys)
+            try:
+                from app.core.database import get_mongo_db
+
+                db = get_mongo_db()
+                for i in range(0, len(key_list), 200):
+                    chunk = key_list[i:i + 200]
+                    or_cond = []
+                    for sym, date in chunk:
+                        or_cond.append({"stock_symbol": sym, "analysis_date": date})
+                        code6 = _norm_code(sym)
+                        if code6 != sym:
+                            or_cond.append(
+                                {"stock_symbol": code6, "analysis_date": date}
+                            )
+                    cursor = db.analysis_reports.find(
+                        {"$or": or_cond},
+                        {"stock_symbol": 1, "analysis_date": 1, "confidence_score": 1},
+                    )
+                    async for doc in cursor:
+                        conf_map[
+                            (_norm_code(doc.get("stock_symbol")), doc.get("analysis_date"))
+                        ] = doc.get("confidence_score")
+            except Exception as e:
+                logger.warning(f"⚠️ 校准曲线置信度反查失败（曲线返回空）: {e}")
+                conf_map = {}
+
+        curve = compute_calibration_curve(entries, conf_map)
+
+        return {
+            "success": True,
+            "data": {
+                "generated_at": now_tz().isoformat(),
+                "per_rating": stats.get("per_rating", {}),
+                "overall": stats.get("overall", {}),
+                "calibration_curve": curve,
+            },
+            "message": "置信度统计校准获取成功",
+        }
+    except Exception as e:
+        logger.error(f"❌ 置信度统计校准获取失败: {e}", exc_info=True)
+        return {"success": False, "data": None, "message": f"获取失败: {e}"}
+
 @router.get("/tasks/{task_id}/status", response_model=dict[str, Any])
 async def get_task_status_new(
     task_id: str,
