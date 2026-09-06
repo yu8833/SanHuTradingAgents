@@ -80,6 +80,9 @@
         </div>
       </el-card>
 
+      <!-- 📋 操作检查清单（实战化要点，来自后端 operational_checklist 字段） -->
+      <OperationalChecklist :checklist="report?.operational_checklist" />
+
       <!-- 报告模块 - 与单股分析页一致的卡片式布局，点击弹出全屏对话框 -->
       <div class="pipeline-intro report-pipeline-intro">
         <!-- 最终决策 -->
@@ -693,6 +696,7 @@ import { getMarketByStockCode } from '@/utils/market'
 import type { CurrencyAmount } from '@/api/paper'
 import { fmtNum, fmtPctFromFraction } from '@/utils/format'
 import { formatDateTime as appFormatDateTime } from '@/utils/datetime'
+import OperationalChecklist from '@/components/OperationalChecklist.vue'
 
 type ReportModuleContent = string | Record<string, unknown>
 

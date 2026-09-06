@@ -825,6 +825,106 @@ def extract_structured_fields(reports: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def build_operational_checklist(reports: dict, extracted: dict | None = None) -> dict:
+    """聚合「操作检查清单」：把交易员/风控/最终决策中的实战化要点整理成结构化对象。
+
+    数据来源优先级：extracted（extract_structured_fields 已结构化的中文键）优先，
+    缺口从 reports 原文（trader_investment_plan / risk_control_decision /
+    final_trade_decision）按 Markdown 行正则补。缺失项返回空，前端隐藏该行。
+
+    返回键（全部可选，缺失即 None/[]）：
+      操作方向 / 评分 / 入场 / 目标1 / 目标2 / 止损 / 风险回报比 /
+      建议仓位 / 持有周期 / 入场策略 / 关键触发 / 风险警报 / 监控点 / 催化因素 / 结论文本
+    """
+    from app.routers.reports import logger as _reports_logger  # noqa: F401
+
+    extracted = extracted or {}
+    out: dict[str, Any] = {}
+
+    # ① 结论性字段（extracted 优先）
+    out["操作方向"] = extracted.get("action") or extracted.get("操作建议") or None
+    out["评分"] = extracted.get("置信度")
+    out["入场"] = extracted.get("理想买入")
+    out["目标1"] = extracted.get("止盈目标")
+    out["目标2"] = extracted.get("二次买入")
+    out["止损"] = extracted.get("止损价格")
+
+    # ② 从 trader_investment_plan 文本按行抓（- **键**：值）
+    def _grab(text: str, keys: tuple[str, ...]) -> str | None:
+        if not text:
+            return None
+        for line in text.splitlines():
+            for k in keys:
+                if k in line and any(sep in line for sep in (":", "：", "=")):
+                    val = line.split("：", 1)[-1] if "：" in line else line.split(":", 1)[-1]
+                    val = val.strip()
+                    # 去掉重复键前缀（如 "- **入场价**：1,450" → "1,450"）
+                    for k2 in keys:
+                        val = val.replace(f"**{k2}**", "").replace(k2, "").strip()
+                    if val and val not in ("无", "none", "-"):
+                        return val.strip("- ").strip()
+        return None
+
+    trader = "" if not isinstance(reports.get("trader_investment_plan"), str) else reports["trader_investment_plan"]
+    risk = "" if not isinstance(reports.get("risk_control_decision"), str) else reports["risk_control_decision"]
+    final = "" if not isinstance(reports.get("final_trade_decision"), str) else reports["final_trade_decision"]
+
+    if out["入场"] is None:
+        out["入场"] = _grab(trader, ("入场价", "入场价格", "入场"))
+    if out["止损"] is None:
+        out["止损"] = _grab(trader, ("止损位", "止损价格", "止损"))
+    if out["目标1"] is None:
+        out["目标1"] = _grab(trader, ("目标价", "第一目标", "目标位"))
+    if out["目标2"] is None:
+        out["目标2"] = _grab(trader, ("第二目标", "目标2"))
+    out["风险回报比"] = _grab(trader, ("风险/回报比", "风险回报比", "盈亏比"))
+    out["建议仓位"] = _grab(trader, ("建议仓位", "仓位建议", "仓位"))
+    out["持有周期"] = _grab(trader, ("预计持有周期", "持有周期", "周期"))
+
+    # ③ 段落级字段（入场策略/关键触发/风险警报/监控点）
+    def _para(text: str, header: str) -> list[str]:
+        if not text:
+            return []
+        lines, collect, acc = text.splitlines(), False, []
+        for ln in lines:
+            s = ln.strip()
+            if s.startswith("#") or s.startswith("**"):
+                if header in s:
+                    collect = True
+                    continue
+                if collect:
+                    break
+            elif collect and s:
+                acc.append(s.lstrip("- ").strip())
+        return acc
+
+    out["入场策略"] = _para(trader, "入场策略")
+    out["关键触发"] = _para(trader, "关键触发")
+    out["风险警报"] = _para(risk, "关键风险因素") or _grab(risk, ("风险提示", "风险因素")) or (_para(risk, "最坏情景") or [])
+    out["监控点"] = _para(risk, "重点监控点")
+    out["催化因素"] = _grab(final, ("催化", "利好催化")) or (_para(final, "利好催化") or [])
+
+    # ④ 结论文本（最终决策，供卡片底部引用）
+    out["结论文本"] = final.strip() if final else (trader.strip() if trader else None)
+
+    # ⑤ 清理：段落字段统一 list；空 list 转 None
+    for k in ("入场策略", "关键触发", "风险警报", "监控点", "催化因素"):
+        v = out.get(k)
+        if isinstance(v, list):
+            out[k] = v if v else None
+        elif isinstance(v, str) and v.strip():
+            out[k] = [v.strip()]
+        else:
+            out[k] = None
+
+    # 抽取值失败时（正则没抓到），回退到 extracted 的 risk_text 类键
+    if out["风险警报"] is None:
+        out["风险警报"] = extracted.get("风险提示")
+
+    # 去掉 None 键，避免前端渲染空字段
+    return {k: v for k, v in out.items() if v is not None}
+
+
 def _inject_position_advice(result: dict[str, Any]) -> None:
     """
     当评级为买入时，自动计算仓位建议并注入到 result 中。
@@ -1764,6 +1864,14 @@ async def get_report_detail(
                 if _v is not None:
                     report[_k] = _v
 
+            # 📋 操作检查清单（实战化要点聚合）
+            try:
+                report["operational_checklist"] = build_operational_checklist(
+                    _combined_for_extract, _extracted
+                )
+            except Exception as _cl_err:
+                logger.warning(f"⚠️ [报告详情] 操作检查清单生成失败: {_cl_err}")
+
             # 🔥 计算置信度详情（多维度评分依据）
             try:
                 _confidence_result = _calculate_confidence(_combined_for_extract)
@@ -1831,6 +1939,14 @@ async def get_report_detail(
             for _k, _v in _extracted.items():
                 if _v is not None:
                     report[_k] = _v
+
+            # 📋 操作检查清单（实战化要点聚合）
+            try:
+                report["operational_checklist"] = build_operational_checklist(
+                    _combined_for_extract, _extracted
+                )
+            except Exception as _cl_err:
+                logger.warning(f"⚠️ [报告详情] 操作检查清单生成失败: {_cl_err}")
 
             # 🔥 计算置信度详情（多维度评分依据）
             try:
