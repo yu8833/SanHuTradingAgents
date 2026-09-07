@@ -233,18 +233,15 @@ def _fetch_index_price() -> float:
     return 0.0
 
 
-def _build_regime_data() -> dict:
+def _build_daily_state() -> dict:
     """
-    构建完整的市场环境检测数据
+    日级别分量：指数 MA250 + 波动率分位 + 融资余额变化。
 
-    Returns:
-        dict: detect_regime 所需的7个参数
+    盘中基本不变（收盘后才更新），单独 6h 缓存，避免 60s 的实时刷新每次都重拉
+    指数日线与两所融资余额历史（省流且稳定）。
     """
-    # 1. 指数当前价
-    index_price = _fetch_index_price()
-
-    # 2. 指数MA250 + 波动率分位（共用一次日线拉取）
-    index_ma250 = index_price if index_price > 0 else 3800.0
+    # 指数MA250 + 波动率分位（共用一次日线拉取）
+    index_ma250 = 3800.0
     volatility_percentile = 0.5
 
     df = _fetch_index_daily(HS300_INDEX_CODE)
@@ -256,38 +253,65 @@ def _build_regime_data() -> dict:
             index_ma250 = float(np.mean(closes))
         volatility_percentile = _calc_volatility_percentile(closes)
 
+    # 融资余额变化（T+1 日频数据）
+    margin_change = _fetch_margin_balance_change()
+
+    return {
+        "index_ma250": round(index_ma250, 2),
+        "volatility_percentile": volatility_percentile,
+        "margin_balance_change_pct": margin_change,
+    }
+
+
+def _build_live_state() -> dict:
+    """
+    实时分量：指数点位 + 市场宽度 + 全市场换手率。
+
+    盘中随行情变化，随 market 分类 TTL（交易时段 60s）刷新。
+    """
+    # 1. 指数当前价
+    index_price = _fetch_index_price()
+
     # 3. 市场宽度
     breadth_ratio = _fetch_breadth_ratio()
-
-    # 4. 融资余额变化
-    margin_change = _fetch_margin_balance_change()
 
     # 5. 换手率
     turnover_ratio, turnover_ma20 = _fetch_market_turnover()
 
     return {
         "index_price": round(index_price, 2) if index_price > 0 else 3800.0,
-        "index_ma250": round(index_ma250, 2),
-        "volatility_percentile": volatility_percentile,
         "breadth_ratio": breadth_ratio,
-        "margin_balance_change_pct": margin_change,
         "turnover_ratio": turnover_ratio,
         "turnover_ma20": turnover_ma20,
     }
 
 
+def _build_regime_data() -> dict:
+    """构建完整的市场环境检测数据（同步入口 / 单次全量构建）。"""
+    return {**_build_daily_state(), **_build_live_state()}
+
+
 async def collect_market_regime_data() -> dict:
     """
-    异步入口：采集市场环境检测数据（带缓存）
+    异步入口：采集市场环境检测数据（分级缓存）。
 
-    缓存策略：交易时段3分钟，非交易时段30分钟（category=market）。
+    - 日级别分量（MA250/波动率分位/融资余额）：6h 缓存，盘中不必重算；
+    - 实时分量（指数点位/宽度/换手率）：交易时段 60s、非交易 30min（category=market）。
     """
-    return await cached(
-        "retail:regime_data",
-        _build_regime_data,
+    daily = await cached(
+        "retail:regime_daily",
+        _build_daily_state,
+        category="default",
+        ttl=21600,
+        valid=lambda v: bool(v and v.get("index_ma250", 0) > 0),
+    )
+    live = await cached(
+        "retail:regime_live",
+        _build_live_state,
         category="market",
         valid=lambda v: bool(v and v.get("index_price", 0) > 0),
     )
+    return {**daily, **live}
 
 
 def collect_market_regime_data_sync() -> dict:

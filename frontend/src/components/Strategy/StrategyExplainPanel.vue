@@ -6,7 +6,7 @@
         <div class="card-header">
           <el-icon><TrendCharts /></el-icon>
           <span class="panel-title">大盘×策略适配矩阵</span>
-          <span class="header-hint">静态规则：选择环境组合 → 查看适配策略（数据来自后端策略注册表）</span>
+          <span class="header-hint">选择环境组合（默认=今日检测结果）→ 下方策略池展示适配策略</span>
         </div>
       </template>
       <el-row :gutter="16" class="matrix-dims">
@@ -23,32 +23,24 @@
           </div>
         </el-col>
       </el-row>
-      <el-divider />
       <div class="matrix-result">
         <div class="matrix-portrait">
           <span class="matrix-portrait-label">当前组合画像</span>
           <el-tag type="warning" effect="dark" size="large">{{ matchedPortrait }}</el-tag>
           <span class="matrix-portrait-desc">{{ portraitDesc }}</span>
+          <span class="matrix-fit-count">适配 <b>{{ recommendedStrategies.length }}</b> 个策略（见下方策略池）</span>
         </div>
-        <div class="matrix-strategies">
-          <div class="matrix-strategies-hint">适配策略（{{ recommendedStrategies.length }}）——</div>
-          <el-empty v-if="!recommendedStrategies.length" description="无匹配策略（全适用策略兜底）" :image-size="60" />
-          <el-row v-else :gutter="12">
-            <el-col :span="12" v-for="s in recommendedStrategies" :key="s.id" :style="{ marginBottom: '10px' }">
-              <div class="matrix-strategy-card">
-                <div class="matrix-strategy-head">
-                  <span class="matrix-strategy-icon">{{ (s.frontend && s.frontend.icon) || '📊' }}</span>
-                  <span class="matrix-strategy-name">{{ s.name }}</span>
-                  <el-tag v-if="s.source === 'retail'" size="small" type="primary" effect="plain">零售</el-tag>
-                  <el-tag v-else-if="s.source === 'template'" size="small" type="info" effect="plain">对话/辅助信号</el-tag>
-                </div>
-                <div class="matrix-strategy-desc">{{ s.description }}</div>
-                <div v-if="s.buy_rules && s.buy_rules.length" class="matrix-strategy-rules">
-                  <span class="matrix-rule-buy">买：{{ s.buy_rules[0] }}</span>
-                </div>
-              </div>
-            </el-col>
-          </el-row>
+        <!-- 盘中预警：实时大盘快照（指示大盘按实际刷新，60s 轮询） -->
+        <div v-if="liveMetrics" class="matrix-live">
+          <el-icon class="matrix-live-dot"><Connection /></el-icon>
+          <span class="matrix-live-label">盘中按实际刷新</span>
+          <template v-if="liveMetrics.price != null">
+            <span class="matrix-live-item">沪深300 <b>{{ liveMetrics.price.toFixed(2) }}</b></span>
+          </template>
+          <template v-if="liveMetrics.breadthPct != null">
+            <span class="matrix-live-item">市场宽度 <b>{{ liveMetrics.breadthPct }}%</b></span>
+          </template>
+          <span class="matrix-live-time" v-if="liveMetrics.updatedAt">检测于 {{ liveMetrics.updatedAt }}</span>
         </div>
       </div>
     </el-card>
@@ -56,13 +48,28 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
-import { TrendCharts } from '@element-plus/icons-vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
+import { TrendCharts, Connection } from '@element-plus/icons-vue'
 import { strategyApi } from '@/api/strategy'
 
 defineOptions({ name: 'StrategyExplainPanel' })
 
-// ---- 大盘×策略 静态适配矩阵（纯规则，无日期；当日情形见作战室盘前 + 顶部四维判断） ----
+export interface LiveMetrics {
+  price: number | null
+  breadthPct: number | null
+  updatedAt: string
+}
+
+// 受控初值（今日检测四维，中文标签），首次到位时初始化矩阵，之后用户手动调整不再覆盖；
+// autoSync=true 时（盘中预警开启）跟随最新检测结果，检测刷新即覆盖矩阵维度（按实际行情）。
+const props = defineProps<{
+  initialDims?: Record<string, string>
+  autoSync?: boolean
+  liveMetrics?: LiveMetrics | null
+}>()
+const emit = defineEmits<{ (e: 'portrait-change', portrait: string): void }>()
+
+// ---- 大盘×策略 静态适配矩阵（选择环境 → 下方策略池联动） ----
 const strategyApiList = ref<any[]>([])
 const matrixDims = [
   { key: 'trend', label: '趋势', options: ['牛市', '震荡', '熊市'] },
@@ -71,6 +78,36 @@ const matrixDims = [
   { key: 'sentiment', label: '情绪', options: ['狂热', '中性', '恐慌'] },
 ]
 const regimeDims = reactive({ trend: '震荡', vol: '正常', breadth: '中性', sentiment: '中性' })
+let initialized = false
+
+const applyInitialDims = (d: Record<string, string>, force = false) => {
+  if (!d || (initialized && !force)) return
+  const next: Record<string, string> = {}
+  for (const k of ['trend', 'vol', 'breadth', 'sentiment']) {
+    if (d[k]) next[k] = d[k]
+  }
+  if (!Object.keys(next).length) return
+  Object.assign(regimeDims, next)
+  // 仅当四维检测值全部到位才视为「已与今日检测同步」，此后用户手动调整不再被覆盖；
+  // 若检测部分缺失，允许后续更完整的初始化继续补齐，避免矩阵维度与检测不一致。
+  initialized = ['trend', 'vol', 'breadth', 'sentiment'].every((k) => !!next[k])
+}
+watch(
+  () => props.initialDims,
+  (d) => {
+    if (props.autoSync) applyInitialDims(d, true)
+    else applyInitialDims(d)
+  },
+  { deep: true }
+)
+// 盘中预警开启 → 立即以最新检测结果强制同步一次
+watch(
+  () => props.autoSync,
+  (on) => {
+    if (on) applyInitialDims(props.initialDims as any, true)
+  }
+)
+
 const onPickDim = (key: string, opt: string) => {
   ;(regimeDims as any)[key] = opt
 }
@@ -102,6 +139,9 @@ const recommendedStrategies = computed(() => {
   )
 })
 
+// 画像变化 → 通知父组件（策略池联动过滤）
+watch(matchedPortrait, p => emit('portrait-change', p), { immediate: true })
+
 const loadStrategyCatalog = async () => {
   try {
     const data: any = await strategyApi.list()
@@ -115,6 +155,7 @@ const loadStrategyCatalog = async () => {
 
 onMounted(() => {
   loadStrategyCatalog()
+  applyInitialDims(props.initialDims as any)
 })
 </script>
 
@@ -131,9 +172,40 @@ onMounted(() => {
 .matrix-dim-label { font-size: 13px; color: #606266; font-weight: 600; margin-bottom: 10px; }
 .matrix-dim-opts { display: flex; flex-wrap: wrap; gap: 6px; }
 .matrix-result { padding: 4px 0; }
-.matrix-portrait { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.matrix-portrait { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
 .matrix-portrait-label { font-size: 14px; color: #909399; }
 .matrix-portrait-desc { font-size: 13px; color: #606266; }
+.matrix-fit-count { font-size: 12px; color: #909399; margin-left: auto; }
+.matrix-fit-count b { color: #E6A23C; }
+
+/* 盘中预警：实时大盘快照条 */
+.matrix-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: linear-gradient(120deg, rgba(250, 173, 20, 0.10), rgba(64, 158, 255, 0.08));
+  border: 1px solid rgba(230, 162, 60, 0.30);
+  font-size: 13px;
+}
+.matrix-live-dot {
+  color: #E6A23C;
+  animation: matrixLivePulse 1.6s ease-in-out infinite;
+}
+@keyframes matrixLivePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.matrix-live-label { font-weight: 600; color: #E6A23C; font-size: 12px; }
+.matrix-live-item { color: #606266; }
+.matrix-live-item b { color: #E6A23C; font-family: 'SFMono-Regular', Consolas, monospace; }
+.matrix-live-time { color: #909399; font-size: 12px; }
+/* 深色主题微调 */
+:global(html.dark) .matrix-live { border-color: rgba(230, 162, 60, 0.4); }
+:global(html.dark) .matrix-live-item { color: #a3a6ad; }
+:global(html.dark) .matrix-live-time { color: #6f7278; }
 .matrix-strategies-hint { font-size: 13px; color: #909399; margin-bottom: 12px; }
 .matrix-strategy-card {
   border: 1px solid #e4e7ed; border-radius: 8px; padding: 12px 14px;

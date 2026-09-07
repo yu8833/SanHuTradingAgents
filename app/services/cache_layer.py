@@ -40,7 +40,8 @@ BEIJING = timezone(timedelta(hours=8))
 # TTL 分级（秒）
 TTL = {
     "realtime": {"trading": 30, "non_trading": 300},
-    "market": {"trading": 180, "non_trading": 1800},
+    # 市场环境检测：交易时段 60s（内存层封顶 60s），盘中预警需按实际行情刷新
+    "market": {"trading": 60, "non_trading": 1800},
     "news": {"trading": 300, "non_trading": 3600},
     "financial": {"trading": 43200, "non_trading": 86400},
     "default": {"trading": 300, "non_trading": 1800},

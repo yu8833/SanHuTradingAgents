@@ -55,40 +55,13 @@
       <span>盘中预警 · 当前为暂定信号（盘中数据未完全定格），15:00 收盘定格后再做最终判断。</span>
     </div>
 
-    <!-- 大盘四维判断（精简单行：趋势·波动·宽度·情绪）+ 环境结论 -->
-    <div class="market-bar" :class="'trend-' + regimeTrend">
-      <div class="market-left">
-        <div class="verdict-chip" :class="'trend-' + regimeTrend">
-          <span class="verdict-icon">
-            <el-icon v-if="regimeTrend === 'bull'"><TrendCharts /></el-icon>
-            <el-icon v-else-if="regimeTrend === 'bear'"><Bottom /></el-icon>
-            <el-icon v-else-if="regimeTrend === 'sideways'"><Minus /></el-icon>
-            <el-icon v-else><QuestionFilled /></el-icon>
-          </span>
-          <span class="verdict-label">{{ regimeTrendLabel }} · {{ regimeVolLabel }} · {{ regimeBreadthLabel }} · {{ regimeSentLabel }}</span>
-        </div>
-        <div v-if="!regimeLoading && regimeData" class="verdict-advice">
-          <span class="advice-icon"><el-icon><Opportunity /></el-icon></span>
-          <span class="advice-text">{{ regimeSummary }}</span>
-        </div>
-        <div v-else-if="!marketLoading && marketCtx" class="verdict-advice">
-          <span class="advice-icon"><el-icon><Opportunity /></el-icon></span>
-          <span class="advice-text">{{ adviceText }}</span>
-        </div>
-      </div>
-      <div class="market-right">
-        <el-switch
-          v-model="showRecommendedOnly"
-          active-text="只看推荐"
-          inactive-text="全部"
-          inline-prompt
-          :disabled="showRecommendedOnlyLoading"
-        />
-      </div>
-    </div>
-
-    <!-- 大盘×策略适配矩阵（静态规则，无折叠） -->
-    <StrategyExplainPanel />
+    <!-- 大盘×策略适配矩阵（受控初值=今日检测四维；盘中预警开启时自动跟随实际检测并展示实时大盘快照，画像变化联动下方策略池） -->
+    <StrategyExplainPanel
+      :initial-dims="initialMatrixDims"
+      :auto-sync="realtimeScan"
+      :live-metrics="liveMetrics"
+      @portrait-change="syncPortrait"
+    />
 
     <!-- 策略卡片 -->
     <el-card class="strategy-panel" shadow="never">
@@ -97,21 +70,24 @@
           <div class="card-title">
             <span class="panel-dot" />
             策略池
-            <span class="panel-count">{{ strategies.length }}</span>
+            <span class="panel-count">{{ displayStrategies.length }}</span>
           </div>
-          <el-tag size="small" type="info" effect="plain" round>点击卡片查看选股结果</el-tag>
+          <el-tag size="small" type="info" effect="plain" round v-if="matrixPortrait">
+            适配「{{ matrixPortrait }}」{{ adaptedCount }} 个高亮 · 未适配半透明显示 · 修改上方矩阵维度可调整 · 点击卡片查看选股结果
+          </el-tag>
+          <el-tag size="small" type="info" effect="plain" round v-else>点击卡片查看选股结果</el-tag>
         </div>
       </template>
       <el-empty v-if="!loading && strategies.length === 0" description="暂无可用策略" :image-size="120" />
       <div v-else class="strategy-grid">
         <div
-          v-for="(s, i) in filteredStrategies"
+          v-for="(s, i) in displayStrategies"
           :key="s.id"
           class="strategy-card"
           :class="{
             active: activeStrategy === s.id,
             loading: runningAll,
-            'card-recommended': regimeCurrentLoadReady && isFitStrategy(s),
+            dimmed: !isAdapted(s.id),
           }"
           :style="{ '--sc': palette[i % palette.length] }"
           @click="handleRun(s)"
@@ -144,13 +120,6 @@
           </div>
           <div class="strategy-tags">
             <el-tag v-for="t in s.tags" :key="t" size="small" effect="plain" class="strategy-tag">{{ t }}</el-tag>
-          </div>
-          <!-- 行情适配：今日推荐（按当前画像匹配 market_regimes，仅依赖四维检测） -->
-          <div v-if="regimeCurrentLoadReady" class="strategy-fit-mark" :class="'lv-' + (isFitStrategy(s) ? 1 : 0)">
-            <span v-if="isFitStrategy(s)" class="mark-pill recommended">
-              <el-icon :size="12"><Promotion /></el-icon>
-              今日推荐
-            </span>
           </div>
           <div class="strategy-foot">
             <div class="strategy-monitor">
@@ -272,11 +241,10 @@ import StrategyExplainPanel from '@/components/Strategy/StrategyExplainPanel.vue
 import {
   TrendCharts, Refresh, Loading, Connection, Star, Clock,
   Histogram, DataAnalysis, Odometer, Aim, MagicStick, Sunny, Cpu, Coin, Files, DataBoard,
-  Opportunity, Promotion, Warning, Bottom, Minus, QuestionFilled,
+  Warning,
 } from '@element-plus/icons-vue'
 import { retailApi } from '@/api/retail'
 import { strategyApi, type StrategyMeta, type StrategyRunItem, type StrategyRunAllItem } from '@/api/strategy'
-import type { MarketContext } from '@/utils/marketFit'
 import { favoritesApi } from '@/api/favorites'
 import { monitorApi } from '@/api/monitor'
 import { fmtPrice, fmtPctFromFraction, fmtNum } from '@/utils/format'
@@ -321,98 +289,77 @@ const tradeDates = ref<string[]>([])
 const computedAt = ref('')
 const allStrategyRunning = ref(false)
 
-// ── 大盘行情上下文（策略行情适配提醒） ────────────────────
-const marketCtx = ref<MarketContext | null>(null)
-const marketLoading = ref(false)
-
-// 当前画像 → 适配策略推荐（与矩阵共用画像规则；market_regimes 含当前画像或全面适用即推荐）
-const currentPortrait = computed(() => {
-  const d = regimeData.value
-  if (!d) return ''
-  if (d.volatility === 'high') return '高波动市'
-  if (d.trend === 'bull') return d.breadth === 'broad' ? '牛市普涨' : '牛市强趋势'
-  if (d.trend === 'bear') return (d.volatility === 'high' || d.sentiment === 'panic') ? '熊市恐慌' : '熊市阴跌'
-  return d.breadth === 'narrow' ? '震荡分化' : '震荡蓄势'
-})
-// 四维检测就绪即视为可推荐（不依赖 market-context 的 marketLoading，后者可能挂起）
-const regimeCurrentLoadReady = computed(() => !!regimeData.value)
-const isFitStrategy = (s: StrategyMeta) =>
-  !!((s.market_regimes || []).includes(currentPortrait.value) || (s.market_regimes || []).includes('全面适用'))
-
-// 简洁的操作建议文案（优先使用后端下发的统一文案，与大盘看板保持一致）
-const adviceText = computed(() => {
-  const c = marketCtx.value
-  if (!c) return '等待行情数据…'
-  if (c.advice) return c.advice
-  const t = c.trend
-  const v = c.volatility
-  if (t === 'bull') {
-    if (v === 'high') return '偏强但波动大 → 优先选择突破/趋势类，注意控制仓位'
-    return '偏强 → 优先选择趋势、突破、放量类策略'
-  }
-  if (t === 'bear') {
-    if (v === 'high') return '偏弱且高波动 → 谨慎操作，可关注超跌反弹小仓试错'
-    return '偏弱 → 降低仓位，关注低估值避险与超跌反弹'
-  }
-  if (t === 'sideways') {
-    if (v === 'high') return '震荡高波动 → 区间操作为主，注意假突破风险'
-    return '震荡 → 关注回踩支撑、反转类策略'
-  }
-  return '等待行情数据…'
-})
-
-// 只看推荐筛选：展示适配当前画像（或全面适用）的策略
-const showRecommendedOnly = ref(false)
-const showRecommendedOnlyLoading = computed(() => !regimeCurrentLoadReady.value)
-const filteredStrategies = computed(() => {
-  if (!showRecommendedOnly.value || !currentPortrait.value) return strategies.value
-  return strategies.value.filter(isFitStrategy)
-})
-
-// ── 大盘四维判断（趋势/波动率/市场宽度/情绪，对齐策略说明矩阵） ──────
+// ── 大盘四维检测（供矩阵初始维度与盘中实时刷新；画像由矩阵广播，联动策略池） ──────
 const regimeData = ref<Record<string, any> | null>(null)
-const regimeLoading = ref(false)
+const regimeUpdatedAt = ref('')
 const loadMarketRegime = async () => {
-  regimeLoading.value = true
   try {
     const res: any = await retailApi.detectRegimeAuto()
     regimeData.value = {
       trend: res.trend, volatility: res.volatility,
       breadth: res.breadth, sentiment: res.sentiment,
       summary: res.summary, active_strategies: res.active_strategies || [],
+      // 原始实时指标：盘中预警时展示「沪深300 / 市场宽度」验证大盘确实在按实际刷新
+      raw_price: res.raw_data?.index_price ?? null,
+      raw_breadth: res.raw_data?.breadth_ratio ?? null,
     }
+    regimeUpdatedAt.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
   } catch (e) {
     console.warn('加载大盘四维判断失败', e)
     regimeData.value = null
-  } finally {
-    regimeLoading.value = false
   }
 }
 
-const _TREND_LABEL: Record<string, string> = { bull: '牛市', bear: '熊市', sideways: '震荡' }
-const regimeTrend = computed(() => {
-  const t = regimeData.value?.trend
-  if (t === 'bull') return 'bull'
-  if (t === 'bear') return 'bear'
-  return 'sideways'
+// 盘中预警开启时：矩阵展示实时大盘快照（值 + 检测时刻），让刷新肉眼可见
+const liveMetrics = computed(() => {
+  if (!realtimeScan.value || !regimeData.value) return null
+  const d = regimeData.value
+  const breadthPct =
+    d.raw_breadth != null ? Math.round(Number(d.raw_breadth) * 1000) / 10 : null
+  return {
+    price: d.raw_price != null ? Number(d.raw_price) : null,
+    breadthPct,
+    updatedAt: regimeUpdatedAt.value,
+  }
 })
-const regimeTrendLabel = computed(() => _TREND_LABEL[regimeTrend.value] || '待研判')
-const regimeVolLabel = computed(() => ({ high: '高波动', normal: '正常', low: '低波动' }[regimeData.value?.volatility || ''] || '—'))
-const regimeBreadthLabel = computed(() => ({ broad: '普涨', normal: '中性', narrow: '分化' }[regimeData.value?.breadth || ''] || '—'))
-const regimeSentLabel = computed(() => ({ euphoric: '狂热', neutral: '中性', panic: '恐慌' }[regimeData.value?.sentiment || ''] || '—'))
-const regimeSummary = computed(() => regimeData.value?.summary || '')
 
-const loadMarketContext = async () => {
-  marketLoading.value = true
-  try {
-    const res = await strategyApi.marketContext()
-    marketCtx.value = ((res as any)?.data as MarketContext | undefined) ?? null
-  } catch (e) {
-    console.warn('加载大盘行情上下文失败', e)
-  } finally {
-    marketLoading.value = false
-  }
+// 矩阵初始维度：今日检测四维 → 矩阵中文选项
+const _DIM_CN: Record<string, Record<string, string>> = {
+  trend: { bull: '牛市', range: '震荡', sideways: '震荡', bear: '熊市' },
+  vol: { high: '高波动', normal: '正常', low: '低波动' },
+  breadth: { broad: '普涨', normal: '中性', narrow: '分化' },
+  sentiment: { euphoric: '狂热', neutral: '中性', panic: '恐慌' },
 }
+const initialMatrixDims = computed<Record<string, string> | undefined>(() => {
+  const d = regimeData.value
+  if (!d) return undefined
+  const out: Record<string, string> = {}
+  const rawKey: Record<string, string> = { trend: 'trend', vol: 'volatility', breadth: 'breadth', sentiment: 'sentiment' }
+  for (const k of Object.keys(_DIM_CN)) {
+    const val = d[rawKey[k]]
+    if (val) out[k] = _DIM_CN[k][String(val)] || ''
+  }
+  return out
+})
+
+// 矩阵画像 → 策略池适配标记（画像由矩阵组件广播）
+const matrixPortrait = ref('')
+const syncPortrait = (p: string) => { matrixPortrait.value = p }
+
+// 策略池展示全部策略：适配当前画像的策略亮色显示，未适配的半透明（可正常点击运行）
+const displayStrategies = computed(() => strategies.value)
+const adaptedSet = computed(() => {
+  const set = new Set<string>()
+  if (!matrixPortrait.value) return set
+  for (const s of strategies.value) {
+    if ((s.market_regimes || []).includes(matrixPortrait.value) || (s.market_regimes || []).includes('全面适用')) {
+      set.add(s.id)
+    }
+  }
+  return set
+})
+const adaptedCount = computed(() => adaptedSet.value.size)
+const isAdapted = (id: string) => adaptedSet.value.has(id)
 
 // ── 盘中实时触发（仅自选+持仓池） ─────────────────────────
 const realtimeScan = ref(false)        // 是否开启盘中预警（实时扫描）开关
@@ -437,7 +384,9 @@ const toggleRealtime = async (on: boolean) => {
       return
     }
     ElMessage.info('盘中预警开启：基于自选+持仓，历史日K + 当日实时K合成（盘中为暂定信号，15:00 收盘定格确认）')
-    await runAll(true)
+    // 大盘实际检测：开启即拉取，之后 60s 独立轮询（不受 runAll 阻塞）
+    await Promise.allSettled([runAll(true), loadMarketRegime()])
+    startRegimeLivePoll()
   } else {
     // 关闭实时扫描：重置交易日，避免残留“今天”导致 EOD 面板取到无数据的当日而一直无结果
     asOf.value = ''
@@ -445,7 +394,25 @@ const toggleRealtime = async (on: boolean) => {
     result.value = null
     showAllResult.value = null
     activeStrategy.value = null
+    stopRegimeLivePoll()
     await runAll()
+  }
+}
+
+// ── 盘中预警：大盘情况独立按实际刷新 ─────────────────────────────
+// 与 runAll 的 5 分钟周期解耦（runAll 可能长时间占用），60s 轮询一次检测，
+// 与后端 market 分类交易时段 TTL(60s) 对齐，矩阵自动跟随最新检测并刷新策略池适配。
+let regimeTimer: number | undefined
+const startRegimeLivePoll = () => {
+  stopRegimeLivePoll()
+  regimeTimer = window.setInterval(() => {
+    if (realtimeScan.value) loadMarketRegime()
+  }, 60_000)
+}
+const stopRegimeLivePoll = () => {
+  if (regimeTimer) {
+    window.clearInterval(regimeTimer)
+    regimeTimer = undefined
   }
 }
 
@@ -609,6 +576,16 @@ const runSingle = async (id: string) => {
 }
 
 const handleRun = (s: StrategyMeta) => {
+  // 非内置策略（零售扫描 / 对话模板）由独立通道执行，不参与本策略池筛选，
+  // 避免对它调用 run 接口产生「全市场全命中」的误导结果。
+  if (s.source !== 'builtin') {
+    ElMessage.info(
+      s.source === 'retail'
+        ? `「${s.name}」由零售扫描器独立执行，请在其专属页面查看结果`
+        : `「${s.name}」由对话引擎 / 辅助信号执行，不参与策略池筛选`
+    )
+    return
+  }
   activeStrategy.value = s.id
   activeStrategyName.value = s.name
   showAll.value = false
@@ -668,9 +645,9 @@ const batchAddToFavorites = async () => {
 onMounted(() => {
   loadStrategies()
   loadMonitorStatus()
-  loadMarketContext()
   loadMarketRegime()
-  // 盘中预警开启时，交易时段内每 5 分钟自动刷新一次（个人分析用，不需要秒级；15:00 后自动定格）
+  // 盘中预警开启时，交易时段内每 5 分钟自动刷新一次选股结果（个人分析用，不需要秒级；15:00 后自动定格）。
+  // 大盘情况的实时刷新由独立的 60s regimeLivePoll 负责（见 startRegimeLivePoll），不在此重复。
   realtimeTimer = window.setInterval(() => {
     if (realtimeScan.value && !runningAll.value) {
       runAll(true)
@@ -680,6 +657,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   if (realtimeTimer) window.clearInterval(realtimeTimer)
+  stopRegimeLivePoll()
 })
 
 let realtimeTimer: number | undefined
@@ -797,115 +775,7 @@ let realtimeTimer: number | undefined
   }
 
   /* ===== 大盘行情上下文条 ===== */
-  .market-bar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    padding: 14px 20px;
-    margin-bottom: 18px;
-    border-radius: 14px;
-    border: 1px solid var(--el-border-color-lighter);
-    background: linear-gradient(135deg, color-mix(in srgb, var(--mbc) 8%, transparent), var(--el-bg-color) 50%);
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
-    --mbc: var(--el-color-primary);
 
-    &.trend-bull { --mbc: var(--el-color-danger); }
-    &.trend-bear { --mbc: var(--el-color-success); }
-    &.trend-sideways { --mbc: var(--el-color-warning); }
-    &.trend-unknown { --mbc: var(--el-text-color-secondary); }
-
-    .market-left {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      flex: 1;
-      min-width: 0;
-      flex-wrap: wrap;
-    }
-
-    .verdict-chip {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 6px 14px;
-      border-radius: 999px;
-      font-size: 14px;
-      font-weight: 700;
-      color: var(--mbc);
-      background: color-mix(in srgb, var(--mbc) 12%, transparent);
-      border: 1px solid color-mix(in srgb, var(--mbc) 28%, transparent);
-
-      .verdict-icon {
-        font-size: 16px;
-      }
-      .verdict-label {
-        letter-spacing: 0.5px;
-      }
-      .verdict-vol {
-        font-size: 12px;
-        font-weight: 500;
-        opacity: 0.8;
-      }
-    }
-
-    .verdict-advice {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 13.5px;
-      color: var(--el-text-color-regular);
-      flex: 1;
-      min-width: 200px;
-
-      .advice-icon {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 26px;
-        height: 26px;
-        border-radius: 50%;
-        background: color-mix(in srgb, var(--mbc) 14%, transparent);
-        color: var(--mbc);
-        flex-shrink: 0;
-      }
-      .advice-text {
-        line-height: 1.5;
-        font-weight: 500;
-      }
-    }
-
-    .market-right {
-      flex-shrink: 0;
-    }
-
-    /* 四维判断徽章行（趋势/波动/宽度/情绪） */
-    .verdict-dims {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      margin-top: 8px;
-    }
-
-    /* 策略说明折叠项 */
-    .market-collapse {
-      margin-top: 10px;
-      border: 1px solid var(--el-border-color-lighter);
-      border-radius: 10px;
-      background: var(--el-bg-color);
-
-      :deep(.el-collapse-item__header) {
-        font-weight: 600;
-        padding-left: 14px;
-      }
-      :deep(.el-collapse-item__wrap) {
-        background: var(--el-bg-color-page);
-      }
-      :deep(.el-collapse-item__content) {
-        padding: 4px 14px 14px;
-      }
-    }
-  }
 
   /* ===== 卡片通用 ===== */
   .strategy-panel,
@@ -1031,22 +901,22 @@ let realtimeTimer: number | undefined
         &::before { opacity: 1; }
       }
 
-      &.card-recommended {
-        border-color: color-mix(in srgb, var(--el-color-success) 50%, transparent);
-        background:
-          linear-gradient(135deg, color-mix(in srgb, var(--el-color-success) 6%, transparent) 0%, transparent 50%),
-          var(--el-bg-color);
-        box-shadow: 0 4px 16px color-mix(in srgb, var(--el-color-success) 12%, transparent);
+      /* 未适配当前大盘画像：半透明显示，与适配策略区分（仍可点击运行） */
+      &.dimmed {
+        opacity: 0.42;
+        filter: grayscale(0.55) saturate(0.6);
 
-        &::before {
-          opacity: 1;
-          background: linear-gradient(90deg, var(--el-color-success), transparent);
+        .strategy-icon { opacity: 0.7; }
+
+        &:hover {
+          opacity: 0.8;
+          filter: grayscale(0.15) saturate(0.9);
         }
       }
 
-      &.card-caution {
-        opacity: 0.65;
-      }
+
+
+
 
       &.loading {
         opacity: 0.7;
@@ -1185,38 +1055,7 @@ let realtimeTimer: number | undefined
       }
 
       /* ===== 行情适配：视觉化推荐标记 ===== */
-      .strategy-fit-mark {
-        margin-top: 10px;
-        min-height: 0;
 
-        .mark-pill {
-          display: inline-flex;
-          align-items: center;
-          gap: 4px;
-          padding: 3px 12px;
-          border-radius: 999px;
-          font-size: 12px;
-          font-weight: 700;
-        }
-
-        .mark-pill.recommended {
-          color: var(--el-color-success);
-          background: color-mix(in srgb, var(--el-color-success) 12%, transparent);
-          border: 1px solid color-mix(in srgb, var(--el-color-success) 30%, transparent);
-          animation: recommend-glow 2.5s ease-in-out infinite;
-        }
-
-        .mark-pill.caution {
-          color: var(--el-color-danger);
-          background: color-mix(in srgb, var(--el-color-danger) 8%, transparent);
-          border: 1px solid color-mix(in srgb, var(--el-color-danger) 22%, transparent);
-          opacity: 0.75;
-        }
-
-        &.lv--1 {
-          opacity: 0.75;
-        }
-      }
 
       @keyframes recommend-glow {
         0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--el-color-success) 30%, transparent); }
@@ -1353,26 +1192,8 @@ let realtimeTimer: number | undefined
 
 @media (max-width: 768px) {
   .strategy-screener {
-    .market-bar {
-      flex-direction: column;
-      align-items: stretch;
-      gap: 12px;
-      padding: 12px 14px;
-
-      .market-left {
-        flex-direction: column;
-        align-items: stretch;
-        gap: 10px;
-      }
-
-      .verdict-advice {
-        font-size: 13px;
-      }
-
-      .market-right {
-        display: flex;
-        justify-content: flex-end;
-      }
+    .strategy-grid {
+      grid-template-columns: 1fr;
     }
   }
 }
@@ -1395,11 +1216,7 @@ html.dark {
         background: linear-gradient(135deg, color-mix(in srgb, var(--sc) 14%, transparent) 0%, transparent 60%),
           var(--el-fill-color-dark);
       }
-      &.card-recommended {
-        background:
-          linear-gradient(135deg, color-mix(in srgb, var(--el-color-success) 10%, transparent) 0%, transparent 50%),
-          var(--el-fill-color-dark);
-      }
+
     }
   }
 }

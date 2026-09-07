@@ -22,6 +22,15 @@ export interface StrategyMeta {
   exit_signals: string[]
   source: string
   asset_types: string[]
+  // 大盘适配画像（策略注册表 market_regimes）：决定矩阵默认画像下的策略池展示
+  market_regimes?: string[]
+  // 展示元数据（注册表 frontend）
+  frontend?: {
+    icon?: string
+    color?: string
+    order?: number
+    badge?: string | null
+  }
   // 买卖指导：人类可读的买入/卖出规则（由 entry/exit 信号转译）
   buy_rules?: string[]
   sell_rules?: string[]
