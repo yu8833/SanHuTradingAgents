@@ -303,7 +303,11 @@ async def test_bug_013_calibrate_repairs_stale_snapshot():
             pytest.skip("300750 无当日日线数据")
 
         # 人为制造滞留快照：amount/volume 缩水 ~1.7%，updated_at 设为北京 14:59（UTC 06:59）
+        # 并同步把 trade_date 对齐到日线最新交易日（非交易日时 market_quotes.trade_date
+        # 可能为当日日期而与日线最新交易日不一致，导致校准查询匹配不到滞留记录）
         td_date = latest_td.replace("-", "")
+        orig_mq = await db["market_quotes"].find_one({"code": "300750"})
+        orig_td = orig_mq.get("trade_date") if orig_mq else None
         stale_updated = datetime(
             int(td_date[:4]), int(td_date[4:6]), int(td_date[6:8]), 6, 59, 0,
             tzinfo=timezone.utc,
@@ -311,6 +315,7 @@ async def test_bug_013_calibrate_repairs_stale_snapshot():
         await db["market_quotes"].update_one(
             {"code": "300750"},
             {"$set": {
+                "trade_date": td_date,
                 "amount": round(sq["amount"] * 0.983, 2),
                 "volume": int(sq["volume"] * 0.983),
                 "updated_at": stale_updated,
@@ -329,6 +334,12 @@ async def test_bug_013_calibrate_repairs_stale_snapshot():
         assert abs(mq["volume"] / sq["volume"] - 1) < 1e-6, (
             f"校准后 volume 应等于日线值: {mq['volume']} vs {sq['volume']}"
         )
+
+        # 还原 trade_date，避免污染线上快照（amount/volume 已校准为日线值，无需还原）
+        if orig_td and orig_td != td_date:
+            await db["market_quotes"].update_one(
+                {"code": "300750"}, {"$set": {"trade_date": orig_td}}
+            )
     finally:
         await close_database()
 
