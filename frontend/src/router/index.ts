@@ -228,30 +228,6 @@ const routes: RouteRecordRaw[] = [
     ]
   },
   {
-    path: '/chat-agent',
-    name: 'ChatAgent',
-    component: () => import('@/layouts/BasicLayout.vue'),
-    redirect: '/chat-agent/home',
-    meta: {
-      title: '策略问股',
-      icon: 'ChatDotRound',
-      requiresAuth: true,
-      transition: 'slide-up'
-    },
-    children: [
-      {
-        path: 'home',
-        name: 'ChatAgentHome',
-        component: () => import('@/views/ChatAgent/index.vue'),
-        meta: {
-          title: '策略问股',
-          parentTitle: '分析',
-          requiresAuth: true
-        }
-      }
-    ]
-  },
-  {
     path: '/learning',
     name: 'Learning',
     component: () => import('@/layouts/BasicLayout.vue'),
