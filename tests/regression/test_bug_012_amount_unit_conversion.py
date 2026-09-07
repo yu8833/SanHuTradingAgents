@@ -414,30 +414,10 @@ def test_bug_012_quotes_service_amount_wan_to_yuan_multiplication():
 
 
 # ========================================================================
-# Axiom 6：前端筛选页 amount 筛选阈值必须是元量级（10亿 = 1e9 元）
+# Axiom 6 已移除：原断言依赖旧 screening 前端页（views/Screening/index.vue）的元量级
+# 成交额阈值，该页面与前端成交额分档功能已随架构演进下线（筛选改由后端 retail/strategy
+# 引擎承担）。单位契约（amount=元）由后端 risk_scanner/retail 及下述 Axiom 7-9 持续守护。
 # ========================================================================
-
-@pytest.mark.regression
-def test_bug_012_frontend_screening_amount_thresholds_in_yuan():
-    """bug-012：前端筛选页 high/medium/low 阈值必须是元量级，不是万元量级"""
-    import re
-    screening_path = _path("frontend", "src", "views", "Screening", "index.vue")
-    assert os.path.exists(screening_path), f"找不到文件: {screening_path}"
-
-    with open(screening_path, encoding="utf-8") as f:
-        content = f.read()
-
-    # high 成交量应该是 > 10亿元 = 1,000,000,000 元
-    assert "1000000000" in content, (
-        "Screening/index.vue 高成交量阈值必须是 1e9 元（>10亿元），"
-        "旧值 100000 是万元量级！"
-    )
-
-    # 绝对不允许再出现 "100000, Number.MAX_SAFE_INTEGER"（万元量级阈值）
-    bad_pattern = re.compile(r"\b100000\s*,\s*Number\.MAX_SAFE_INTEGER")
-    assert not bad_pattern.search(content), (
-        "Screening/index.vue 仍然保留万元量级的高成交量阈值 100000！必须×10000 改成元量级"
-    )
 
 
 # ========================================================================
