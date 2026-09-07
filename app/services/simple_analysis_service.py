@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from app.utils.timezone import now_tz, to_display_iso
+from app.utils.timezone import now_tz, to_display_iso, to_config_tz
 
 from app.services.analysis.analyst_catalog import REPORT_FIELDS as _REPORT_FIELDS
 
@@ -2119,9 +2119,88 @@ class SimpleAnalysisService:
                 else:
                     logger.info(f"⚠️ 未找到进度信息: {task_id}")
         else:
-            logger.warning(f"❌ 未找到任务: {task_id}")
+            logger.warning(f"❌ 未找到任务(内存): {task_id}，尝试从 MongoDB 恢复")
+            result = await self._recover_task_status_from_mongo(task_id)
 
         return result
+
+    async def _recover_task_status_from_mongo(self, task_id: str) -> dict[str, Any] | None:
+        """从 MongoDB 恢复任务状态（backend 内存与 worker 独立进程不同步时的兜底）。
+
+        优先查 analysis_tasks（进行中任务），其次 analysis_reports（已完成任务）。
+        返回与内存任务一致的结构，避免前端轮询拿到 None 导致状态中断闪烁。
+        """
+        try:
+            db = get_mongo_db()
+
+            # 首先从 analysis_tasks 集合中查找（正在进行的任务）
+            task_doc = await db.analysis_tasks.find_one({"task_id": task_id})
+            if task_doc:
+                status = task_doc.get("status", "pending") or "pending"
+                progress = int(task_doc.get("progress", 0) or 0)
+                start_time = task_doc.get("started_at") or task_doc.get("created_at")
+                end_time = task_doc.get("completed_at")
+                current_time = now_tz()
+                elapsed_time = 0.0
+                if start_time:
+                    start_aware = to_config_tz(start_time)
+                    if end_time and status in ("completed", "failed", "cancelled"):
+                        end_aware = to_config_tz(end_time)
+                        elapsed_time = max(0, (end_aware - start_aware).total_seconds())
+                    else:
+                        elapsed_time = max(0, (current_time - start_aware).total_seconds())
+
+                logger.info(f"✅ [STATUS] 从 analysis_tasks 恢复任务: {task_id} - {status}")
+                return {
+                    "task_id": task_id,
+                    "status": status,
+                    "progress": progress,
+                    "message": "任务完成" if status == "completed" else f"任务{status}中...",
+                    "current_step": status,
+                    "start_time": to_display_iso(start_time),
+                    "end_time": to_display_iso(end_time),
+                    "elapsed_time": elapsed_time,
+                    "remaining_time": 0,
+                    "estimated_total_time": 0,
+                    "source": "mongodb_tasks",
+                }
+
+            # analysis_tasks 中没有，再从 analysis_reports 集合中查找（已完成的任务）
+            report_doc = await db.analysis_reports.find_one({"task_id": task_id})
+            if report_doc:
+                start_time = report_doc.get("created_at")
+                end_time = report_doc.get("updated_at")
+                elapsed_time = 0.0
+                if start_time and end_time:
+                    try:
+                        elapsed_time = max(
+                            0,
+                            (
+                                to_config_tz(end_time) - to_config_tz(start_time)
+                            ).total_seconds(),
+                        )
+                    except Exception:
+                        elapsed_time = 0.0
+                logger.info(f"✅ [STATUS] 从 analysis_reports 恢复已完成任务: {task_id}")
+                return {
+                    "task_id": task_id,
+                    "status": "completed",
+                    "progress": 100,
+                    "message": "分析完成（从历史记录恢复）",
+                    "current_step": "completed",
+                    "start_time": to_display_iso(start_time),
+                    "end_time": to_display_iso(end_time),
+                    "elapsed_time": elapsed_time,
+                    "remaining_time": 0,
+                    "estimated_total_time": elapsed_time,
+                    "source": "mongodb_reports",
+                }
+
+            logger.warning(f"❌ [STATUS] MongoDB 中也未找到任务: {task_id}")
+        except Exception as mongo_err:
+            logger.warning(f"⚠️ [STATUS] MongoDB 状态恢复失败(忽略): {mongo_err}")
+
+        return None
 
     async def list_all_tasks(
         self,
