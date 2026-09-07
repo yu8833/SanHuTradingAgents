@@ -141,6 +141,14 @@
         :text-inside="true"
       />
 
+      <!-- 分析完成后：查看报告入口 -->
+      <div v-if="batchProgress.status === 'completed' && lastCompletedTask?.taskId" class="report-jump">
+        <el-button type="primary" :icon="Document" @click="openReport(lastCompletedTask.taskId)">
+          查看分析报告
+        </el-button>
+        <span class="report-jump-tip">已生成完整分析报告，点击查看交易员执行方案、操作检查清单等详情</span>
+      </div>
+
       <!-- 子任务 -->
       <div v-if="batchProgress.tasks.length > 0" class="subtask-grid">
         <div
@@ -169,7 +177,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { analysisApi, type BatchProgress } from '@/api/analysis'
 import { configApi } from '@/api/config'
@@ -177,6 +185,7 @@ import ModelConfig from '@/components/ModelConfig.vue'
 import { Document, CaretRight, Loading, CircleCheck } from '@element-plus/icons-vue'
 
 const route = useRoute()
+const router = useRouter()
 const authStore = useAuthStore()
 
 // ── State ──────────────────────────────────────────────
@@ -193,6 +202,8 @@ const modelSettings = ref({
 const progressVisible = ref(false)
 // 单股进行中任务：提交后锁定按钮，刷新后自动恢复进度跟踪
 const singleActive = ref<{ taskId: string; symbol: string } | null>(null)
+// 最近完成的任务：保留查看报告按钮入口
+const lastCompletedTask = ref<{ taskId: string; symbol: string } | null>(null)
 const ACTIVE_TASK_KEY = 'sanhu_active_single_task'
 
 const hasActiveTask = computed(() => {
@@ -385,6 +396,11 @@ const submitAnalysis = async () => {
               if (singlePollTimer) { clearInterval(singlePollTimer); singlePollTimer = null }
               // 任务结束：解除按钮锁定，清理持久化标记
               singleActive.value = null
+              // 完成态保留报告入口（按钮跳转用）
+              if (d.status === 'completed') {
+                lastCompletedTask.value = { taskId, symbol }
+                ElMessage.success(`「${symbol}」分析完成，可查看分析报告`)
+              }
               localStorage.removeItem(ACTIVE_TASK_KEY)
             }
           }
@@ -413,6 +429,12 @@ const submitAnalysis = async () => {
   } finally {
     submitting.value = false
   }
+}
+
+// ── 跳转分析报告 ──────────────────────────────────────
+const openReport = (taskId: string) => {
+  // 报告详情接口支持 task_id / analysis_id / ObjectId 查询
+  router.push({ path: `/reports/view/${taskId}` })
 }
 
 // ── 刷新恢复：进行中的单股任务重新挂起进度跟踪 ────────
@@ -451,6 +473,7 @@ const restoreActiveTask = () => {
         if (['completed', 'failed', 'cancelled'].includes(d.status)) {
           if (singlePollTimer) { clearInterval(singlePollTimer); singlePollTimer = null }
           singleActive.value = null
+          if (d.status === 'completed') { lastCompletedTask.value = { taskId, symbol } }
           localStorage.removeItem(ACTIVE_TASK_KEY)
         }
       }
@@ -764,6 +787,18 @@ onUnmounted(cleanup)
         align-items: center;
         gap: 8px;
         margin: 0;
+      }
+    }
+
+    .report-jump {
+      margin: 4px 0 12px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+
+      .report-jump-tip {
+        font-size: 12px;
+        color: var(--el-text-color-secondary);
       }
     }
 

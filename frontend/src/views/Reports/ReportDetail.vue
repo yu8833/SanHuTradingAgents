@@ -80,58 +80,58 @@
         </div>
       </el-card>
 
+      <!-- 最终决策（融合：优先 final_trade_decision，否则回退 trader_investment_plan） -->
+      <div v-if="finalDecisionKey" class="final-decision">
+        <div class="decision-label">📈 决策建议</div>
+        <div class="decision-options">
+          <div
+            class="decision-chip decision-chip--buy"
+            :class="{
+              'is-active': getFinalAction() === '买入',
+              'is-disabled': getFinalAction() && getFinalAction() !== '买入'
+            }"
+            @click="getFinalAction() === '买入' && openReportDialog(finalDecisionKey)"
+          >买入</div>
+          <div
+            class="decision-chip decision-chip--overweight"
+            :class="{
+              'is-active': getFinalAction() === '增持',
+              'is-disabled': getFinalAction() && getFinalAction() !== '增持'
+            }"
+            @click="getFinalAction() === '增持' && openReportDialog(finalDecisionKey)"
+          >增持</div>
+          <div
+            class="decision-chip decision-chip--hold"
+            :class="{
+              'is-active': getFinalAction() === '持有',
+              'is-disabled': getFinalAction() && getFinalAction() !== '持有'
+            }"
+            @click="getFinalAction() === '持有' && openReportDialog(finalDecisionKey)"
+          >持有</div>
+          <div
+            class="decision-chip decision-chip--underweight"
+            :class="{
+              'is-active': getFinalAction() === '减持',
+              'is-disabled': getFinalAction() && getFinalAction() !== '减持'
+            }"
+            @click="getFinalAction() === '减持' && openReportDialog(finalDecisionKey)"
+          >减持</div>
+          <div
+            class="decision-chip decision-chip--sell"
+            :class="{
+              'is-active': getFinalAction() === '卖出',
+              'is-disabled': getFinalAction() && getFinalAction() !== '卖出'
+            }"
+            @click="getFinalAction() === '卖出' && openReportDialog(finalDecisionKey)"
+          >卖出</div>
+        </div>
+      </div>
+
       <!-- 📋 操作检查清单（实战化要点，来自后端 operational_checklist 字段） -->
       <OperationalChecklist :checklist="report?.operational_checklist" />
 
       <!-- 报告模块 - 与单股分析页一致的卡片式布局，点击弹出全屏对话框 -->
       <div class="pipeline-intro report-pipeline-intro">
-        <!-- 最终决策 -->
-        <div v-if="hasReport('final_trade_decision')" class="final-decision">
-          <div class="decision-label">📈 决策建议</div>
-          <div class="decision-options">
-            <div
-              class="decision-chip decision-chip--buy"
-              :class="{
-                'is-active': getFinalAction() === '买入',
-                'is-disabled': getFinalAction() && getFinalAction() !== '买入'
-              }"
-              @click="getFinalAction() === '买入' && openReportDialog('final_trade_decision')"
-            >买入</div>
-            <div
-              class="decision-chip decision-chip--overweight"
-              :class="{
-                'is-active': getFinalAction() === '增持',
-                'is-disabled': getFinalAction() && getFinalAction() !== '增持'
-              }"
-              @click="getFinalAction() === '增持' && openReportDialog('final_trade_decision')"
-            >增持</div>
-            <div
-              class="decision-chip decision-chip--hold"
-              :class="{
-                'is-active': getFinalAction() === '持有',
-                'is-disabled': getFinalAction() && getFinalAction() !== '持有'
-              }"
-              @click="getFinalAction() === '持有' && openReportDialog('final_trade_decision')"
-            >持有</div>
-            <div
-              class="decision-chip decision-chip--underweight"
-              :class="{
-                'is-active': getFinalAction() === '减持',
-                'is-disabled': getFinalAction() && getFinalAction() !== '减持'
-              }"
-              @click="getFinalAction() === '减持' && openReportDialog('final_trade_decision')"
-            >减持</div>
-            <div
-              class="decision-chip decision-chip--sell"
-              :class="{
-                'is-active': getFinalAction() === '卖出',
-                'is-disabled': getFinalAction() && getFinalAction() !== '卖出'
-              }"
-              @click="getFinalAction() === '卖出' && openReportDialog('final_trade_decision')"
-            >卖出</div>
-          </div>
-        </div>
-
         <!-- 仓位建议（仅当评级为买入且有仓位建议数据时显示） -->
         <div v-if="report['仓位建议'] && getFinalAction() === '买入'" class="position-advice-card">
           <div class="pipeline-section section--position-advice">
@@ -385,26 +385,6 @@
                 <span class="node-icon">🎯</span>
                 <span class="node-name">风险经理</span>
                 <span class="node-desc">综合三方风控视角 → 止损位 / 仓位上限 / 持有周期</span>
-              </div>
-            </div>
-
-            <div v-if="hasReport('trader_investment_plan') || hasReport('final_trade_decision')" class="timeline-phase phase--final-strategy">
-              <div class="phase-label">📈 决策建议</div>
-              <div class="phase-flow">
-                <div
-                  v-if="hasReport('trader_investment_plan')"
-                  class="trade-node is-clickable"
-                  @click="openReportDialog('trader_investment_plan')"
-                >
-                  <span class="node-icon">💼</span>
-                  <span class="node-name">交易员</span>
-                  <span class="node-desc">制定具体策略：买入 / 持有 / 卖出 + 目标价位 + 仓位建议</span>
-                </div>
-                <div v-if="!hasReport('trader_investment_plan') && hasReport('final_trade_decision')" class="trade-node is-clickable" @click="openReportDialog('final_trade_decision')">
-                  <span class="node-icon">📈</span>
-                  <span class="node-name">决策建议</span>
-                  <span class="node-desc">决策建议与执行方案</span>
-                </div>
               </div>
             </div>
           </div>
@@ -936,6 +916,13 @@ const closeReportDialog = () => {
 const hasReport = (key: string): boolean => {
   return !!getReportContentByKey(key)
 }
+
+// 决策建议入口：优先 final_trade_decision，回退 trader_investment_plan（二者融合为一个入口）
+const finalDecisionKey = computed<string | null>(() => {
+  if (hasReport('final_trade_decision')) return 'final_trade_decision'
+  if (hasReport('trader_investment_plan')) return 'trader_investment_plan'
+  return null
+})
 
 const getFinalAction = (): string => {
   if (!report.value) return ''
@@ -4820,8 +4807,8 @@ onBeforeUnmount(() => {
   }
 }
 
-/* 最终决策样式 - 金融专业配色 */
-.report-pipeline-intro .final-decision {
+/* 最终决策样式 - 金融专业配色（顶层块，位于操作检查清单上方） */
+.final-decision {
   background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
   border: 1px solid #e2e8f0;
   border-radius: 16px;
@@ -4829,6 +4816,7 @@ onBeforeUnmount(() => {
   box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.04);
   text-align: center;
   margin-top: 0;
+  margin-bottom: 24px;
   position: relative;
   overflow: hidden;
 
@@ -4942,7 +4930,7 @@ onBeforeUnmount(() => {
 }
 
 html.dark {
-  .report-pipeline-intro .final-decision {
+  .final-decision {
     background: linear-gradient(135deg, #1e293b 0%, #1c1917 100%);
     border-color: #334155;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.2);

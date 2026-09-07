@@ -850,33 +850,60 @@ def build_operational_checklist(reports: dict, extracted: dict | None = None) ->
     out["止损"] = extracted.get("止损价格")
 
     # ② 从 trader_investment_plan 文本按行抓（- **键**：值）
-    def _grab(text: str, keys: tuple[str, ...]) -> str | None:
+    def _grab(text: str, keys: tuple[str, ...], require_price: bool = False) -> str | None:
+        """抓取键值行，带值合法性校验。
+
+        require_price=True 时只接受含数字的合理值（键期望是价格/点位），
+        拒绝畸形串（如 "1不支持方向性加仓"、纯介词说明文字），无效则继续找下一行。
+        """
         if not text:
             return None
         for line in text.splitlines():
             for k in keys:
-                if k in line and any(sep in line for sep in (":", "：", "=")):
-                    val = line.split("：", 1)[-1] if "：" in line else line.split(":", 1)[-1]
-                    val = val.strip()
-                    # 去掉重复键前缀（如 "- **入场价**：1,450" → "1,450"）
-                    for k2 in keys:
-                        val = val.replace(f"**{k2}**", "").replace(k2, "").strip()
-                    if val and val not in ("无", "none", "-"):
-                        return val.strip("- ").strip()
+                if k not in line:
+                    continue
+                if not any(sep in line for sep in (":", "：", "=")):
+                    continue
+                val = line.split("：", 1)[-1] if "：" in line else line.split(":", 1)[-1]
+                val = val.strip()
+                # 去掉重复键前缀（如 "- **入场价**：1,450" → "1,450"）
+                for k2 in keys:
+                    val = val.replace(f"**{k2}**", "").replace(k2, "").strip()
+                val = val.strip("- ").strip()
+                if not val or val in ("无", "none", "-", "不", "否"):
+                    continue
+                # 拒绝明确否定/说明性价值（非数值点位的完整句子）
+                if any(w in val for w in ("不支持", "不建议", "无法", "未必", "待定", "观望")):
+                    continue
+                if require_price:
+                    # 价格类值：必须含数字；且长度合理（纯价格如"28.4 元"通常 ≤12 字符，
+                    # 长句是说明文而非数值，一律按无效处理）
+                    if not any(ch.isdigit() for ch in val):
+                        continue
+                    if len(val) > 20:
+                        continue
+                return val
         return None
 
     trader = "" if not isinstance(reports.get("trader_investment_plan"), str) else reports["trader_investment_plan"]
     risk = "" if not isinstance(reports.get("risk_control_decision"), str) else reports["risk_control_decision"]
     final = "" if not isinstance(reports.get("final_trade_decision"), str) else reports["final_trade_decision"]
 
+    # 点位缺失时按顺序兜底：extracted 结构化字段 → trader 文本 →（入场/目标可回退到 支撑位/目标价）
     if out["入场"] is None:
-        out["入场"] = _grab(trader, ("入场价", "入场价格", "入场"))
+        out["入场"] = _grab(trader, ("入场价", "入场价格", "入场"), require_price=True)
+    if out["入场"] is None:
+        out["入场"] = extracted.get("支撑位")
     if out["止损"] is None:
-        out["止损"] = _grab(trader, ("止损位", "止损价格", "止损"))
+        out["止损"] = _grab(trader, ("止损位", "止损价格", "止损"), require_price=True)
     if out["目标1"] is None:
-        out["目标1"] = _grab(trader, ("目标价", "第一目标", "目标位"))
+        out["目标1"] = _grab(trader, ("目标价", "第一目标", "目标位"), require_price=True)
+    if out["目标1"] is None:
+        out["目标1"] = extracted.get("止盈目标")
     if out["目标2"] is None:
-        out["目标2"] = _grab(trader, ("第二目标", "目标2"))
+        out["目标2"] = _grab(trader, ("第二目标", "目标2"), require_price=True)
+    if out["目标2"] is None:
+        out["目标2"] = extracted.get("二次买入")
     out["风险回报比"] = _grab(trader, ("风险/回报比", "风险回报比", "盈亏比"))
     out["建议仓位"] = _grab(trader, ("建议仓位", "仓位建议", "仓位"))
     out["持有周期"] = _grab(trader, ("预计持有周期", "持有周期", "周期"))
@@ -889,6 +916,7 @@ def build_operational_checklist(reports: dict, extracted: dict | None = None) ->
         for ln in lines:
             s = ln.strip()
             if s.startswith("#") or s.startswith("**"):
+                # 命中目标章节标题则开始收集；遇到下一个章节标题则终止
                 if header in s:
                     collect = True
                     continue
@@ -896,16 +924,40 @@ def build_operational_checklist(reports: dict, extracted: dict | None = None) ->
                     break
             elif collect and s:
                 acc.append(s.lstrip("- ").strip())
-        return acc
+        # 过滤空白项与仅分隔线项，避免尾部空字符串
+        return [a for a in acc if a and not set(a) <= {"-", "=", "_"}]
 
     out["入场策略"] = _para(trader, "入场策略")
     out["关键触发"] = _para(trader, "关键触发")
     out["风险警报"] = _para(risk, "关键风险因素") or _grab(risk, ("风险提示", "风险因素")) or (_para(risk, "最坏情景") or [])
     out["监控点"] = _para(risk, "重点监控点")
-    out["催化因素"] = _grab(final, ("催化", "利好催化")) or (_para(final, "利好催化") or [])
+    # 催化因素：优先精确匹配"关键催化剂"，其次"利好催化/催化剂"，拒绝回退到整章大段
+    out["催化因素"] = (
+        _para(trader, "关键催化剂")
+        or _para(trader, "催化")
+        or _grab(final, ("关键催化剂", "催化剂"))
+        or None
+    )
 
-    # ④ 结论文本（最终决策，供卡片底部引用）
-    out["结论文本"] = final.strip() if final else (trader.strip() if trader else None)
+    # ④ 结论文本（仅保留最终评级结论行，不显示整篇 final；供前端决策行展示）
+    def _summary_line(text: str, keys: tuple[str, ...]) -> str | None:
+        if not text:
+            return None
+        for line in text.splitlines():
+            s = line.strip().lstrip("#").strip()
+            for k in keys:
+                if k in s and any(sep in s for sep in (":", "：", "：")):
+                    val = s.split(":", 1)[-1] if ":" in s else s.split("：", 1)[-1]
+                    val = val.strip()
+                    if val and val not in ("无", "-", "None", "none"):
+                        return val
+        return None
+
+    out["结论文本"] = (
+        _summary_line(final, ("最终交易决策", "交易决策", "最终定性评级"))
+        or _summary_line(trader, ("最终交易决策", "交易决策", "要害抉择"))
+        or None
+    )
 
     # ⑤ 清理：段落字段统一 list；空 list 转 None
     for k in ("入场策略", "关键触发", "风险警报", "监控点", "催化因素"):
