@@ -1361,10 +1361,6 @@ app.include_router(health.router, prefix="/api", tags=["health"])
 app.include_router(data_status.router, tags=["data-status"])
 app.include_router(auth.router, prefix="/api/auth", tags=["authentication"])
 app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"])
-# 已废弃：quick_analysis 模块的 GET /{stock_code} 通配路由会遮蔽 /api/favorites、
-# /api/notifications 等单段路径，且功能已由 /api/analysis/single (mode=quick) 替代。
-# 如需恢复，请将通配路径改为 /api/quick/{stock_code} 后再注册。
-# app.include_router(quick_analysis.router, prefix="/api", tags=["quick-analysis"])
 app.include_router(reports.router, tags=["reports"])
 app.include_router(screening.router, prefix="/api/screening", tags=["screening"])
 # 候选池（行业→个股→择时 流水线）

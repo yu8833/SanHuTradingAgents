@@ -94,28 +94,6 @@ const routes: RouteRecordRaw[] = [
           requiresAuth: true
         }
       },
-      {
-        path: 'single',
-        name: 'SingleAnalysis',
-        redirect: '/analysis',
-        meta: {
-          title: '单股分析',
-          parentTitle: '分析',
-          requiresAuth: true,
-          hideInMenu: true
-        }
-      },
-      {
-        path: 'batch',
-        name: 'BatchAnalysis',
-        redirect: '/analysis',
-        meta: {
-          title: '批量分析',
-          parentTitle: '分析',
-          requiresAuth: true,
-          hideInMenu: true
-        }
-      },
       ]
   },
   {
@@ -148,38 +126,6 @@ const routes: RouteRecordRaw[] = [
           title: '策略回测',
           parentTitle: '策略',
           requiresAuth: true
-        }
-      },
-      {
-        path: 'convertible-arbitrage',
-        name: 'ConvertibleArbitrage',
-        component: () => import('@/views/Screening/ConvertibleArbitrage.vue'),
-        meta: {
-          title: '转债博弈',
-          parentTitle: '策略',
-          requiresAuth: true
-        }
-      },
-      {
-        path: 'macd-divergence',
-        name: 'MacdDivergence',
-        component: () => import('@/views/Screening/MacdDivergence.vue'),
-        meta: {
-          title: 'MACD背离',
-          parentTitle: '策略',
-          requiresAuth: true,
-          hidden: true // 高级变体，折叠保留
-        }
-      },
-      {
-        path: 'extreme-reversal',
-        name: 'ExtremeReversal',
-        component: () => import('@/views/Screening/ExtremeReversal.vue'),
-        meta: {
-          title: '极端反转',
-          parentTitle: '策略',
-          requiresAuth: true,
-          hidden: true // 高级变体，折叠保留
         }
       }
     ]
@@ -313,6 +259,7 @@ const routes: RouteRecordRaw[] = [
       title: '资料',
       icon: 'Reading',
       requiresAuth: false,
+      hideInMenu: true,
       transition: 'fade'
     },
     children: [
