@@ -85,15 +85,18 @@
             class="submit-btn"
             type="primary"
             :loading="submitting"
-            :disabled="stockCount === 0"
+            :disabled="stockCount === 0 || hasActiveTask"
             @click="submitAnalysis"
           >
             <el-icon v-if="!submitting"><CaretRight /></el-icon>
             {{ submitting
               ? '分析中...'
-              : (mode === 'batch' ? `开始批量分析 · ${stockCount} 只` : '开始分析') }}
+              : (hasActiveTask
+                ? '分析进行中...'
+                : (mode === 'batch' ? `开始批量分析 · ${stockCount} 只` : '开始分析')) }}
           </el-button>
           <span v-if="stockCount === 0" class="submit-hint">请先输入股票代码</span>
+          <span v-else-if="hasActiveTask" class="submit-hint">已有进行中的分析任务，完成后可再次提交</span>
         </div>
       </el-card>
 
@@ -188,6 +191,17 @@ const modelSettings = ref({
 })
 
 const progressVisible = ref(false)
+// 单股进行中任务：提交后锁定按钮，刷新后自动恢复进度跟踪
+const singleActive = ref<{ taskId: string; symbol: string } | null>(null)
+const ACTIVE_TASK_KEY = 'sanhu_active_single_task'
+
+const hasActiveTask = computed(() => {
+  if (submitting.value) return false
+  if (singleActive.value) return true
+  // 批量模式进行中（进度弹窗且非终态）也视为活跃，避免完成前重复提交
+  if (mode.value === 'batch' && progressVisible.value && !['completed', 'failed', 'cancelled'].includes(batchProgress.status)) return true
+  return false
+})
 const batchProgress = reactive<BatchProgress>({
   batch_id: '',
   status: 'pending',
@@ -324,6 +338,10 @@ const buildParams = () => ({
 
 const submitAnalysis = async () => {
   if (stockCount.value === 0) return
+  if (hasActiveTask.value) {
+    ElMessage.warning('已有分析任务在进行中，请等待完成后再提交')
+    return
+  }
   if (mode.value === 'batch' && stockCount.value > 10) {
     ElMessage.warning('单次批量分析最多支持 10 只股票')
     return
@@ -347,6 +365,10 @@ const submitAnalysis = async () => {
       batchProgress.total_tasks = 1
       batchProgress.tasks = [{ task_id: taskId, symbol, status: 'processing', progress: 0 }]
 
+      // 记录进行中的单股任务，锁定提交按钮；刷新后可恢复进度跟踪
+      singleActive.value = { taskId, symbol }
+      localStorage.setItem(ACTIVE_TASK_KEY, JSON.stringify({ taskId, symbol }))
+
       singlePollTimer = setInterval(async () => {
         try {
           const s = await analysisApi.getTaskStatus(taskId)
@@ -361,6 +383,9 @@ const submitAnalysis = async () => {
             batchProgress.status = d.status === 'completed' ? 'completed' : (d.status === 'failed' ? 'failed' : 'processing')
             if (['completed', 'failed', 'cancelled'].includes(d.status)) {
               if (singlePollTimer) { clearInterval(singlePollTimer); singlePollTimer = null }
+              // 任务结束：解除按钮锁定，清理持久化标记
+              singleActive.value = null
+              localStorage.removeItem(ACTIVE_TASK_KEY)
             }
           }
         } catch { /* ignore */ }
@@ -390,6 +415,49 @@ const submitAnalysis = async () => {
   }
 }
 
+// ── 刷新恢复：进行中的单股任务重新挂起进度跟踪 ────────
+const restoreActiveTask = () => {
+  const raw = localStorage.getItem(ACTIVE_TASK_KEY)
+  if (!raw) return
+  let saved: { taskId: string; symbol: string }
+  try { saved = JSON.parse(raw) } catch { return }
+  if (!saved?.taskId) return
+
+  const { taskId, symbol } = saved
+  if (mode.value !== 'single') return
+
+  singleActive.value = { taskId, symbol }
+  stockCodes.value = [symbol]
+  stockInput.value = symbol
+  progressVisible.value = true
+  Object.assign(batchProgress, {
+    status: 'processing', progress: 0, total_tasks: 1, completed_tasks: 0, failed_tasks: 0,
+    running_tasks: 1, cancelled_tasks: 0,
+    tasks: [{ task_id: taskId, symbol, status: 'processing', progress: 0 }]
+  })
+
+  singlePollTimer = setInterval(async () => {
+    try {
+      const s = await analysisApi.getTaskStatus(taskId)
+      if (s?.success && s.data) {
+        const d = s.data
+        const task = batchProgress.tasks[0]
+        if (task) { task.status = d.status; task.progress = d.progress || 0 }
+        batchProgress.progress = d.progress || 0
+        batchProgress.completed_tasks = d.status === 'completed' ? 1 : 0
+        batchProgress.failed_tasks = d.status === 'failed' ? 1 : 0
+        batchProgress.running_tasks = ['pending', 'processing', 'running', 'queued'].includes(d.status) ? 1 : 0
+        batchProgress.status = d.status === 'completed' ? 'completed' : (d.status === 'failed' ? 'failed' : 'processing')
+        if (['completed', 'failed', 'cancelled'].includes(d.status)) {
+          if (singlePollTimer) { clearInterval(singlePollTimer); singlePollTimer = null }
+          singleActive.value = null
+          localStorage.removeItem(ACTIVE_TASK_KEY)
+        }
+      }
+    } catch { /* ignore */ }
+  }, 2000)
+}
+
 // ── 初始化 ─────────────────────────────────────────────
 onMounted(async () => {
   try {
@@ -416,6 +484,9 @@ onMounted(async () => {
     stockCodes.value = parts
     stockInput.value = parts.join('\n')
   }
+
+  // 刷新页面后恢复进行中的单股任务（若路由未指定新股票）
+  if (!q?.stocks) restoreActiveTask()
 })
 
 onUnmounted(cleanup)

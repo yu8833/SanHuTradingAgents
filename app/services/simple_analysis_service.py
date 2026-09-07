@@ -806,6 +806,52 @@ class SimpleAnalysisService:
 
         return trading_graph
 
+    async def find_active_task(self, user_id: str, stock_code: str) -> dict[str, Any] | None:
+        """幂等去重：查找同一用户对同一股票当前仍在进行中的活跃任务。
+
+        活跃判定：status 为非终态（pending/processing/queued/running），
+        且 updated_at 在最近 STALE_WINDOW（默认 30 分钟）内，避免陈旧僵尸任务
+        长期阻塞新分析。
+
+        Returns:
+            存在活跃任务时返回 {"task_id", "status", "progress"}，否则 None
+        """
+        try:
+            db = get_mongo_db()
+            from datetime import timedelta
+
+            active_statuses = ["pending", "processing", "queued", "running"]
+            stale_cutoff = now_tz() - timedelta(minutes=30)
+            task_doc = await db.analysis_tasks.find_one(
+                {
+                    "user_id": str(user_id),
+                    "$or": [
+                        {"stock_symbol": stock_code},
+                        {"stock_code": stock_code},
+                        {"symbol": stock_code},
+                    ],
+                    "status": {"$in": active_statuses},
+                    "updated_at": {"$gte": stale_cutoff},
+                },
+                {"task_id": 1, "status": 1, "progress": 1},
+                sort=[("updated_at", -1)],
+            )
+            if task_doc:
+                logger.info(
+                    f"🔁 幂等去重命中: user={user_id} stock={stock_code} "
+                    f"task={task_doc.get('task_id')} status={task_doc.get('status')}"
+                )
+                return {
+                    "task_id": task_doc["task_id"],
+                    "status": task_doc.get("status", "processing"),
+                    "progress": task_doc.get("progress", 0),
+                }
+        except Exception as e:
+            # 幂等查询失败时降级为允许创建（首条错误不能阻塞正常分析）
+            logger.warning(f"⚠️ 幂等去重查询失败(降级为允许创建): {e}")
+
+        return None
+
     async def create_analysis_task(
         self,
         user_id: str,

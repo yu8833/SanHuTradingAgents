@@ -58,12 +58,32 @@ async def submit_single_analysis(
 
         # 立即创建任务记录并返回，不等待执行完成
         analysis_service = get_simple_analysis_service()
+
+        # 🔧 幂等去重：同一用户对同一股票已有进行中的活跃任务（非终态且近期更新）时，
+        # 直接复用已有任务，避免用户重复点击/重复提交造成重复分析、重复报告。
+        stock_code = request.get_symbol()
+        active = await analysis_service.find_active_task(user["id"], stock_code)
+        if active:
+            logger.info(
+                f"🔁 幂等去重: 用户 {user['id']} 对 {stock_code} 已有活跃任务 "
+                f"{active['task_id']}（{active['status']}），直接复用不重复创建"
+            )
+            return {
+                "success": True,
+                "data": {
+                    "task_id": active["task_id"],
+                    "status": active["status"],
+                    "message": "已有进行中的分析任务，已复用（未重复创建）",
+                    "reused": True,
+                },
+                "message": "分析任务已在进行中（已复用现有任务，避免重复分析）",
+            }
+
         result = await analysis_service.create_analysis_task(user["id"], request)
 
         # 提取变量，避免闭包问题
         task_id = result["task_id"]
         user_id = user["id"]
-        stock_code = request.get_symbol()
 
         # 构建队列参数
         params_dict = request.parameters.model_dump() if request.parameters else {}
