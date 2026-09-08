@@ -18,8 +18,8 @@
       </div>
     </div>
 
-    <!-- 大盘状态条（与「常用策略」行情条统一口径下发，展示一致的中性/高波动与建议） -->
-    <div v-if="regime && !loading" class="regime-bar" :class="'regime-' + regime.trend">
+    <!-- 大盘统一状态条（与「常用策略」矩阵同源四维检测，展示一致的中性/震荡/高波动与建议） -->
+    <div v-if="regime && !loading" class="regime-bar" :class="'regime-' + regime.barKey">
       <div class="regime-chip">
         <el-icon>
           <TrendCharts v-if="regime.trend === 'bull'" />
@@ -266,6 +266,7 @@ import {
   type IndexQuote,
   type MarketDashboard,
 } from '@/api/vibe'
+import { retailApi } from '@/api/retail'
 import { fmtPrice, fmtPct, fmtAbsPct, fmtAmount, fmtSigned, clsByVal } from '@/utils/format'
 
 const loading = ref(false)
@@ -273,8 +274,27 @@ const activeTab = ref('ashare')
 const indices = ref<IndexQuote[]>([])
 const dashboard = ref<MarketDashboard | null>(null)
 
-// 大盘统一市场状态（与「常用策略」行情条同口径，后端下发）
-const regime = computed(() => dashboard.value?.regime ?? null)
+// 大盘统一市场状态条（与「常用策略」矩阵完全同源：同一四维检测接口，中文措辞也对齐）
+const _TREND_CN: Record<string, string> = { bull: '牛市', bear: '熊市', range: '震荡', sideways: '震荡' }
+const _VOL_CN: Record<string, string> = { high: '高波动', normal: '正常', low: '低波动' }
+const regime = ref<Record<string, any> | null>(null)
+const loadMarketRegime = async () => {
+  try {
+    const res: any = await retailApi.detectRegimeAuto()
+    regime.value = {
+      // 矩阵维度取值（range=震荡），barKey 映射现有 status 条配色（range→sideways）
+      trend: res.trend || 'range',
+      barKey: res.trend === 'range' || res.trend === 'sideways' ? 'sideways' : res.trend,
+      trend_label: _TREND_CN[res.trend] || '震荡',
+      volatility_label: _VOL_CN[res.volatility] || '正常',
+      advice: res.summary || '',
+      as_of: `检测于 ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}`,
+    }
+  } catch (e) {
+    console.warn('加载统一市场状态失败', e)
+    regime.value = null
+  }
+}
 
 const today = computed(() => {
   const d = new Date()
@@ -424,6 +444,7 @@ const loadAll = async () => {
     const results = await Promise.allSettled([
       withTimeout(vibeApi.getIndices(), 15000),
       withTimeout(vibeApi.getDashboard(), 20000),
+      withTimeout(loadMarketRegime(), 20000),
     ])
 
     // 逐个处理结果，失败不影响其他数据显示
