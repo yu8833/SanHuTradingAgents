@@ -238,6 +238,58 @@
       </div>
     </section>
       </el-tab-pane>
+
+      <!-- 外围市场（原作战室「参考」tab 外围快照迁入：指数 / 美股 / 港股；财经日历与重要快讯仍在作战室） -->
+      <el-tab-pane label="外围市场" name="overseas">
+        <template v-if="overseas">
+          <section class="block">
+            <div class="block-head">
+              <span class="block-title"><el-icon><Position /></el-icon> 外围市场快照</span>
+              <div class="block-actions">
+                <span class="block-hint">指数 / 美股 / 港股 · 更新于 {{ fmtClock(overseas.generated_at) }}</span>
+                <el-button size="small" :icon="Refresh" :loading="overseasRefreshing || foreignLoading" @click="refreshOverseas">刷新</el-button>
+              </div>
+            </div>
+
+            <div class="sub-block">
+              <div class="sub-title"><el-icon><DataLine /></el-icon> 指数</div>
+              <div class="grid grid-4">
+                <el-card v-for="idx in overseas.indices || []" :key="idx.key" shadow="never" class="idx-card">
+                  <div class="idx-name">{{ idx.name }}<span class="region">{{ idx.region }}</span></div>
+                  <div class="idx-price">{{ idx.price != null ? idx.price.toFixed(2) : '—' }}</div>
+                  <div class="idx-pct" :class="clsByVal(idx.change_pct, '')">{{ fmtPct(idx.change_pct) }}</div>
+                </el-card>
+                <el-empty v-if="!overseas.indices?.length" :image-size="48" description="暂无指数数据" />
+              </div>
+            </div>
+
+            <div class="sub-block">
+              <div class="sub-title"><el-icon><DataLine /></el-icon> 美股</div>
+              <div class="grid grid-4">
+                <el-card v-for="s in foreignUsStocks" :key="s.secid" shadow="never" class="idx-card">
+                  <div class="idx-name">{{ s.name }}<span class="region">美股</span></div>
+                  <div class="idx-price">{{ s.price != null ? s.price.toFixed(2) : '—' }}</div>
+                  <div class="idx-pct" :class="clsByVal(s.change_pct, '')">{{ fmtPct(s.change_pct) }}</div>
+                </el-card>
+                <el-empty v-if="!foreignUsStocks.length" :image-size="48" description="暂无美股数据" />
+              </div>
+            </div>
+
+            <div class="sub-block">
+              <div class="sub-title"><el-icon><DataLine /></el-icon> 港股</div>
+              <div class="grid grid-4">
+                <el-card v-for="s in foreignHkStocks" :key="s.secid" shadow="never" class="idx-card">
+                  <div class="idx-name">{{ s.name }}<span class="region">港股</span></div>
+                  <div class="idx-price">{{ s.price != null ? s.price.toFixed(2) : '—' }}</div>
+                  <div class="idx-pct" :class="clsByVal(s.change_pct, '')">{{ fmtPct(s.change_pct) }}</div>
+                </el-card>
+                <el-empty v-if="!foreignHkStocks.length" :image-size="48" description="暂无港股数据" />
+              </div>
+            </div>
+          </section>
+        </template>
+        <el-empty v-else-if="!overseasLoading" :image-size="48" description="外围市场数据暂不可用，可点「刷新」或刷新页面重试" />
+      </el-tab-pane>
     </el-tabs>
 
     <!-- 免责声明 -->
@@ -248,7 +300,7 @@
 <script setup lang="ts">
 // 显式声明组件名，供 <keep-alive :include> 匹配
 defineOptions({ name: 'ReviewOverview' })
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onActivated } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   DataAnalysis,
@@ -260,6 +312,7 @@ import {
   Bottom,
   Minus,
   Opportunity,
+  Position,
 } from '@element-plus/icons-vue'
 import {
   vibeApi,
@@ -267,6 +320,7 @@ import {
   type MarketDashboard,
 } from '@/api/vibe'
 import { retailApi } from '@/api/retail'
+import { warRoomApi } from '@/api/warRoom'
 import { fmtPrice, fmtPct, fmtAbsPct, fmtAmount, fmtSigned, clsByVal } from '@/utils/format'
 
 const loading = ref(false)
@@ -303,6 +357,70 @@ const today = computed(() => {
   const day = String(d.getDate()).padStart(2, '0')
   return `${y}-${m}-${day}`
 })
+
+// ── 外围市场 tab（指数/美股/港股，原作战室「参考」tab 外围快照迁入）──
+const overseasLoading = ref(false)
+const overseasRefreshing = ref(false)
+const foreignLoading = ref(false)
+const overseas = ref<Record<string, any> | null>(null)
+const foreignStocks = ref<any[]>([])
+const foreignUsStocks = computed(() => foreignStocks.value.filter(s => s.region === '美股'))
+const foreignHkStocks = computed(() => foreignStocks.value.filter(s => s.region === '港股'))
+
+const loadOverseas = async () => {
+  overseasLoading.value = true
+  try {
+    overseas.value = await warRoomApi.getMacroReference()
+  } catch (e) {
+    console.warn('[Overview] 加载外围指数失败', e)
+  } finally {
+    overseasLoading.value = false
+  }
+}
+const loadGlobalStocks = async () => {
+  foreignLoading.value = true
+  try {
+    const res: any = await vibeApi.getGlobalStocks()
+    foreignStocks.value = res?.data || []
+  } catch (e) {
+    console.warn('[Overview] 加载美股/港股失败', e)
+  } finally {
+    foreignLoading.value = false
+  }
+}
+const refreshOverseas = async () => {
+  overseasRefreshing.value = true
+  try {
+    await Promise.all([
+      warRoomApi.getMacroReference(true).then(d => { overseas.value = d }),
+      loadGlobalStocks(),
+    ])
+    ElMessage.success('外围市场已刷新')
+  } catch (e) {
+    console.warn('[Overview] 刷新外围市场失败', e)
+    ElMessage.error('外围市场刷新失败，请稍后重试')
+  } finally {
+    overseasRefreshing.value = false
+  }
+}
+
+// 快照生成时间格式化：今日显示「今日 HH:MM」，否则「M/D HH:MM」
+function fmtClock(iso?: string): string {
+  if (!iso) return '—'
+  let s = String(iso).trim()
+  // 统一截断多余小数秒到 3 位（后端微秒 .898000，部分浏览器解析 >3 位微秒失败）
+  s = s.replace(/\.(\d{3})\d+/, '.$1')
+  // 时区判定：Z / ±HH:MM（可带括号注释，如 "+08:00 (CST)"）都视为带时区；
+  // 无时区的 naive ISO（如旧缓存）一律按 UTC 补 Z，避免按本地时区解析导致时间倒退
+  if (!/([Z]|[+-]\d{2}:?\d{2}( ?\(.+\))?)$/.test(s)) s += 'Z'
+  const d = new Date(s)
+  if (isNaN(d.getTime())) return '—'
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`
+  return d.toDateString() === new Date().toDateString()
+    ? `今日 ${hm}`
+    : `${d.getMonth() + 1}/${d.getDate()} ${hm}`
+}
 
 const colorClass = (v: number | null | undefined) => {
   if (v == null) return 'flat'
@@ -445,6 +563,8 @@ const loadAll = async () => {
       withTimeout(vibeApi.getIndices(), 15000),
       withTimeout(vibeApi.getDashboard(), 20000),
       withTimeout(loadMarketRegime(), 20000),
+      withTimeout(loadOverseas(), 20000),
+      withTimeout(loadGlobalStocks(), 20000),
     ])
 
     // 逐个处理结果，失败不影响其他数据显示
@@ -471,6 +591,13 @@ const loadAll = async () => {
 
 onMounted(() => {
   loadAll()
+})
+
+// keep-alive 缓存恢复时刷新（大盘/外围/日历数据会随时间变化）
+let overviewInited = false
+onActivated(() => {
+  if (overviewInited) loadAll()
+  overviewInited = true
 })
 </script>
 
@@ -568,6 +695,34 @@ onMounted(() => {
   gap: 4px;
 }
 
+.block-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sub-block {
+  margin-bottom: 18px;
+}
+
+.sub-block:last-child {
+  margin-bottom: 0;
+}
+
+.sub-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  margin-bottom: 10px;
+}
+
+.sub-title .el-icon {
+  color: var(--el-color-primary);
+}
+
 .grid {
   display: grid;
   gap: 12px;
@@ -594,8 +749,14 @@ onMounted(() => {
 }
 
 .idx-name .region {
+  margin-left: 4px;
+  padding: 0 6px;
   font-size: 11px;
-  color: var(--el-text-color-placeholder);
+  line-height: 16px;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color);
+  border-radius: 4px;
+  vertical-align: 1px;
 }
 
 .idx-price {
@@ -605,6 +766,11 @@ onMounted(() => {
   color: var(--el-text-color-primary);
   margin: 8px 0 4px;
   letter-spacing: -0.5px;
+}
+
+.idx-pct {
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .idx-change {

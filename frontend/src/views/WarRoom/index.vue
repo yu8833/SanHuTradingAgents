@@ -19,29 +19,26 @@
       </div>
     </div>
 
-    <!-- 流程引导条 -->
-    <div class="flow-bar">
-      <div
-        v-for="seg in flowSegments"
-        :key="seg.key"
-        class="flow-seg"
-        :class="{ active: seg.key === activeTab }"
-        @click="onTabChange(tabIndexMap[seg.key])"
-      >
-        <span class="flow-dot">{{ seg.key === currentPeriod ? '●' : '○' }}</span>
-        <span class="flow-name">{{ seg.label }}</span>
-        <span v-if="seg.count > 0" class="flow-badge">{{ seg.count }}</span>
-      </div>
-      <div class="flow-spacer"></div>
-      <span class="flow-todo">待办合计 <b>{{ todayData?.total_todo ?? 0 }}</b>
-        <span class="flow-todo-sub" :title="todoTooltip">计划 {{ todayData?.pre_market?.plan_pending ?? 0 }} · 预警 {{ alertsUnread }} · 指令 {{ todayData?.intraday?.pending_orders ?? 0 }} · 信号 {{ todayData?.post_market?.signal_pending ?? 0 }}</span>
-      </span>
-    </div>
-
-    <!-- 时段 Tab -->
-    <el-tabs v-model="activeTab" class="war-tabs" @tab-change="onTabChange">
-      <!-- ============ 盘前 ============ -->
-      <el-tab-pane label="盘前" name="pre_market">
+    <!-- 外层 Tab：今日作战（时段时间线）/ 参考（独立，保持原样） -->
+    <el-tabs v-model="outerTab" class="war-tabs" @tab-change="onOuterTabChange">
+      <el-tab-pane label="今日作战" name="ops">
+      <!-- ============ 时间线 · 盘前 ============ -->
+      <section class="tl-period" id="period-pre_market">
+        <div class="tl-head" :class="{ on: activeTab === 'pre_market' }" @click="goPeriod('pre_market')">
+          <span class="tl-dot">{{ currentPeriod === 'pre_market' ? '●' : '○' }}</span>
+          <span class="tl-name">盘前</span>
+          <span v-if="todayData?.pre_market?.todo" class="tl-badge">{{ todayData.pre_market.todo }}</span>
+          <span class="tl-sub">晨间定方向 · 生成当日计划 · 大盘情势</span>
+          <span class="tl-fold-tip">{{ activeTab === 'pre_market' ? '' : '展开 →' }}</span>
+        </div>
+        <div class="tl-body" v-show="activeTab === 'pre_market'">
+          <!-- 盘前决策带：第一眼即知今日方向与待办 -->
+          <div class="decision-bar">
+            <span class="db-item"><span class="db-k">宏观方向</span><span class="db-v">{{ basis?.status ? statusLabel(basis.status) : '—' }}·{{ basis?.confidence ?? '—' }}%</span></span>
+            <span class="db-item"><span class="db-k">今日策略</span><span class="db-v">{{ strategyText }}</span></span>
+            <span class="db-item"><span class="db-k">待确认候选</span><span class="db-v">{{ planGen?.candidates?.length ?? 0 }}</span></span>
+            <span class="db-item"><span class="db-k">卖出观测</span><span class="db-v">{{ planGen?.sell_candidates?.length ?? 0 }}</span></span>
+          </div>
         <template v-if="macro">
           <!-- ① 宏观方向判断（置顶大卡） -->
           <section class="block">
@@ -49,8 +46,7 @@
               <span class="block-title"><el-icon><Compass /></el-icon> 宏观方向判断</span>
               <div class="block-actions">
                 <span v-if="!macro.llm_available" class="block-hint llm-off">解读不可用（仅规则结果）</span>
-                <span class="block-hint">快照生成于 {{ fmtClock(macro.created_at) }}<template v-if="gaugeLocked && basis?.locked_at"> · 方向锁定 {{ fmtClock(basis.locked_at) }}</template></span>
-                <el-button size="small" :icon="Refresh" :loading="macroRefreshing" @click="refreshMacro">立即刷新</el-button>
+                <span class="block-hint">快照生成于 {{ fmtClock(macro.created_at) }}<template v-if="gaugeLocked && basis?.locked_at"> · 方向锁定 {{ fmtClock(basis.locked_at) }}</template> · 点顶部「刷新」更新</span>
               </div>
             </div>
             <!-- 5.2 仪表盘式方向 + 置信度（当日基准静态快照） -->
@@ -171,8 +167,7 @@
           <div class="block-head">
             <span class="block-title"><el-icon><Compass /></el-icon> 今日大盘情形 · 建议策略</span>
             <div class="block-actions">
-              <span class="block-hint">盘前调度检测结果（后端规则，非实时重算）</span>
-              <el-button size="small" :icon="Refresh" :loading="todayRegimeLoading" @click="loadTodayRegime">刷新</el-button>
+              <span class="block-hint">盘前调度检测结果（后端规则，非实时重算）· 点顶部「刷新」更新</span>
             </div>
           </div>
           <el-card shadow="never">
@@ -405,16 +400,35 @@
           </el-table>
           <el-empty v-if="!plans.length" description="今日暂无计划：可点「生成当日计划」自动装配，或手动添加" />
         </section>
-      </el-tab-pane>
+        </div><!-- /tl-body -->
+        <div v-if="activeTab !== 'pre_market'" class="tl-folder" @click="goPeriod('pre_market')">
+          <span class="tf-main">当日计划待确认 {{ plans.filter(p => p.status === 'pending').length }} · 宏观 {{ basis?.status ? statusLabel(basis.status) : '—' }}</span>
+          <span class="tf-tip">点击回看 →</span>
+        </div>
+      </section><!-- /盘前 -->
 
-      <!-- ============ 盘中 ============ -->
-      <el-tab-pane label="盘中" name="intraday">
+      <!-- ============ 时间线 · 盘中 ============ -->
+      <section class="tl-period" id="period-intraday">
+        <div class="tl-head" :class="{ on: activeTab === 'intraday' }" @click="goPeriod('intraday')">
+          <span class="tl-dot">{{ currentPeriod === 'intraday' ? '●' : '○' }}</span>
+          <span class="tl-name">盘中</span>
+          <span v-if="todayData?.intraday?.todo" class="tl-badge">{{ todayData.intraday.todo }}</span>
+          <span class="tl-sub">实时买卖指导 · 持仓跟踪 · 预警</span>
+          <span class="tl-fold-tip">{{ activeTab === 'intraday' ? '' : '展开 →' }}</span>
+        </div>
+        <div class="tl-body" v-show="activeTab === 'intraday'">
+          <!-- 盘中决策带：现在该做什么 -->
+          <div class="decision-bar">
+            <span class="db-item"><span class="db-k">待执行指令</span><span class="db-v hot">{{ intradayExecutable }}</span></span>
+            <span class="db-item"><span class="db-k">持仓浮盈亏</span><span class="db-v">{{ posSummary?.total_profit_loss != null ? fmtSigned(posSummary.total_profit_loss) + ' 元' : '—' }}</span></span>
+            <span class="db-item"><span class="db-k">今日预警</span><span class="db-v">{{ todayData?.intraday?.alert_count ?? todayAlerts.length }}</span></span>
+            <span class="db-item"><span class="db-k">大盘</span><span class="db-v">{{ regime ? (regime.trend_label || '') + (regime.volatility_label ? ' · ' + regime.volatility_label : '') : '—' }}</span></span>
+          </div>
         <section class="block">
           <div class="block-head">
             <span class="block-title"><el-icon><Odometer /></el-icon> 买卖点实时指导</span>
             <div class="block-actions">
-              <span v-if="guide?.as_of" class="block-hint">评估于 {{ guide.as_of }} · 盘中每 30s 自动刷新</span>
-              <el-button size="small" :icon="Refresh" :loading="guideLoading" @click="loadIntradayGuide">对照实时价评估</el-button>
+              <span v-if="guide?.as_of" class="block-hint">评估于 {{ guide.as_of }} · 盘中每 30s 自动刷新 · 点顶部「刷新」手动更新</span>
             </div>
           </div>
 
@@ -422,6 +436,8 @@
             实时行情暂不可用，以下卖出建议基于信号快照价（止损/止盈实时触发不可用），可点「对照实时价评估」重试。
           </el-alert>
 
+          <!-- 买卖指导两栏并排（同吃一路 SSE 行情，避免两张全宽长表上下堆叠） -->
+          <div class="tl-grid-2">
           <!-- 买入建议（未买入的股票：什么时候适合买） -->
           <div class="sub-block">
             <div class="sub-title"><el-icon><ShoppingCart /></el-icon> 买入建议 · 何时买
@@ -514,6 +530,7 @@
             </el-table>
             <el-empty v-if="!guideSells.length" :image-size="48" description="暂无持仓，无需卖出评估" />
           </div>
+          </div><!-- /tl-grid-2 -->
         </section><section class="block">
           <div class="block-head">
             <span class="block-title"><el-icon><Coin /></el-icon> 持仓追踪</span>
@@ -562,14 +579,16 @@
             </el-table-column>
           </el-table>
           <el-empty v-if="!posSummary?.positions?.length" :image-size="48" description="暂无持仓" />
-        </section><!-- ③ 今日预警（角标数字对应本列表行数，顶部「盘中」待办） -->
+        </section><!-- ③ 今日预警（明细默认折叠：总数在决策带，需要时展开列表） -->
         <section class="block">
           <div class="block-head">
             <span class="block-title"><el-icon><Bell /></el-icon> 今日预警
-              <span class="block-hint">今日触发 {{ todayData?.intraday?.alert_count ?? todayAlerts.length }} 条</span>
+              <span class="block-hint">今日触发 {{ todayData?.intraday?.alert_count ?? todayAlerts.length }} 条 · 展开查看明细</span>
             </span>
             <router-link to="/stock-alerts" class="more-link">监控中心页 →</router-link>
           </div>
+          <details class="quiet-details">
+            <summary>预警明细（{{ todayAlerts.length }} 条）</summary>
           <el-table v-loading="alertsLoading" :data="todayAlerts" stripe size="small" class="app-table app-table--compact" max-height="360">
             <el-table-column label="代码" width="100">
               <template #default="{ row }">
@@ -598,6 +617,7 @@
             </el-table-column>
           </el-table>
           <el-empty v-if="!todayAlerts.length && !alertsLoading" :image-size="48" description="今日暂无触发预警" />
+          </details>
         </section><!-- ④ 自选重点（≤5 只实时行情） -->
         <section class="block">
           <div class="block-head">
@@ -633,19 +653,39 @@
             <span v-if="regime.as_of" class="regime-asof">{{ regime.as_of }}</span>
           </div>
           <el-empty v-else :image-size="48" description="暂无市场环境数据" />
-        </section><!-- ⑥ 监控中心（复用现有组件：价格/涨跌幅/持仓退出信号预警） -->
+        </section><!-- ⑥ 监控中心：不再整块内嵌（压缩页面长度），完整功能在监控中心页 -->
         <section class="block">
           <div class="block-head">
             <span class="block-title"><el-icon><Lightning /></el-icon> 监控中心</span>
             <router-link to="/stock-alerts" class="more-link">监控中心页 →</router-link>
           </div>
-          <MonitorCenter />
+          <p class="block-tip">价格 / 涨跌幅 / 持仓退出信号的完整监控在监控中心页查看，此处仅作为入口。</p>
         </section>
-      </el-tab-pane>
+        </div><!-- /tl-body -->
+        <div v-if="activeTab !== 'intraday'" class="tl-folder" @click="goPeriod('intraday')">
+          <span class="tf-main">待执行指令 {{ intradayExecutable }} · 预警 {{ todayData?.intraday?.alert_count ?? todayAlerts.length }} · 持仓盈亏 {{ posSummary?.total_profit_loss != null ? fmtSigned(posSummary.total_profit_loss) : '—' }}</span>
+          <span class="tf-tip">点击回看 →</span>
+        </div>
+      </section><!-- /盘中 -->
 
-      <!-- ============ 盘后 ============ -->
-      <el-tab-pane label="盘后" name="post_market">
-        <!-- ① 交易复盘 · 当日成交（盘后 Tab 首位，先看结果） -->
+      <!-- ============ 时间线 · 盘后 ============ -->
+      <section class="tl-period" id="period-post_market">
+        <div class="tl-head" :class="{ on: activeTab === 'post_market' }" @click="goPeriod('post_market')">
+          <span class="tl-dot">{{ currentPeriod === 'post_market' ? '●' : '○' }}</span>
+          <span class="tl-name">盘后</span>
+          <span v-if="todayData?.post_market?.todo" class="tl-badge">{{ todayData.post_market.todo }}</span>
+          <span class="tl-sub">交易复盘 · 信号验证 · 明日计划预填</span>
+          <span class="tl-fold-tip">{{ activeTab === 'post_market' ? '' : '展开 →' }}</span>
+        </div>
+        <div class="tl-body" v-show="activeTab === 'post_market'">
+          <!-- 盘后决策带：当日结果一目了然 -->
+          <div class="decision-bar">
+            <span class="db-item"><span class="db-k">今日成交</span><span class="db-v">{{ todayTrades.length }} 笔</span></span>
+            <span class="db-item"><span class="db-k">当日盈亏</span><span class="db-v">{{ todayTradesPnl != null ? fmtSigned(todayTradesPnl) : '—' }}</span></span>
+            <span class="db-item"><span class="db-k">信号待验证</span><span class="db-v">{{ signalStats?.pending_count ?? 0 }}</span></span>
+            <span class="db-item"><span class="db-k">信号胜率</span><span class="db-v">{{ signalStats?.total?.win_rate != null ? fmtPct(signalStats.total.win_rate) : '—' }}</span></span>
+          </div>
+        <!-- ① 交易复盘 · 当日成交（盘后首位，先看结果） -->
         <section class="block">
           <div class="block-head">
             <span class="block-title"><el-icon><Document /></el-icon> 交易复盘 · 当日成交</span>
@@ -709,7 +749,6 @@
           <div class="block-head">
             <span class="block-title"><el-icon><Search /></el-icon> 信号跟踪</span>
             <div class="block-actions">
-              <el-button size="small" :icon="Refresh" :loading="signalsLoading" @click="loadSignals">刷新</el-button>
               <el-button size="small" type="primary" :loading="backfillLoading" @click="triggerBackfill">回填到期信号</el-button>
             </div>
           </div>
@@ -807,10 +846,30 @@
           </el-table>
           <el-empty v-if="!scanResult" :image-size="48" description="点击上方按钮运行盘后信号扫描，命中信号自动写入「信号跟踪」" />
         </section>
-      </el-tab-pane>
+        </div><!-- /tl-body -->
+        <div v-if="activeTab !== 'auto'" placeholder @click="goPeriod('post_market')">
+          <span class="tf-main">今日成交 {{ todayTrades.length }} 笔 · 信号待验证 {{ signalStats?.pending_count ?? 0 }}</span>
+          <span class="tf-tip">点击回看 →</span>
+        </div>
+      </section><!-- /盘后 -->
 
-      <!-- ============ 周度复盘 ============ -->
-      <el-tab-pane label="周度复盘" name="weekly">
+      <!-- ============ 时间线 · 周度 ============ -->
+      <section class="tl-period" id="period-weekly">
+        <div class="tl-head" :class="{ on: activeTab === 'weekly' }" @click="goPeriod('weekly')">
+          <span class="tl-dot">{{ currentPeriod === 'weekly' ? '●' : '○' }}</span>
+          <span class="tl-name">周度</span>
+          <span v-if="todayData?.weekly?.todo" class="tl-badge">{{ todayData.weekly.todo }}</span>
+          <span class="tl-sub">定量统计 · 信号有效性 · 定性回顾</span>
+          <span class="tl-fold-tip">{{ activeTab === 'weekly' ? '' : '展开 →' }}</span>
+        </div>
+        <div class="tl-body" v-show="activeTab === 'weekly'">
+          <!-- 周度决策带：本周结果汇总 -->
+          <div class="decision-bar">
+            <span class="db-item"><span class="db-k">本周收益率</span><span class="db-v">{{ weekly?.quant?.weekly_return != null ? fmtPct(weekly.quant.weekly_return) : '—' }}</span></span>
+            <span class="db-item"><span class="db-k">vs 沪深300</span><span class="db-v">{{ weekly?.excess_return != null ? fmtPct(weekly.excess_return) : '—' }}</span></span>
+            <span class="db-item"><span class="db-k">胜率</span><span class="db-v">{{ weekly?.quant?.win_rate != null ? fmtPct(weekly.quant.win_rate) : '—' }}</span></span>
+            <span class="db-item"><span class="db-k">交易笔数</span><span class="db-v">{{ weekly?.quant?.trade_count ?? '—' }}</span></span>
+          </div>
         <section class="block">
           <div class="block-head">
             <span class="block-title"><el-icon><Histogram /></el-icon> 定量统计</span>
@@ -893,72 +952,25 @@
           </div>
           <p class="block-tip">做对了什么 / 做错了什么 / 有没有违反系统规则 / 三系统信号一致性 —— 在交易复盘页记录。</p>
         </section>
-      </el-tab-pane>
-    <!-- ============ 参考（全局背景数据区：外围市场 / 财经日历 / 重要快讯，独立实时数据） ============ -->
+        </div><!-- /tl-body -->
+        <div v-if="activeTab !== 'weekly'" class="tl-folder" @click="goPeriod('weekly')">
+          <span class="tf-main">本周收益 {{ weekly?.quant?.weekly_return != null ? fmtPct(weekly.quant.weekly_return) : '待生成（周五 17:30 自动）' }}</span>
+          <span class="tf-tip">点击查看 →</span>
+        </div>
+      </section><!-- /周度 -->
+      </el-tab-pane><!-- /今日作战 -->
+
+    <!-- ============ 参考（独立 Tab：外围市场 / 财经日历 / 重要快讯，独立实时数据，保持原样） ============ -->
       <el-tab-pane label="参考" name="reference">
         <template v-if="reference">
-      <el-collapse v-model="bgCollapse" class="bg-collapse">
-        <el-collapse-item name="bg">
-          <template #title>
-            <span class="bg-collapse-title">
-              <el-icon><Position /></el-icon>
-              <span class="bg-title-text">全局背景 · 全天参考</span>
-              <span class="block-hint">外围市场 / 财经日历 / 重要快讯 · 更新于 {{ fmtClock(reference.generated_at) }}，可点「刷新」更新</span>
-            </span>
-          </template>
-
-          <!-- 外围市场快照（指数 / 美股 / 港股分类，样式仿大盘看板全球市场） -->
-          <section class="block">
-            <div class="block-head">
-              <span class="block-title"><el-icon><Position /></el-icon> 外围市场快照</span>
-              <div class="block-actions">
-                <span class="block-hint">指数 / 美股 / 港股 · 更新于 {{ fmtClock(reference.generated_at) }}</span>
-                <el-button size="small" :icon="Refresh" :loading="referenceRefreshing || foreignStocksLoading" @click="refreshReference">刷新</el-button>
-              </div>
-            </div>
-
-            <div class="sub-block">
-              <div class="sub-title"><el-icon><DataLine /></el-icon> 指数</div>
-              <div class="grid grid-4">
-                <el-card v-for="idx in reference.indices || []" :key="idx.key" shadow="never" class="idx-card">
-                  <div class="idx-name">{{ idx.name }}<span class="region">{{ idx.region }}</span></div>
-                  <div class="idx-price">{{ idx.price != null ? idx.price.toFixed(2) : '—' }}</div>
-                  <div class="idx-pct" :class="clsByVal(idx.change_pct, '')">{{ fmtPct(idx.change_pct) }}</div>
-                </el-card>
-                <el-empty v-if="!reference.indices?.length" :image-size="48" description="暂无指数数据" />
-              </div>
-            </div>
-
-            <div class="sub-block">
-              <div class="sub-title"><el-icon><DataLine /></el-icon> 美股</div>
-              <div class="grid grid-4">
-                <el-card v-for="s in foreignUsStocks" :key="s.secid" shadow="never" class="idx-card">
-                  <div class="idx-name">{{ s.name }}<span class="region">美股</span></div>
-                  <div class="idx-price">{{ s.price != null ? s.price.toFixed(2) : '—' }}</div>
-                  <div class="idx-pct" :class="clsByVal(s.change_pct, '')">{{ fmtPct(s.change_pct) }}</div>
-                </el-card>
-                <el-empty v-if="!foreignUsStocks.length" :image-size="48" description="暂无美股数据" />
-              </div>
-            </div>
-
-            <div class="sub-block">
-              <div class="sub-title"><el-icon><DataLine /></el-icon> 港股</div>
-              <div class="grid grid-4">
-                <el-card v-for="s in foreignHkStocks" :key="s.secid" shadow="never" class="idx-card">
-                  <div class="idx-name">{{ s.name }}<span class="region">港股</span></div>
-                  <div class="idx-price">{{ s.price != null ? s.price.toFixed(2) : '—' }}</div>
-                  <div class="idx-pct" :class="clsByVal(s.change_pct, '')">{{ fmtPct(s.change_pct) }}</div>
-                </el-card>
-                <el-empty v-if="!foreignHkStocks.length" :image-size="48" description="暂无港股数据" />
-              </div>
-            </div>
-          </section>
-
-          <!-- 今日财经日历：含昨天/今天已公布事件的实际值 + 规则化解读 -->
+          <!-- 今日财经日历：含昨天/今天已公布事件的实际值 + 规则化解读（外围市场快照已迁至大盘看板「外围市场」tab） -->
           <section class="block">
             <div class="block-head">
               <span class="block-title"><el-icon><Calendar /></el-icon> 今日财经日历</span>
-              <span class="block-hint">昨天 + 未来 7 日 · 已公布事件带实际值与解读</span>
+              <div class="block-actions">
+                <span class="block-hint">昨天 + 未来 7 日 · 已公布事件带实际值与解读</span>
+                <el-button size="small" :icon="Refresh" :loading="referenceRefreshing" @click="refreshReference">刷新</el-button>
+              </div>
             </div>
             <el-table v-loading="referenceLoading" :data="reference.calendar || []" stripe size="small" class="app-table app-table--compact" max-height="420">
               <el-table-column label="日期" width="104">
@@ -1014,11 +1026,9 @@
             </div>
             <p v-if="filteredNewsCount > 0" class="block-tip">已过滤 {{ filteredNewsCount }} 条与自选/持仓/当日计划无关的个股快讯</p>
           </section>
-        </el-collapse-item>
-      </el-collapse>
         </template>
-        <el-empty v-else-if="!referenceLoading" :image-size="48" description="参考数据暂不可用（外围市场 / 财经日历 / 重要快讯），可点「刷新」重试" />
-        <p class="block-tip" style="margin: 12px 0 0">外围市场 / 财经日历 / 重要快讯为全天参考信息：独立实时获取，不依赖盘前宏观快照，可点「刷新」更新。</p>
+        <el-empty v-else-if="!referenceLoading" :image-size="48" description="参考数据暂不可用（财经日历 / 重要快讯），可点「刷新」重试" />
+        <p class="block-tip" style="margin: 12px 0 0">财经日历 / 重要快讯为全天参考信息：独立实时获取，不依赖盘前宏观快照，可点「刷新」更新（外围市场快照已迁至大盘看板「外围市场」tab）。</p>
       </el-tab-pane>
     </el-tabs>
 
@@ -1115,11 +1125,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, onActivated, ref } from 'vue'
+import { computed, onMounted, onUnmounted, onActivated, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Aim, Refresh, Setting, Compass, Position, Calendar, Bell, Tickets, Plus,
+  Aim, Refresh, Setting, Compass, Calendar, Bell, Tickets, Plus,
           Odometer, TrendCharts, Bottom, Minus, InfoFilled, Coin, AlarmClock,
           Search, Document, Histogram, Warning, EditPen, Star, Lightning, MagicStick, DataLine,
           Magnet, Operation, Checked, Right, WarningFilled, Sell, ShoppingCart
@@ -1130,7 +1140,6 @@ import { portfolioApi } from '@/api/portfolio'
 import { paperApi } from '@/api/paper'
 import { favoritesApi } from '@/api/favorites'
 import { screeningApi } from '@/api/screening'
-import MonitorCenter from '@/components/Dashboard/MonitorCenter.vue'
 import { subscribeQuotesUpdate, type QuotesUpdateSignal } from '@/utils/quotesSSE'
 import { fmtPct, fmtSigned, fmtMoney, clsByVal } from '@/utils/format'
 
@@ -1243,31 +1252,12 @@ const todayTrades = ref<any[]>([])
 const todayAlerts = ref<any[]>([])
 const alertsLoading = ref(false)
 
-// 今日预警「已读」标记（按日期维度）：查看过盘中预警列表后即视为已读，角标清零
-const ALERTS_READ_KEY = 'war_alerts_read_date'
-function alertReadKey() {
-  const d = new Date()
-  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`
-}
-let alertsReadDate = localStorage.getItem(ALERTS_READ_KEY) || ''
-const alertsReadToday = computed(() => alertsReadDate === alertReadKey())
-const alertsUnread = computed(() => {
-  if (alertsReadToday.value) return 0
-  return todayData.value?.intraday?.alert_count || todayAlerts.value.length || 0
-})
-
 const todayData = ref<WarRoomToday | null>(null)
 const macro = ref<any>(null)
 // 参考 Tab 独立实时数据（外围指数 / 财经日历 / 重要快讯）：与盘前宏观快照解耦，不依赖快照是否生成
 const reference = ref<any>(null)
 const referenceLoading = ref(false)
 const referenceRefreshing = ref(false)
-// 全局背景区折叠状态（默认展开，用户可收起减少滚动）
-const bgCollapse = ref<string[]>(['bg'])
-const foreignStocksLoading = ref(false)
-const foreignStocks = ref<any[]>([])
-const foreignUsStocks = computed(() => foreignStocks.value.filter(s => s.region === '美股'))
-const foreignHkStocks = computed(() => foreignStocks.value.filter(s => s.region === '港股'))
 const llm = computed(() => macro.value?.llm_interpretation || null)
 const rule = computed(() => macro.value?.rule || null)
 const plans = ref<any[]>([])
@@ -1286,29 +1276,13 @@ const todayText = computed(() => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} 周${wd}`
 })
 
-const flowSegments = computed(() => [
-  { key: 'pre_market', label: '盘前', count: todayData.value?.pre_market?.todo ?? 0 },
-  { key: 'intraday', label: '盘中', count: todayData.value?.intraday?.todo ?? 0 },
-  { key: 'post_market', label: '盘后', count: todayData.value?.post_market?.todo ?? 0 },
-  { key: 'weekly', label: '周度', count: todayData.value?.weekly?.todo ?? 0 },
-  // 「参考」非时段（无待办角标），仅作为全局背景数据入口
-  { key: 'reference', label: '参考', count: 0 }
-])
+// 直达兼容：?tab=pre_market|intraday|post_market|weekly → 时间线时段；?tab=reference → 外层参考 Tab
 const tabIndexMap: Record<string, string> = { pre_market: 'pre_market', intraday: 'intraday', post_market: 'post_market', weekly: 'weekly', reference: 'reference' }
 const currentPeriod = computed(() => todayData.value?.current_period || 'pre_market')
-
-// 待办合计构成说明（悬浮提示，避免数字来源不可解释）
-const todoTooltip = computed(() => {
-  const d = todayData.value
-  if (!d) return ''
-  const parts = [
-    `盘前 ${d.pre_market?.todo ?? 0}（待确认计划 ${d.pre_market?.plan_pending ?? 0} + 宏观快照未生成）`,
-    `盘中 ${d.intraday?.todo ?? 0}（已确认待执行计划 ${d.intraday?.plan_confirmed_pending ?? 0} + 待确认指令 ${d.intraday?.pending_orders ?? 0}）`,
-    `盘后 ${d.post_market?.todo ?? 0}（待验证信号 ${d.post_market?.signal_pending ?? 0}）`,
-    `周度 ${d.weekly?.todo ?? 0}（周五 17:30 后且复盘未生成）`,
-  ]
-  return `待办合计 = ${parts.join('；')}`
-})
+// 外层 Tab：今日作战(ops) / 参考(reference)
+const outerTab = ref('ops')
+// 用户手动点击过时段节点后，不再随 currentPeriod 自动流转（● 标记仍指向真实当前时段，可再点回）
+const periodPinned = ref(false)
 
 // 将含编号（①.../1. 1、1)）的 LLM 解读文本切分为独立行，便于逐条阅读。
 // 用「编号后不紧跟数字」排除百分比/小数（如 1.14%、0.94%）误切分。
@@ -1486,33 +1460,17 @@ async function loadReference() {
   }
 }
 
-// 参考 Tab「刷新」：强制重建指数/快讯缓存（不动宏观快照、不跑 LLM），并同步刷新美股/港股行情
+// 参考 Tab「刷新」：强制重建日历/快讯缓存（不动宏观快照、不跑 LLM）
 async function refreshReference() {
   referenceRefreshing.value = true
   try {
-    await Promise.all([
-      warRoomApi.getMacroReference(true).then(d => { reference.value = d }),
-      loadGlobalStocks()
-    ])
+    reference.value = await warRoomApi.getMacroReference(true)
     ElMessage.success('参考数据已刷新')
   } catch (e) {
     console.warn('[WarRoom] refreshReference', e)
     ElMessage.error('参考数据刷新失败，请稍后重试')
   } finally {
     referenceRefreshing.value = false
-  }
-}
-
-async function loadGlobalStocks() {
-  foreignStocksLoading.value = true
-  try {
-    const { vibeApi } = await import('@/api/vibe')
-    const res: any = await vibeApi.getGlobalStocks()
-    foreignStocks.value = res?.data || []
-  } catch (e) {
-    console.warn('[WarRoom] loadGlobalStocks', e)
-  } finally {
-    foreignStocksLoading.value = false
   }
 }
 
@@ -1561,11 +1519,6 @@ async function loadTodayAlerts() {
   try {
     const res = await warRoomApi.getTodayAlerts()
     todayAlerts.value = res?.items || []
-    // 用户已进入盘中查看预警列表 → 标记今日已读，红色角标清零
-    if (todayAlerts.value.length > 0) {
-      alertsReadDate = alertReadKey()
-      localStorage.setItem(ALERTS_READ_KEY, alertsReadDate)
-    }
   } catch (e) {
     console.warn('[WarRoom] loadTodayAlerts', e)
   } finally {
@@ -1620,6 +1573,25 @@ async function loadWeekly() {
 const isCurrentWeek = computed(() => {
   const wk = weekly.value?.week_start
   return !!wk && !!todayData.value?.week_start && wk === todayData.value.week_start
+})
+
+// ── 决策带数据（各时段顶部一行关键状态，替代散落各 block 的碎片数字）──
+// 盘前：今日建议策略（今日大盘情形 active_strategies → 中文标签）
+const strategyText = computed(() => {
+  const ss = todayRegime?.active_strategies
+  if (!ss?.length) return '—'
+  return ss.map((s: string) => getStrategyLabel(s)).join('、')
+})
+// 盘中：已触达触发价的待执行买入指令数（实时由 SSE 更新 triggered 标记）
+const intradayExecutable = computed(() => (guide.value?.buys || []).filter((b: any) => b.triggered).length)
+// 盘后：当日成交盈亏合计（p 字段缺失则不参与，null 表示无盈亏数据）
+const todayTradesPnl = computed(() => {
+  let sum = 0
+  let has = false
+  for (const t of todayTrades.value) {
+    if (t.pnl != null) { sum += Number(t.pnl); has = true }
+  }
+  return has ? sum : null
 })
 
 async function loadFavorites() {
@@ -2345,34 +2317,79 @@ function goScheduled() {
   router.push('/tasks')
 }
 
-function refreshCurrent() {
-  loadToday()
-  // 设计文档 A.5：进入 Tab/点刷新即拉取该时段静态数据
-  if (activeTab.value === 'pre_market') { ensureMacroAuto(); loadGlobalStocks(); loadPlans() }
-  if (activeTab.value === 'intraday') { loadTodayAlerts(); loadRegime(); loadPositions(); loadIntradayGuide(); loadFavorites(); startIntradayLive() }
-  if (activeTab.value === 'post_market') { loadSignals(); loadTodayTrades() }
-  if (activeTab.value === 'weekly') loadWeekly()
+// 按时段加载其静态数据（SSE 启停统一由 syncIntradayLive 管理，不在此处理）
+function loadPeriodData(name: string) {
+  if (name === 'pre_market') { ensureMacroAuto(); loadPlans(); loadTodayPlan(); loadTodayRegime() }
+  if (name === 'intraday') { loadTodayAlerts(); loadRegime(); loadPositions(); loadIntradayGuide(); loadFavorites() }
+  if (name === 'post_market') { loadSignals(); loadTodayTrades() }
+  if (name === 'weekly') { loadWeekly(); loadTodayPlan() }
+}
+
+// 统一刷新：并行刷新全部时段数据 + 参考，一次点按全页更新。
+// 重操作（生成计划/宏观重算/信号扫描/周报）不在此触发，保留各自兜底按钮，避免误触重型任务。
+async function refreshCurrent() {
+  loading.value = true
+  await Promise.allSettled([
+    ensureMacroAuto(), loadPlans(), loadTodayPlan(), loadTodayRegime(),
+    loadIntradayGuide(), loadRegime(), loadPositions(), loadFavorites(), loadTodayAlerts(),
+    loadSignals(), loadTodayTrades(), loadWeekly(), loadReference(),
+  ])
+  syncIntradayLive()
+  loading.value = false
 }
 
 // 盘前宏观：读取已生成的今日快照（后端在快照缺失时会自动生成一次），
-// 不强制重置；生成时间展示在卡片上，由用户自行判断是否点击「立即刷新」更新。
+// 统一刷新仅重新拉取快照，不触发重新生成（生成由 8:15 调度/缺失时自动补）。
 function ensureMacroAuto() {
   loadMacro()
 }
 
-function onTabChange(name: string | number) {
-  // 流程引导条 .flow-seg 点击时会显式调用本函数（不会触发 el-tabs 内部 v-model 更新），
-  // 所以先手动同步 activeTab，保证 UI 高亮 + 后续依赖 activeTab.value 的逻辑一致。
-  activeTab.value = String(name)
-  if (name === 'pre_market') { ensureMacroAuto(); loadGlobalStocks(); loadPlans() }
-  if (name === 'intraday') { loadTodayAlerts(); loadRegime(); loadPositions(); loadIntradayGuide(); loadFavorites(); startIntradayLive() }
-  if (name === 'post_market') { loadSignals(); loadTodayTrades() }
-  if (name === 'weekly') loadWeekly()
-  // 参考 Tab：加载自选/持仓/当日计划（用于重要快讯相关性过滤）+ 独立实时参考数据
-  if (name === 'reference') { loadFavorites(); loadPositions(); loadPlans(); loadReference() }
-  // 离开盘中 → 关闭 SSE 订阅与轮询
-  if (name !== 'intraday') stopIntradayLive()
+// 时间线节点 / 折叠摘要条点击：切换查看时段（不依赖 el-tabs 内部 v-model）
+function goPeriod(key: string) {
+  if (key === activeTab.value) { scrollToPeriod(key); return }
+  periodPinned.value = true
+  activeTab.value = key
+  loadPeriodData(key)
+  syncIntradayLive()
+  scrollToPeriod(key)
 }
+
+function scrollToPeriod(key: string) {
+  window.setTimeout(() => {
+    const el = document.getElementById('period-' + key)
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, 60)
+}
+
+// SSE 实时订阅生命周期：仅外层在「今日作战」且查看时段为盘中时运行（不看盘中不空耗）
+function syncIntradayLive() {
+  if (outerTab.value === 'ops' && activeTab.value === 'intraday') startIntradayLive()
+  else stopIntradayLive()
+}
+
+// 外层 Tab（今日作战 / 参考）切换
+function onOuterTabChange(name: string | number) {
+  outerTab.value = String(name)
+  if (name === 'reference') {
+    // 参考独立 Tab：自选/持仓/当日计划（供重要快讯相关性过滤）+ 独立实时数据
+    loadFavorites(); loadPositions(); loadPlans(); loadReference()
+  } else {
+    refreshCurrent()
+  }
+  syncIntradayLive()
+}
+
+// 时段自动流转：后端 currentPeriod 变化（60s /today 轮询感知）时，
+// 用户未手动锁定则自动展开新时段并平滑定位；● 标记始终指向真实当前时段。
+watch(currentPeriod, (np) => {
+  if (periodPinned.value) return
+  if (activeTab.value !== np && np !== 'reference') {
+    activeTab.value = np
+    loadPeriodData(np)
+    syncIntradayLive()
+    scrollToPeriod(np)
+  }
+})
 
 // ---- 格式化辅助 ----
 function regionLabel(r?: string) {
@@ -2444,29 +2461,27 @@ function snapshotText(s: any) {
 }
 
 onMounted(async () => {
-          // 从 query 支持 ?tab=pre_market 直达（速览引导条跳转）
-          const q = route.query.tab
-          if (typeof q === 'string' && tabIndexMap[q]) {
-            activeTab.value = q
-          }
-          // today 聚合 + 当前时段 Tab 自动定位；与 macro 并发拉取，避免互相阻塞
-          await loadToday()
-          if (!(typeof q === 'string' && tabIndexMap[q])) {
-            const cp = todayData.value?.current_period
-            if (cp && tabIndexMap[cp]) activeTab.value = cp
-          }
-          refreshCurrent()
-          // 全局背景数据区（外围/日历/快讯）独立实时获取（不再依赖宏观快照，轻量秒回）
-          loadReference()
-          ensureMacroAuto()
-          loadGlobalStocks()
-          // 今日大盘情形 + 建议策略（盘前调度检测结果）
-          loadTodayRegime()
-          // 打开即读：加载今日计划快照（盘前预生成成品），无需点击生成
-          await loadTodayPlan()
-          // 角标实时刷新定时器（每 60s 更新待办数字）
-          startTodayRefresh()
-        })
+  // ?tab= 直达兼容：reference → 外层参考 Tab；时段值 → 时间线内定位并锁定（不回自动流转）
+  const q = route.query.tab
+  if (typeof q === 'string' && q === 'reference') {
+    outerTab.value = 'reference'
+  } else if (typeof q === 'string' && tabIndexMap[q]) {
+    activeTab.value = q
+    periodPinned.value = true
+  }
+  // today 聚合：后续 currentPeriod watch 自动定位当前时段
+  await loadToday()
+  // 打开即全量呈现：并行拉取全部时段数据 + 参考（互不阻塞，单项失败不影响其他）。
+  // 替代旧版"先选时段再逐块点按钮加载"的空态流程。
+  await Promise.allSettled([
+    ensureMacroAuto(), loadPlans(), loadTodayPlan(), loadTodayRegime(),
+    loadIntradayGuide(), loadRegime(), loadPositions(), loadFavorites(), loadTodayAlerts(),
+    loadSignals(), loadTodayTrades(), loadWeekly(), loadReference(),
+  ])
+  // 角标实时刷新定时器（每 60s 更新待办数字 + 支撑时段自动流转）
+  startTodayRefresh()
+  syncIntradayLive()
+})
 
 // keep-alive 激活钩子：每次组件被复用时强制清空全部计划生成相关状态。
 // 残留状态危害：
@@ -2485,6 +2500,7 @@ onActivated(() => {
   // 重新激活时立即刷新一次角标，并重启实时刷新定时器
   loadToday()
   startTodayRefresh()
+  syncIntradayLive()
 })
 
 onUnmounted(() => {
@@ -2496,77 +2512,124 @@ onUnmounted(() => {
 
 <style lang="scss" scoped>
 .war-room {
-  // 全局背景数据区（四个时段 Tab 均可见，折叠为单行标题）
-  .bg-collapse {
-    margin: 8px 0 16px;
-    border: 1px solid var(--el-border-color-light);
-    border-radius: 10px;
-
-    .bg-collapse-title {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
-
-      .bg-title-text {
-        font-size: 15px;
-        font-weight: 600;
-        color: var(--el-text-color-primary);
-      }
-    }
-  }
-
-  // 流程引导条
   // 日历已公布事件高亮与解读
   .cal-announced { font-weight: 600; color: var(--el-color-success); }
   .cal-analysis { color: var(--el-text-color-regular); }
   .cal-pending { color: var(--el-text-color-secondary); }
 
-  .flow-bar {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    flex-wrap: wrap;
-    padding: 12px 16px;
-    margin-bottom: 20px;
-    background: var(--el-bg-color);
-    border: 1px solid var(--el-border-color-light);
-    border-radius: 10px;
+  // 外层 Tab（今日作战 / 参考）头部恢复展示，作为页面一级导航
+  .war-tabs :deep(.el-tabs__header) { margin-bottom: 16px; }
+  .war-tabs :deep(.el-tabs__item) { font-size: 15px; font-weight: 600; padding: 0 22px; }
 
-    .flow-seg {
-      display: inline-flex;
+  // ── 时间线 · 时段区块（单 Tab 内纵向主线：标题条 → 详情体 / 折叠摘要） ──
+  .tl-period {
+    margin-bottom: 16px;
+
+    .tl-head {
+      display: flex;
       align-items: center;
-      gap: 6px;
-      padding: 4px 10px;
-      border-radius: 16px;
+      gap: 10px;
+      padding: 10px 14px;
+      border: 1px solid var(--el-border-color-light);
+      border-radius: 10px;
       cursor: pointer;
-      color: var(--el-text-color-secondary);
+      transition: all .2s;
+      background: var(--el-bg-color);
+
+      &:hover { border-color: var(--el-color-primary-light-5); }
+      &.on { border-color: var(--el-color-primary); }
+
+      .tl-dot { font-size: 13px; color: var(--el-color-primary); }
+      .tl-name { font-size: 15px; font-weight: 700; color: var(--el-text-color-primary); }
+      .tl-badge {
+        background: var(--el-color-danger); color: #fff; font-size: 11px; line-height: 1;
+        padding: 2px 6px; border-radius: 10px;
+      }
+      .tl-sub { font-size: 12px; color: var(--el-text-color-placeholder); flex: 1; min-width: 0; }
+      .tl-fold-tip { font-size: 12px; color: var(--el-color-primary-light-3); flex: none; }
+    }
+
+    .tl-body {
+      border: 1px solid var(--el-border-color-lighter);
+      border-top: none;
+      border-radius: 0 0 10px 10px;
+      padding: 14px;
+      background: var(--el-bg-color-page);
+    }
+
+    // 折叠摘要条（非当前查看时段，点击回看）
+    .tl-folder {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 14px;
+      border: 1px dashed var(--el-border-color-light);
+      border-top: none;
+      border-radius: 0 0 10px 10px;
+      cursor: pointer;
       transition: all .2s;
 
-      &.active {
-        background: var(--el-color-primary-light-9);
-        color: var(--el-color-primary);
-        font-weight: 600;
-      }
-      .flow-dot { font-size: 12px; }
-      .flow-badge {
-        background: var(--el-color-danger);
-        color: #fff;
-        font-size: 11px;
-        line-height: 1;
-        padding: 2px 6px;
-        border-radius: 10px;
-      }
+      &:hover { border-color: var(--el-color-primary-light-5); background: var(--el-color-primary-light-9); }
+      .tf-main { font-size: 13px; color: var(--el-text-color-secondary); }
+      .tf-tip { font-size: 12px; color: var(--el-color-primary); flex: none; }
     }
-    .flow-spacer { flex: 1; }
-    .flow-todo { color: var(--el-text-color-secondary); font-size: 13px; b { color: var(--el-color-primary); } }
-    .flow-todo-sub { margin-left: 8px; color: var(--el-text-color-placeholder); font-size: 12px; }
   }
 
-  // 时段切换已由顶部「流程引导条」承载，隐藏 el-tabs 原生头部，避免出现两行重复导航
-  .war-tabs :deep(.el-tabs__header) { display: none; }
+  // ── 决策带（时段顶部一行关键状态，第一眼回答"现在什么最重要"） ──
+  .decision-bar {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    flex-wrap: wrap;
+    padding: 12px 16px;
+    margin-bottom: 14px;
+    border: 1px solid var(--el-color-primary-light-5);
+    border-radius: 10px;
+    background: var(--el-color-primary-light-9);
 
-  .block { margin-bottom: 24px; }
+    .db-item {
+      display: inline-flex;
+      align-items: baseline;
+      gap: 8px;
+
+      .db-k { font-size: 12px; color: var(--el-text-color-secondary); }
+      .db-v {
+        font-size: 16px; font-weight: 700; color: var(--el-text-color-primary);
+        font-variant-numeric: tabular-nums;
+        &.hot { color: var(--el-color-danger); }
+      }
+    }
+  }
+
+  // ── 盘中买卖指导两栏并排（同吃一路 SSE 行情） ──
+  .tl-grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    align-items: start;
+
+    @media (max-width: 1100px) {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  // ── 预警明细折叠（原生 details，无需额外状态） ──
+  .quiet-details {
+    summary {
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--el-color-primary);
+      margin-bottom: 8px;
+      outline: none;
+      user-select: none;
+    }
+    summary:hover { color: var(--el-color-primary-dark-2); }
+  }
+
+  // 区块间距收紧：时间线内纵向噪音更小，分段感由 tl-period 容器承担
+  .block { margin-bottom: 16px; }
   .block-head {
     display: flex;
     justify-content: space-between;
