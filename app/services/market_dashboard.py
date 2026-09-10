@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import math
 from datetime import datetime, timedelta, timezone
 
@@ -23,6 +25,8 @@ from app.core.database import get_mongo_db_sync
 from app.services import vibe_astock as astock
 from app.services.cache_layer import cached
 from app.services.market_overview import _emotion, _sectors, _sentiment
+
+logger = logging.getLogger("webapi")
 
 BEIJING = timezone(timedelta(hours=8))
 
@@ -332,10 +336,27 @@ def _build() -> dict:
     }
 
 
+# 看板构建并发锁：cached 命中前并发请求会各自完整 _build（外部 AKShare/东财可达数十秒），
+# 用进程级 asyncio.Lock 串行化构建，避免 N 个并发请求叠加 N 倍慢请求。
+_dashboard_build_lock: asyncio.Lock | None = None
+
+
+def _get_dashboard_lock() -> asyncio.Lock:
+    global _dashboard_build_lock
+    if _dashboard_build_lock is None:
+        _dashboard_build_lock = asyncio.Lock()
+    return _dashboard_build_lock
+
+
 async def get_dashboard() -> dict:
-    """市场看板（Redis 缓存，market 级 TTL）。"""
-    return await cached(
-        "vibe:market_dashboard", _build,
-        category="market",
-        valid=lambda v: bool(v.get("breadth", {}).get("total")) or bool(v.get("indices")),
-    )
+    """市场看板（Redis 缓存，market 级 TTL，交易时段放宽到 120s 以减少外部重建）。"""
+    from app.services.cache_layer import get_ttl
+    # market 分级 TTL（交易 60s）对含外部网络调用的看板太短，交易时段升至 120s；非交易保持 1800s
+    ttl = max(get_ttl("market"), 120)
+    async with _get_dashboard_lock():
+        return await cached(
+            "vibe:market_dashboard", _build,
+            category="market",
+            valid=lambda v: bool(v.get("breadth", {}).get("total")) or bool(v.get("indices")),
+            ttl=ttl,
+        )

@@ -36,6 +36,10 @@ class PlanCreateRequest(BaseModel):
     date: str | None = Field(None, description="计划日期 YYYY-MM-DD，默认当日")
     source: dict | None = Field(None, description="5.4 来源标签 {type, ref, label}")
     confirmed: bool | None = Field(None, description="三态确认：False=待确认 / True=已确认（手动添加/已拍板为 True，候选写库为 False）")
+    signal_label: str | None = Field(None, description="信号标签（如 B2 低吸），信号链审计用")
+    signal_type: str | None = Field(None, description="信号类型（如 B2），信号链审计用")
+    hit_rate: float | None = Field(None, description="周度信号有效性：该信号类型历史命中率（0-100）")
+    signal_count: int | None = Field(None, description="该信号类型历史已回填样本数")
 
 
 class PlanDetailUpdateRequest(BaseModel):

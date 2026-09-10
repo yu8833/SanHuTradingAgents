@@ -1492,13 +1492,18 @@ async def get_user_analysis_history(
             ]
         }]
 
-        # 状态过滤（前端 processing -> running）
+        # 状态过滤（前端 processing -> running + pending，均属"进行中"语义）
         if status:
             status_mapping = {
                 "processing": "running", "pending": "pending",
                 "completed": "completed", "failed": "failed", "cancelled": "cancelled",
             }
-            conditions.append({"status": status_mapping.get(status, status)})
+            mapped_status = status_mapping.get(status, status)
+            if mapped_status == "running":
+                # "进行中"包含已排队(pending)与处理中(running)，否则刚提交的任务在列表不可见
+                conditions.append({"status": {"$in": ["running", "pending"]}})
+            else:
+                conditions.append({"status": mapped_status})
 
         # 股票代码过滤
         query_symbol = symbol or stock_code
@@ -1527,9 +1532,13 @@ async def get_user_analysis_history(
 
         query = {"$and": conditions} if len(conditions) > 1 else conditions[0]
 
-        # 2) 分页查询 MongoDB（仅返回当前页）
+        # 2) 分页查询 MongoDB（仅返回当前页；列表场景排除 result 巨字段，payload 从 MB 级降到 KB 级。
+        # 注意保留 parameters（供市场类型过滤）；tokens_used/analysts 体积小，一并保留）
         offset = (page - 1) * page_size
-        cursor = db.analysis_tasks.find(query).sort("created_at", -1).skip(offset).limit(page_size)
+        cursor = db.analysis_tasks.find(
+            query,
+            {"result": 0},
+        ).sort("created_at", -1).skip(offset).limit(page_size)
 
         def _item(doc: dict[str, Any]) -> dict[str, Any]:
             user_field_val = doc.get("user_id", doc.get("user"))
@@ -1550,7 +1559,6 @@ async def get_user_analysis_history(
                 "parameters": doc.get("parameters", {}),
                 "execution_time": doc.get("execution_time"),
                 "tokens_used": doc.get("tokens_used"),
-                "result_data": doc.get("result"),
             }
             # 统一时间字段为北京时间（MongoDB 读回为 naive UTC）
             for k in ("start_time", "end_time"):
@@ -1564,6 +1572,9 @@ async def get_user_analysis_history(
         tasks = [_item(doc) async for doc in cursor]
 
         # 3) 用内存任务覆盖本页的实时进度（running/pending 保持新鲜）
+        # ⚠️ 终态护栏：backend 内存与 worker 独立进程，完成任务可能残留 pending/running
+        # 的内存记录；数据库终态（completed/failed/cancelled）是权威结论，绝不能被内存覆盖回非终态。
+        terminal_statuses = {"completed", "failed", "cancelled"}
         try:
             mem_tasks = await service.memory_manager.list_user_tasks(user_id=uid, limit=1000, offset=0)
             mem_by_id = {t.get("task_id"): t for t in mem_tasks if t.get("task_id")}
@@ -1571,8 +1582,9 @@ async def get_user_analysis_history(
                 mem = mem_by_id.get(t.get("task_id"))
                 if not mem:
                     continue
-                if mem.get("status") in ("processing", "running", "pending"):
-                    t["status"] = mem.get("status", t.get("status"))
+                mem_status = mem.get("status")
+                if mem_status in ("processing", "running", "pending") and t.get("status") not in terminal_statuses:
+                    t["status"] = mem_status
                     t["progress"] = mem.get("progress", t.get("progress", 0))
                     t["message"] = mem.get("message", t.get("message", ""))
                     t["current_step"] = mem.get("current_step", t.get("current_step", ""))

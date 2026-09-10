@@ -524,6 +524,19 @@ async def _build_plan_step(user_id: str, items: list[dict], direction: str | Non
     target_pct = 8 if stop_pct == STOP_PCT_BULL else 5
     candidates: list[dict] = []
     skipped = 0
+    # 周度信号有效性（P1 聚合）：按信号类型映射历史命中率，供候选/计划突出「信效」。
+    # 聚合失败时降级为空映射，候选不显示命中率徽标，绝不阻塞计划生成。
+    signal_stats_by_type: dict[str, dict] = {}
+    try:
+        from app.services.signal_tracking_service import get_signal_stats
+        _stats = await get_signal_stats()
+        for _r in _stats.get("by_type") or []:
+            if _r.get("count"):
+                signal_stats_by_type[_r["signal_type"]] = {
+                    "win_rate": _r["win_rate"], "count": _r["count"],
+                }
+    except Exception:
+        logger.warning("信号有效性聚合读取失败（候选不显示命中率）", exc_info=True)
     for it in items[:DEFAULT_LIMIT]:
         code = it.get("code")
         if not code:
@@ -551,6 +564,8 @@ async def _build_plan_step(user_id: str, items: list[dict], direction: str | Non
         position = await plan_service._position_sizing(
             user_id, code, tp, "default"
         )
+        # 周度信号有效性：候选所属信号类型的历史命中率（无聚合数据则不附加）
+        signal_stat = signal_stats_by_type.get(sig_type) or {}
         candidates.append({
             "code": code,
             "name": it.get("name") or code,
@@ -561,6 +576,9 @@ async def _build_plan_step(user_id: str, items: list[dict], direction: str | Non
             "position": position,
             "quality_score": it.get("quality_score"),
             "signal_label": it.get("signal_label") or sig_type,
+            "signal_type": sig_type,
+            "hit_rate": signal_stat.get("win_rate"),
+            "signal_count": signal_stat.get("count"),
             "source": source,
             "industry": industry,
         })

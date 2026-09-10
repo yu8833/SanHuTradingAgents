@@ -561,7 +561,7 @@ const loadAll = async () => {
   try {
     const results = await Promise.allSettled([
       withTimeout(vibeApi.getIndices(), 15000),
-      withTimeout(vibeApi.getDashboard(), 20000),
+      withTimeout(vibeApi.getDashboard(), 60000),
       withTimeout(loadMarketRegime(), 20000),
       withTimeout(loadOverseas(), 20000),
       withTimeout(loadGlobalStocks(), 20000),

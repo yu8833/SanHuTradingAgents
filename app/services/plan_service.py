@@ -153,6 +153,11 @@ async def create_plan(user_id: str, data: dict) -> dict:
         "executed_trade_id": None,
         # 5.4 来源标签：{type, ref, label}，标注该条计划的来源（已验证信号/候选池/手动），便于审计与人工可改
         "source": data.get("source"),
+        # 信号链审计：信号标签/类型 + 周度信号有效性（历史命中率），确认写库时透传
+        "signal_label": data.get("signal_label"),
+        "signal_type": data.get("signal_type"),
+        "hit_rate": data.get("hit_rate"),
+        "signal_count": data.get("signal_count"),
         "notes": data.get("notes"),
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow(),

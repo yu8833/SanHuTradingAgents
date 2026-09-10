@@ -2291,10 +2291,14 @@ class SimpleAnalysisService:
 
             query = {}
             if task_status:
-                query["status"] = task_status.value
+                if task_status.value == "running":
+                    # "进行中"语义包含已排队(pending)与处理中(running)
+                    query["status"] = {"$in": ["running", "pending"]}
+                else:
+                    query["status"] = task_status.value
 
-            # 读取全部用于计算总数和统计
-            cursor = collection.find(query).sort("start_time", -1)
+            # 读取全部用于计算总数和统计；列表场景排除 result 巨字段
+            cursor = collection.find(query, {"result": 0}).sort("start_time", -1)
             tasks_from_db = []
             async for doc in cursor:
                 doc.pop("_id", None)
@@ -2302,7 +2306,7 @@ class SimpleAnalysisService:
 
             logger.info(f"📋 [Tasks] MongoDB 返回数量: {len(tasks_from_db)}")
 
-            # 3) 合并任务（内存优先）
+            # 3) 合并任务（内存优先，但 Mongo 终态权威）
             task_dict = {}
 
             # 先添加 MongoDB 中的任务
@@ -2317,6 +2321,12 @@ class SimpleAnalysisService:
                 if task_id:
                     task_dict[task_id] = task
 
+            # ⚠️ 终态护栏：跨进程内存残留的 pending/running 不得覆盖数据库已完成结论
+            for task in tasks_from_db:
+                task_id = task.get("task_id")
+                if task_id and task.get("status") in ("completed", "failed", "cancelled"):
+                    task_dict[task_id] = task
+
             # 转换为列表并按时间排序
             merged_tasks = list(task_dict.values())
             merged_tasks.sort(key=lambda x: (x.get('start_time') or x.get('started_at') or x.get('created_at') or ''), reverse=True)
@@ -2326,6 +2336,11 @@ class SimpleAnalysisService:
 
             # 分页
             results = merged_tasks[offset:offset + limit]
+
+            # 列表场景统一剔除 result/result_data 巨字段（内存任务可能携带，避免 payload MB 级）
+            for task in results:
+                task.pop("result", None)
+                task.pop("result_data", None)
 
             # 🔥 统一时间字段为北京时间（MongoDB 读回为 naive UTC，需转 +08:00）
             for task in results:
@@ -2401,11 +2416,12 @@ class SimpleAnalysisService:
                     logger.warning(f"⚠️ [Tasks] 无效的状态值: {status}")
                     task_status = None
 
-            # 1) 从内存读取任务
+            # 1) 从内存读取任务（不过滤状态：内存中活跃(pending/running)任务都要呈现，
+            # 终态由下面 MongoDB 权威覆盖）
             logger.info(f"📋 [Tasks] 准备从内存读取任务: user_id={user_id}, status={status} (mapped to {task_status}), limit={limit}, offset={offset}")
             tasks_in_mem = await self.memory_manager.list_user_tasks(
                 user_id=user_id,
-                status=task_status,
+                status=None,
                 limit=10000,
                 offset=0
             )
@@ -2454,12 +2470,16 @@ class SimpleAnalysisService:
 
                 if task_status:
                     # 使用映射后的状态值（TaskStatus枚举的value）
-                    query["status"] = task_status.value
+                    # "进行中"语义包含已排队(pending)与处理中(running)
+                    if task_status.value == "running":
+                        query["status"] = {"$in": ["running", "pending"]}
+                    else:
+                        query["status"] = task_status.value
                     logger.info(f"📋 [Tasks] 添加状态过滤: {task_status.value}")
 
                 logger.info(f"📋 [Tasks] MongoDB 查询条件: {query}")
-                # 读取全部用于计算总数和统计
-                cursor = db.analysis_tasks.find(query).sort("created_at", -1)
+                # 读取全部用于计算总数和统计；列表场景排除 result 巨字段
+                cursor = db.analysis_tasks.find(query, {"result": 0}).sort("created_at", -1)
                 async for doc in cursor:
                     count += 1
                     # 兼容 user_id 或 user 字段
@@ -2482,8 +2502,7 @@ class SimpleAnalysisService:
                         "parameters": doc.get("parameters", {}),
                         "execution_time": doc.get("execution_time"),
                         "tokens_used": doc.get("tokens_used"),
-                        # 为兼容前端，这里沿用 memory_manager 的字段名
-                        "result_data": doc.get("result"),
+                        # 列表场景不返回完整 result（体积庞大，详情经 getTaskResult 接口拉取）
                     }
                     # 时间格式转为 ISO 字符串（统一为北京时间）
                     # 注意：MongoDB 以 UTC 存储、读回为 naive UTC，
@@ -2501,6 +2520,9 @@ class SimpleAnalysisService:
             # 4) 合并内存和 MongoDB 数据，去重
             # 🔧 对于 processing/running 状态，优先使用 MongoDB 中的进度数据
             # 因为 graph_progress_callback 直接更新 MongoDB，而内存数据可能是旧的
+            # ⚠️ 终态护栏：MongoDB 终态（completed/failed/cancelled）是权威结论，
+            # 内存里跨进程残留的 pending/running 不得覆盖已完成的数据库结论。
+            terminal_statuses = {"completed", "failed", "cancelled"}
             task_dict = {}
 
             # 先添加内存中的任务
@@ -2510,24 +2532,30 @@ class SimpleAnalysisService:
                     task_dict[task_id] = task
 
             # 再添加 MongoDB 中的任务
-            # 对于 processing/running 状态，使用 MongoDB 中的进度数据（更新）
-            # 对于其他状态，如果内存中已有，则跳过（内存优先）
+            # - Mongo 终态：强制覆盖内存残留（内存可能停留在 pending/running）
+            # - Mongo running 且内存非终态：使用 MongoDB 进度数据（更新）
+            # - 其他：内存中已有则跳过（内存优先）
             for task in mongo_tasks:
                 task_id = task.get("task_id")
                 if not task_id:
                     continue
 
+                mongo_status = task.get("status")
+                # 数据库已终态 → 以数据库为准，覆盖任何陈旧内存状态
+                if mongo_status in terminal_statuses:
+                    task_dict[task_id] = task
+                    continue
+
                 # 如果内存中已有这个任务
                 if task_id in task_dict:
                     mem_task = task_dict[task_id]
-                    mongo_task = task
 
                     # 如果是 processing/running 状态，使用 MongoDB 中的进度数据
-                    if mongo_task.get("status") in ["processing", "running"]:
+                    if mongo_status in ["processing", "running"] and mem_task.get("status") in ["processing", "running", "pending"]:
                         # 保留内存中的基本信息，但更新进度相关字段
-                        mem_task["progress"] = mongo_task.get("progress", mem_task.get("progress", 0))
-                        mem_task["message"] = mongo_task.get("message", mem_task.get("message", ""))
-                        mem_task["current_step"] = mongo_task.get("current_step", mem_task.get("current_step", ""))
+                        mem_task["progress"] = task.get("progress", mem_task.get("progress", 0))
+                        mem_task["message"] = task.get("message", mem_task.get("message", ""))
+                        mem_task["current_step"] = task.get("current_step", mem_task.get("current_step", ""))
                         logger.debug(f"🔄 [Tasks] 更新任务进度: {task_id}, progress={mem_task['progress']}%")
                 else:
                     # 内存中没有，直接添加 MongoDB 中的任务
@@ -2542,6 +2570,11 @@ class SimpleAnalysisService:
 
             # 分页
             results = merged_tasks[offset:offset + limit]
+
+            # 列表场景统一剔除 result/result_data 巨字段（内存任务可能携带，避免 payload MB 级）
+            for task in results:
+                task.pop("result", None)
+                task.pop("result_data", None)
 
             # 🔥 统一处理时区信息（确保所有时间字段都带北京时间 +08:00 标识）
             for task in results:

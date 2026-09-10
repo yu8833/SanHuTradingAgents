@@ -167,7 +167,7 @@
 <script setup lang="ts">
 // 显式声明组件名，供 <keep-alive :include> 匹配
 defineOptions({ name: 'TaskCenterHome' })
-import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onActivated, onUnmounted, nextTick, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { List, Refresh, Download } from '@element-plus/icons-vue'
@@ -539,6 +539,14 @@ onMounted(() => {
     activeTab.value = tab as any
   }
   loadList(); setupPolling()
+})
+
+// keep-alive 缓存恢复（从其他页面返回）：任务中心是高频回看页，
+// 若依赖 onMounted 会因组件被缓存而不触发，列表停留在离开时的旧快照，
+// 导致"发起分析后切走再回来看不到正在分析的任务"。onActivated 每次激活都重拉。
+onActivated(() => {
+  loadList()
+  setupPolling()
 })
 
 // 监听路由 query 的 tab 变化，动态切换标签页

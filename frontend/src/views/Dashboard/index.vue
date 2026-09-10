@@ -212,7 +212,7 @@
 <script setup lang="ts">
 // 显式声明组件名，供 <keep-alive :include> 匹配
 defineOptions({ name: 'DashboardHome' })
-import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, onActivated } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Aim,
@@ -771,6 +771,17 @@ onMounted(async () => {
     // P5-12：SSE 降级/恢复时同步 UI 提示
     quotesStale.value = status === 'degraded'
   })
+})
+
+// keep-alive 缓存恢复时刷新核心数据（SSE 订阅在缓存期间保持存活，不重复订阅）
+let dashInited = false
+onActivated(() => {
+  if (dashInited) {
+    loadTodayFlow()
+    loadFavoriteStocks()
+    loadPaperAccount()
+  }
+  dashInited = true
 })
 </script>
 

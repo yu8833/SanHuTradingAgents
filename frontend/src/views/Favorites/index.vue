@@ -501,7 +501,7 @@
 <script setup lang="ts">
 // 显式声明组件名，供 <keep-alive :include> 匹配
 defineOptions({ name: 'FavoritesHome' })
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onActivated } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import {
@@ -1227,6 +1227,17 @@ const getChangeClass = (changePercent: number) => {
 
 // 生命周期
 onMounted(() => {
+  const auth = useAuthStore()
+  if (auth.isAuthenticated) {
+    loadFavorites()
+    loadUserTags()
+  }
+})
+
+// keep-alive 缓存恢复时刷新（在别处修改自选/标签后返回可看到最新）
+let favsInited = false
+onActivated(() => {
+  if (!favsInited) { favsInited = true; return }
   const auth = useAuthStore()
   if (auth.isAuthenticated) {
     loadFavorites()

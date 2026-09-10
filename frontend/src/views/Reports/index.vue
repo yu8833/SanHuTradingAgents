@@ -164,7 +164,7 @@
 <script setup lang="ts">
 // 显式声明组件名，供 <keep-alive :include> 匹配
 defineOptions({ name: 'ReportsHome' })
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onActivated } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -450,6 +450,13 @@ const getActionType = (action: string): string => {
 // 生命周期
 onMounted(() => {
   fetchReports()
+})
+
+// keep-alive 缓存恢复时刷新报告列表（分析完成返回后能看到新报告）
+let reportsInited = false
+onActivated(() => {
+  if (reportsInited) fetchReports()
+  reportsInited = true
 })
 </script>
 

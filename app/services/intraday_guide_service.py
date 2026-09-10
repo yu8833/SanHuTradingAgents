@@ -294,9 +294,15 @@ async def build_intraday_guide(user_id: str) -> dict:
     except Exception as e:
         logger.warning(f"盘中买入数据源读取失败（降级）: {e}")
 
-    # ── 数据源：卖出（当前持仓） ──
+    # ── 数据源：卖出（当前持仓；当日已有卖出计划的持仓不再重复建议） ──
     positions = await _load_open_positions(user_id)
-    sell_src = {pos["code"]: pos for pos in positions}
+    sell_planned: set[str] = set()
+    try:
+        _sp = await plan_service.list_plans(user_id, plan_date=today, status="pending")
+        sell_planned = {str(p.get("code")) for p in _sp if p.get("direction") == "sell" and p.get("code")}
+    except Exception as e:
+        logger.warning(f"当日卖出计划读取失败（卖出建议不过滤）: {e}")
+    sell_src = {pos["code"]: pos for pos in positions if str(pos["code"]) not in sell_planned}
 
     # ── 实时行情（买入 code ∪ 持仓 code 一次取齐） ──
     all_codes = list(dict.fromkeys([*buys_src.keys(), *sell_src.keys()]))
