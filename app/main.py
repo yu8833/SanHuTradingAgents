@@ -1086,6 +1086,13 @@ async def lifespan(app: FastAPI):
         else:
             logger.info(f"📊 ΔG景气度刷新已配置: {settings.DG_PROSPERITY_SYNC_CRON}")
 
+        # 市场数据预热（vibe 大盘看板/短线情绪/概念分析/概念轮动冷启动 5-30s 优化）
+        try:
+            from app.services.market_data_prewarm import register_prewarm_job
+            register_prewarm_job(scheduler)
+        except Exception as e:
+            logger.error(f"❌ 市场数据预热任务注册失败（忽略）: {e}", exc_info=True)
+
         # 设置调度器实例到服务中，以便API可以管理任务
         # 注意：必须在 scheduler.start() 之前设置，避免 start 与 set 之间的窗口期 API 无可用实例
         set_scheduler_instance(scheduler)

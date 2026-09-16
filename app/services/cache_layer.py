@@ -40,8 +40,10 @@ BEIJING = timezone(timedelta(hours=8))
 # TTL 分级（秒）
 TTL = {
     "realtime": {"trading": 30, "non_trading": 300},
-    # 市场环境检测：交易时段 60s（内存层封顶 60s），盘中预警需按实际行情刷新
-    "market": {"trading": 60, "non_trading": 1800},
+    # 市场环境检测/大盘/情绪/概念：交易时段 10 分钟。
+    # 冷启动重建需 5-30s（东财/同花顺外部源），60s 缓存期内容易被用户撞上冷启动；
+    # 配合后台预热任务（market_data_prewarm）周期刷新，保证数据新鲜且多数请求命中缓存。
+    "market": {"trading": 600, "non_trading": 1800},
     "news": {"trading": 300, "non_trading": 3600},
     "financial": {"trading": 43200, "non_trading": 86400},
     "default": {"trading": 300, "non_trading": 1800},
