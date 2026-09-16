@@ -33,7 +33,9 @@ VIX_RISK_ON, VIX_RISK_OFF = 18.0, 25.0
 BREADTH_BULL, BREADTH_BEAR = 3.0, 1 / 3  # 涨跌家数比 >3:1 / <1:3
 DIRECTION_BULL, DIRECTION_BEAR = 2, -2
 EVENT_WEIGHT = 2     # 高重要性政策/数据事件权重
-EVENT_CAP = 2        # 事件计分上限条数（防事件类信号过度加权）
+EVENT_CAP = 10       # 事件计分上限条数。高于前端"重要事件"默认展示数（5），
+                     # 保证所有 |影响度|≥50 的强影响事件都能计入总分，事件卡不出现"未计入 —"
+                     # 已按 |impact_score| 过滤且每条权重 ±2，条数上限只作兜底防极端堆积。
 INDEX_WEIGHT = 1
 
 # 事件极性关键词（利好/利空）；命中多者取数量差符号

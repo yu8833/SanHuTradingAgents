@@ -690,7 +690,10 @@ async def refresh_macro_snapshot() -> dict:
                 if lock_bj.hour >= 8 or not new_data_ok:
                     # 盘前窗口（>=08:00）产生的锁定一律保留（盘中不横跳）；
                     # 凌晨的半成品锁定，仅在新数据齐全时才允许被覆盖。
-                    snap["basis"] = old_basis
+                    # 方向/置信/总分/信号明细全部沿用盘前同源基准（basis 与 rule 一起锁），
+                    # 保证页面"总分 == 明细各信号分值之和"自洽，方向与分数不会互相矛盾。
+                    snap["basis"] = dict(old_basis)
+                    snap["rule"] = (existing or {}).get("rule") or snap.get("rule")
     except Exception as e:
         logger.warning(f"盘前基准锁定判断跳过: {e}")
     await _persist_snapshot(snap)

@@ -282,6 +282,10 @@ async def build_intraday_guide(user_id: str) -> dict:
         plans = await plan_service.list_plans(user_id, plan_date=today, status="pending")
         for p in plans:
             if p.get("direction") == "buy" and p.get("code"):
+                # 已确认计划不再出现在「今日买入」清单（与「决定卖出」对称：入计划即从清单消失，
+                # 触发盯盘由今日计划管理区承担）；未确认计划保留（仍需人工到今日计划确认）。
+                if p.get("confirmed"):
+                    continue
                 buys_src[p["code"]] = {"type": "plan", "plan_id": p.get("id"), "item": p}
         # 今日已写入当日计划的代码（无论状态：待确认/已确认/已执行）：
         # 已在计划中覆盖的标的不再从快照候选重复加入，避免「已执行」的股票仍在盘中显示可执行。

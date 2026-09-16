@@ -36,16 +36,16 @@
       <!-- 打分依据 · 折叠（与方向条融为一体，展开逐条复核） -->
       <div v-if="signals.length" class="macro-facts" :class="{ open: signalOpen }" @click="signalOpen = !signalOpen">
         <span class="mf-label">打分依据</span>
-        <span class="mf-sum">总分 <b>{{ basis?.score ?? '—' }}</b> · 偏多≥+2 · 偏空≤-2</span>
+        <span class="mf-sum">总分 <b>{{ basis?.score ?? '—' }}</b><em v-if="scoreBreakdown" class="mf-brk">（{{ scoreBreakdown }}）</em><i class="mf-th">偏多≥+2 · 偏空≤-2</i></span>
         <span class="flex"></span>
         <i class="mf-arrow" :class="{ open: signalOpen }"></i>
       </div>
       <div v-show="signalOpen" class="ms-list">
-        <!-- A · 大盘信号：指数/期货/情绪 紧凑行 -->
-        <div v-for="(s, i) in indexSignals" :key="i" class="ms-row">
+        <!-- A · 大盘信号：指数/期货/情绪 紧凑行，分值徽章醒目 -->
+        <div v-for="(s, i) in indexSignals" :key="i" class="ms-row" :class="['score-' + sigScoreCls(s), { hot: sigScore(s) !== 0 }]">
           <span class="ms-name">{{ s.name }}</span>
           <span class="ms-val">{{ fmtSigValue(s) }}</span>
-          <em class="ms-chip" :class="sigCls(s)">{{ sigText(s) }}</em>
+          <b class="ms-score" :class="sigScoreCls(s)">{{ fmtSigScore(s) }}</b>
           <span class="ms-detail">{{ s.detail }}</span>
         </div>
 
@@ -64,11 +64,10 @@
             <div v-if="shownNews.length" class="ev-cards">
               <div v-for="(n, i) in shownNews" :key="i" class="ev-card" :class="newsDir(n)">
                 <div class="ev-side">
-                  <em class="ev-dir" :class="newsDir(n)">{{ newsDirText(n) }}</em>
-                  <b class="ev-score" :class="newsScoreText(n)">{{ Number(n.impact_score ?? 0) > 0 ? '+' : '' }}{{ Number(n.impact_score ?? 0) || 0 }}</b>
-                  <span class="ev-lv">{{ n.impact_level }}影响</span>
-                  <span v-if="evContribution(n) != null" class="ev-contrib" :class="priceCls(evContribution(n))">计入总分 {{ evContribution(n) > 0 ? '+' : '' }}{{ evContribution(n) }}</span>
-                </div>
+                <em class="ev-dir" :class="newsDir(n)">{{ newsDirText(n) }}</em>
+                <b class="ev-score" :class="evScoreCls(n)">{{ evScoreText(n) }}</b>
+                <span class="ev-lv">{{ n.impact_level }}影响</span>
+              </div>
                 <div class="ev-main">
                   <div class="ev-meta">
                     <el-tag v-if="n.category" size="small" class="cat-tag" effect="plain">{{ n.category }}</el-tag>
@@ -127,6 +126,8 @@
               <span class="cd">{{ b.code }}</span>
               <span v-if="b.signal_label" class="tag">{{ b.signal_label }}</span>
               <span class="flex"></span>
+              <!-- 候选（无 plan_id）可一键并入今日计划（已确认，进入盘中盯盘）；已有计划的无需重复 -->
+              <el-button v-if="!b.plan_id" size="small" type="primary" plain :loading="addPlanCode === b.code" @click="addBuyToPlan(b)">加入计划</el-button>
               <el-button v-if="buyStatus(b) === 'exec'" size="small" type="danger" @click="goTrade(b)">去交易</el-button>
             </div>
             <div class="num-row">
@@ -247,7 +248,7 @@
           </template>
           <div class="extra-body">
             <div class="extra-tools">
-              <span class="block-hint">已确认的计划会自动进入「今日买入」清单提醒</span>
+              <span class="block-hint">已确认计划在这里盯「距触发」；今日买入卡上可一键「加入计划」</span>
               <div class="extra-ops">
                 <el-radio-group v-model="planFilter" size="small">
                   <el-radio-button value="all">全部</el-radio-button>
@@ -278,6 +279,12 @@
               </el-table-column>
               <el-table-column label="触发价" width="88">
                 <template #default="{ row }">{{ row.trigger_price ?? '—' }}</template>
+              </el-table-column>
+              <el-table-column label="距触发" width="96">
+                <template #default="{ row }">
+                  <span v-if="row.direction === 'buy'" :class="planDistCls(row)">{{ planDistText(row) }}</span>
+                  <span v-else>—</span>
+                </template>
               </el-table-column>
               <el-table-column label="止损" width="88">
                 <template #default="{ row }">{{ row.stop_loss ?? '—' }}</template>
@@ -443,6 +450,25 @@ const opsSell = computed(() => sellUrgent.value.length)
 // 最近一次行情推送时刻（数据新鲜度标注）
 const lastQuoteAt = ref('')
 const lastUpdateText = computed(() => lastQuoteAt.value ? `更新于 ${lastQuoteAt.value}` : '')
+// 计划报价表（SSE 推送填充）：供「今日计划」管理区距触发列盯盘
+const planQuoteMap = ref<Record<string, number>>({})
+function planDist(row: any): number | null {
+  const tp = Number(row.trigger_price)
+  const price = planQuoteMap.value[String(row.code)]
+  if (!tp || price == null) return null
+  return Math.round((price / tp - 1) * 10000) / 100
+}
+function planDistText(row: any): string {
+  const d = planDist(row)
+  if (d == null) return '—'
+  if (d <= 0) return `已触达 ↓${Math.abs(d)}%`
+  return `${d}%`
+}
+function planDistCls(row: any): string {
+  const d = planDist(row)
+  if (d == null) return ''
+  return d <= 0 ? 'up' : 'down'
+}
 
 // fetch 辅助：绕开 axios 拦截器（其 401 刷新 token 逻辑可能挂起）
 async function _fetchJSON<T>(path: string, init: RequestInit = {}, timeoutMs = 20000): Promise<T> {
@@ -513,14 +539,29 @@ function fmtSigValue(s: any): string {
   if (typeof v === 'number') return String(Math.round(v * 100) / 100)
   return String(v)
 }
-function sigCls(s: any): string {
-  const sc = Number(s?.score ?? 0)
+// 分值徽章：数值 + 方向色（非零醒目，零弱化）
+function sigScore(s: any): number {
+  return Number(s?.score ?? 0) || 0
+}
+function fmtSigScore(s: any): string {
+  const sc = sigScore(s)
+  return sc > 0 ? `+${sc}` : String(sc)
+}
+function sigScoreCls(s: any): string {
+  const sc = sigScore(s)
   return sc > 0 ? 'up' : sc < 0 ? 'down' : 'flat'
 }
-function sigText(s: any): string {
-  const sc = Number(s?.score ?? 0)
-  return sc > 0 ? `利多 +${sc}` : sc < 0 ? `利空 ${sc}` : '中性 0'
-}
+// 总分来源分解：如「VIX+1 · 事件-2 · 事件-2」，一眼看到总分怎么凑出来的
+const scoreBreakdown = computed(() => {
+  const parts = signals.value
+    .filter((s: any) => sigScore(s) !== 0)
+    .map((s: any) => {
+      const name = s.name === '高重要性政策/数据事件' ? '事件' : s.name
+      const sc = sigScore(s)
+      return `${name}${sc > 0 ? '+' : ''}${sc}`
+    })
+  return parts.join(' · ')
+})
 function fmtClock(iso?: string): string {
   if (!iso) return '—'
   let s = String(iso).trim()
@@ -681,6 +722,36 @@ function sellPctText(s: any): string {
   return sellForce(s) === 0 ? '100%' : '—'
 }
 
+// 买入候选 → 一键并入今日计划（已确认，进入盘中盯盘）；防重复提交
+const addPlanCode = ref('')
+async function addBuyToPlan(b: any) {
+  const code = String(b.code || '').trim()
+  if (!code || addPlanCode.value) return
+  addPlanCode.value = code
+  try {
+    await warRoomApi.createPlan({
+      code,
+      name: b.name || undefined,
+      direction: 'buy',
+      trigger_price: b.trigger_price ?? undefined,
+      stop_loss: undefined,
+      sell_condition: undefined,
+      confirmed: true,
+    })
+    ElMessage.success(`${b.name || code} 已加入今日计划（已确认，价格触达将提醒）`)
+    // 与「决定卖出」对称：前端立即从今日买入移除，后端已确认计划不再返回该卡
+    if (guide.value?.buys) {
+      guide.value.buys = guide.value.buys.filter((x: any) => String(x.code) !== code)
+    }
+    await loadPlans()
+    await loadIntradayGuide()
+  } catch (e) {
+    ElMessage.error('加入计划失败')
+  } finally {
+    addPlanCode.value = ''
+  }
+}
+
 // 卖出决定：并入今日卖出计划（一键，不做多余表单）
 async function decideSell(s: any) {
   try {
@@ -697,9 +768,9 @@ async function decideSell(s: any) {
       trigger_price: s.trigger_price ?? undefined,
       stop_loss: undefined,
       sell_condition: (s.reason || s.advice || '').slice(0, 120),
-      confirmed: false
+      confirmed: true   // 「决定卖出」即确认，不再到「今日计划」二次确认
     })
-    ElMessage.success('已记入今日卖出计划（待确认）')
+    ElMessage.success('已记入今日卖出计划（已确认）')
     // 前端立即移除 + 后端同步过滤，30s 刷新后也不会回来
     if (guide.value?.sells) {
       guide.value.sells = guide.value.sells.filter((x: any) => String(x.code) !== String(s.code).trim())
@@ -800,21 +871,22 @@ function newsDirText(n: any): string {
   const d = newsDir(n)
   return d === 'bull' ? '利多' : d === 'bear' ? '利空' : '中性'
 }
-// 该新闻是否被计入大盘总分：按标题匹配规则引擎事件信号，取贡献分（±2）；未计入返回 null
-function evContribution(n: any): number | null {
-  const t = (n?.title || '').toString().trim()
-  if (!t) return null
-  const hit = signals.value.find((s: any) =>
-    s.name === '高重要性政策/数据事件' && (s.title || '').toString().trim() === t)
-  return hit ? Number(hit.score ?? 0) : null
-}
-function newsScoreText(n: any): string {
+// 事件卡打分制：|影响度|≥50 的强影响事件 → 打分制贡献（利多 +2 / 利空 -2）；
+// 与规则引擎计入总分的口径一致（EVENT_CAP 已放开），不依赖 signals 标题匹配
+function evScoreOf(n: any): number | null {
   const s = Number(n?.impact_score ?? 0) || 0
-  return `score-${s > 0 ? 'bull' : s < 0 ? 'bear' : 'neutral'}`
+  if (Math.abs(s) < 50) return null
+  return s > 0 ? 2 : -2
 }
-function newsBarPct(n: any): number {
-  // 中性点在条中央：填充宽度 = |score|/2 %（±100 对应半幅 50%）
-  return Math.min(50, Math.abs(Number(n?.impact_score ?? 0) || 0) / 2)
+function evScoreText(n: any): string {
+  const c = evScoreOf(n)
+  if (c == null) return '—'
+  return c > 0 ? `+${c}` : String(c)
+}
+function evScoreCls(n: any): string {
+  const c = evScoreOf(n)
+  if (c == null) return 'is-na'
+  return c > 0 ? 'up' : 'down'
 }
 function newsTime(t?: string): string {
   if (!t) return '—'
@@ -853,6 +925,14 @@ function onQuotesUpdate(signal: QuotesUpdateSignal) {
     liveOn.value = true
     lastQuoteAt.value = fmtClock(new Date().toISOString())
   }
+  // 兜底：SSE 推送的实时价同时写入计划报价表，供「今日计划」管理区距触发列盯盘
+  const nextMap = { ...planQuoteMap.value }
+  let changed = false
+  for (const k of Object.keys(qs)) {
+    const close = qs[k]?.close
+    if (close != null && nextMap[k] !== close) { nextMap[k] = close; changed = true }
+  }
+  if (changed) planQuoteMap.value = nextMap
   if (guide.value?.buys) {
     guide.value.buys = guide.value.buys.map((p: any) => {
       const q = qs[p.code]
@@ -1361,7 +1441,12 @@ onUnmounted(() => {
       &:hover { background: var(--el-fill-color-lighter); border-color: var(--el-border-color-hover); }
 
       .mf-label { font-size: 12px; font-weight: 700; color: var(--el-text-color-primary); }
-      .mf-sum { font-size: 12px; color: var(--el-text-color-secondary); b { color: var(--el-color-primary); font-weight: 700; } }
+      .mf-sum {
+        font-size: 12px; color: var(--el-text-color-secondary);
+        b { color: var(--el-color-primary); font-weight: 700; font-size: 14px; }
+        .mf-brk { margin-left: 4px; font-style: normal; color: var(--el-text-color-placeholder); }
+        .mf-th { margin: 0 4px 0 8px; font-style: normal; color: var(--el-text-color-placeholder); }
+      }
       .mf-arrow {
         width: 0; height: 0;
         border-left: 5px solid transparent;
@@ -1386,22 +1471,28 @@ onUnmounted(() => {
         padding: 5px 4px;
         font-size: 12.5px;
         border-bottom: 1px dashed var(--el-border-color-lighter);
+        border-radius: 6px;
         &:last-child { border-bottom: none; }
+        // 有实际贡献分（非零）的行：浅方向色底强调（用 element 官方 light-9，兼容性稳定）
+        &.hot { padding: 5px 4px 5px 6px; background: var(--el-fill-color-light); }
+        &.hot.score-up { background: var(--el-color-danger-light-9); }
+        &.hot.score-down { background: var(--el-color-success-light-9); }
 
         .ms-name { width: 150px; flex: none; font-weight: 600; color: var(--el-text-color-primary); }
         .ms-val { width: 90px; flex: none; color: var(--el-text-color-regular); font-variant-numeric: tabular-nums; }
-        .ms-chip {
+        // 分值徽章：非零方向色实底白字（高分对比，避免红字红底看不清），零灰弱化
+        .ms-score {
           flex: none;
-          width: 64px;
+          width: 34px;
           text-align: center;
-          font-style: normal;
-          font-size: 11px;
-          font-weight: 700;
-          padding: 1px 6px;
-          border-radius: 99px;
-          &.up { color: #fff; background: var(--el-color-danger); }
-          &.down { color: #fff; background: var(--el-color-success); }
-          &.flat { color: var(--el-text-color-secondary); background: var(--el-fill-color-light); }
+          font-size: 13px;
+          font-weight: 800;
+          font-variant-numeric: tabular-nums;
+          line-height: 1.8;
+          border-radius: 6px;
+          &.up { color: #fff; background: var(--el-color-danger-dark-2); }
+          &.down { color: #fff; background: var(--el-color-success-dark-2); }
+          &.flat { color: var(--el-text-color-placeholder); background: var(--el-fill-color-light); }
         }
         .ms-detail { flex: 1; min-width: 0; color: var(--el-text-color-secondary); }
 
@@ -1781,24 +1872,20 @@ onUnmounted(() => {
           &.neutral { color: var(--el-text-color-secondary); background: var(--el-fill-color-light); }
         }
         .ev-score {
-          font-size: 24px;
+          // 打分制：显示对总分的贡献（±2/±1），白字深色底高分对比；未计入显示 —
+          min-width: 36px;
+          text-align: center;
+          font-size: 20px;
           font-weight: 800;
-          line-height: 1.1;
+          line-height: 1.4;
+          border-radius: 6px;
+          padding: 0 6px;
           font-variant-numeric: tabular-nums;
-          &.score-bull { color: var(--el-color-danger); }
-          &.score-bear { color: var(--el-color-success); }
-          &.score-neutral { color: var(--el-text-color-secondary); }
+          &.up { color: #fff; background: var(--el-color-danger-dark-2); }
+          &.down { color: #fff; background: var(--el-color-success-dark-2); }
+          &.is-na { color: var(--el-text-color-placeholder); background: var(--el-fill-color-light); font-size: 14px; }
         }
         .ev-lv { font-size: 11px; color: var(--el-text-color-secondary); }
-        .ev-contrib {
-          font-size: 11px;
-          font-weight: 700;
-          padding: 0 7px;
-          border-radius: 99px;
-          border: 1px solid var(--el-border-color-lighter);
-          &.up { color: var(--el-color-danger); border-color: var(--el-color-danger-light-7); }
-          &.down { color: var(--el-color-success); border-color: var(--el-color-success-light-7); }
-        }
       }
 
       // 右内容
