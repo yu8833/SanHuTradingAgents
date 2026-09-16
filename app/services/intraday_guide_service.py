@@ -139,9 +139,11 @@ def _advice_for(position: dict, price: float | None, sig: dict | None) -> dict:
             if price and cost else None,
         "stop_loss_price": stop if stop else None,
         "take_profit_price": take if take else None,
+        "reasons": [],  # 依据编号列表：每条 {kind, text}，前端按编号展开
     }
     if price is None:
         base["sells_cached"] = not bool(sig)  # 无实时价：信号态兜底
+        base["reasons"] = [{"kind": "warn", "text": "实时价暂不可用，由信号快照兜底（可点「对照实时价评估」刷新）"}]
         return {**base, "advice": "持有", "advice_label": "等待实时价",
                 "sell_pct": 0.0, "trigger_price": None,
                 "reason": "实时价暂不可用，由信号快照兜底（可点「对照实时价评估」刷新）"}
@@ -149,6 +151,7 @@ def _advice_for(position: dict, price: float | None, sig: dict | None) -> dict:
     def _hit() -> dict:
         return {**base, "advice": "触发止损", "advice_label": "无条件离场",
                 "sell_pct": 1.0, "trigger_price": float(stop),
+                "reasons": [{"kind": "warn", "text": f"现价 {price} 已跌破止损位 {stop}，无条件止损离场"}],
                 "reason": f"现价 {price} 已跌破止损位 {stop}，无条件止损离场"}
 
     if stop and float(stop) > 0 and price <= float(stop):
@@ -157,32 +160,41 @@ def _advice_for(position: dict, price: float | None, sig: dict | None) -> dict:
         st = sig.get("signal_type")
         tp = sig.get("trigger_price") or price
         reasons = "；".join(sig.get("reasons") or []) or "触发卖出信号"
+        reason_items = [{"kind": "warn", "text": r} for r in (sig.get("reasons") or [])] or [
+            {"kind": "warn", "text": reasons}]
         if st == "S3":
             return {**base, "advice": "S3 清仓卖出", "advice_label": "清仓",
                     "sell_pct": float(sig.get("sell_pct") or 1.0), "trigger_price": tp,
+                    "reasons": reason_items,
                     "reason": reasons or "中期/大级别趋势破坏，无条件清仓"}
         if st == "SafetyNet":
             return {**base, "advice": "SafetyNet 安全网", "advice_label": "强制减至50%",
                     "sell_pct": float(sig.get("sell_pct") or 0.5), "trigger_price": tp,
+                    "reasons": reason_items,
                     "reason": reasons or "单日跌幅超 ATR×3，强制减仓一半"}
         if st == "S2":
             return {**base, "advice": "S2 主减仓", "advice_label": "主减仓",
                     "sell_pct": float(sig.get("sell_pct") or 0.67), "trigger_price": tp,
+                    "reasons": reason_items,
                     "reason": reasons or "连续跌破 MA5/MA8/MA13，主减仓（减至1/3）"}
         if st == "TrailingStop":
             return {**base, "advice": "TrailingStop 移动止损", "advice_label": "离场",
                     "sell_pct": float(sig.get("sell_pct") or 1.0), "trigger_price": tp,
+                    "reasons": reason_items,
                     "reason": reasons or "触发移动止损，保护利润离场"}
         if st == "S1":
             return {**base, "advice": "S1 减仓预警", "advice_label": "减仓1/3",
                     "sell_pct": float(sig.get("sell_pct") or 0.33), "trigger_price": tp,
+                    "reasons": reason_items,
                     "reason": reasons or "BIAS 超阈值或慢组压缩，减仓1/3锁盈"}
     if take and float(take) > 0 and price >= float(take):
         return {**base, "advice": "触及止盈", "advice_label": "分批止盈",
                 "sell_pct": 0.5, "trigger_price": float(take),
+                "reasons": [{"kind": "good", "text": f"现价 {price} 已达止盈位 {take}，分批止盈一半"}],
                 "reason": f"现价 {price} 已达止盈位 {take}，分批止盈一半"}
     return {**base, "advice": "持有", "advice_label": "继续持有",
             "sell_pct": 0.0, "trigger_price": None,
+            "reasons": [{"kind": "flat", "text": "未触发卖出信号、未触及止损/止盈，继续持有观察"}],
             "reason": "未触发卖出信号、未触及止损/止盈，继续持有观察"}
 
 
@@ -313,6 +325,20 @@ async def build_intraday_guide(user_id: str) -> dict:
         except Exception as e:
             logger.warning(f"盘中指导实时行情获取失败（走信号快照价）: {e}")
 
+    # ── 买入理由 · 宏观新闻环境（新闻打分：利好/利空方向 + 最强影响度） ──
+    # 一次性取宏观快讯打分聚合，避免逐卡重复调用（get_macro_news 有 5min/1h 缓存）
+    news_env: dict = {"bull": 0, "bear": 0}
+    try:
+        from app.services.macro.news_classifier import get_macro_news
+        for _n in await get_macro_news(hours_back=24, top_n=40):
+            sc = float(_n.get("impact_score") or 0)
+            if sc > 0:
+                news_env["bull"] = max(news_env["bull"], abs(sc))
+            elif sc < 0:
+                news_env["bear"] = max(news_env["bear"], abs(sc))
+    except Exception as e:
+        logger.warning(f"买入理由·新闻环境获取失败（跳过）: {e}")
+
     buys: list[dict] = []
     for code, src in buys_src.items():
         item = src.get("item") or {}
@@ -337,6 +363,27 @@ async def build_intraday_guide(user_id: str) -> dict:
             advice = f"等待回落至 {tp_f}（当前价 {price} 偏离 {dist}%）"
         else:
             advice = "等待实时价确认触发"
+        # 买入理由 = 信号依据（signal_label + 信效/样本）+ 宏观新闻环境打分
+        reason_parts: list[str] = []
+        buy_reasons: list[dict] = []  # 依据编号列表：每条 {kind, text}
+        if item.get("signal_label"):
+            reason_parts.append(f"信号 {item['signal_label']}")
+            buy_reasons.append({"kind": "good", "text": f"信号 {item['signal_label']}"})
+        if item.get("hit_rate") is not None:
+            reason_parts.append(f"信效 {item['hit_rate']}%（样本 {item.get('signal_count') or '—'}）")
+            buy_reasons.append({"kind": "good",
+                                "text": f"历史信效 {item['hit_rate']}%（样本 {item.get('signal_count') or '—'}）"})
+        if news_env["bull"] or news_env["bear"]:
+            if news_env["bull"] >= news_env["bear"]:
+                reason_parts.append(f"新闻环境偏利好（最强 +{news_env['bull']}）")
+                buy_reasons.append({"kind": "good",
+                                    "text": f"宏观新闻环境偏利好（最强影响 +{news_env['bull']}）"})
+            else:
+                reason_parts.append(f"新闻环境偏利空（最强 -{news_env['bear']}）")
+                buy_reasons.append({"kind": "warn",
+                                    "text": f"宏观新闻环境偏利空（最强影响 -{news_env['bear']}），买入需谨慎"})
+        buy_reasons.append({"kind": "flat", "text": advice})
+        buy_reason = "；".join(reason_parts) or f"{item.get('name') or code} 触发买入信号"
         buys.append({
             "code": code,
             "name": item.get("name") or code,
@@ -350,6 +397,8 @@ async def build_intraday_guide(user_id: str) -> dict:
             "source": item.get("source"),
             "plan_id": src.get("plan_id"),
             "advice": advice,
+            "buy_reason": buy_reason,
+            "reasons": buy_reasons,
         })
 
     sells: list[dict] = []

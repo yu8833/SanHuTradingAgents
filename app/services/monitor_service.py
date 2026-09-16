@@ -1086,7 +1086,19 @@ class MonitorService:
             else:
                 qty = int(avail * position_pct / 100) * 100
             if qty <= 0:
-                raise ValueError("可用持仓不足，无法卖出")
+                # 持仓已平仓（quantity=0）：指令随持仓失效，自动取消并给出明确提示，
+                # 而不是笼统报"可用持仓不足"让用户困惑（历史 pending 卖出指令在别处平仓后仍残留）。
+                held_pos = await db["paper_positions"].find_one(
+                    {"user_id": target_user, "code": symbol})
+                held = int((held_pos or {}).get("quantity") or 0)
+                if held <= 0:
+                    await db[self.tbs_orders_coll].update_one(
+                        {"_id": order["_id"]},
+                        {"$set": {"status": "cancelled",
+                                  "cancelled_reason": "持仓已平仓，卖出指令自动失效"}},
+                    )
+                    raise ValueError(f"{symbol} 持仓已平仓，该卖出指令已自动取消")
+                raise ValueError("可用持仓不足，无法卖出（可能为当日买入 T+1 限制）")
 
         order_result = await execute_market_order(
             user_id=target_user,

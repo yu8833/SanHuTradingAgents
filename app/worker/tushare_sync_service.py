@@ -23,6 +23,15 @@ logger = logging.getLogger(__name__)
 # UTC+8 时区
 UTC_8 = timezone(timedelta(hours=8))
 
+# --- 历史同步"有界化"硬时限（秒）：弱网下任何单只/单次运行都不无限等待 ---
+# 单只股票 API 调用 >60s 视为该只失败并跳过；单次运行 >180 分钟（低于僵尸阈值 6h）
+# 优雅停止并正常返回（不抛给 APScheduler），已同步部分靠增量断点下次 cron 续传，
+# 任务不再被僵尸检测标记 failed。一处可调，不进 .env。
+HIST_SYNC_STOCK_TIMEOUT = 60
+HIST_SYNC_RUNTIME_BUDGET = 180 * 60
+# 连续失败熔断阈值：API 完全不可用时避免逐只尝试全部股票
+MAX_CONSECUTIVE_FAILURES = 20
+
 # 模块级同步 MongoDB 客户端单例（供 _update_progress 使用）
 # 避免每次进度更新都新建 MongoClient 连接，减少连接开销与事件循环阻塞。
 _sync_mongo_client = None
@@ -652,9 +661,8 @@ class TushareSyncService:
 
             logger.info(f"📊 历史数据同步: 结束日期={end_date}, 股票数量={len(symbols)}, 模式={'增量' if incremental else '全量'}")
 
-            # 连续失败熔断：API 完全不可用时避免逐只尝试全部股票
+            # 连续失败熔断：API 完全不可用时避免逐只尝试全部股票（阈值见模块常量）
             consecutive_failures = 0
-            MAX_CONSECUTIVE_FAILURES = 20  # 连续失败20次后终止
 
             # 真增量：最近一个"理应已有K线数据"的交易日（仅增量模式用于跳过已最新股票）
             latest_settled = self._latest_settled_trade_day() if (incremental and not all_history) else ""
@@ -705,9 +713,12 @@ class TushareSyncService:
                         f"start={symbol_start_date}, end={end_date}, period={period}"
                     )
 
-                    # ⏱️ 性能监控：API 调用
+                    # ⏱️ 性能监控：API 调用（单只硬超时：弱网下不无限等待）
                     api_start = now_tz()
-                    df = await self.provider.get_historical_data(symbol, symbol_start_date, end_date, period=period)
+                    df = await asyncio.wait_for(
+                        self.provider.get_historical_data(symbol, symbol_start_date, end_date, period=period),
+                        timeout=HIST_SYNC_STOCK_TIMEOUT,
+                    )
                     api_duration = (now_tz() - api_start).total_seconds()
 
                     if df is not None and not df.empty:
@@ -1897,36 +1908,57 @@ async def run_tushare_historical_sync(incremental: bool = True):
     try:
         service = await get_tushare_sync_service()
         logger.info("✅ [APScheduler] Tushare 同步服务已初始化")
-        result = await service.sync_historical_data(incremental=incremental, job_id="tushare_historical_sync")
+        # ⏱️ 单次运行预算：弱网下全量循环无界拖长（曾超 6h 被僵尸检测标记 failed）。
+        # 超预算即优雅停止、正常返回（不抛给 APScheduler），已同步部分靠增量断点下次续传。
+        timed_out = False
+        try:
+            result = await asyncio.wait_for(
+                service.sync_historical_data(incremental=incremental, job_id="tushare_historical_sync"),
+                timeout=HIST_SYNC_RUNTIME_BUDGET,
+            )
+        except asyncio.TimeoutError:
+            timed_out = True
+            result = {
+                "stopped": True,
+                "stop_reason": f"runtime_budget_timeout({HIST_SYNC_RUNTIME_BUDGET // 60}min)",
+                "note": "已达到单次运行预算，进度已记录，下次 cron 增量续传",
+            }
+            logger.error(
+                f"⏱️ [APScheduler] Tushare历史数据同步达到运行预算（>{HIST_SYNC_RUNTIME_BUDGET // 60}分钟），"
+                f"提前结束；已同步部分将下次增量续传"
+            )
         logger.info(f"✅ [APScheduler] Tushare历史数据同步完成: {result}")
 
         # 历史日K同步完成后，串行执行每日估值同步（daily_basic，供回测按日对齐 PE/PB/市值）
         # 原独立任务 tushare_daily_basic_sync(23:30) 已合并至此，减少调度条目。
-        try:
-            if settings.TUSHARE_DAILY_BASIC_SYNC_ENABLED:
-                days_back = getattr(settings, "TUSHARE_DAILY_BASIC_SYNC_DAYS_BACK", 730)
-                db_result = await service.sync_daily_basic_data(
-                    days_back=days_back, job_id="tushare_historical_sync"
-                )
-                logger.info(f"✅ [APScheduler] 每日估值数据同步完成(随历史同步): {db_result}")
-        except Exception as e:
-            logger.warning(f"⚠️ 历史同步尾部每日估值同步失败（不影响历史同步结果）: {e}")
+        # 预算超时（预算不足时间）时跳过该尾部步骤，避免基于不完整日K估出失真数据。
+        if not timed_out:
+            try:
+                if settings.TUSHARE_DAILY_BASIC_SYNC_ENABLED:
+                    days_back = getattr(settings, "TUSHARE_DAILY_BASIC_SYNC_DAYS_BACK", 730)
+                    db_result = await service.sync_daily_basic_data(
+                        days_back=days_back, job_id="tushare_historical_sync"
+                    )
+                    logger.info(f"✅ [APScheduler] 每日估值数据同步完成(随历史同步): {db_result}")
+            except Exception as e:
+                logger.warning(f"⚠️ 历史同步尾部每日估值同步失败（不影响历史同步结果）: {e}")
 
         # 同步完成后自动执行完整性检查和补数
-        try:
-            from app.services.data_integrity_service import get_data_integrity_service
-            integrity_service = await get_data_integrity_service()
-            integrity_result = await integrity_service.check_historical_completeness(
-                auto_remediate=settings.DATA_INTEGRITY_AUTO_REMEDIATE,
-                remediate_source=settings.DATA_INTEGRITY_REMEDIATE_SOURCE,
-            )
-            logger.info(f"🔍 [完整性检查] Tushare同步后检查结果: {integrity_result.get('status')} "
-                       f"(期望: {integrity_result.get('expected_count')}, "
-                       f"实际: {integrity_result.get('actual_count')}, "
-                       f"缺失: {integrity_result.get('missing_count')}, "
-                       f"补数: {integrity_result.get('remediated_count')})")
-        except Exception as ie:
-            logger.warning(f"⚠️ 同步后完整性检查失败（不影响同步结果）: {ie}")
+        if not timed_out:
+            try:
+                from app.services.data_integrity_service import get_data_integrity_service
+                integrity_service = await get_data_integrity_service()
+                integrity_result = await integrity_service.check_historical_completeness(
+                    auto_remediate=settings.DATA_INTEGRITY_AUTO_REMEDIATE,
+                    remediate_source=settings.DATA_INTEGRITY_REMEDIATE_SOURCE,
+                )
+                logger.info(f"🔍 [完整性检查] Tushare同步后检查结果: {integrity_result.get('status')} "
+                           f"(期望: {integrity_result.get('expected_count')}, "
+                           f"实际: {integrity_result.get('actual_count')}, "
+                           f"缺失: {integrity_result.get('missing_count')}, "
+                           f"补数: {integrity_result.get('remediated_count')})")
+            except Exception as ie:
+                logger.warning(f"⚠️ 同步后完整性检查失败（不影响同步结果）: {ie}")
 
         return result
     except Exception as e:

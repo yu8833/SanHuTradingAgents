@@ -16,6 +16,14 @@ from tradingagents.dataflows.providers.china.akshare import get_akshare_provider
 
 logger = logging.getLogger(__name__)
 
+# --- 历史同步"有界化"硬时限（秒）：弱网下任何单只/单次运行都不无限等待 ---
+# 单只股票 API 调用 >60s 视为该只失败并跳过；单次运行 >180 分钟（低于僵尸阈值 6h）
+# 优雅停止并正常返回（不抛给 APScheduler），已同步部分靠增量断点下次 cron 续传。
+# 连续失败熔断阈值：API 完全不可用时避免逐只尝试全部股票。一处可调，不进 .env。
+HIST_SYNC_STOCK_TIMEOUT = 60
+HIST_SYNC_RUNTIME_BUDGET = 180 * 60
+MAX_CONSECUTIVE_FAILURES = 20
+
 
 class AKShareSyncService:
     """
@@ -689,6 +697,7 @@ class AKShareSyncService:
             logger.info(f"📊 历史数据同步: 结束日期={end_date}, 股票数量={len(symbols)}, 模式={'增量' if incremental else '全量'}")
 
             # 4. 批量处理
+            consecutive_failures = 0
             for i in range(0, len(symbols), self.batch_size):
                 # 检查是否需要退出
                 if job_id and await self._should_stop(job_id):
@@ -700,6 +709,18 @@ class AKShareSyncService:
                 batch_stats = await self._process_historical_batch(
                     batch, start_date, end_date, period, incremental
                 )
+
+                # 连续失败熔断：整批全败视为一批失败，连续达阈值提前终止
+                # （弱网下避免逐只尝试完剩余全部股票）
+                if batch_stats["error_count"] >= len(batch):
+                    consecutive_failures += 1
+                    if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                        logger.error(f"🚨 连续 {MAX_CONSECUTIVE_FAILURES} 批同步失败，终止同步")
+                        stats["stopped"] = True
+                        stats["stop_reason"] = f"连续 {MAX_CONSECUTIVE_FAILURES} 批失败"
+                        break
+                else:
+                    consecutive_failures = 0
 
                 # 更新统计
                 stats["success_count"] += batch_stats["success_count"]
@@ -771,8 +792,11 @@ class AKShareSyncService:
                         # 全量同步：最近1年
                         symbol_start_date = (now_tz() - timedelta(days=365)).strftime('%Y-%m-%d')
 
-                # 获取历史数据
-                hist_data = await self.provider.get_historical_data(symbol, symbol_start_date, end_date, period)
+                # 获取历史数据（单只硬超时：弱网下不无限等待）
+                hist_data = await asyncio.wait_for(
+                    self.provider.get_historical_data(symbol, symbol_start_date, end_date, period),
+                    timeout=HIST_SYNC_STOCK_TIMEOUT,
+                )
 
                 if hist_data is not None and not hist_data.empty:
                     # 保存到统一历史数据集合
@@ -1378,24 +1402,43 @@ async def run_akshare_historical_sync(incremental: bool = True):
     """APScheduler任务：同步历史数据"""
     try:
         service = await get_akshare_sync_service()
-        result = await service.sync_historical_data(incremental=incremental, job_id="akshare_historical_sync")
+        # ⏱️ 单次运行预算：弱网下全量循环无界拖长会被僵尸检测标记 failed。
+        # 超预算即优雅停止、正常返回（不抛给 APScheduler），已同步部分靠增量断点下次续传。
+        timed_out = False
+        try:
+            result = await asyncio.wait_for(
+                service.sync_historical_data(incremental=incremental, job_id="akshare_historical_sync"),
+                timeout=HIST_SYNC_RUNTIME_BUDGET,
+            )
+        except asyncio.TimeoutError:
+            timed_out = True
+            result = {
+                "stopped": True,
+                "stop_reason": f"runtime_budget_timeout({HIST_SYNC_RUNTIME_BUDGET // 60}min)",
+                "note": "已达到单次运行预算，进度已记录，下次 cron 增量续传",
+            }
+            logger.error(
+                f"⏱️ [APScheduler] AKShare历史数据同步达到运行预算（>{HIST_SYNC_RUNTIME_BUDGET // 60}分钟），"
+                f"提前结束；已同步部分将下次增量续传"
+            )
         logger.info(f"✅ AKShare历史数据同步完成: {result}")
 
         # 同步完成后自动执行完整性检查（用Tushare补数）
-        try:
-            from app.services.data_integrity_service import get_data_integrity_service
-            integrity_service = await get_data_integrity_service()
-            integrity_result = await integrity_service.check_historical_completeness(
-                auto_remediate=True,
-                remediate_source="tushare",
-            )
-            logger.info(f"🔍 [完整性检查] AKShare同步后检查结果: {integrity_result.get('status')} "
-                       f"(期望: {integrity_result.get('expected_count')}, "
-                       f"实际: {integrity_result.get('actual_count')}, "
-                       f"缺失: {integrity_result.get('missing_count')}, "
-                       f"补数: {integrity_result.get('remediated_count')})")
-        except Exception as ie:
-            logger.warning(f"⚠️ 同步后完整性检查失败（不影响同步结果）: {ie}")
+        if not timed_out:
+            try:
+                from app.services.data_integrity_service import get_data_integrity_service
+                integrity_service = await get_data_integrity_service()
+                integrity_result = await integrity_service.check_historical_completeness(
+                    auto_remediate=True,
+                    remediate_source="tushare",
+                )
+                logger.info(f"🔍 [完整性检查] AKShare同步后检查结果: {integrity_result.get('status')} "
+                           f"(期望: {integrity_result.get('expected_count')}, "
+                           f"实际: {integrity_result.get('actual_count')}, "
+                           f"缺失: {integrity_result.get('missing_count')}, "
+                           f"补数: {integrity_result.get('remediated_count')})")
+            except Exception as ie:
+                logger.warning(f"⚠️ 同步后完整性检查失败（不影响同步结果）: {ie}")
 
         return result
     except Exception as e:

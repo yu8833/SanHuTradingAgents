@@ -545,6 +545,17 @@ async def execute_market_order(
                         "updated_at": now,
                     }}
                 )
+                # 平仓后：作废该标的的待确认卖出指令（监控中心残留的 pending 卖出指令
+                # 若不清理，用户稍后执行必然报"可用持仓不足"）。
+                try:
+                    await db["monitor_tbs_orders"].update_many(
+                        {"user_id": user_id, "symbol": normalized_code,
+                         "direction": "sell", "status": "pending"},
+                        {"$set": {"status": "cancelled",
+                                  "cancelled_reason": "持仓已平仓，卖出指令自动失效"}},
+                    )
+                except Exception as e:
+                    logger.warning(f"平仓作废卖出指令失败 {normalized_code}: {e}")
             else:
                 # 卖出后同步 available_qty 字段：以动态口径（总持仓−今日买入）卖出前可用量 − qty。
                 # 该字段在买入当天被置 0（T+1 锁定），跨天后不会自动恢复；这里随卖出修正，

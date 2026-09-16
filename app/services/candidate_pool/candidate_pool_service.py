@@ -31,6 +31,10 @@ from app.strategy_system.screener import _resolve_as_of
 
 logger = logging.getLogger(__name__)
 
+# 强势行业结果「就绪」门槛：行业数低于该值时视为数据未就绪（面板/指标不完整），
+# 拒绝写入失败缓存——避免"数据补齐前的半成品行业榜"被缓存 24h 后一直毒化行业段。
+_INDUSTRIES_READY_MIN = 5
+
 # ──────────────────────────────────────────────────────────────
 # 候选池默认视图（stocks-overview）结果级缓存：同一交易日 + 同一行业集合的
 # 结果幂等（底层面板/指标已有 screener 进程内缓存），缓存后重复打开页面毫秒级返回。
@@ -188,10 +192,11 @@ async def get_candidate_industries(top_n: int = 20, as_of=None) -> dict:
 
     try:
         from app.services.cache_layer import cached
-        # valid：行业列表为空（数据未就绪）时不缓存，避免"空结果被缓存 24h 后永久命中"
+        # valid：行业列表数量不足（数据未就绪：面板/指标不完整）时不缓存，
+        # 避免"半成品行业榜"被缓存 24h 后一直命中，导致行业段/候选池长期空。
         return await cached(
             cache_key, _build, category="financial", ttl=86400,
-            valid=lambda v: bool((v or {}).get("industries")),
+            valid=lambda v: len((v or {}).get("industries") or []) >= _INDUSTRIES_READY_MIN,
         )
     except Exception as e:
         logger.warning(f"候选池行业缓存未命中（直接计算）: {e}")
@@ -467,8 +472,11 @@ async def get_candidate_stocks_overview(top_n: int = 10, per_industry: int = 3,
     if not ind_names:
         return {"as_of": as_of_date, "industry": "", "items": [], "total": 0}
 
-    # 构建并集代码池（top_n 行业成分股），缩小面板加载范围、缩短冷启动
-    pool_codes = _build_industry_pool(ind_names) or None
+    # 构建并集代码池（top_n 行业成分股），缩小面板加载范围、缩短冷启动。
+    # 注意：get_candidate_industries 返回的是**本地细类**行业名，必须按细类直接取成分股，
+    # 不能走 _build_industry_pool（它按 ETF 主题名查映射）——否则重名细类（如"银行"）会被
+    # 当成 ETF 主题，把缩池错误收敛到单行业成分股，导致其它行业取不到股票（候选池全空）。
+    pool_codes = _codes_by_local_industries(set(ind_names)) or None
 
     results = await asyncio.gather(
         *[get_candidate_stocks(ind, limit=per_industry, as_of=as_of_date, pool=pool_codes)

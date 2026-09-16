@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 import urllib.request
 
@@ -194,7 +195,9 @@ def index_futures() -> list[dict]:
                 change_pct = float(r.get("涨跌幅"))
             except (TypeError, ValueError):
                 continue
-            if price <= 0:
+            # AKShare 偶发返回 NaN（停牌/源异常），NaN 与 price <= 0 比较恒为 False，
+            # 不显式过滤会把 NaN 写入缓存，导致 JSON 序列化 500（Out of range float）
+            if (not math.isfinite(price)) or (not math.isfinite(change_pct)) or price <= 0:
                 continue
             out.append({
                 "key": t["key"], "name": t["name"], "region": t["region"],
@@ -216,7 +219,11 @@ def macro_indices() -> list[dict]:
     if vix:
         out.append(vix)
     out.extend(index_futures())
-    return out
+    # 出口兜底：任一路径混入 NaN/Infinity 都会让 JSON 序列化 500，
+    # 这里统一丢弃非有限数值项，避免污染缓存与响应
+    return [it for it in out
+            if math.isfinite(float(it.get("price") or 0))
+            and math.isfinite(float(it.get("change_pct") or 0))]
 
 
 def _search(q: str) -> dict | None:

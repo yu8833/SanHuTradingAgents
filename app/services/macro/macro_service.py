@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from datetime import datetime, timezone
 from typing import Any
 
@@ -37,6 +38,30 @@ import asyncio  # noqa: E402
 _snapshot_gen_lock = asyncio.Lock()
 # 记录"当日是否已触发过后台补生成"，跨请求避免重复启动（进程内即可，重启即复位为重新允许）
 _snapshot_auto_attempted: set[str] = set()
+
+# --- 快照构建各数据步的硬时限（秒）：弱网下任何一步都不无限等待 ---
+# 外围指数 / 日历 / 快讯 / 大盘宽度 并行收集，各自带硬上限；超时的步降级为空值，
+# 其余步不受影响、已取到数据不丢弃。score_macro 对空输入安全（出「数据不足」），
+# 空数据快照照常落库 ⇒ 宏观快照必然在有限时间内生成，前端不再长时「未就绪」。
+SNAPSHOT_FETCH_TIMEOUTS = {
+    "indices": 20,   # 外围指数全量（并行拉取）
+    "breadth": 10,   # 大盘宽度
+    "calendar": 15,  # 财经日历（缓存 1 天，通常秒回）
+    "news": 60,      # 分级快讯（108 RSS / 多源合并，最慢步）
+}
+SNAPSHOT_LLM_TIMEOUT = 30  # LLM 解读（日历逐条 + 盘前解读）单次硬上限
+
+
+async def _bounded_fetch(coro, name: str, timeout: float, default):
+    """包硬超时运行单个数据收集步；超时/异常一律降级为 default，绝不把耗时外抛。"""
+    try:
+        return await asyncio.wait_for(coro, timeout=timeout)
+    except asyncio.TimeoutError:
+        logger.warning(f"宏观数据步[{name}]超时（>{timeout:.0f}s），降级处理")
+        return default
+    except Exception as e:
+        logger.warning(f"宏观数据步[{name}]失败，降级处理: {e}")
+        return default
 
 
 async def _ensure_snapshot_auto_generated() -> bool:
@@ -494,11 +519,20 @@ async def _calendar_ai_analysis(calendar: list[dict], news: list[dict]) -> list[
 # 快照构建 / 读取 / 刷新
 # ---------------------------------------------------------------------------
 async def build_macro_snapshot(days: int = 7) -> dict:
-    """构建当日宏观快照：聚合数据 → 规则引擎 → LLM 解读。"""
-    indices = await _collect_indices()
-    calendar = await get_financial_calendar(days)
-    news = await get_macro_news(hours_back=24, top_n=40)
-    breadth = await _collect_breadth()
+    """构建当日宏观快照：聚合数据 → 规则引擎 → LLM 解读。
+
+    有界化（防弱网下无限等待）：
+    - 四路数据收集并行拉取，各自包硬超时（SNAPSHOT_FETCH_TIMEOUTS），
+      超时/失败降级为该步空值，其余步不受影响、已取到数据不丢弃；
+    - LLM 解读（日历逐条 + 盘前解读）各包 SNAPSHOT_LLM_TIMEOUT 硬超时，超时走既有降级。
+    最坏情况整体约 2 分钟内返回完整结构快照（数据不足也算）⇒ 快照必然有界落库。
+    """
+    indices, calendar, news, breadth = await asyncio.gather(
+        _bounded_fetch(_collect_indices(), "外围指数", SNAPSHOT_FETCH_TIMEOUTS["indices"], []),
+        _bounded_fetch(get_financial_calendar(days), "财经日历", SNAPSHOT_FETCH_TIMEOUTS["calendar"], []),
+        _bounded_fetch(get_macro_news(hours_back=24, top_n=40), "分级快讯", SNAPSHOT_FETCH_TIMEOUTS["news"], []),
+        _bounded_fetch(_collect_breadth(), "大盘宽度", SNAPSHOT_FETCH_TIMEOUTS["breadth"], None),
+    )
 
     rule = score_macro(indices, calendar, news, breadth)
     created_at = datetime.now(timezone.utc)
@@ -508,9 +542,15 @@ async def build_macro_snapshot(days: int = 7) -> dict:
         sig["judge"] = "利多" if sig.get("score", 0) > 0 else ("利空" if sig.get("score", 0) < 0 else "中性")
 
     # 已公布事件：快讯流提取实际值 + LLM 逐条解读（参考 Tab 直接呈现分析）
-    calendar = await _calendar_ai_analysis(calendar, news)
+    calendar = await _bounded_fetch(
+        _calendar_ai_analysis(calendar, news), "日历LLM解读", SNAPSHOT_LLM_TIMEOUT, calendar
+    )
 
-    llm = await _llm_interpretation(indices, calendar, news, rule)
+    llm = await _bounded_fetch(
+        _llm_interpretation(indices, calendar, news, rule),
+        "盘前LLM解读", SNAPSHOT_LLM_TIMEOUT,
+        {"available": False, "interpretation": None},
+    )
 
     return {
         "date": datetime.now().strftime("%Y-%m-%d"),
@@ -526,6 +566,21 @@ async def build_macro_snapshot(days: int = 7) -> dict:
     }
 
 
+def _sanitize_snapshot(obj: Any) -> Any:
+    """递归清洗快照中的非有限浮点（NaN/Infinity）为 None。
+
+    数据源偶发 NaN（停牌/源异常）会直接导致 JSON 序列化 500；
+    落库与读库都过一遍，保证任何路径产出的快照均可安全序列化。
+    """
+    if isinstance(obj, float):
+        return None if not math.isfinite(obj) else obj
+    if isinstance(obj, dict):
+        return {k: _sanitize_snapshot(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_snapshot(v) for v in obj]
+    return obj
+
+
 async def _persist_snapshot(snapshot: dict) -> bool:
     """写入 macro_daily_snapshots（date 唯一，upsert）。"""
     try:
@@ -533,7 +588,7 @@ async def _persist_snapshot(snapshot: dict) -> bool:
         db = get_mongo_db()
         await db[SNAPSHOT_COLLECTION].update_one(
             {"date": snapshot["date"]},
-            {"$set": snapshot},
+            {"$set": _sanitize_snapshot(snapshot)},
             upsert=True,
         )
         return True
@@ -560,7 +615,8 @@ async def get_macro_snapshot(date_str: str | None = None) -> dict | None:
         # 保证已落库的存量快照也能提供"状态四态 + 置信 + 锁定"基准。
         if not doc.get("basis") and doc.get("rule"):
             doc["basis"] = _build_basis(doc["rule"], doc.get("created_at") or datetime.now(timezone.utc))
-        return doc
+        # 清洗存量 NaN/Infinity（历史脏数据 + 序列化 500 兜底）
+        return _sanitize_snapshot(doc)
 
     key = f"macro:snapshot:{date_str}"
     return await cached(key, _load, category="market", valid=lambda v: v is not None)

@@ -101,6 +101,12 @@ from app.worker.tushare_sync_service import (
     run_tushare_status_check,
 )
 
+# --- 新闻数据同步"有界化"硬时限（秒）：弱网下任何一步都不无限等待 ---
+# 单股 ≤60s、市场新闻 ≤300s，任务总时长 = 自选股数×60s + 300s，天然有界，
+# 不再出现单次同步拖数小时占用调度资源、拖累其它 cron 的情况。
+NEWS_STOCK_FETCH_TIMEOUT = 60
+NEWS_MARKET_FETCH_TIMEOUT = 300
+
 
 def get_version() -> str:
     """从 VERSION 文件读取版本号"""
@@ -722,13 +728,20 @@ async def lifespan(app: FastAPI):
                         total_saved = 0
                         for code in favorite_codes:
                             try:
-                                result = await sync_service.sync_stock_news(
-                                    symbol=code,
-                                    data_sources=["akshare", "tushare", "realtime"],
-                                    hours_back=24,
-                                    max_news_per_source=settings.NEWS_SYNC_MAX_PER_SOURCE
+                                result = await asyncio.wait_for(
+                                    sync_service.sync_stock_news(
+                                        symbol=code,
+                                        data_sources=["akshare", "tushare", "realtime"],
+                                        hours_back=24,
+                                        max_news_per_source=settings.NEWS_SYNC_MAX_PER_SOURCE
+                                    ),
+                                    timeout=NEWS_STOCK_FETCH_TIMEOUT,
                                 )
                                 total_saved += result.successful_saves
+                            except asyncio.TimeoutError:
+                                logger.warning(
+                                    f"⏱️ 自选股 {code} 新闻同步超时（>{NEWS_STOCK_FETCH_TIMEOUT}s），跳过"
+                                )
                             except Exception as e:
                                 logger.warning(f"⚠️ 自选股 {code} 新闻同步失败: {e}")
                         logger.info(f"✅ 自选股新闻同步完成: 共保存{total_saved}条")
@@ -739,16 +752,23 @@ async def lifespan(app: FastAPI):
                 
                 # 2. 同步市场新闻（多数据源）
                 try:
-                    market_result = await sync_service.sync_market_news(
-                        data_sources=["akshare", "tushare", "realtime"],
-                        hours_back=24,
-                        max_news_per_source=settings.NEWS_SYNC_MAX_PER_SOURCE
+                    market_result = await asyncio.wait_for(
+                        sync_service.sync_market_news(
+                            data_sources=["akshare", "tushare", "realtime"],
+                            hours_back=24,
+                            max_news_per_source=settings.NEWS_SYNC_MAX_PER_SOURCE
+                        ),
+                        timeout=NEWS_MARKET_FETCH_TIMEOUT,
                     )
                     logger.info(
                         f"✅ 市场新闻同步完成: "
                         f"成功保存{market_result.successful_saves}条, "
                         f"失败{market_result.failed_saves}条, "
                         f"去重跳过{market_result.duplicate_skipped}条"
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        f"⏱️ 市场新闻同步超时（>{NEWS_MARKET_FETCH_TIMEOUT}s），跳过本次"
                     )
                 except Exception as e:
                     logger.error(f"❌ 市场新闻同步异常: {e}")
@@ -783,6 +803,11 @@ async def lifespan(app: FastAPI):
 
         # ==================== 宏观快扫（盘前）：交易日 8:15 生成并落库 ====================
         # 设计文档《第六章·交易工具与日常流程》§5.5：调度 交易日 8:15 自动生成落库。
+        # 职责解耦（从根上保证「宏观就绪」）：
+        # - 8:15 macro_daily_scan 只负责快照落库（build_macro_snapshot 已并行有界化，
+        #   score_macro 对空数据安全 → 数据不足也落库），宏观就绪与候选池/计划彻底解耦；
+        # - 9:00 macro_scan_plan 才做候选池冷算 + 当日计划快照，失败只影响计划成品、
+        #   不影响宏观；快照缺失时 plan_generation_service 自带「未就绪快速降级」。
         # 任务内部自判交易日（复用 trading_time.is_trading_day）。
         try:
             async def run_macro_daily_scan():
@@ -801,6 +826,26 @@ async def lifespan(app: FastAPI):
                         f"指数={len(snap.get('indices', []))}, 日历={len(snap.get('calendar', []))}, "
                         f"LLM={'可用' if snap.get('llm_available') else '降级'}"
                     )
+                except Exception as e:
+                    logger.error(f"❌ [APScheduler] 宏观快扫失败: {e}", exc_info=True)
+
+            scheduler.add_job(
+                run_macro_daily_scan,
+                cron_trigger("15 8 * * 1-5", timezone=get_tz()),
+                id="macro_daily_scan",
+                name="宏观快扫（盘前8:15自动生成）",
+                replace_existing=True,
+            )
+            logger.info("✅ 宏观快扫定时任务已注册: 工作日 8:15（仅快照落库）")
+
+            async def run_macro_scan_plan():
+                """9:00 候选池冷算 + 当日计划快照（与宏观快照解耦，独立失败互不影响）。"""
+                try:
+                    from app.utils.trading_time import is_trading_day
+                    from app.utils.timezone import now_tz
+                    if not is_trading_day(now_tz()):
+                        logger.info("⏭️ 非交易日，跳过当日候选池/计划快照")
+                        return
                     # 计算并持久化「当日候选快照」：让「当日计划生成」退化为纯读取，
                     # 不再现场全量重算候选池（实测冷算 ~40-50s）。冷算主体在后台执行，
                     # 不阻塞任何用户请求；下次点击生成只读库 + 秒级装配。
@@ -827,16 +872,16 @@ async def lifespan(app: FastAPI):
                         f"候选{plan.get('candidates_count', 0)}条（作战室打开即读）"
                     )
                 except Exception as e:
-                    logger.error(f"❌ [APScheduler] 宏观快扫失败: {e}", exc_info=True)
+                    logger.error(f"❌ [APScheduler] 当日候选池/计划快照失败: {e}", exc_info=True)
 
             scheduler.add_job(
-                run_macro_daily_scan,
-                cron_trigger("15 8 * * 1-5", timezone=get_tz()),
-                id="macro_daily_scan",
-                name="宏观快扫（盘前8:15自动生成）",
+                run_macro_scan_plan,
+                cron_trigger("0 9 * * 1-5", timezone=get_tz()),
+                id="macro_scan_plan",
+                name="当日候选池与计划快照（9:00生成）",
                 replace_existing=True,
             )
-            logger.info("✅ 宏观快扫定时任务已注册: 工作日 8:15")
+            logger.info("✅ 当日候选池/计划快照定时任务已注册: 工作日 9:00")
         except Exception as e:
             logger.error(f"🚨 宏观快扫定时任务注册失败: {e}", exc_info=True)
 

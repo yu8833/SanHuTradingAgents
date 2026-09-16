@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 # ---- 阈值（可配置；设计文档建议默认值先行，后续按回测调参）----
@@ -48,6 +49,24 @@ _BEAR_WORDS = (
 
 def _find_index(indices: list[dict], key: str) -> dict | None:
     return next((i for i in indices if i.get("key") == key), None)
+
+
+def _sanitize_indices(indices: list[dict]) -> list[dict]:
+    """清洗外围指数：非有限数值（NaN/Infinity）置 None。
+
+    数据源偶发 NaN（停牌/源异常）会让评分引擎输出 NaN 信号并污染快照，
+    进而导致 JSON 序列化 500；这里统一转为 None，由下游 `is not None`
+    检查自然跳过该信号。
+    """
+    out = []
+    for it in indices:
+        it = dict(it)
+        for k in ("price", "change_pct"):
+            v = it.get(k)
+            if isinstance(v, float) and not math.isfinite(v):
+                it[k] = None
+        out.append(it)
+    return out
 
 
 def _score_change(v: float, high: float, low: float, name: str, detail: str) -> dict:
@@ -78,7 +97,10 @@ def _event_polarity(title: str) -> int:
 def _score_events(news: list[dict]) -> tuple[list[dict], int]:
     """高重要性政策/数据事件：利好 +2 / 利空 -2，最多计 EVENT_CAP 条。
 
-    news 入参为分级快讯（含 importance/category）。只取 high 且带明确极性的。
+    news 入参为分级快讯（含 importance/category + v5 impact_score/direction）。
+    只计入 |impact_score| ≥ 50 的强影响事件（与前端"重要事件"展示口径一致）：
+    极性取 news_classifier v5 确定性打分的符号，保证大盘方向引擎与事件展示判定一致；
+    无打分字段（历史缓存/直接构造入参）时回退本地词表 _event_polarity。
     """
     signals: list[dict] = []
     total = 0
@@ -89,9 +111,17 @@ def _score_events(news: list[dict]) -> tuple[list[dict], int]:
         if item.get("importance") != "high":
             continue
         title = item.get("title") or ""
-        polarity = _event_polarity(title)
-        if polarity == 0:
-            continue
+        # v5：优先用 news_classifier 已算好的 impact_score，取方向并只计强影响（|score|≥50）
+        v5 = item.get("impact_score")
+        if v5 is not None:
+            v5 = float(v5)
+            if abs(v5) < 50:   # 弱影响事件不计入大盘，也不进"重要事件"列表
+                continue
+            polarity = 1 if v5 > 0 else -1
+        else:
+            polarity = _event_polarity(title)
+            if polarity == 0:
+                continue
         score = polarity * EVENT_WEIGHT
         total += score
         counted += 1
@@ -101,6 +131,8 @@ def _score_events(news: list[dict]) -> tuple[list[dict], int]:
             "score": score,
             "detail": f"{'利好' if polarity > 0 else '利空'}（贡献 {score:+d}）：{title[:50]}",
             "weight": EVENT_WEIGHT,
+            "title": title,            # 完整事件标题（前端链接文本）
+            "url": item.get("url") or "",  # 原文链接（快讯源自带，前端跳原文）
         })
     return signals, total
 
@@ -115,6 +147,7 @@ def score_macro(indices: list[dict], calendar: list[dict],
         news: 分级快讯 [{title, content, importance, category, ...}]
         breadth: 昨日大盘情绪 {up, down}（涨跌家数），可为 None
     """
+    indices = _sanitize_indices(indices or [])
     signals: list[dict] = []
     total = 0
     max_abs = 0  # 已触发信号的满分绝对值之和（用于置信度）
