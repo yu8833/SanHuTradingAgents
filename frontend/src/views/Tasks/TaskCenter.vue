@@ -13,6 +13,9 @@
     </div>
 
     <el-tabs v-model="topTab" class="top-level-tabs">
+      <el-tab-pane label="⏰ 定时任务" name="scheduled">
+        <ScheduledTasksView />
+      </el-tab-pane>
       <el-tab-pane label="📊 分析任务" name="analysis">
 
     <el-card class="tabs-card" shadow="never">
@@ -143,10 +146,8 @@
       </div>
     </el-card>
 
-      </el-tab-pane>
-      <el-tab-pane label="⏰ 定时任务" name="scheduled" lazy>
-        <ScheduledTasksView />
-      </el-tab-pane>
+
+    </el-tab-pane>
     </el-tabs>
 
     <!-- 结果弹窗组件化 -->
@@ -179,7 +180,7 @@ import ScheduledTasksView from './ScheduledTasksView.vue'
 const router = useRouter()
 const route = useRoute()
 
-const topTab = ref<'analysis' | 'scheduled'>('analysis')
+const topTab = ref<'analysis' | 'scheduled'>('scheduled')
 const activeTab = ref<'running'|'completed'|'failed'|'all'>('running')
 const loading = ref(false)
 const keyword = ref('')
