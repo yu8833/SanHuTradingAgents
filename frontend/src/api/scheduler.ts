@@ -231,3 +231,10 @@ export function markExecutionFailed(executionId: string, reason?: string) {
 export function deleteExecution(executionId: string) {
   return ApiClient.delete<void>(`/api/scheduler/executions/${executionId}`)
 }
+
+/**
+ * 一键清空所有执行记录（保留执行中的记录）
+ */
+export function deleteAllExecutions() {
+  return ApiClient.delete<{ deleted: number; kept_running: number }>('/api/scheduler/executions')
+}

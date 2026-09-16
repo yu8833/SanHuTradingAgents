@@ -207,8 +207,8 @@ class Settings(BaseSettings):
     # 监控中心规则评估任务
     MONITOR_ENABLED: bool = Field(default=True, description="启用监控中心规则评估")
     MONITOR_INTERVAL_SECONDS: int = Field(
-        default=300,
-        description="监控中心规则评估间隔（秒）。行情每60s一更，评估5分钟一次即可（60s→180s→300s降频），每次评估内部会调用三买三卖池扫描，频率过高会造成无效资源消耗"
+        default=120,
+        description="监控中心规则评估间隔（秒）。行情入库 120s 一更，评估 120s 一次即可（与行情频率对齐，实时性无损失，且每次评估内部会调用三买三卖池扫描，频率过高会造成无效资源消耗并产生大量执行记录）"
     )
 
     # 实时行情入库任务

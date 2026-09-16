@@ -379,6 +379,29 @@ async def get_job_executions(
         raise HTTPException(status_code=500, detail=f"获取执行历史失败: {str(e)}")
 
 
+@router.delete("/executions")
+async def delete_all_executions(
+    user: dict = Depends(get_current_user),
+    service: SchedulerService = Depends(get_scheduler_service)
+):
+    """
+    一键清空所有执行记录（保留正在执行中的记录）
+
+    Returns:
+        {"deleted": 删除条数, "kept_running": 保留的执行中记录数}
+    """
+    try:
+        result = await service.delete_all_executions()
+        msg = f"已清空 {result['deleted']} 条执行记录"
+        if result["kept_running"]:
+            msg += f"，保留执行中的 {result['kept_running']} 条"
+        return ok(data=result, message=msg)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"清空执行记录失败: {str(e)}")
+
+
 @router.get("/jobs/{job_id}/executions")
 async def get_single_job_executions(
     job_id: str,

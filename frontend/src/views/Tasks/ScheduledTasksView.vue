@@ -100,6 +100,9 @@
               <el-icon><Refresh /></el-icon>
               刷新
             </el-button>
+            <el-button v-if="execPage.total > 0" type="danger" plain size="small" :loading="clearing" @click="clearAllExecutions">
+              清空全部记录
+            </el-button>
           </div>
         </div>
       </template>
@@ -341,6 +344,7 @@ function viewJobExecutions(job: any) {
 // 执行记录
 const executions = ref<any[]>([])
 const execLoading = ref(false)
+const clearing = ref(false)
 const execFilter = reactive<{ job_id: string; status: string; is_manual: boolean | null }>({
   job_id: '', status: '', is_manual: null
 })
@@ -404,6 +408,28 @@ async function deleteExecution(row: any) {
     await loadExecutions()
   } catch (e: any) {
     if (e !== 'cancel') ElMessage.error(e?.message || '删除失败')
+  }
+}
+
+async function clearAllExecutions() {
+  const total = execPage.total || 0
+  try {
+    await ElMessageBox.confirm(
+      `确定要清空全部 ${total} 条执行记录吗？此操作不可恢复！执行中的任务记录会保留。`,
+      '清空全部执行记录',
+      { confirmButtonText: '确定清空', cancelButtonText: '取消', type: 'error' }
+    )
+    clearing.value = true
+    const res: any = await schedulerApi.deleteAllExecutions()
+    const body = (res as any)?.data?.data || (res as any)?.data || {}
+    const deleted = body.deleted ?? total
+    const kept = body.kept_running ?? 0
+    ElMessage.success(`已清空 ${deleted} 条执行记录${kept ? `，保留执行中的 ${kept} 条` : ''}`)
+    await loadExecutions()
+  } catch (e: any) {
+    if (e !== 'cancel') ElMessage.error(e?.message || '清空失败')
+  } finally {
+    clearing.value = false
   }
 }
 

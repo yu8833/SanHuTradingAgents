@@ -361,6 +361,14 @@ async def lifespan(app: FastAPI):
         # 必须用 async 函数注册，调度才会真正运行 run_full_sync。
         async def _run_basics_sync():
             await multi_source_service.run_full_sync(force=False, preferred_sources=preferred_sources)
+            # 数据源状态检查已合并至此（原独立 tushare_status_check 每日8:30 已删除）：
+            # 基础信息同步本身就是多数据源健康探测，尾部串行做一次状态检查即可，
+            # 减少一个独立调度条目（任务总数 18→17）。
+            if settings.TUSHARE_UNIFIED_ENABLED and settings.TUSHARE_STATUS_CHECK_ENABLED:
+                try:
+                    await run_tushare_status_check()
+                except Exception as e:
+                    logger.warning(f"⚠️ 基础同步尾部状态检查失败（不影响基础同步结果）: {e}")
 
         # 配置调度：优先使用 CRON，其次使用 HH:MM
         if settings.SYNC_STOCK_BASICS_ENABLED:
@@ -516,17 +524,12 @@ async def lifespan(app: FastAPI):
             elif settings.TUSHARE_DAILY_BASIC_SYNC_ENABLED:
                 logger.info(f"📈 Tushare每日估值数据同步已合并进历史同步任务（23:00串行）")
 
-            # 状态检查任务（保留，频率在 config.py 已为每小时，后续可降频）
+            # 数据源状态检查已合并进 basics_sync_service（每日基础信息同步尾部串行），
+            # 不再单独注册 tushare_status_check，减少一个独立调度条目。
             if settings.TUSHARE_STATUS_CHECK_ENABLED:
-                scheduler.add_job(
-                    run_tushare_status_check,
-                    cron_trigger(settings.TUSHARE_STATUS_CHECK_CRON, timezone=get_tz()),
-                    id="tushare_status_check",
-                    name="数据源状态检查（Tushare）"
-                )
-                logger.info(f"🔍 Tushare状态检查已配置: {settings.TUSHARE_STATUS_CHECK_CRON}")
+                logger.info("🔍 Tushare状态检查已合并进基础信息同步任务（06:30尾部串行）")
             else:
-                logger.info(f"⏭️ Tushare状态检查跳过（未启用）: {settings.TUSHARE_STATUS_CHECK_CRON}")
+                logger.info("⏭️ Tushare状态检查跳过（未启用）")
         else:
             logger.info("⏭️ Tushare统一数据源未启用，跳过Tushare定时任务注册（仅保留基础同步服务 basics_sync_service）")
 

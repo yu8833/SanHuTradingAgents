@@ -633,6 +633,34 @@ class SchedulerService:
             logger.error(f"❌ 删除执行记录失败: {e}")
             return False
 
+    async def delete_all_executions(self) -> dict[str, int]:
+        """
+        一键清空所有执行记录（保留正在执行中的记录）。
+
+        正在运行的执行记录是任务进度/取消追踪的载体，删除会导致执行中任务
+        的进度条与取消能力丢失。故仅删除非 running 的历史记录；
+        执行中的记录在任务结束转为终态后由正常调度流程回收。
+
+        Returns:
+            {"deleted": 删除条数, "kept_running": 保留的执行中记录数}
+        """
+        try:
+            db = self._get_db()
+            running = await db.scheduler_executions.count_documents({"status": "running"})
+            if running:
+                result = await db.scheduler_executions.delete_many({"status": {"$ne": "running"}})
+                deleted = result.deleted_count
+                kept_running = running
+            else:
+                result = await db.scheduler_executions.delete_many({})
+                deleted = result.deleted_count
+                kept_running = 0
+            logger.info(f"🧹 已清空执行记录: 删除 {deleted} 条, 保留执行中 {kept_running} 条")
+            return {"deleted": int(deleted), "kept_running": int(kept_running)}
+        except Exception as e:
+            logger.error(f"❌ 清空执行记录失败: {e}")
+            raise
+
     async def get_job_execution_stats(self, job_id: str) -> dict[str, Any]:
         """
         获取任务执行统计信息

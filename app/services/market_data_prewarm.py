@@ -21,6 +21,11 @@ import logging
 
 logger = logging.getLogger("webapi")
 
+# 非交易时段时间节流：非交易时段数据变化小，预热频率从交易时段的 5 分钟
+# 降为 30 分钟（记录上次实际执行时间，避免无意义的外部数据源请求）。
+_NON_TRADING_INTERVAL_SECONDS = 30 * 60
+_last_prewarm_ts: float = 0.0
+
 
 async def prewarm_market_data() -> None:
     """预热 Vibe 市场模块热接口缓存（后台执行，失败不影响主流程）。
@@ -28,6 +33,22 @@ async def prewarm_market_data() -> None:
     每个接口都经由自身 cached() 去重：缓存未过期时直接跳过（零开销），
     过期/缺失时才真正重建。接口间用 gather 并发，缩短整轮预热耗时。
     """
+    global _last_prewarm_ts
+
+    # 非交易时段降频：距上次实际执行不足 30 分钟则跳过本轮；
+    # 交易时段维持调度器设定的 5 分钟频率。
+    try:
+        from app.utils.timezone import now_tz
+        from app.utils.trading_time import is_trading_time
+
+        if not is_trading_time(now_tz()):
+            now_ts = asyncio.get_event_loop().time()
+            if now_ts - _last_prewarm_ts < _NON_TRADING_INTERVAL_SECONDS:
+                return
+    except Exception:
+        # 判断失败时按交易时段处理，保证不因降频逻辑保守而缺失预热
+        pass
+
     try:
         # 延迟导入：避免模块加载期依赖数据库/外部服务未就绪
         from app.services.market_dashboard import get_dashboard
@@ -55,6 +76,7 @@ async def prewarm_market_data() -> None:
             _safe("成交额Top20", get_turnover_top()),
         )
         el = asyncio.get_event_loop().time() - start
+        _last_prewarm_ts = el
         logger.info(f"🌡️ [prewarm] 市场数据预热完成，耗时 {el:.1f}s")
     except Exception as e:
         logger.warning(f"🌡️ [prewarm] 预热任务整体失败（忽略）: {e}")
