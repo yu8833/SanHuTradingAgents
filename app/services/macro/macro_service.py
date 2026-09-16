@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import math
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.services.cache_layer import cached, clear_cache
@@ -162,6 +162,53 @@ async def _collect_breadth() -> dict | None:
         return {"up": b["up"], "down": b["down"]}
     except Exception as e:
         logger.warning(f"大盘宽度获取失败: {e}")
+        return None
+
+
+# A股技术面信号：上证指数日线由 AKShare 实时拉取（stock_daily_quotes 未同步指数数据）。
+_A_SHARE_DAYS = 70   # 取 70 个交易日，容 60 日均线
+
+
+async def _collect_a_share_signals() -> dict | None:
+    """上证指数近 70 交易日（AKShare 实时）→ close/ma20/ma60 + 当日/近5日量能。失败返回 None。
+
+    数据源：ak.stock_zh_index_daily(sh000001)（免费、秒级；stock_daily_quotes 未同步指数日线）。
+    量能：上证指数成交量（手）当日 vs 近 5 日均量，判断放量/缩量。
+    """
+    try:
+        import akshare as ak
+        df = ak.stock_zh_index_daily(symbol="sh000001")
+        if df is None or df.empty:
+            return None
+        # 取最近 _A_SHARE_DAYS 个交易日；列名 date/open/high/low/close/volume
+        tail = df.tail(_A_SHARE_DAYS)
+        closes = []
+        for v in tail["close"]:
+            f = float(v)
+            if f == f:            # 过滤 NaN
+                closes.append(f)
+        if len(closes) < 21:
+            return None
+        ma20 = sum(closes[-20:]) / 20
+        ma60 = sum(closes[-60:]) / 60 if len(closes) >= 60 else None
+        latest = closes[-1]
+
+        volumes = []
+        for v in tail["volume"]:
+            f = float(v)
+            if f == f:
+                volumes.append(f)
+        amount = volumes[-1] if volumes else None
+        amount_avg5 = (sum(volumes[-5:]) / 5) if len(volumes) >= 5 else None
+        return {
+            "close": round(latest, 2),
+            "ma20": round(ma20, 2),
+            "ma60": round(ma60, 2) if ma60 else None,
+            "amount": amount,
+            "amount_avg5": amount_avg5,
+        }
+    except Exception as e:
+        logger.warning(f"A股技术面信号获取失败: {e}")
         return None
 
 
@@ -527,14 +574,15 @@ async def build_macro_snapshot(days: int = 7) -> dict:
     - LLM 解读（日历逐条 + 盘前解读）各包 SNAPSHOT_LLM_TIMEOUT 硬超时，超时走既有降级。
     最坏情况整体约 2 分钟内返回完整结构快照（数据不足也算）⇒ 快照必然有界落库。
     """
-    indices, calendar, news, breadth = await asyncio.gather(
+    indices, calendar, news, breadth, a_share = await asyncio.gather(
         _bounded_fetch(_collect_indices(), "外围指数", SNAPSHOT_FETCH_TIMEOUTS["indices"], []),
         _bounded_fetch(get_financial_calendar(days), "财经日历", SNAPSHOT_FETCH_TIMEOUTS["calendar"], []),
         _bounded_fetch(get_macro_news(hours_back=24, top_n=40), "分级快讯", SNAPSHOT_FETCH_TIMEOUTS["news"], []),
         _bounded_fetch(_collect_breadth(), "大盘宽度", SNAPSHOT_FETCH_TIMEOUTS["breadth"], None),
+        _bounded_fetch(_collect_a_share_signals(), "A股技术面", SNAPSHOT_FETCH_TIMEOUTS["indices"], None),
     )
 
-    rule = score_macro(indices, calendar, news, breadth)
+    rule = score_macro(indices, calendar, news, breadth, a_share=a_share)
     created_at = datetime.now(timezone.utc)
 
     # 5.1：为每条信号补充"判定"（利多/利空/中性），便于面板逐条复核

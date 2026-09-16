@@ -553,10 +553,10 @@ onMounted(() => {
   border-radius: 50%;
   display: inline-block;
 }
-.dot-success { background: #67c23a; }
+.dot-success { background: var(--app-down); }
 .dot-warning { background: #e6a23c; }
-.dot-danger { background: #f56c6c; }
-.dot-info { background: #909399; }
+.dot-danger { background: var(--app-up); }
+.dot-info { background: var(--app-flat); }
 .ind-line {
   display: flex;
   align-items: center;
@@ -585,7 +585,7 @@ onMounted(() => {
   font-weight: 600;
   color: var(--el-text-color-primary);
 }
-.tone-strong { color: #f56c6c; }
+.tone-strong { color: var(--app-up); }
 .tone-mid { color: #e6a23c; }
 .tone-weak { color: #2b6cb0; }
 .rank {
@@ -602,8 +602,6 @@ onMounted(() => {
 .rank-silver { background: #a0a4a8; color: #fff; }
 .rank-bronze { background: #cd7f32; color: #fff; }
 .rank-normal { background: #f0f2f5; color: #909399; }
-.up { color: #f56c6c; }
-.down { color: #67c23a; }
 .muted { color: var(--el-text-color-secondary); }
 .stocks-toolbar {
   display: flex;

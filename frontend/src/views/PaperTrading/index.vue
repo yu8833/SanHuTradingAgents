@@ -466,7 +466,7 @@ function goAnalysisWithCode(stockCode: string) {
   if (!stockCode) return
   // 根据股票代码判断市场
   const market = getMarketByCode(stockCode)
-  router.push({ name: 'SingleAnalysis', query: { stock: stockCode, market } })
+  router.push({ name: 'StockAnalysis', query: { stock: stockCode, market } })
 }
 
 // 根据股票代码判断市场

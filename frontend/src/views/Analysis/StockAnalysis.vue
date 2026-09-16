@@ -39,10 +39,12 @@
             placeholder="每行输入一只，最多 10 只"
             :disabled="submitting"
             @input="onInputChange"
+            @keydown="onCodeKeydown"
           />
           <div class="code-tips">
             <span>兼容格式：000001 · 600519.SH · AAPL · 0700.HK</span>
             <span v-if="stockCount > 10" class="warn">上限 10 只</span>
+            <span class="kbd-tip">⌘/Ctrl + Enter 直接提交</span>
           </div>
         </div>
 
@@ -247,6 +249,15 @@ const getAuthToken = (): string | null => {
 }
 const getBaseUrl = (): string => {
   return import.meta.env.VITE_API_BASE_URL || ''
+}
+
+// ⌘/Ctrl + Enter 快速提交（复用主按钮的校验与逻辑，省一次点击）
+const onCodeKeydown = (e: KeyboardEvent) => {
+  if (e.key !== 'Enter') return
+  if (!(e.ctrlKey || e.metaKey)) return
+  e.preventDefault()
+  if (submitting.value || hasActiveTask.value) return
+  submitAnalysis()
 }
 
 const subtaskTagType = (status: string): 'success' | 'danger' | 'warning' | 'info' => {
@@ -502,8 +513,10 @@ onMounted(async () => {
   } catch { /* 用默认值 */ }
 
   const q = route.query as any
-  if (q?.stocks) {
-    const parts = String(q.stocks).split(',').map((s: string) => s.trim()).filter(Boolean)
+  // 兼容 stocks（批量）与 stock（单只）两种入参：Detail/Favorites/PaperTrading 跳转统一带 stock
+  const rawStock = q?.stocks ?? q?.stock
+  if (rawStock) {
+    const parts = String(rawStock).split(',').map((s: string) => s.trim()).filter(Boolean)
     stockCodes.value = parts
     stockInput.value = parts.join('\n')
   }

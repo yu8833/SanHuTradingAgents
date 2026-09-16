@@ -101,7 +101,12 @@
 
     <!-- 自选股列表 -->
     <el-card class="favorites-list-card" shadow="never">
+      <!-- 首次加载骨架 -->
+      <div v-if="loading && favorites.length === 0" class="fav-skeleton">
+        <el-skeleton :rows="4" animated></el-skeleton>
+      </div>
       <el-table
+        v-else
         class="app-table app-table--trades"
         :data="filteredFavorites"
         v-loading="loading"
@@ -1005,7 +1010,7 @@ const editFavorite = (row: any) => {
 
 const analyzeFavorite = (row: any) => {
   router.push({
-    name: 'SingleAnalysis',
+    name: 'StockAnalysis',
     query: { stock: row.stock_code, market: normalizeMarketForAnalysis(row.market || 'A股') }
   })
 }
@@ -1219,8 +1224,8 @@ const handleBatchSync = async () => {
 }
 
 const getChangeClass = (changePercent: number) => {
-  if (changePercent > 0) return 'text-red'
-  if (changePercent < 0) return 'text-green'
+  if (changePercent > 0) return 'text-up'
+  if (changePercent < 0) return 'text-down'
   return ''
 }
 
@@ -1260,9 +1265,9 @@ onActivated(() => {
     .selection-hint {
       margin-top: 10px;
       font-size: 13px;
-      color: #e6a23c;
-      background: #fdf6ec;
-      border: 1px solid #faecd8;
+      color: var(--el-color-warning);
+      background: var(--el-color-warning-light-9);
+      border: 1px solid var(--el-color-warning-light-7);
       padding: 8px 12px;
       border-radius: 6px;
     }
@@ -1295,17 +1300,13 @@ onActivated(() => {
   }
 
   .favorites-list-card {
+    .fav-skeleton {
+      padding: 24px 18px;
+    }
+
     .empty-state {
       padding: 40px;
       text-align: center;
-    }
-
-    .text-red {
-      color: #f56c6c;
-    }
-
-    .text-green {
-      color: #67c23a;
     }
 
     /* 所有单元格不换行，保持单行显示 */

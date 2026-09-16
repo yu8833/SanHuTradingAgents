@@ -322,8 +322,8 @@ onBeforeUnmount(() => {
         gap: 12px;
         .alert-price { font-family: monospace; font-size: 13px; font-weight: 600; }
         .alert-pct { font-family: monospace; font-size: 13px; font-weight: 600; }
-        .up { color: var(--el-color-danger); }
-        .down { color: var(--el-color-success); }
+        .up { color: var(--app-up); }
+        .down { color: var(--app-down); }
       }
 
       .alert-message {

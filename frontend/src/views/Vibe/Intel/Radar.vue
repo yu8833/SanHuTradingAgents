@@ -680,7 +680,7 @@ onMounted(() => {
 }
 
 .skeleton-tabs {
-  background: #fff;
+  background: var(--el-bg-color);
   border-radius: 8px;
   border: 1px solid var(--el-border-color);
   overflow: hidden;
@@ -1064,7 +1064,7 @@ onMounted(() => {
   .layer-block {
     border: 1px solid var(--el-border-color-lighter);
     border-radius: 8px;
-    background: #fafbfc;
+    background: var(--el-bg-color);
     overflow: hidden;
   }
 
@@ -1111,7 +1111,7 @@ onMounted(() => {
   }
 
   .link-card {
-    background: #fff;
+    background: var(--el-bg-color);
     border: 1px solid var(--el-border-color-lighter);
     border-radius: 6px;
     padding: 12px 14px;
@@ -1156,13 +1156,13 @@ onMounted(() => {
     .link-focus {
       font-size: 12px;
       line-height: 1.6;
-      background: #f5f7fa;
+      background: var(--el-fill-color-light);
       border-radius: 4px;
       padding: 6px 8px;
 
       .focus-label {
         font-weight: 600;
-        color: #2b6cb0;
+        color: var(--el-color-primary);
         margin-right: 4px;
       }
 
@@ -1179,9 +1179,9 @@ onMounted(() => {
     font-size: 12px;
     font-weight: 500;
 
-    &.bn-high { background: #fff1f0; color: #f5222d; border: 1px solid #ffa39e; }
-    &.bn-mid  { background: #fff7e6; color: #d46b08; border: 1px solid #ffd591; }
-    &.bn-low  { background: #f6ffed; color: #389e0d; border: 1px solid #b7eb8f; }
+    &.bn-high { background: var(--el-color-danger-light-9); color: var(--app-up); border: 1px solid var(--el-color-danger-light-7); }
+    &.bn-mid  { background: var(--el-color-warning-light-9); color: #d46b08; border: 1px solid var(--el-color-warning-light-7); }
+    &.bn-low  { background: var(--el-color-success-light-9); color: #389e0d; border: 1px solid var(--el-color-success-light-7); }
   }
 
   .bn-grid {
@@ -1333,8 +1333,8 @@ onMounted(() => {
       :deep(blockquote) {
         margin: 10px 0;
         padding: 8px 14px;
-        background: #f5f7fa;
-        border-left: 4px solid #909399;
+        background: var(--el-fill-color-light);
+        border-left: 4px solid var(--app-flat);
         color: var(--el-text-color-regular);
         font-size: 13px;
         border-radius: 0 4px 4px 0;
@@ -1372,9 +1372,9 @@ onMounted(() => {
     margin-bottom: 24px;
 
     .node-pill {
-      border-color: #e6a23c;
+      border-color: var(--el-color-warning);
       color: #b88200;
-      background-color: #fdf6ec;
+      background-color: var(--el-color-warning-light-9);
       font-size: 13px;
     }
 

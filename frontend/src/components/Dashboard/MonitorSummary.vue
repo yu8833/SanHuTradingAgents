@@ -229,8 +229,8 @@ onBeforeUnmount(() => {
         font-weight: 600;
         text-decoration: none;
 
-        &.up { color: var(--el-color-danger); }
-        &.down { color: var(--el-color-success); }
+        &.up { color: var(--app-up); }
+        &.down { color: var(--app-down); }
 
         &:hover { text-decoration: underline; }
       }

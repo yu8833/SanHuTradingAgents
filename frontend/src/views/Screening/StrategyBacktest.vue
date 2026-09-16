@@ -166,7 +166,7 @@
               <el-table-column prop="exit_price" label="卖出价" width="95" align="right" sortable />
               <el-table-column prop="pnl_pct" label="收益率" width="95" align="right" sortable>
                 <template #default="{ row }">
-                  <span :class="row.pnl_pct >= 0 ? 'text-red' : 'text-green'">{{ fmtPctFromFraction(row.pnl_pct) }}</span>
+                  <span :class="row.pnl_pct >= 0 ? 'text-up' : 'text-down'">{{ fmtPctFromFraction(row.pnl_pct) }}</span>
                 </template>
               </el-table-column>
               <el-table-column prop="duration" label="持有(天)" width="90" align="right" sortable />
@@ -226,10 +226,10 @@
             <el-table :data="factorResult.group_returns" size="small" stripe class="app-table app-table--compact">
               <el-table-column prop="group" label="分组" width="120" />
               <el-table-column prop="avg_return" label="平均收益" align="right">
-                <template #default="{ row }"><span :class="row.avg_return >= 0 ? 'text-red' : 'text-green'">{{ fmtPctFromFraction(row.avg_return) }}</span></template>
+                <template #default="{ row }"><span :class="row.avg_return >= 0 ? 'text-up' : 'text-down'">{{ fmtPctFromFraction(row.avg_return) }}</span></template>
               </el-table-column>
               <el-table-column prop="cum_return" label="累计收益" align="right">
-                <template #default="{ row }"><span :class="row.cum_return >= 0 ? 'text-red' : 'text-green'">{{ fmtPctFromFraction(row.cum_return) }}</span></template>
+                <template #default="{ row }"><span :class="row.cum_return >= 0 ? 'text-up' : 'text-down'">{{ fmtPctFromFraction(row.cum_return) }}</span></template>
               </el-table-column>
               <el-table-column prop="n_days" label="样本天数" align="right" />
             </el-table>
@@ -284,7 +284,7 @@
                 </template>
               </el-table-column>
               <el-table-column prop="value" label="目标值" align="right" width="120">
-                <template #default="{ row }"><span class="text-red">{{ fmtNum(row.value, 4) }}</span></template>
+                <template #default="{ row }"><span class="text-up">{{ fmtNum(row.value, 4) }}</span></template>
               </el-table-column>
               <el-table-column prop="stats.total_return" label="总收益" align="right" width="100">
                 <template #default="{ row }">{{ fmtPctFromFraction(row.stats?.total_return) }}</template>
@@ -358,7 +358,7 @@
               </el-table-column>
               <el-table-column label="测试收益" align="right" width="110">
                 <template #default="{ row }">
-                  <span :class="row.stats?.total_return >= 0 ? 'text-red' : 'text-green'">{{ fmtPctFromFraction(row.stats?.total_return) }}</span>
+                  <span :class="row.stats?.total_return >= 0 ? 'text-up' : 'text-down'">{{ fmtPctFromFraction(row.stats?.total_return) }}</span>
                 </template>
               </el-table-column>
               <el-table-column prop="stats.sharpe" label="夏普" align="right" width="90" />
@@ -566,7 +566,7 @@
               <el-table-column prop="sell_price" label="卖出价" width="95" align="right" sortable />
               <el-table-column prop="return_pct" label="收益率" width="95" align="right" sortable>
                 <template #default="{ row }">
-                  <span :class="row.return_pct >= 0 ? 'text-red' : 'text-green'">{{ fmtPct(row.return_pct) }}</span>
+                  <span :class="row.return_pct >= 0 ? 'text-up' : 'text-down'">{{ fmtPct(row.return_pct) }}</span>
                 </template>
               </el-table-column>
               <el-table-column prop="signal_type" label="买点" width="80">
@@ -609,17 +609,17 @@
             </el-table-column>
             <el-table-column prop="stats.total_return" label="总收益" align="right" sortable width="105">
               <template #default="{ row }">
-                <span :class="row.stats.total_return >= 0 ? 'text-red' : 'text-green'">{{ fmtPctFromFraction(row.stats.total_return) }}</span>
+                <span :class="row.stats.total_return >= 0 ? 'text-up' : 'text-down'">{{ fmtPctFromFraction(row.stats.total_return) }}</span>
               </template>
             </el-table-column>
             <el-table-column prop="stats.annual_return" label="年化收益" align="right" sortable width="105">
               <template #default="{ row }">
-                <span :class="row.stats.annual_return >= 0 ? 'text-red' : 'text-green'">{{ fmtPctFromFraction(row.stats.annual_return) }}</span>
+                <span :class="row.stats.annual_return >= 0 ? 'text-up' : 'text-down'">{{ fmtPctFromFraction(row.stats.annual_return) }}</span>
               </template>
             </el-table-column>
             <el-table-column prop="stats.max_drawdown" label="最大回撤" align="right" sortable width="105">
               <template #default="{ row }">
-                <span class="text-green">{{ fmtPctFromFraction(row.stats.max_drawdown) }}</span>
+                <span class="text-down">{{ fmtPctFromFraction(row.stats.max_drawdown) }}</span>
               </template>
             </el-table-column>
             <el-table-column prop="stats.sharpe" label="夏普" align="right" sortable width="90">
@@ -1549,8 +1549,6 @@ onBeforeUnmount(() => {
   }
 
   .param-tag { margin-right: 6px; margin-bottom: 4px; }
-  .text-red { color: var(--el-color-danger); font-weight: 600; }
-  .text-green { color: var(--el-color-success); font-weight: 600; }
   .text-muted { color: var(--el-text-color-secondary); }
 
   .compare-panel {
@@ -1706,9 +1704,9 @@ html.dark {
         }
 
         &.is-active .el-radio-button__inner {
-          color: #1e3a5f;
-          background: #fff;
-          border-color: #fff;
+          color: var(--app-text-heading, #1e3a5f);
+          background: var(--el-bg-color);
+          border-color: var(--el-bg-color);
           font-weight: 600;
           box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
         }

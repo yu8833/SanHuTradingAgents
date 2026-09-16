@@ -346,13 +346,9 @@ onMounted(() => {
   font-size: 13px;
 }
 
-.up { color: #f56c6c; }
-.down { color: #67c23a; }
-.flat { color: #909399; }
-
-.bar-fill.up { background: #f56c6c; }
-.bar-fill.down { background: #67c23a; }
-.bar-fill.neutral { background: #909399; }
+.bar-fill.up { background: var(--app-up); }
+.bar-fill.down { background: var(--app-down); }
+.bar-fill.neutral { background: var(--app-flat); }
 
 .disclaimer {
   margin-top: 8px;

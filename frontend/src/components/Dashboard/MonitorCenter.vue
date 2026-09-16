@@ -1036,7 +1036,7 @@ onBeforeUnmount(() => { stopPolling() })
       flex: 1; min-width: 0;
       display: flex; align-items: center; gap: 10px;
       padding: 12px 14px;
-      background: #fff; border: 1px solid #e3ebfb; border-radius: 10px;
+      background: var(--el-bg-color); border: 1px solid var(--el-border-color-light); border-radius: 10px;
       transition: box-shadow .2s, transform .2s;
 
       &.clickable { cursor: pointer; &:hover { box-shadow: 0 4px 14px rgba(43,108,176,.15); transform: translateY(-2px); } }
@@ -1047,10 +1047,10 @@ onBeforeUnmount(() => { stopPolling() })
         width: 40px; height: 40px; border-radius: 10px; flex-shrink: 0;
         display: flex; align-items: center; justify-content: center; font-size: 20px; color: #fff;
         &.watch { background: #2b6cb0; }
-        &.buy { background: #f56c6c; }
+        &.buy { background: var(--app-up); }
         &.pos { background: #9261d6; }
-        &.sell { background: #67c23a; }
-        &.out { background: #909399; }
+        &.sell { background: var(--app-down); }
+        &.out { background: var(--app-flat); }
       }
 
       .flow-info { min-width: 0; }
@@ -1170,8 +1170,8 @@ onBeforeUnmount(() => { stopPolling() })
             &:hover { text-decoration: underline; } }
           .alert-name { font-size: 12px; color: var(--el-text-color-secondary); max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: none;
             &:hover { color: var(--el-color-primary); text-decoration: underline; } }
-          .alert-price { font-family: monospace; font-size: 13px; font-weight: 600; &.up { color: var(--el-color-danger); } &.down { color: var(--el-color-success); } }
-          .alert-pct { font-family: monospace; font-size: 12px; &.up { color: var(--el-color-danger); } &.down { color: var(--el-color-success); } }
+          .alert-price { font-family: monospace; font-size: 13px; font-weight: 600; &.up { color: var(--app-up); } &.down { color: var(--app-down); } }
+          .alert-pct { font-family: monospace; font-size: 12px; &.up { color: var(--app-up); } &.down { color: var(--app-down); } }
         }
         .alert-message { margin-top: 4px; font-size: 12px; color: var(--el-text-color-regular); }
         .alert-conditions { margin-top: 4px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; font-size: 12px;

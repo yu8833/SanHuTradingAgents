@@ -450,8 +450,8 @@ function getStrategyTagType(s: string) {
   font-weight: 600;
   margin-top: 4px;
 }
-.up { color: var(--el-color-danger); }
-.down { color: var(--el-color-success); }
+.up { color: var(--app-up); }
+.down { color: var(--app-down); }
 .notes-toolbar {
   margin-bottom: 12px;
   text-align: right;
@@ -541,8 +541,8 @@ function getStrategyTagType(s: string) {
       font-family: 'Menlo', 'Monaco', 'Consolas', monospace;
       letter-spacing: -0.5px;
 
-      &.up { color: var(--el-color-danger); }
-      &.down { color: var(--el-color-success); }
+      &.up { color: var(--app-up); }
+      &.down { color: var(--app-down); }
     }
   }
 
@@ -569,8 +569,8 @@ function getStrategyTagType(s: string) {
         font-weight: 600;
         font-family: 'Menlo', 'Monaco', monospace;
 
-        &.up { color: var(--el-color-danger); }
-        &.down { color: var(--el-color-success); }
+        &.up { color: var(--app-up); }
+        &.down { color: var(--app-down); }
       }
     }
   }
@@ -587,8 +587,8 @@ function getStrategyTagType(s: string) {
         border-radius: 3px;
         transition: width 0.4s ease;
 
-        &.up { background: var(--el-color-danger); }
-        &.down { background: var(--el-color-success); }
+        &.up { background: var(--app-up); }
+        &.down { background: var(--app-down); }
       }
     }
 

@@ -2058,7 +2058,7 @@ const financialDetail = ref<any>(null)
 
 // 操作
 function onAnalyze() {
-  router.push({ name: 'SingleAnalysis', query: { stock: code.value } })
+  router.push({ name: 'StockAnalysis', query: { stock: code.value } })
 }
 async function onToggleFavorite() {
   try {
@@ -3586,9 +3586,9 @@ function exportReport() {
 /* 分析摘要 */
 .summary-section {
   padding: 18px 20px;
-  background: #f8fafc;
+  background: var(--el-fill-color-lighter);
   border-radius: 8px;
-  border-left: 4px solid #2b6cb0;
+  border-left: 4px solid var(--el-color-primary);
   margin-top: 16px;
 }
 
@@ -3696,11 +3696,11 @@ function exportReport() {
           font-weight: 500;
 
           &.up {
-            color: #f56c6c;
+            color: var(--app-up);
           }
 
           &.down {
-            color: #67c23a;
+            color: var(--app-down);
           }
         }
       }

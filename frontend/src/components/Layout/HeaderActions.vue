@@ -1,5 +1,21 @@
 <template>
   <div class="header-actions">
+    <!-- 全局个股搜索：输入代码/名称直达详情页 -->
+    <el-popover
+      placement="bottom-end"
+      :width="360"
+      trigger="click"
+      :teleported="true"
+      popper-class="global-stock-search-pop"
+    >
+      <template #reference>
+        <el-button type="text" class="action-btn" title="搜索股票">
+          <el-icon><Search /></el-icon>
+        </el-button>
+      </template>
+      <MultiMarketStockSearch @select="handleGlobalStockSelect" />
+    </el-popover>
+
     <el-tooltip content="切换主题" placement="bottom">
       <el-button type="text" @click="toggleTheme" class="action-btn">
         <el-icon>
@@ -64,6 +80,7 @@ import { useAuthStore } from '@/stores/auth'
 import { formatDateTime } from '@/utils/datetime'
 import { storeToRefs } from 'pinia'
 import {
+  Search,
   Sunny,
   Moon,
   FullScreen,
@@ -82,6 +99,14 @@ let timerCount: any = null
 let timerList: any = null
 
 const toggleTheme = () => { appStore.toggleTheme() }
+
+// 全局搜索：选中股票 → 跳转个股详情页（新标签页）
+const handleGlobalStockSelect = (stock: any) => {
+  const code = String(stock?.code || stock?.symbol || '').trim()
+  if (!code) return
+  window.open(router.resolve({ name: 'StockDetail', params: { code } }).href, '_blank', 'noopener')
+}
+
 const toggleFullscreen = () => {
   if (document.fullscreenElement) document.exitFullscreen()
   else document.documentElement.requestFullscreen()
@@ -184,6 +209,11 @@ function showHelp() {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 8px;
+}
+
+/* 全局搜索弹层内边距（MultiMarketStockSearch 自带布局） */
+:deep(.global-stock-search-pop) {
+  padding: 10px;
 }
 
 .notif-list {

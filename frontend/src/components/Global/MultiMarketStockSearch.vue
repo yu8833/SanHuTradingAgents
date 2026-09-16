@@ -1,24 +1,17 @@
 <template>
   <div class="multi-market-stock-search">
-    <div class="search-header">
-      <MarketSelector
-        v-model="selectedMarket"
-        size="default"
-        @change="handleMarketChange"
-      />
-      <el-input
-        v-model="searchQuery"
-        :placeholder="getPlaceholder()"
-        clearable
-        @input="handleSearch"
-        @clear="handleClear"
-        class="search-input"
-      >
-        <template #prefix>
-          <el-icon><Search /></el-icon>
-        </template>
-      </el-input>
-    </div>
+    <el-input
+      v-model="searchQuery"
+      placeholder="输入股票代码或名称（如 600519 / 00700 / AAPL / 平安）"
+      clearable
+      @input="handleSearch"
+      @clear="handleClear"
+      class="search-input"
+    >
+      <template #prefix>
+        <el-icon><Search /></el-icon>
+      </template>
+    </el-input>
 
     <div v-if="loading" class="search-loading">
       <el-icon class="is-loading"><Loading /></el-icon>
@@ -59,7 +52,6 @@ import { Search, Loading } from '@element-plus/icons-vue'
 import { searchStocks, type StockInfo } from '@/api/multiMarket'
 import { ElMessage } from 'element-plus'
 import { fmtNum } from '@/utils/format'
-import MarketSelector from './MarketSelector.vue'
 
 interface Emits {
   (e: 'select', stock: StockInfo): void
@@ -67,21 +59,11 @@ interface Emits {
 
 const emit = defineEmits<Emits>()
 
-const selectedMarket = ref('CN')
 const searchQuery = ref('')
 const searchResults = ref<StockInfo[]>([])
 const loading = ref(false)
 
 let searchTimer: ReturnType<typeof setTimeout> | null = null
-
-const getPlaceholder = () => {
-  const placeholders: Record<string, string> = {
-    CN: '输入股票代码或名称（如：000001 或 平安银行）',
-    HK: '输入股票代码或名称（如：00700 或 腾讯）',
-    US: '输入股票代码或名称（如：AAPL 或 Apple）'
-  }
-  return placeholders[selectedMarket.value] || '输入股票代码或名称'
-}
 
 const getMarketLabel = (market: string) => {
   const labels: Record<string, string> = {
@@ -98,12 +80,6 @@ const formatStockCode = (stock: StockInfo) => {
     return stock.code.padStart(5, '0')
   }
   return stock.code
-}
-
-const handleMarketChange = () => {
-  // 切换市场时清空搜索结果
-  searchResults.value = []
-  searchQuery.value = ''
 }
 
 const handleSearch = () => {
@@ -129,8 +105,18 @@ const performSearch = async () => {
 
   loading.value = true
   try {
-    const response = await searchStocks(selectedMarket.value, searchQuery.value.trim(), 20)
-    searchResults.value = response.data?.stocks || []
+    const query = searchQuery.value.trim()
+    // 同时搜索 A股/港股/美股 三市场，合并结果
+    const results = await Promise.allSettled(
+      ['CN', 'HK', 'US'].map((market) => searchStocks(market, query, 10))
+    )
+    const merged: StockInfo[] = []
+    results.forEach((r) => {
+      if (r.status === 'fulfilled' && r.value?.data?.stocks) {
+        merged.push(...r.value.data.stocks)
+      }
+    })
+    searchResults.value = merged
   } catch (error: any) {
     console.error('搜索失败:', error)
     ElMessage.error(error.message || '搜索失败')
@@ -157,14 +143,8 @@ const handleSelectStock = (stock: StockInfo) => {
   width: 100%;
 }
 
-.search-header {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
 .search-input {
-  flex: 1;
+  margin-bottom: 12px;
 }
 
 .search-loading {
@@ -214,6 +194,7 @@ const handleSelectStock = (stock: StockInfo) => {
   font-weight: 600;
   font-size: 14px;
   color: var(--el-text-color-primary);
+  font-family: var(--app-font-mono, 'SFMono-Regular', Consolas, monospace);
 }
 
 .stock-name {

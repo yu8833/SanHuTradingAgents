@@ -415,7 +415,7 @@ onMounted(async () => {
 })
 
 const goToAnalysis = () => {
-  router.push('/analysis/single')
+  router.push('/analysis')
 }
 
 const viewDocumentation = () => {
@@ -536,7 +536,7 @@ const viewDocumentation = () => {
           border-radius: 8px;
 
           &.el-button--primary {
-            background: white;
+            background: var(--el-bg-color);
             color: #2c5282;
             border: none;
 

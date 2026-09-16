@@ -96,51 +96,105 @@ def _event_polarity(title: str) -> int:
     return 1 if bull > bear else -1 if bear > bull else 0
 
 
+# ── 事件主题去重：同一主题（主体/动作一致）只计入最强一条，避免"美联储加息"4条×-3 重复加权带崩方向 ──
+_TOPIC_ENTITIES = (
+    "美联储", "日本央行", "欧洲央行", "中国人民银行", "央行", "证监会", "交易所",
+    "国务院", "国常会", "特朗普", "OpenAI", "苹果", "华为", "英伟达", "财政部", "发改委",
+)
+_TOPIC_ACTIONS = (
+    "加息", "降息", "降准", "LPR", "MLF", "融资", "IPO", "收购", "并购",
+    "制裁", "关税", "解禁", "回购", "增持", "减持", "违约", "破产", "裁员",
+    "重组", "万亿", "特别国债", "涨停", "退市",
+)
+
+
+def _event_topic(title: str) -> str | None:
+    """事件主题键：**动作词优先**（加息/降准/IPO…，同动作话题统一去重，避免"鸽派加息"与"美联储加息"
+    被拆成两个主题）；标题无动作词时才用主体（美联储/证监会…）。无命中返回 None。"""
+    for act in _TOPIC_ACTIONS:
+        if act in title:
+            return "动作:" + act
+    for ent in _TOPIC_ENTITIES:
+        if ent in title:
+            return "主体:" + ent
+    return None
+
+
 def _score_events(news: list[dict]) -> tuple[list[dict], int]:
-    """高重要性政策/数据事件：利好 +2 / 利空 -2，最多计 EVENT_CAP 条。
+    """高重要性政策/数据事件：利多 +2（影响度≥80 为 +3）/ 利空对称，最多计 EVENT_CAP 条。
 
     news 入参为分级快讯（含 importance/category + v5 impact_score/direction）。
-    只计入 |impact_score| ≥ 50 的强影响事件（与前端"重要事件"展示口径一致）：
-    极性取 news_classifier v5 确定性打分的符号，保证大盘方向引擎与事件展示判定一致；
+    只计入 |impact_score| ≥ 50 的强影响事件；**同主题事件（如多条"美联储加息"）
+    按主题去重，只取影响度最强的一条**，避免同事件重复加权扭曲大盘方向；
     无打分字段（历史缓存/直接构造入参）时回退本地词表 _event_polarity。
     """
-    signals: list[dict] = []
-    total = 0
-    counted = 0
+    # 1) 收集候选（high importance + 强影响）
+    cands: list[dict] = []
     for item in news:
-        if counted >= EVENT_CAP:
-            break
         if item.get("importance") != "high":
             continue
         title = item.get("title") or ""
-        # v5：优先用 news_classifier 已算好的 impact_score，取方向并只计强影响（|score|≥50）
         v5 = item.get("impact_score")
         if v5 is not None:
             v5 = float(v5)
             if abs(v5) < 50:   # 弱影响事件不计入大盘，也不进"重要事件"列表
                 continue
             polarity = 1 if v5 > 0 else -1
+            contrib = 2 + (1 if abs(v5) >= 80 else 0)   # |影响度|≥80 重大 ±3 / 50~79 ±2
+            impact = abs(v5)
         else:
             polarity = _event_polarity(title)
             if polarity == 0:
                 continue
-        score = polarity * EVENT_WEIGHT
+            contrib = EVENT_WEIGHT
+            impact = 50.0
+            v5 = None
+        cands.append({
+            "item": item, "title": title, "polarity": polarity, "contrib": contrib,
+            "impact": impact, "v5": v5, "topic": _event_topic(title),
+        })
+
+    # 2) 同主题去重：保留影响度最强一条；无主题词的各自保留
+    keep: list[dict] = []
+    best: dict[str, dict] = {}
+    for c in cands:
+        tp = c["topic"]
+        if tp is None:
+            keep.append(c)
+            continue
+        ex = best.get(tp)
+        if ex is None or c["impact"] > ex["impact"]:
+            best[tp] = c
+    selected = keep + list(best.values())
+
+    # 3) 按影响度降序取前 EVENT_CAP 条
+    selected.sort(key=lambda c: c["impact"], reverse=True)
+    selected = selected[:EVENT_CAP]
+
+    # 4) 生成信号
+    signals: list[dict] = []
+    total = 0
+    for c in selected:
+        score = c["polarity"] * c["contrib"]
         total += score
-        counted += 1
+        note = f"（同主题合并计1条）" if c["topic"] else ""
         signals.append({
             "name": "高重要性政策/数据事件",
-            "value": title[:40],
+            "value": c["title"][:40],
             "score": score,
-            "detail": f"{'利好' if polarity > 0 else '利空'}（贡献 {score:+d}）：{title[:50]}",
-            "weight": EVENT_WEIGHT,
-            "title": title,            # 完整事件标题（前端链接文本）
-            "url": item.get("url") or "",  # 原文链接（快讯源自带，前端跳原文）
+            "detail": f"{'利好' if c['polarity'] > 0 else '利空'}（贡献 {score:+d}"
+                      f"{' · 影响度 ' + ('+' if c['polarity'] > 0 else '') + str(int(c['impact'])) if c['v5'] is not None else ''}）：{c['title'][:40]}",
+            "weight": c["contrib"],
+            "title": c["title"],
+            "url": c["item"].get("url") or "",
+            "impact_score": c["v5"],
         })
     return signals, total
 
 
 def score_macro(indices: list[dict], calendar: list[dict],
-                news: list[dict], breadth: dict | None = None) -> dict:
+                news: list[dict], breadth: dict | None = None,
+                a_share: dict | None = None) -> dict:
     """宏观方向评分。
 
     Args:
@@ -148,6 +202,7 @@ def score_macro(indices: list[dict], calendar: list[dict],
         calendar: 财经日历 [{date, region, event, importance, forecast, previous, release_time}]
         news: 分级快讯 [{title, content, importance, category, ...}]
         breadth: 昨日大盘情绪 {up, down}（涨跌家数），可为 None
+        a_share: A股自身技术面 {close, ma20, ma60, amount, amount_avg5}，可为 None
     """
     indices = _sanitize_indices(indices or [])
     signals: list[dict] = []
@@ -229,6 +284,45 @@ def score_macro(indices: list[dict], calendar: list[dict],
         _add({"name": "昨日大盘情绪", "value": f"{up}:{down}", "score": score,
               "detail": f"涨跌家数 {up}/{down}（{judge}，贡献 {score:+d}）",
               "weight": INDEX_WEIGHT}, score)
+
+    # 8. A股自身技术面（业界主导信号，外围只作辅助）：上证指数 vs 均线 + 量能
+    #    a_share = {close, ma20, ma60, amount, amount_avg5}，任一缺失则跳过对应信号
+    if a_share:
+        ax = a_share.get
+        close = ax("close")
+        ma20 = ax("ma20")
+        ma60 = ax("ma60")
+        if close is not None and ma20:
+            if close >= ma20:
+                _add({"name": "上证指数·20日线", "value": close, "score": INDEX_WEIGHT,
+                      "detail": f"上证 {close} 站上 20 日线 {ma20:.0f} → 短期偏多，贡献 +{INDEX_WEIGHT}",
+                      "weight": INDEX_WEIGHT}, INDEX_WEIGHT)
+            else:
+                _add({"name": "上证指数·20日线", "value": close, "score": -INDEX_WEIGHT,
+                      "detail": f"上证 {close} 跌破 20 日线 {ma20:.0f} → 短期偏空，贡献 -{INDEX_WEIGHT}",
+                      "weight": INDEX_WEIGHT}, -INDEX_WEIGHT)
+        if ma20 and ma60:
+            if ma20 >= ma60:
+                _add({"name": "上证指数·中期趋势", "value": f"MA20 {ma20:.0f}",
+                      "score": INDEX_WEIGHT,
+                      "detail": f"MA20 {ma20:.0f} ≥ MA60 {ma60:.0f} 多头排列 → 中期偏多，贡献 +{INDEX_WEIGHT}",
+                      "weight": INDEX_WEIGHT}, INDEX_WEIGHT)
+            else:
+                _add({"name": "上证指数·中期趋势", "value": f"MA20 {ma20:.0f}",
+                      "score": -INDEX_WEIGHT,
+                      "detail": f"MA20 {ma20:.0f} < MA60 {ma60:.0f} 空头排列 → 中期偏空，贡献 -{INDEX_WEIGHT}",
+                      "weight": INDEX_WEIGHT}, -INDEX_WEIGHT)
+        amount = ax("amount")
+        amount_avg5 = ax("amount_avg5")
+        if amount and amount_avg5:
+            if amount >= amount_avg5 * 1.05:
+                _add({"name": "两市量能", "value": round(amount, 0), "score": INDEX_WEIGHT,
+                      "detail": f"成交额 {amount/1e8:.0f}亿 ≥ 5日均量 {amount_avg5/1e8:.0f}亿×1.05 放量 → 量在价先，贡献 +{INDEX_WEIGHT}",
+                      "weight": INDEX_WEIGHT}, INDEX_WEIGHT)
+            elif amount <= amount_avg5 * 0.95:
+                _add({"name": "两市量能", "value": round(amount, 0), "score": -INDEX_WEIGHT,
+                      "detail": f"成交额 {amount/1e8:.0f}亿 ≤ 5日均量 {amount_avg5/1e8:.0f}亿×0.95 缩量 → 观望，贡献 -{INDEX_WEIGHT}",
+                      "weight": INDEX_WEIGHT}, -INDEX_WEIGHT)
 
     # 聚合
     if total >= DIRECTION_BULL:

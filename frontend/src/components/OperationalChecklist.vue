@@ -165,7 +165,7 @@ html.dark .oc-md-b {
 
 /* ── 结论文本 ── */
 .oc-summary {
-  background: #f7f9fc;
+  background: var(--el-fill-color-light);
   border-left: 3px solid #1f6feb;
   border-radius: 6px;
   padding: 10px 14px;

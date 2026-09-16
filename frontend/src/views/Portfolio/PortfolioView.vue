@@ -89,7 +89,10 @@
         </div>
       </div>
 
-      <el-table :data="positions" v-loading="loading" stripe class="app-table app-table--trades">
+      <div v-if="loading && positions.length === 0" class="pos-skeleton">
+        <el-skeleton :rows="5" animated></el-skeleton>
+      </div>
+      <el-table v-else :data="positions" v-loading="loading" stripe class="app-table app-table--trades">
         <el-table-column label="代码" width="100" prop="symbol">
           <template #default="{ row }">
             <router-link target="_blank" rel="noopener" :to="`/stocks/${row.symbol}`" class="stock-code">{{ row.symbol }}</router-link>
@@ -301,15 +304,18 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { UploadInstance, UploadFile, UploadFiles } from 'element-plus'
 import { Wallet, Money, TrendCharts, Odometer, Refresh, Plus, Upload } from '@element-plus/icons-vue'
 import { portfolioApi, type PositionItem, type PositionSummary, type AddPositionPayload, type UpdatePositionPayload, type ClosedTrade } from '@/api/portfolio'
 import { vibeApi } from '@/api/vibe'
+import { subscribeQuotesUpdate } from '@/utils/quotesSSE'
 import { getStrategyNameMap, strategyNameSync } from '@/utils/strategyName'
 import { fmtNum, fmtPct } from '@/utils/format'
 import { todayDateInBeijing } from '@/utils/datetime'
+
+let quotesUnsub: (() => void) | null = null
 
 defineOptions({ name: 'PortfolioView' })
 
@@ -533,6 +539,13 @@ onMounted(() => {
   getStrategyNameMap().then((m) => {
     strategyNames.value = m
   })
+  // 全局行情 SSE 信号触发持仓自动刷新，免去手动点刷新
+  quotesUnsub = subscribeQuotesUpdate(() => {
+    loadPositions()
+  })
+})
+onUnmounted(() => {
+  if (quotesUnsub) { quotesUnsub(); quotesUnsub = null }
 })
 
 // ============ 交易复盘 ============
@@ -718,12 +731,14 @@ const getExitReasonTagType = (r?: string | null) => {
   }
 }
 
-.up { color: var(--el-color-danger); }
-.down { color: var(--el-color-success); }
-
+// 涨跌色由全局 .up/.down/.text-up/.text-down 提供，避免重复定义
 // ============ 持仓表格 ============
 // 表格样式已迁移至全局设计系统 (.app-table, .app-table--trades, .app-table-toolbar, .app-table-card)
 // 此处仅保留页面特定的工具栏微调和响应式
+
+.pos-skeleton {
+  padding: 20px 18px;
+}
 
 .stock-code {
   color: var(--el-color-primary);

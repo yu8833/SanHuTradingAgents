@@ -3515,11 +3515,11 @@ onBeforeUnmount(() => {
             border: none;
 
             .el-collapse-item__header {
-              background: #f8fafc;
-              border: 1px dashed #cbd5e1;
+              background: var(--el-fill-color-lighter);
+              border: 1px dashed var(--el-border-color);
               border-radius: 6px;
               font-size: 13px;
-              color: #64748b;
+              color: var(--el-text-color-regular);
               height: 36px;
               line-height: 36px;
             }
@@ -3593,15 +3593,15 @@ onBeforeUnmount(() => {
 
       .confidence-detail-item {
         padding: 16px 20px;
-        background: #ffffff;
+        background: var(--el-bg-color);
         border-radius: 12px;
-        border: 1px solid #e2e8f0;
+        border: 1px solid var(--el-border-color-light);
         transition: all 0.3s ease;
 
         &:hover {
           transform: translateY(-2px);
           box-shadow: 0 8px 24px rgba(43, 108, 176, 0.1);
-          border-color: #bfdbfe;
+          border-color: var(--el-color-primary-light-7);
         }
 
         .detail-item-header {
@@ -5172,6 +5172,26 @@ html.dark {
 
     .full-score-collapse .collapse-title {
       color: #34d399;
+    }
+  }
+
+  // Markdown 正文：引用块/代码/表格浅底色 → 暗色覆盖
+  :deep(.dialog-report-content) {
+    blockquote {
+      background: rgba(99, 102, 241, 0.12);
+      border-left-color: #818cf8;
+      color: #c7d2fe;
+    }
+    code {
+      background: var(--el-fill-color-light);
+      color: #f472b6;
+    }
+    table th {
+      background: #1e293b;
+      color: #e2e8f0;
+    }
+    table tr:nth-child(even) td {
+      background: #182235;
     }
   }
 }

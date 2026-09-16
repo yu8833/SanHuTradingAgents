@@ -404,14 +404,6 @@ onMounted(() => {
     color: var(--el-text-color-placeholder);
   }
 
-  .up {
-    color: var(--el-color-danger);
-  }
-
-  .down {
-    color: var(--el-color-success);
-  }
-
   .accent {
     color: var(--el-color-warning);
   }

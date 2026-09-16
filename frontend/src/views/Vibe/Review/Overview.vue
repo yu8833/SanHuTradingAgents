@@ -791,10 +791,6 @@ onActivated(() => {
   margin: 0;
 }
 
-.up { color: #f56c6c; }
-.down { color: #67c23a; }
-.flat { color: #909399; }
-
 .disclaimer {
   margin-top: 8px;
   font-size: 12px;
@@ -941,9 +937,9 @@ onActivated(() => {
   min-height: 4px;
 }
 
-.dist-up { background: #f56c6c; }
-.dist-flat { background: #c0c4cc; }
-.dist-down { background: #67c23a; }
+.dist-up { background: var(--app-up); }
+.dist-flat { background: var(--app-flat); }
+.dist-down { background: var(--app-down); }
 
 .dist-label {
   font-size: 9px;
@@ -967,9 +963,9 @@ onActivated(() => {
   background: var(--el-fill-color-light);
 }
 
-.breadth-up { background: #f56c6c; }
-.breadth-flat { background: #c0c4cc; }
-.breadth-down { background: #67c23a; }
+.breadth-up { background: var(--app-up); }
+.breadth-flat { background: var(--app-flat); }
+.breadth-down { background: var(--app-down); }
 
 .breadth-legend {
   display: flex;
@@ -978,9 +974,9 @@ onActivated(() => {
   font-size: 12px;
 }
 
-.lg-up { color: #f56c6c; }
-.lg-flat { color: #909399; }
-.lg-down { color: #67c23a; }
+.lg-up { color: var(--app-up); }
+.lg-flat { color: var(--app-flat); }
+.lg-down { color: var(--app-down); }
 
 /* 行业热度 */
 .rank-grid {

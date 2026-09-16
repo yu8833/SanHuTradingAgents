@@ -168,7 +168,7 @@ onMounted(() => {
 
 /* 大盘×策略适配矩阵 */
 .matrix-dims { margin-bottom: 4px; }
-.matrix-dim { background: #f5f7fa; border-radius: 8px; padding: 12px 14px; height: 100%; }
+.matrix-dim { background: var(--el-fill-color-light); border-radius: 8px; padding: 12px 14px; height: 100%; }
 .matrix-dim-label { font-size: 13px; color: #606266; font-weight: 600; margin-bottom: 10px; }
 .matrix-dim-opts { display: flex; flex-wrap: wrap; gap: 6px; }
 .matrix-result { padding: 4px 0; }
@@ -208,8 +208,8 @@ onMounted(() => {
 :global(html.dark) .matrix-live-time { color: #6f7278; }
 .matrix-strategies-hint { font-size: 13px; color: #909399; margin-bottom: 12px; }
 .matrix-strategy-card {
-  border: 1px solid #e4e7ed; border-radius: 8px; padding: 12px 14px;
-  background: #fff; height: 100%; transition: box-shadow 0.25s ease;
+  border: 1px solid var(--el-border-color-light); border-radius: 8px; padding: 12px 14px;
+  background: var(--el-bg-color); height: 100%; transition: box-shadow 0.25s ease;
 }
 .matrix-strategy-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
 .matrix-strategy-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }

@@ -331,7 +331,7 @@ onMounted(() => {
       justify-content: space-between;
       align-items: center;
       padding: 12px;
-      background: #f5f7fa;
+      background: var(--el-fill-color-light);
       border-radius: 4px;
       margin-bottom: 8px;
 

@@ -35,7 +35,7 @@
             <el-icon><House /></el-icon>
             仪表板
           </el-link>
-          <el-link type="primary" @click="$router.push('/analysis/single')">
+          <el-link type="primary" @click="$router.push('/analysis')">
             <el-icon><TrendCharts /></el-icon>
             单股分析
           </el-link>
@@ -145,7 +145,7 @@ const goBack = () => {
 }
 
 .suggestions {
-  background: white;
+  background: var(--el-bg-color);
   border-radius: 12px;
   padding: 32px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);

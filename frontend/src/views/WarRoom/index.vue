@@ -53,40 +53,40 @@
         <div class="ms-news" :class="{ open: newsOpen }">
           <div class="ms-news-head" @click="newsOpen = !newsOpen">
             <i class="mf-arrow" :class="{ open: newsOpen }"></i>
-            <span class="ms-news-title">重要事件<em class="ms-news-sub">重大新闻 · 打分 / 解读 / 板块</em></span>
+            <span class="ms-news-title">重要事件<em class="ms-news-sub">已计入总分 · 打分 / 解读 / 板块</em></span>
             <span class="flex"></span>
-            <span class="ms-news-count">{{ newsList.length }} 条</span>
-            <el-button v-if="newsList.length > 5" size="small" text @click.stop="newsLimit = newsLimit >= newsList.length ? 5 : newsList.length">
-              {{ newsLimit >= newsList.length ? '展开全部' : '收起' }}
+            <span class="ms-news-count">{{ eventSignals.length }} 条</span>
+            <el-button v-if="eventSignals.length > 5" size="small" text @click.stop="evLimit = evLimit >= eventSignals.length ? 5 : eventSignals.length">
+              {{ evLimit >= eventSignals.length ? '展开全部' : '收起' }}
             </el-button>
           </div>
           <div v-show="newsOpen">
-            <div v-if="shownNews.length" class="ev-cards">
-              <div v-for="(n, i) in shownNews" :key="i" class="ev-card" :class="newsDir(n)">
+            <div v-if="shownEvents.length" class="ev-cards">
+              <div v-for="(s, i) in shownEvents" :key="i" class="ev-card" :class="evDir(s)">
                 <div class="ev-side">
-                <em class="ev-dir" :class="newsDir(n)">{{ newsDirText(n) }}</em>
-                <b class="ev-score" :class="evScoreCls(n)">{{ evScoreText(n) }}</b>
-                <span class="ev-lv">{{ n.impact_level }}影响</span>
-              </div>
+                  <em class="ev-dir" :class="evDir(s)">{{ evDirText(s) }}</em>
+                  <b class="ev-score" :class="evScoreCls(s)">{{ evScoreText(s) }}</b>
+                  <span class="ev-lv">{{ evLevel(s) }}影响</span>
+                </div>
                 <div class="ev-main">
                   <div class="ev-meta">
-                    <el-tag v-if="n.category" size="small" class="cat-tag" effect="plain">{{ n.category }}</el-tag>
-                    <el-tag :type="importanceTag(n.importance)" size="small" effect="plain">{{ n.importance === 'high' ? '重大' : n.importance === 'medium' ? '重要' : '一般' }}</el-tag>
-                    <span class="ev-src">{{ sourceShort(n.source) }} · {{ newsTime(n.publish_time) }}</span>
+                    <el-tag v-if="evDetail(s)?.category" size="small" class="cat-tag" effect="plain">{{ evDetail(s)?.category }}</el-tag>
+                    <el-tag :type="importanceTag(evDetail(s)?.importance)" size="small" effect="plain">{{ evDetail(s)?.importance === 'high' ? '重大' : evDetail(s)?.importance === 'medium' ? '重要' : '一般' }}</el-tag>
+                    <span v-if="evDetail(s)?.source" class="ev-src">{{ sourceShort(evDetail(s)?.source) }} · {{ newsTime(evDetail(s)?.publish_time) }}</span>
                   </div>
                   <p class="ev-title">
-                    <a v-if="n.url" :href="n.url" target="_blank" rel="noopener noreferrer" class="ev-origin">{{ n.title }} →</a>
-                    <span v-else>{{ n.title }}</span>
+                    <a v-if="s.url" :href="s.url" target="_blank" rel="noopener noreferrer" class="ev-origin">{{ s.title }} →</a>
+                    <span v-else>{{ s.title }}</span>
                   </p>
-                  <p class="ev-analysis">{{ n.analysis }}</p>
-                  <div v-if="n.related_sectors?.length" class="ev-sectors">
+                  <p v-if="evDetail(s)?.analysis" class="ev-analysis">{{ evDetail(s)?.analysis }}</p>
+                  <div v-if="evDetail(s)?.related_sectors?.length" class="ev-sectors">
                     <span class="sec-label">相关板块</span>
-                    <span v-for="(s, si) in n.related_sectors" :key="si" class="sec-chip">{{ s }}</span>
+                    <span v-for="(sec, si) in evDetail(s)?.related_sectors" :key="si" class="sec-chip">{{ sec }}</span>
                   </div>
                 </div>
               </div>
             </div>
-            <p v-else class="ms-news-empty">今日暂无 |影响度| ≥50 的重大事件</p>
+            <p v-else class="ms-news-empty">今日暂无计入总分的强影响事件</p>
           </div>
         </div>
       </div>
@@ -160,9 +160,15 @@
         </div>
 
         <div v-else class="zone-empty">
-          <p class="ze-t">今日暂无买入标的</p>
-          <p class="ze-s">盘前 8:15 会自动生成候选并出现在这里，也可手动生成</p>
-          <el-button size="small" type="primary" :loading="genPlanLoading" @click="generatePlan">生成当日计划</el-button>
+          <template v-if="genPlanLoading">
+            <p class="ze-t">正在自动生成当日计划…</p>
+            <p class="ze-s">约 1~2 分钟，生成后自动出现在这里，无需操作</p>
+            <el-progress :percentage="genPlanProgress" :stroke-width="6" style="max-width: 260px; margin: 6px auto 0;" />
+          </template>
+          <template v-else>
+            <p class="ze-t">今日暂无买入标的</p>
+            <p class="ze-s">盘前 8:15 自动生成候选；打开页面自动补生成，刷新即可看到</p>
+          </template>
         </div>
       </section>
 
@@ -325,10 +331,10 @@
     <el-dialog v-model="planDialog" title="添加当日计划" width="480px">
       <el-form :model="planForm" label-width="90px">
         <el-form-item label="代码">
-          <el-input v-model="planForm.code" placeholder="如 600519" />
+          <el-input v-model="planForm.code" placeholder="如 600519" @blur="autoFillPlanQuote" @keyup.enter="autoFillPlanQuote" />
         </el-form-item>
         <el-form-item label="名称">
-          <el-input v-model="planForm.name" placeholder="可选，自动解析" />
+          <el-input v-model="planForm.name" placeholder="可选，自动解析" readonly />
         </el-form-item>
         <el-form-item label="方向">
           <el-radio-group v-model="planForm.direction">
@@ -390,7 +396,7 @@
           <div class="fld"><span class="k">触发价</span><span class="v">{{ buyTradeRow.trigger_price ?? '—' }}</span></div>
           <div class="fld"><span class="k">实时价</span><span class="v">{{ buyTradeRow.last_price ?? '—' }}</span></div>
         </div>
-        <el-form label-width="90px" class="qt-form">
+        <el-form label-width="90px" class="qt-form" @submit.prevent="submitQuickBuy">
           <el-form-item label="买入数量">
             <el-input-number v-model="buyTradeQty" :min="100" :step="100" :precision="0" style="width: 100%" />
           </el-form-item>
@@ -415,6 +421,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh, Plus } from '@element-plus/icons-vue'
 import { warRoomApi } from '@/api/warRoom'
 import { paperApi } from '@/api/paper'
+import { stocksApi } from '@/api/stocks'
 import { subscribeQuotesUpdate, type QuotesUpdateSignal } from '@/utils/quotesSSE'
 
 defineOptions({ name: 'WarRoomHome' })
@@ -859,33 +866,41 @@ const newsList = computed(() => {
   })
   return list
 })
-const newsLimit = ref(5)
-const shownNews = computed(() => newsList.value.slice(0, newsLimit.value))
 // 重要事件区独立折叠（默认展开；配合外层"打分依据"折叠两层可收起）
 const newsOpen = ref(true)
-function newsDir(n: any): string {
-  return n?.direction || 'neutral'
+// 重要事件（B 区）：直接渲染计入总分的 signals 事件（与总分同源，杜绝加和对不上）
+const eventSignals = computed(() =>
+  signals.value.filter((s: any) => s.name === '高重要性政策/数据事件')
+)
+const evLimit = ref(5)
+const shownEvents = computed(() => eventSignals.value.slice(0, evLimit.value))
+function evDir(s: any): string {
+  return Number(s?.score ?? 0) > 0 ? 'bull' : 'bear'
 }
-// 方向徽章文案：利多 / 利空 / 中性
-function newsDirText(n: any): string {
-  const d = newsDir(n)
-  return d === 'bull' ? '利多' : d === 'bear' ? '利空' : '中性'
+function evDirText(s: any): string {
+  return Number(s?.score ?? 0) > 0 ? '利多' : '利空'
 }
-// 事件卡打分制：|影响度|≥50 的强影响事件 → 打分制贡献（利多 +2 / 利空 -2）；
-// 与规则引擎计入总分的口径一致（EVENT_CAP 已放开），不依赖 signals 标题匹配
-function evScoreOf(n: any): number | null {
-  const s = Number(n?.impact_score ?? 0) || 0
-  if (Math.abs(s) < 50) return null
-  return s > 0 ? 2 : -2
+function evLevel(s: any): string {
+  const imp = Math.abs(Number(s?.impact_score ?? 0)) || 0
+  if (imp >= 60) return '强'
+  if (imp >= 30) return '中'
+  return Number(s?.score ?? 0) !== 0 ? '强' : '弱'
 }
-function evScoreText(n: any): string {
-  const c = evScoreOf(n)
-  if (c == null) return '—'
+// 事件对应的新闻详情（标题匹配 news_top），补充解读/板块/来源；匹配不到返回 null
+function evDetail(s: any): any {
+  if (!s?.title) return null
+  const t = String(s.title).trim()
+  return newsList.value.find((n: any) => String(n.title || '').trim() === t) || null
+}
+// 事件打分制：直接显示对总分的贡献（±3 重大 / ±2 重要），与规则引擎分档一致
+function evScoreText(s: any): string {
+  const c = Number(s?.score ?? 0)
+  if (!c) return '—'
   return c > 0 ? `+${c}` : String(c)
 }
-function evScoreCls(n: any): string {
-  const c = evScoreOf(n)
-  if (c == null) return 'is-na'
+function evScoreCls(s: any): string {
+  const c = Number(s?.score ?? 0)
+  if (!c) return 'is-na'
   return c > 0 ? 'up' : 'down'
 }
 function newsTime(t?: string): string {
@@ -1043,6 +1058,22 @@ let planCompletionTimer: ReturnType<typeof setInterval> | null = null
 function _clearPlanWatchdog() {
   if (planCompletionTimer) { clearInterval(planCompletionTimer); planCompletionTimer = null }
 }
+
+// 自动补生成当日计划（去除"生成当日计划"按钮的操作层）：
+// 打开页面/刷新时，若今日快照未生成且买入清单为空 → 自动后台生成一次（会话级去重），
+// 生成后候选自动出现在「今日买入」，无需任何点击。
+let planAutoTriggered = false
+async function ensurePlanAuto() {
+  if (planAutoTriggered || genPlanLoading.value) return
+  if (buyList.value.length) return          // 已有候选/计划，无需生成
+  planAutoTriggered = true
+  try {
+    const tp = await warRoomApi.getTodayPlan()
+    if (tp?.generated) return               // 快照已生成，直接读即可（本轮逻辑已加载）
+  } catch { /* 查询失败仍尝试自动生成 */ }
+  await generatePlan()
+}
+
 async function generatePlan() {
   if (genPlanLoading.value) return
   _clearPlanWatchdog()
@@ -1110,6 +1141,23 @@ const planForm = ref({ code: '', name: '', direction: 'buy', trigger_price: unde
 function openPlanDialog() {
   planForm.value = { code: '', name: '', direction: 'buy', trigger_price: undefined, stop_loss: undefined, sell_condition: '' }
   planDialog.value = true
+}
+// 手动添加计划：输入A股代码后自动带出名称，并以现价为触发价默认值
+async function autoFillPlanQuote() {
+  const code = String(planForm.value.code || '').trim()
+  if (!/^\d{6}$/.test(code)) return
+  try {
+    const res = await stocksApi.getQuote(code)
+    const data = res?.data
+    if (!data) return
+    if (data.name && !planForm.value.name) planForm.value.name = data.name
+    const px = Number(data.price)
+    if (!Number.isNaN(px) && px > 0 && planForm.value.trigger_price == null) {
+      planForm.value.trigger_price = px
+    }
+  } catch (e) {
+    // 行情获取失败则保持原状，不阻断用户手动填写
+  }
 }
 async function submitPlan() {
   if (!planForm.value.code.trim()) { ElMessage.warning('请填写代码'); return }
@@ -1279,6 +1327,8 @@ const showHolders = ref(false)
 onMounted(async () => {
   await Promise.allSettled([loadMacro(), loadPlans(), loadIntradayGuide(), loadReference()])
   startIntradayLive()
+  // 打开页面即自动补生成当日计划（缺快照且空态时），无需手动点击
+  ensurePlanAuto()
 })
 onActivated(() => {
   genPlanLoading.value = false
@@ -1302,8 +1352,8 @@ onUnmounted(() => {
 .war-room {
   font-variant-numeric: tabular-nums;
 
-  .up { color: var(--el-color-danger); }    // A股惯例：涨 = 红
-  .down { color: var(--el-color-success); } // 跌 = 绿
+  .up { color: var(--app-up); }    // A股惯例：涨 = 红
+  .down { color: var(--app-down); } // 跌 = 绿
   .flex { flex: 1; }
   .no-op { color: var(--el-text-color-placeholder); }
 

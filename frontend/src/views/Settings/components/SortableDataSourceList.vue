@@ -288,8 +288,8 @@ onUnmounted(() => {
     justify-content: space-between;
     align-items: center;
     padding: 16px 20px;
-    background: #f5f7fa;
-    border-bottom: 1px solid #ebeef5;
+    background: var(--el-fill-color-light);
+    border-bottom: 1px solid var(--el-border-color-lighter);
 
     h4 {
       margin: 0;
@@ -321,7 +321,7 @@ onUnmounted(() => {
       }
 
       &:hover {
-        background: #f8f9fa;
+        background: var(--el-fill-color-lighter);
       }
 
       .drag-handle {
@@ -395,7 +395,7 @@ onUnmounted(() => {
 }
 
 :global(.sortable-drag) {
-  background: #ffffff;
+  background: var(--el-bg-color);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   transform: rotate(2deg);
 }
