@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import math
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 
 from app.services.cache_layer import cached, clear_cache
@@ -33,7 +33,7 @@ _STRONG = {"偏多": "偏多", "偏空": "偏空", "多": "偏多", "空": "偏�
 # --- 宏观快照"缺失时后台自动补生成"的防并发单飞机制 ---
 # 冷启动/非交易日恢复后，快照可能缺失。作战室打开时不再空态等用户点「立即生成」，
 # 而是 GET 缺失时自动在后台起一次补生成（当日仅一次），前端展示"自动生成中…"并轻轮询取回。
-import asyncio  # noqa: E402
+import asyncio
 
 _snapshot_gen_lock = asyncio.Lock()
 # 记录"当日是否已触发过后台补生成"，跨请求避免重复启动（进程内即可，重启即复位为重新允许）
@@ -142,10 +142,17 @@ def _build_basis(rule: dict, created_at) -> dict:
 # 数据聚合（数据层 A-D）
 # ---------------------------------------------------------------------------
 async def _collect_indices() -> list[dict]:
-    """外围指数全集：7 指数 + VIX + 美股期货 + 富时A50期货（各档失败仅跳过）。"""
+    """外围指数全集：7 指数 + VIX + 美股期货 + 富时A50期货（各档失败仅跳过）。
+
+    整体硬超时 30s：弱网/东财主机不可达时（串行重试 3 主机 × 7 指数理论最坏
+    可达数分钟）降级为空，绝不让参考 Tab / 快照被指数步长时间拖住。
+    """
     try:
         from app.services import vibe_gstock as gstock
-        return gstock.macro_indices()
+        return await asyncio.wait_for(asyncio.to_thread(gstock.macro_indices), timeout=30)
+    except asyncio.TimeoutError:
+        logger.warning("外围指数收集超时（>30s），降级为空")
+        return []
     except Exception as e:
         logger.warning(f"外围指数获取失败: {e}")
         return []
@@ -234,8 +241,8 @@ _LLM_SYSTEM_PROMPT = (
 def _get_llm_cfg() -> dict | None:
     """获取快速分析模型的 {model, api_base, api_key, temperature, max_tokens}；无则 None。"""
     try:
-        from app.services.simple_analysis_service import get_provider_and_url_by_model_sync
         from app.core.unified_config import unified_config
+        from app.services.simple_analysis_service import get_provider_and_url_by_model_sync
 
         model = unified_config.get_quick_analysis_model()
         if not model:
@@ -670,28 +677,72 @@ async def get_macro_snapshot(date_str: str | None = None) -> dict | None:
     return await cached(key, _load, category="market", valid=lambda v: v is not None)
 
 
+def snapshot_needs_refresh(snap: dict | None) -> bool:
+    """判断快照是否需要在盘中轻量重算一次方向（放弃盘前锁定后支撑"页面打开即当下"）。
+
+    规则：交易时段内，且快照缺失或已过期（created_at 距今 > SNAPSHOT_INTRADAY_REFRESH_SECONDS）
+    → 返回 True，前端据此主动调一次 /api/macro/refresh 重算当下方向。
+    非交易时段 / 快照足够新鲜 → 不刷新。
+    """
+    try:
+        from app.core.config import settings
+        from app.utils.trading_time import is_trading_time
+        s = settings.SNAPSHOT_INTRADAY_REFRESH_SECONDS
+        if not is_trading_time() or not s:
+            return False
+        if not snap or not snap.get("created_at"):
+            return True
+        created = snap["created_at"]
+        if isinstance(created, str):
+            created = datetime.fromisoformat(
+                created.replace("Z", "+00:00")
+            )
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - created).total_seconds()
+        return age > s
+    except Exception:
+        return False
+
+
 async def get_macro_reference(refresh: bool = False) -> dict:
     """参考 Tab 独立实时数据：外围指数 / 财经日历 / 重要快讯。
 
     与宏观快照解耦：不落库、不跑 LLM 逐条解读、不依赖快照是否生成。
-    三块数据各自复用已有短 TTL 缓存（指数 market 级、日历 1 天、快讯 5min/1h），
-    秒级返回；refresh=True 仅强制重建外围指数（2-5s），快讯因 5min/1h TTL
-    已足够新鲜且重建 108 个 RSS 源耗时 30s+（超过前端等待阈值），故沿用缓存。
-    日历解读采用规则化 analysis（financial_calendar 内置，秒回）；LLM 解读保留在盘前快照。
+    三块数据各自复用已有短 TTL 缓存（指数 market 级+SWR、日历 1 天、快讯 5min/1h），
+    并行收集：整体耗时 ≈ 最慢一块，而非三块之和；任一超时降级为空，不拖垮整体。
     """
     # ① 外围指数：market 级缓存（交易 3min / 非交易 30min）；refresh 先清缓存强制重建
     if refresh:
         await clear_cache("macro:ref:indices:v1")
-    indices = await cached(
-        "macro:ref:indices:v1",
-        _collect_indices,
-        category="market",
-        valid=bool,
-    )
-    # ② 财经日历：复用 1 天 TTL 缓存（含 announced/actual/规则化 analysis）
-    calendar = await get_financial_calendar(8)
-    # ③ 重要快讯：复用 5min/1h 缓存（与快照同键 top_n=40，命中已有缓存；不强制重建）
-    news = await get_macro_news(hours_back=24, top_n=40)
+
+    async def _indices():
+        return await cached(
+            "macro:ref:indices:v1",
+            _collect_indices,
+            category="market",
+            valid=bool,
+            swr=True,
+        )
+
+    async def _calendar():
+        # 财经日历：1 天 TTL；规则化 analysis 秒回
+        return await get_financial_calendar(8)
+
+    async def _news():
+        # 快讯：5min/1h 缓存命中秒回；冷重建 108 RSS 源可能 30-60s，
+        # 硬超时 60s 降级为空（重建任务仍在后台单飞进行，下个窗口命中缓存）
+        try:
+            return await asyncio.wait_for(
+                get_macro_news(hours_back=24, top_n=40), timeout=60
+            )
+        except asyncio.TimeoutError:
+            logger.warning("参考快讯获取超时（>60s），降级为空")
+            return []
+        except Exception:
+            return []
+
+    indices, calendar, news = await asyncio.gather(_indices(), _calendar(), _news())
     return {
         "indices": indices,
         "calendar": calendar,
@@ -703,47 +754,25 @@ async def get_macro_reference(refresh: bool = False) -> dict:
 async def refresh_macro_snapshot() -> dict:
     """生成今日快照并落库（手动刷新 / 8:15 调度共用）。返回快照。
 
-    5.2 盘前锁定：当日方向基准一旦在「盘前窗口」锁定（当日 >=08:00 产生的 locked_at），
-    盘中刷新只更新事实数据（指数/日历/快讯/信号值），沿用盘前基准，
-    避免方向盘中横跳（对应文档 §3.2"盘中不重算标签，只展示基准"、
-    §5.2 指针仅在盘前定位一次）。
+    放弃盘前锁定：每次生成都用最新数据重算方向基准（basis）并覆盖当日快照，
+    页面打开/刷新即可提取当下盘面判断方向。
 
-    锁定有效性窗口：凌晨（08:00 前）由服务重启/夜间任务抢先生成的基准，
-    外围数据不完整、置信度失真（如 14%），不视为有效锁定 —— 允许盘前正式计算覆盖，
-    保证「今日置信度」不是被凌晨的半成品锁死的。
+    兜底：若本次拉取数据不齐全（外围指数缺失或置信度为 0，典型如数据源瞬时限频）、
+    而库里已有更完整快照，则保留旧快照方向，避免把好数据退化成空数据。
     """
     snap = await build_macro_snapshot()
-    # 今日是否已存在有效锁定基准 → 已锁定则保留原基准（覆盖方向/置信度之外的其余数据）
     try:
-        from datetime import datetime as _dt, timezone as _dt_tz
-        from zoneinfo import ZoneInfo
         from app.core.database import get_mongo_db
         db = get_mongo_db()
         existing = await db[SNAPSHOT_COLLECTION].find_one({"date": snap["date"]})
-        old_basis = (existing or {}).get("basis") or {}
-        lock = old_basis.get("locked_at")
         # 新快照数据是否齐全：外围指数到位且置信度 > 0。
-        # 数据源瞬时失败（如行情接口限频）时 rule 会退化（置信度 0），
-        # 此时不应把「凌晨/历史基准」换成更糟的空数据。
         new_data_ok = bool((snap.get("indices") or [])) and float((snap.get("rule") or {}).get("confidence") or 0) > 0
-        if lock:
-            if not isinstance(lock, _dt):
-                try:
-                    lock = _dt.fromisoformat(str(lock))
-                except ValueError:
-                    lock = None
-            if lock is not None:
-                lock_aware = lock if lock.tzinfo else lock.replace(tzinfo=_dt_tz.utc)
-                lock_bj = lock_aware.astimezone(ZoneInfo("Asia/Shanghai"))
-                if lock_bj.hour >= 8 or not new_data_ok:
-                    # 盘前窗口（>=08:00）产生的锁定一律保留（盘中不横跳）；
-                    # 凌晨的半成品锁定，仅在新数据齐全时才允许被覆盖。
-                    # 方向/置信/总分/信号明细全部沿用盘前同源基准（basis 与 rule 一起锁），
-                    # 保证页面"总分 == 明细各信号分值之和"自洽，方向与分数不会互相矛盾。
-                    snap["basis"] = dict(old_basis)
-                    snap["rule"] = (existing or {}).get("rule") or snap.get("rule")
+        if not new_data_ok and existing and existing.get("basis"):
+            # 数据源瞬时失败：保留旧快照，避免把完整基准覆盖成空数据
+            snap["basis"] = dict(existing["basis"])
+            snap["rule"] = existing.get("rule") or snap.get("rule")
     except Exception as e:
-        logger.warning(f"盘前基准锁定判断跳过: {e}")
+        logger.warning(f"快照数据齐全度兜底判断跳过: {e}")
     await _persist_snapshot(snap)
     # 清今日快照缓存，下次读取即时生效
     from app.services.cache_layer import clear_cache

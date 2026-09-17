@@ -167,9 +167,10 @@ def _top_rows(rows: list[dict], key: str, descending: bool, limit: int = 8) -> l
     ]
 
 
-def _industry_rank(rows: list[dict]) -> dict:
+def _industry_rank(rows: list[dict], sectors: list[dict] | None = None) -> dict:
     """行业热度：按行业资金流 pct 领涨/领跌（复用 _sectors 的即时资金流）。"""
-    sectors = _sectors()
+    if sectors is None:
+        sectors = _sectors()
     if not sectors:
         return {"leading": [], "lagging": []}
     items = [
@@ -206,18 +207,49 @@ def _market_regime() -> dict | None:
             "advice": regime.get("advice", ""),
             "as_of": regime.get("as_of"),
         }
-    except Exception as e:  # noqa: BLE001 - 看板不因市场状态失败而崩溃
+    except Exception:
         logger.exception("构造大盘统一市场状态失败")
         return None
 
 
-def _build() -> dict:
-    """同步构建看板数据（market_quotes + 情绪/板块/短线情绪 + 指数）。"""
-    rows = _load_market_rows()
-    indices = astock.index_quote()
-    sentiment = _sentiment()
-    emotion = _emotion()
-    regime = _market_regime()
+async def _build() -> dict:
+    """异步并行构建看板数据（market_quotes + 情绪/板块/短线情绪 + 指数）。
+
+    外部数据步（gtimg 指数 / AKShare 涨跌家数 / 东财涨停四池 / 行业资金流 /
+    市场状态）并行拉取且各自带硬超时，超时降级为空值——任何一步挂起都不会
+    拖垮整块看板（复刻 macro_service 的 _bounded_fetch 降级策略）。
+    """
+    # 各外部数据步硬时限（秒）：弱网/被限流时最多等这么久
+    STEP_TIMEOUTS = {
+        "rows": 20,      # MongoDB 全市场行情（本地，通常毫秒级）
+        "indices": 15,   # 腾讯 gtimg 指数
+        "sentiment": 15, # AKShare 涨跌家数
+        "emotion": 25,   # 东财涨停四池（含最多回溯 8 天）
+        "sectors": 15,   # AKShare 行业资金流
+        "regime": 15,    # 市场状态（复用进程级缓存时秒回）
+    }
+
+    async def _bounded(step_name: str, fn, default):
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(fn), timeout=STEP_TIMEOUTS[step_name]
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"看板数据步[{step_name}]超时（>{STEP_TIMEOUTS[step_name]}s），降级处理")
+            return default
+        except Exception as e:
+            logger.warning(f"看板数据步[{step_name}]失败，降级处理: {e}")
+            return default
+
+    rows_task = asyncio.create_task(asyncio.to_thread(_load_market_rows))
+    indices, sentiment, emotion, regime, sectors = await asyncio.gather(
+        _bounded("indices", astock.index_quote, []),
+        _bounded("sentiment", _sentiment, {}),
+        _bounded("emotion", _emotion, {}),
+        _bounded("regime", _market_regime, None),
+        _bounded("sectors", _sectors, []),
+    )
+    rows = await rows_task
 
     total = len(rows)
     up = sum(1 for r in rows if r["pct_chg"] > 0)
@@ -260,7 +292,7 @@ def _build() -> dict:
     strong_down_pct = strong_down / total * 100 if total else 0
 
     # 主线 = 行业热度领涨（平均涨幅 + 覆盖度）
-    ind_rank = _industry_rank(rows)
+    ind_rank = _industry_rank(rows, sectors)
     mainline_items = ind_rank["leading"]
     mainline_avg = max([float(i.get("pct") or 0) for i in mainline_items], default=0)
     mainline_score = round(_score(mainline_avg, -0.5, 3.0)) if mainline_items else 50
@@ -336,27 +368,19 @@ def _build() -> dict:
     }
 
 
-# 看板构建并发锁：cached 命中前并发请求会各自完整 _build（外部 AKShare/东财可达数十秒），
-# 用进程级 asyncio.Lock 串行化构建，避免 N 个并发请求叠加 N 倍慢请求。
-_dashboard_build_lock: asyncio.Lock | None = None
-
-
-def _get_dashboard_lock() -> asyncio.Lock:
-    global _dashboard_build_lock
-    if _dashboard_build_lock is None:
-        _dashboard_build_lock = asyncio.Lock()
-    return _dashboard_build_lock
-
-
 async def get_dashboard() -> dict:
-    """市场看板（Redis 缓存，market 级 TTL，交易时段放宽到 120s 以减少外部重建）。"""
+    """市场看板（Redis 缓存 + SWR）。
+
+    - 命中缓存：直接返回（交易时段 market 级 600s，非交易 1800s）；
+    - 缓存过期：**立即回退备用旧值**并在后台异步重建，请求方零等待，
+      不再出现"缓存还没到期就被并发请求排队硬重建"的分钟级卡顿；
+    - 冷启动（无任何缓存）：前台单飞构建一次（构建内部已并行 + 硬超时）。
+    """
     from app.services.cache_layer import get_ttl
-    # market 分级 TTL（交易 60s）对含外部网络调用的看板太短，交易时段升至 120s；非交易保持 1800s
-    ttl = max(get_ttl("market"), 120)
-    async with _get_dashboard_lock():
-        return await cached(
-            "vibe:market_dashboard", _build,
-            category="market",
-            valid=lambda v: bool(v.get("breadth", {}).get("total")) or bool(v.get("indices")),
-            ttl=ttl,
-        )
+    ttl = get_ttl("market")
+    return await cached(
+        "vibe:market_dashboard", _build,
+        category="market",
+        valid=lambda v: bool(v.get("breadth", {}).get("total")) or bool(v.get("indices")),
+        ttl=ttl, swr=True,
+    )

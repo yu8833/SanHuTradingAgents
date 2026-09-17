@@ -167,39 +167,68 @@ async def list_strategies():
 
 @router.post("/api/strategy/run")
 async def run_strategy(req: StrategyRunRequest):
-    """运行单个策略筛选。"""
+    """运行单个策略筛选（异步任务，复用体系内 task_manager）。
+
+    盘中实时触发需逐股拉行情/聚合大盘数据，同步占用 HTTP 连接可达数十秒；
+    改为后台线程执行 + 立即返回 task_id，前端走 GET /api/strategy/task/{id}
+    轮询（完成后 result 与原有返回结构一致）。
+    """
     try:
-        db = get_mongo_db_sync()
-        # 盘中实时触发：若不显式指定 pool，则按 user_id 解析自选+持仓池
-        pool = req.pool
-        if req.realtime and not pool and req.user_id:
-            pool = _resolve_watch_positions_pool(req.user_id)
-        result = await asyncio.to_thread(
-            screener.run_strategy, db, req.strategy_id, req.as_of,
-            req.params, req.limit, pool, req.realtime,
-        )
-        return ok(result)
+        task = task_manager.create("strategy_run")
+        task_id = task.task_id
+        payload = req.model_dump(mode="json")
+
+        def _run() -> None:
+            try:
+                db = get_mongo_db_sync()
+                pool = payload.get("pool")
+                if payload.get("realtime") and not pool and payload.get("user_id"):
+                    pool = _resolve_watch_positions_pool(payload["user_id"])
+                result = screener.run_strategy(
+                    db, payload.get("strategy_id"), payload.get("as_of"),
+                    payload.get("params"), payload.get("limit", 100), pool,
+                    payload.get("realtime"),
+                )
+                task_manager.update(task_id, status="success", result=result, progress=1.0)
+            except Exception as e:
+                logger.exception("策略筛选任务异常")
+                task_manager.update(task_id, status="failure", error=str(e))
+
+        threading.Thread(target=_run, daemon=True).start()
+        return ok({"task_id": task_id, "status": "running", "kind": "strategy_run"})
     except Exception as e:
-        logger.exception("策略筛选失败")
-        return fail(f"策略筛选失败: {e}")
+        logger.exception("创建策略筛选任务失败")
+        return fail(f"创建策略筛选任务失败: {e}")
 
 
 @router.post("/api/strategy/run-all")
 async def run_all_strategies(req: StrategyRunAllRequest):
-    """批量运行全部策略。"""
+    """批量运行全部策略（异步任务，复用体系内 task_manager）。"""
     try:
-        db = get_mongo_db_sync()
-        pool = req.pool
-        if req.realtime and not pool and req.user_id:
-            pool = _resolve_watch_positions_pool(req.user_id)
-        result = await asyncio.to_thread(
-            screener.run_all_strategies, db, req.as_of, req.limit,
-            pool, req.refresh, req.realtime,
-        )
-        return ok(result)
+        task = task_manager.create("strategy_run_all")
+        task_id = task.task_id
+        payload = req.model_dump(mode="json")
+
+        def _run() -> None:
+            try:
+                db = get_mongo_db_sync()
+                pool = payload.get("pool")
+                if payload.get("realtime") and not pool and payload.get("user_id"):
+                    pool = _resolve_watch_positions_pool(payload["user_id"])
+                result = screener.run_all_strategies(
+                    db, payload.get("as_of"), payload.get("limit", 30),
+                    pool, payload.get("refresh"), payload.get("realtime"),
+                )
+                task_manager.update(task_id, status="success", result=result, progress=1.0)
+            except Exception as e:
+                logger.exception("批量策略筛选任务异常")
+                task_manager.update(task_id, status="failure", error=str(e))
+
+        threading.Thread(target=_run, daemon=True).start()
+        return ok({"task_id": task_id, "status": "running", "kind": "strategy_run_all"})
     except Exception as e:
-        logger.exception("批量策略筛选失败")
-        return fail(f"批量策略筛选失败: {e}")
+        logger.exception("创建批量策略筛选任务失败")
+        return fail(f"创建批量策略筛选任务失败: {e}")
 
 
 @router.get("/api/strategy/market-context")

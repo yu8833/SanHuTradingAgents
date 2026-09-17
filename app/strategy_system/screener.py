@@ -3,7 +3,6 @@
 流程：加载全市场日线(warmup历史) → 计算指标/信号 → 在某交易日过滤 → 评分排序。
 """
 from __future__ import annotations
-from app.utils.timezone import now_tz
 
 import logging
 import threading
@@ -18,10 +17,10 @@ from app.strategy_system import data_adapter
 from app.strategy_system.indicators import compute_all
 from app.strategy_system.strategies import (
     BUILTIN_STRATEGIES,
-    get_strategies,
     get_strategy,
     run_strategy_filter,
 )
+from app.utils.timezone import now_tz
 
 logger = logging.getLogger(__name__)
 
@@ -223,8 +222,13 @@ def compute_market_context(db) -> dict:
 
     latest, dates = _resolve_match_dates(db)
     if not latest:
-        return {"as_of": None, "trend": "unknown", "volatility": "unknown",
-                "detail": "暂无行情数据", "cache": False}
+        # 短 TTL（60s）缓存空态：行情数据缺失期间不每请求重跑重型聚合
+        _market_context_cache["time"] = now_ts - (_MARKET_CONTEXT_TTL - 60)
+        _market_context_cache["data"] = {
+            "as_of": None, "trend": "unknown", "volatility": "unknown",
+            "detail": "暂无行情数据", "cache": False,
+        }
+        return _market_context_cache["data"]
 
     # 汇总文档里 pct_chg/pre_close 可能未回填(null)，故基于 close 逐symbol按日计算
     # 日收益率（pct），再按交易日聚合出全市场宽度（涨跌家数/均涨跌幅）。
@@ -264,8 +268,12 @@ def compute_market_context(db) -> dict:
     ]
     rows = list(db["stock_daily_quotes"].aggregate(pipe, allowDiskUse=True))
     if not rows:
-        return {"as_of": latest, "trend": "unknown", "volatility": "unknown",
-                "detail": "暂无行情数据", "cache": False}
+        # 空态同样短 TTL 兜底，避免聚合结果为空时每个请求重跑重型管道
+        empty = {"as_of": latest, "trend": "unknown", "volatility": "unknown",
+                 "detail": "暂无行情数据", "cache": False}
+        _market_context_cache["time"] = now_ts - (_MARKET_CONTEXT_TTL - 60)
+        _market_context_cache["data"] = empty
+        return empty
 
     # 近5交易日宽度
     recent5 = rows[-5:]

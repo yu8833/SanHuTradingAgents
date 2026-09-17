@@ -622,7 +622,14 @@ const loadStrategyMonitors = async () => {
     const [tbsRes, statusRes, listRes] = await Promise.allSettled([
       monitorApi.tbsMonitorStatus(),
       monitorApi.strategyMonitorStatus(),
-      strategyApi.runAll({ as_of: null, limit: 30, refresh: false }),
+      // 策略筛选已改异步任务：提交后轮询取回结果（同交易日缓存命中时秒回）
+      (async () => {
+        const res = await strategyApi.runAll({ as_of: null, limit: 30, refresh: false })
+        const task = (res as any)?.data ?? res
+        if (!task?.task_id) return task
+        const done = await strategyApi.waitTask(task.task_id, { timeoutMs: 300000 })
+        return done.result
+      })(),
     ])
     if (tbsRes.status === 'fulfilled') {
       tbsMonitorOn.value = !!(tbsRes.value as any)?.data?.enabled

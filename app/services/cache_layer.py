@@ -165,26 +165,95 @@ async def clear_cache(key: str):
     _memory_cache.pop(key, None)
 
 
+# ---------------------------------------------------------------------------
+# 缓存构建"单飞"：同一 key 任意时刻只允许一个构建任务（SWR 后台重建/冷启动
+# 并发首建共用），其余请求合并等待同一任务结果，杜绝 N 个并发请求叠加重建。
+# ---------------------------------------------------------------------------
+_build_tasks: dict[str, asyncio.Task[Any]] = {}
+_build_tasks_lock = asyncio.Lock()
+
+
+def _execute_build(build_fn: Callable) -> Any:
+    """执行构建函数：协程直接 await，同步函数放线程池避免阻塞事件循环。"""
+    if asyncio.iscoroutinefunction(build_fn):
+        return build_fn()
+    return asyncio.to_thread(build_fn)
+
+
+async def _build_and_cache(
+    key: str, build_fn: Callable, category: str,
+    valid: Callable[[Any], bool], ttl: int | None,
+    stale_key: str | None, stale_ttl: int | None,
+) -> Any:
+    try:
+        value = await _execute_build(build_fn)
+        if valid(value):
+            await set_cache(key, value, ttl=ttl, category=category)
+            if stale_key:
+                # 备用旧值：长 TTL（默认 3h），供 SWR 在正式 key 过期后回退
+                await set_cache(stale_key, value, ttl=stale_ttl or 3 * 3600)
+        else:
+            logger.warning(f"缓存跳过（校验失败）: {key}")
+        return value
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        logger.error(f"缓存构建失败: {key} - {e}", exc_info=True)
+        raise
+
+
+async def _ensure_build_task(
+    key: str, build_fn: Callable, category: str,
+    valid: Callable[[Any], bool], ttl: int | None,
+    stale_key: str | None, stale_ttl: int | None,
+) -> asyncio.Task[Any]:
+    """按原始 key 单飞去重；主缓存写入 key，备用旧值写入 stale_key。"""
+    async with _build_tasks_lock:
+        task = _build_tasks.get(key)
+        if task is None or task.done():
+            task = asyncio.create_task(
+                _build_and_cache(key, build_fn, category, valid, ttl, stale_key, stale_ttl)
+            )
+            _build_tasks[key] = task
+
+            def _cleanup(t: asyncio.Task) -> None:
+                if _build_tasks.get(key) is t:
+                    _build_tasks.pop(key, None)
+
+            task.add_done_callback(_cleanup)
+        return task
+
+
 async def cached(key: str, build_fn: Callable, category: str = "default",
-                 valid: Callable[[Any], bool] = bool, ttl: int | None = None) -> Any:
+                 valid: Callable[[Any], bool] = bool, ttl: int | None = None,
+                 swr: bool = False, stale_ttl: int | None = None) -> Any:
     """
     带缓存的数据获取：命中则返回，未命中则调用 build_fn 构建并缓存。
     valid 返回 False 的结果不缓存，下次直接重试。
     ttl 指定时覆盖分级 TTL（例如财经日历固定 1 天），否则按 category+时段自动分级。
+
+    swr=True（stale-while-revalidate）：正式 key 过期但备用旧值仍有效时，
+    立即返回旧值并在后台异步重建缓存，请求方无需等待；无旧值时才前台构建。
+    所有构建（前台/后台）按 key 单飞合并，避免并发重建雪崩。
     """
     hit = await get_cache(key)
     if hit is not None:
         return hit
 
-    # 未命中：同步构建函数放入线程池执行，避免重负载阻塞事件循环
-    if asyncio.iscoroutinefunction(build_fn):
-        value = await build_fn()
-    else:
-        value = await asyncio.to_thread(build_fn)
+    stale_key = f"{key}:stale" if swr else None
+    if stale_key:
+        stale = await get_cache(stale_key)
+        if stale is not None and valid(stale):
+            # 后台异步重建，不阻塞本次请求；单飞防止重复重建
+            await _ensure_build_task(key, build_fn, category, valid, ttl, stale_key, stale_ttl)
+            return stale
 
-    if valid(value):
-        await set_cache(key, value, ttl=ttl, category=category)
-    else:
-        logger.warning(f"缓存跳过（校验失败）: {key}")
-
-    return value
+    # 前台构建：单飞合并并发请求（同一 key 同时只构建一次，其余等待其结果）
+    task = await _ensure_build_task(key, build_fn, category, valid, ttl, stale_key, stale_ttl)
+    try:
+        return await task
+    finally:
+        if _build_tasks.get(key) is task:
+            async with _build_tasks_lock:
+                if _build_tasks.get(key) is task:
+                    _build_tasks.pop(key, None)

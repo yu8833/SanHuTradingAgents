@@ -18,6 +18,7 @@ from __future__ import annotations
 import math
 import re
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
 from app.services import vibe_astock as astock
 
@@ -97,19 +98,25 @@ def _quote_from(d: dict) -> dict:
 
 
 def global_indices() -> list[dict]:
-    """全球指数快照（道指 / 标普500 / 纳斯达克 / 恒生 / 恒生科技 / 日经225 / KOSPI）。源无的档跳过。"""
-    out = []
-    for idx in _INDICES:
+    """全球指数快照（道指 / 标普500 / 纳斯达克 / 恒生 / 恒生科技 / 日经225 / KOSPI）。
+
+    各指数并行拉取（东财推单可能每只 3 主机×10s 重试，串行会叠加数分钟
+    延迟），任一失败仅跳过该档；源无的档直接跳过。
+    """
+    def _one(idx: dict) -> dict | None:
         d = _push2_stock_get(idx["secid"], "f43,f57,f58,f59,f60,f170")
         if not d:
-            continue
+            return None
         chg = d.get("f170")
-        out.append({
+        return {
             "key": idx["key"], "name": idx["name"], "region": idx["region"],
             "price": _price(d, "f43"),
             "change_pct": round(chg / 100, 2) if isinstance(chg, (int, float)) else None,
-        })
-    return out
+        }
+
+    with ThreadPoolExecutor(max_workers=min(len(_INDICES), 8)) as ex:
+        items = list(ex.map(_one, _INDICES))
+    return [it for it in items if it]
 
 
 def vix_quote() -> dict | None:
@@ -217,7 +224,7 @@ def macro_indices() -> list[dict]:
     out = global_indices()
     vix = vix_quote()
     if vix:
-        out.append(vix)
+        out.extend(vix)
     out.extend(index_futures())
     # 出口兜底：任一路径混入 NaN/Infinity 都会让 JSON 序列化 500，
     # 这里统一丢弃非有限数值项，避免污染缓存与响应

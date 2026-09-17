@@ -290,10 +290,29 @@ export const FACTOR_OPTIONS = [
 export const strategyApi = {
   list: () => ApiClient.get<StrategyMeta[]>('/api/strategy/list'),
   tradeDates: (limit?: number) => ApiClient.get<{ dates: string[] }>('/api/strategy/trade-dates', { limit: limit ?? 30 }),
-  run: (payload: { strategy_id: string; as_of?: string | null; params?: any; limit?: number; pool?: string[]; realtime?: boolean; user_id?: string | null }, options?: { timeout?: number }) =>
-    ApiClient.post<StrategyRunResult>('/api/strategy/run', payload, { timeout: options?.timeout ?? 300000 }),
-  runAll: (payload: { as_of?: string | null; limit?: number; pool?: string[]; refresh?: boolean; realtime?: boolean; user_id?: string | null }, options?: { timeout?: number }) =>
-    ApiClient.post<StrategyRunAllResult>('/api/strategy/run-all', payload, { timeout: options?.timeout ?? 300000 }),
+
+  // 策略筛选已改为异步任务：提交立即返回 task_id，轮询 getTask 取结果（result 结构与原同步返回一致）
+  run: (payload: { strategy_id: string; as_of?: string | null; params?: any; limit?: number; pool?: string[]; realtime?: boolean; user_id?: string | null }) =>
+    ApiClient.post<{ task_id: string; status: string; kind: string }>('/api/strategy/run', payload),
+  runAll: (payload: { as_of?: string | null; limit?: number; pool?: string[]; refresh?: boolean; realtime?: boolean; user_id?: string | null }) =>
+    ApiClient.post<{ task_id: string; status: string; kind: string }>('/api/strategy/run-all', payload),
+  /**
+   * 轮询等待任务完成，返回任务对象（status=success 时含 result）。
+   * 失败/超时抛错，由调用方提示。
+   */
+  waitTask: async (taskId: string, options?: { intervalMs?: number; timeoutMs?: number }) => {
+    const intervalMs = options?.intervalMs ?? 2000
+    const timeoutMs = options?.timeoutMs ?? 600000
+    const deadline = Date.now() + timeoutMs
+    for (;;) {
+      const res = await strategyApi.getTask(taskId)
+      const data = (res as any)?.data ?? res
+      if (data?.status === 'success') return data
+      if (data?.status === 'failure') throw new Error(data.error || '任务执行失败')
+      if (Date.now() > deadline) throw new Error('任务超时，请稍后查看')
+      await new Promise(r => setTimeout(r, intervalMs))
+    }
+  },
   backtest: (payload: BacktestConfig, options?: { timeout?: number }) =>
     ApiClient.post<BacktestResult>('/api/strategy/backtest', payload, { timeout: options?.timeout ?? 600000 }),
   factorBacktest: (payload: any, options?: { timeout?: number }) =>

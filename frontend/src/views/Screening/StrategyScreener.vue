@@ -55,8 +55,10 @@
       <span>盘中预警 · 当前为暂定信号（盘中数据未完全定格），15:00 收盘定格后再做最终判断。</span>
     </div>
 
-    <!-- 大盘×策略适配矩阵（受控初值=今日检测四维；盘中预警开启时自动跟随实际检测并展示实时大盘快照，画像变化联动下方策略池） -->
+    <!-- 大盘×策略适配矩阵：仅盘中预警（实时模式）下展示 —— 矩阵四维=今日实时检测（60s 跟随），与「选择交易日」无关；
+         平时隐藏，避免用户切换选股日期时误以为矩阵应随日期回看历史环境 -->
     <StrategyExplainPanel
+      v-if="realtimeScan"
       :initial-dims="initialMatrixDims"
       :auto-sync="realtimeScan"
       :live-metrics="liveMetrics"
@@ -87,7 +89,9 @@
           :class="{
             active: activeStrategy === s.id,
             loading: runningAll,
-            dimmed: !isAdapted(s.id),
+            // 仅当存在矩阵画像上下文（盘中预警开启）时才做适配高亮/未适配半透明；
+            // 平时无画像 → 全部正常显示，避免策略池整体变灰
+            dimmed: !!matrixPortrait && !isAdapted(s.id),
           }"
           :style="{ '--sc': palette[i % palette.length] }"
           @click="handleRun(s)"
@@ -373,6 +377,15 @@ const dataFreshnessText = computed(() => {
   return computedAt.value ? `数据更新于 ${computedAt.value}` : ''
 })
 
+// 收盘定格窗口（15:00-15:30 可成交）只对「今日/实时」有意义：
+// 后端 decision_window 是当前时刻的全局判定，与查询日期无关；历史交易日查询时强制不显示该窗口
+const isTodayAsOf = (d?: string | null) => {
+  if (!d) return true
+  const now = new Date()
+  const p = (n: number) => String(n).padStart(2, '0')
+  return d === `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}`
+}
+
 const toggleRealtime = async (on: boolean) => {
   realtimeScan.value = on
   isRealtimeResult.value = false
@@ -394,6 +407,8 @@ const toggleRealtime = async (on: boolean) => {
     result.value = null
     showAllResult.value = null
     activeStrategy.value = null
+    // 清空矩阵画像：矩阵随预警关闭而卸载，画像残留会让策略池继续按旧画像半透明高亮
+    matrixPortrait.value = ''
     stopRegimeLivePoll()
     await runAll()
   }
@@ -503,9 +518,14 @@ const runAll = async (refresh = false) => {
       realtime: realtimeScan.value || undefined,
       user_id: (realtimeScan.value ? currentUserId.value : null),
     })
-    const data = (res as any)?.data ?? res
+    const task = (res as any)?.data ?? res
+    if (!task?.task_id) throw new Error('提交筛选任务失败')
+    // 后端缓存命中时任务秒完成（同交易日幂等），否则后台计算后轮询取回
+    const done = await strategyApi.waitTask(task.task_id, { timeoutMs: 600000 })
+    const data = done.result
     isRealtimeResult.value = !!data?.realtime
-    decisionWindow.value = !!data?.decision_window
+    // 收盘定格窗口仅对「今日/实时」生效：历史交易日查询一律不显示
+    decisionWindow.value = !!data?.decision_window && isTodayAsOf(data?.as_of || asOf.value)
     if (isRealtimeResult.value) {
       // 实时结果以当日为准，交易日下拉与 computed_at 不适用
       asOf.value = data.as_of || asOf.value
@@ -562,9 +582,13 @@ const runSingle = async (id: string) => {
       realtime: realtimeScan.value || undefined,
       user_id: (realtimeScan.value ? currentUserId.value : null),
     })
-    const data = (res as any)?.data ?? res
+    const task = (res as any)?.data ?? res
+    if (!task?.task_id) throw new Error('提交筛选任务失败')
+    const done = await strategyApi.waitTask(task.task_id, { timeoutMs: 600000 })
+    const data = done.result
     isRealtimeResult.value = !!data?.realtime
-    decisionWindow.value = !!data?.decision_window
+    // 收盘定格窗口仅对「今日/实时」生效：历史交易日查询一律不显示
+    decisionWindow.value = !!data?.decision_window && isTodayAsOf(data?.as_of || asOf.value)
     if (data?.as_of) asOf.value = data.as_of
     result.value = data
     if (data?.strategy_id) {
@@ -609,6 +633,7 @@ const onAsOfChange = () => {
   result.value = null
   showAllResult.value = null
   activeStrategy.value = null
+  decisionWindow.value = false
   runAll()
 }
 
