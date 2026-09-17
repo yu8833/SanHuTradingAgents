@@ -59,7 +59,14 @@ async def daily_overview(
                 base = ok(None)
                 base["data"] = {"snapshot": None, "auto_generating": True}
                 return base
-        return ok(snap)
+            return ok(None)
+        # 放弃盘前锁定：盘中且快照过期 → 标记 needs_refresh，前端主动重算当下方向
+        base = ok(snap)
+        base["data"] = {
+            "snapshot": snap,
+            "needs_refresh": macro_service.snapshot_needs_refresh(snap),
+        }
+        return base
     except Exception as e:
         logger.error(f"宏观快照读取失败: {e}", exc_info=True)
         return ok(None, message="宏观快照读取失败，请稍后重试")

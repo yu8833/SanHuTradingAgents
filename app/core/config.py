@@ -215,6 +215,12 @@ class Settings(BaseSettings):
         default=True,
         description="止损自动执行：持仓现价跌破 stop_loss_price 时自动市价卖出全部持仓（仅交易时段生效）",
     )
+    # 宏观快照盘中刷新频率：放弃盘前锁定后，交易时段内快照超过此秒数即标记 needs_refresh，
+    # 前端据此主动重算一次当下方向（轻量重算，不跑 LLM）。非交易时段不刷新。
+    SNAPSHOT_INTRADAY_REFRESH_SECONDS: int = Field(
+        default=300,
+        description="宏观快照盘中刷新间隔（秒）：交易时段内快照已过期即标记需刷新，默认 5 分钟",
+    )
 
     # 实时行情入库任务
     QUOTES_INGEST_ENABLED: bool = Field(default=True)

@@ -11,11 +11,6 @@
       <template #title>速览</template>
     </el-menu-item>
 
-    <el-menu-item index="/war-room">
-      <el-icon><Aim /></el-icon>
-      <template #title>作战</template>
-    </el-menu-item>
-
     <el-menu-item index="/learning" v-show="false">
       <el-icon><Reading /></el-icon>
       <template #title>资料</template>
@@ -26,6 +21,7 @@
         <el-icon><DataAnalysis /></el-icon>
         <span>市场</span>
       </template>
+      <el-menu-item index="/vibe/synthesis">综合研判</el-menu-item>
       <el-menu-item index="/vibe/review/overview">大盘看板</el-menu-item>
       <el-menu-item index="/vibe/review/emotion">短线情绪</el-menu-item>
       <el-menu-item index="/vibe/review/concept">概念分析</el-menu-item>
@@ -40,8 +36,6 @@
       <el-menu-item index="/candidate">三买三卖</el-menu-item>
       <el-menu-item index="/screening/common">常用策略</el-menu-item>
       <el-menu-item index="/screening/backtest">策略回测</el-menu-item>
-      <!-- 转债博弈（资产类型独立，单独保留入口） -->
-      <el-menu-item index="/screening/convertible-arbitrage">转债博弈</el-menu-item>
       <!-- 高级变体（折叠，保留但不并列展示） -->
       <el-menu-item index="/screening/macd-divergence" v-show="false">MACD背离</el-menu-item>
       <el-menu-item index="/screening/extreme-reversal" v-show="false">极端反转</el-menu-item>

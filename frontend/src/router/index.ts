@@ -51,29 +51,6 @@ const routes: RouteRecordRaw[] = [
     ]
   },
   {
-    path: '/war-room',
-    name: 'WarRoom',
-    component: () => import('@/layouts/BasicLayout.vue'),
-    meta: {
-      title: '作战',
-      icon: 'Aim',
-      requiresAuth: true,
-      transition: 'fade'
-    },
-    children: [
-      {
-        path: '',
-        name: 'WarRoomHome',
-        component: () => import('@/views/WarRoom/index.vue'),
-        meta: {
-          title: '作战室',
-          parentTitle: '作战',
-          requiresAuth: true
-        }
-      }
-    ]
-  },
-  {
     path: '/analysis',
     name: 'Analysis',
     component: () => import('@/layouts/BasicLayout.vue'),
@@ -178,7 +155,7 @@ const routes: RouteRecordRaw[] = [
     path: '/vibe',
     name: 'VibeResearch',
     component: () => import('@/layouts/BasicLayout.vue'),
-    redirect: '/vibe/review/overview',
+    redirect: '/vibe/synthesis',
     meta: {
       title: '市场',
       icon: 'DataAnalysis',
@@ -186,6 +163,16 @@ const routes: RouteRecordRaw[] = [
       transition: 'slide-up'
     },
     children: [
+      {
+        path: 'synthesis',
+        name: 'Synthesis',
+        component: () => import('@/views/Vibe/Review/Synthesis.vue'),
+        meta: {
+          title: '综合研判',
+          parentTitle: '市场',
+          requiresAuth: true
+        }
+      },
       {
         path: 'review/overview',
         name: 'ReviewOverview',

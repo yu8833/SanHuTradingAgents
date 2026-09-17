@@ -370,6 +370,63 @@ export interface NewsItem {
 }
 
 // ---------------------------------------------------------------------------
+// 市场综合研判（纯 LLM 综合研判：四页内容 + 买卖清单）
+// ---------------------------------------------------------------------------
+
+export interface SynthesisVerdict {
+  direction: string       // 大盘方向结论
+  confidence: number | null // 置信度 0-100
+  conclusion: string      // 综合研判结论
+  strategy: string        // 当下建议策略
+  risk_tips: string[]     // 风险提示
+}
+
+export interface SynthesisBuyItem {
+  code: string
+  name?: string
+  trigger_price?: number | null
+  last_price?: number | null
+  distance_pct?: number | null
+  triggered?: boolean
+  signal_label?: string
+  advice?: string
+}
+
+export interface SynthesisSellItem {
+  code: string
+  name?: string
+  quantity?: number
+  last_price?: number | null
+  profit_loss_rate?: number | null
+  stop_loss_price?: number | null
+  take_profit_price?: number | null
+  advice?: string
+  advice_label?: string
+  sell_pct?: number
+  reason?: string | null
+}
+
+export interface SynthesisSources {
+  dashboard?: MarketDashboard | null
+  emotion?: ShortTermEmotion | null
+  concept?: ConceptAnalysis | null
+  rotation?: ConceptRotation | null
+  regime?: any | null
+  radar?: RadarData | null
+}
+
+export interface MarketSynthesis {
+  verdict: SynthesisVerdict | null
+  buys: SynthesisBuyItem[]
+  sells: SynthesisSellItem[]
+  buy_count: number
+  sell_count: number
+  llm_available: boolean
+  as_of: string
+  sources: SynthesisSources | null
+}
+
+// ---------------------------------------------------------------------------
 // 本地存储（研究记录）
 // ---------------------------------------------------------------------------
 
@@ -424,6 +481,12 @@ export const vibeApi = {
   // 资讯模块
   async getRadar() {
     return cachedGet<RadarData>('/api/vibe/radar', undefined, 3600000)
+  },
+
+  // 市场综合研判（纯 LLM；不缓存，LLM 结果需每次刷新重算）
+  async getSynthesis() {
+    const res = await ApiClient.get<any>('/api/vibe/market/synthesis', undefined, { timeout: 180000 })
+    return res.data as MarketSynthesis
   },
 
   async refreshRadar() {

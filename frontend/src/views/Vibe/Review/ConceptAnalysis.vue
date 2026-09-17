@@ -50,6 +50,10 @@
       <div class="block-head">
         <span class="block-title"><el-icon><TrendCharts /></el-icon> 概念热度</span>
       </div>
+      <div class="concept-chart">
+        <VChart v-if="chartData" :option="conceptChartOption" autoresize class="concept-chart-inner" />
+        <el-empty v-else :image-size="48" description="暂无涨跌数据" />
+      </div>
       <div class="rank-grid">
         <el-card shadow="never" class="rank-card">
           <div class="rank-title up">🔥 领涨概念</div>
@@ -203,9 +207,19 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { Refresh, DataAnalysis, TrendCharts, Odometer, Grid, Histogram } from '@element-plus/icons-vue'
+import { use as echartsUse } from 'echarts/core'
+import { BarChart } from 'echarts/charts'
+import { GridComponent, TooltipComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+import VChart from 'vue-echarts'
+import type { EChartsOption } from 'echarts'
 import { vibeApi } from '@/api/vibe'
 import type { ConceptAnalysis, ConceptRotation } from '@/api/vibe'
 import { fmtPct, fmtSigned, clsByVal } from '@/utils/format'
+
+echartsUse([CanvasRenderer, BarChart, GridComponent, TooltipComponent])
+
+const MONO = "'SFMono-Regular', ui-monospace, Menlo, monospace"
 
 const today = new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' })
 const loading = ref(false)
@@ -228,6 +242,60 @@ const filteredConcepts = computed(() => {
   return (data.value?.concepts || []).filter(
     (c) => c.name.toLowerCase().includes(kw) || (c.lead_name || '').toLowerCase().includes(kw)
   )
+})
+
+// ── 领涨 / 领跌 双向条形图 ──
+const chartData = computed(() => {
+  const c = data.value
+  return !!(c && ((c.gainers || []).length || (c.losers || []).length))
+})
+
+const conceptChartOption = computed<EChartsOption>(() => {
+  const g = (data.value?.gainers || []).slice(0, 5)
+  const l = (data.value?.losers || []).slice(0, 5)
+  const cats = [...g.map(x => x.name), ...l.map(x => x.name)]
+  const vals = [...g.map(x => Number(x.pct_chg)), ...l.map(x => -Math.abs(Number(x.pct_chg)))]
+  return {
+    animationDuration: 600,
+    grid: { left: 8, right: 48, top: 10, bottom: 6, containLabel: true },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow', shadowStyle: { color: 'rgba(43, 108, 176, .06)' } },
+      backgroundColor: '#fff',
+      borderColor: 'rgba(45, 55, 72, .08)',
+      borderWidth: 1,
+      textStyle: { color: '#2d3748', fontSize: 12 },
+      extraCssText: 'box-shadow: 0 6px 20px rgba(45,55,72,.12); border-radius: 8px;',
+      formatter: (ps: any) => {
+        const p = Array.isArray(ps) ? ps[0] : ps
+        const v = Number(p?.value ?? 0)
+        const cls = v >= 0 ? '#f56c6c' : '#67c23a'
+        return `${p?.name}<br/><b style="color:${cls};font-family:${MONO}">${v >= 0 ? '+' : ''}${v.toFixed(2)}%</b>`
+      },
+    },
+    xAxis: {
+      type: 'value',
+      axisLabel: { color: '#a0aec0', fontSize: 10, formatter: '{value}%' },
+      splitLine: { lineStyle: { color: '#f0f4f8' } },
+      axisLine: { show: false },
+      axisTick: { show: false },
+    },
+    yAxis: {
+      type: 'category',
+      data: cats,
+      axisLine: { show: false },
+      axisTick: { show: false },
+      axisLabel: { color: '#4a5568', fontSize: 12 },
+    },
+    series: [{
+      type: 'bar',
+      barWidth: 9,
+      data: vals.map((v, i) => ({
+        value: v,
+        itemStyle: { color: i < g.length ? '#f56c6c' : '#67c23a', borderRadius: 3 },
+      })),
+    }],
+  }
 })
 
 async function loadAnalysis() {
@@ -310,7 +378,6 @@ onMounted(() => {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 12px;
-
     .kpi-cell {
       padding: 12px 16px;
       border-radius: 8px;
@@ -338,6 +405,15 @@ onMounted(() => {
         font-size: 12px;
         color: var(--el-text-color-secondary);
       }
+    }
+  }
+
+  .concept-chart {
+    margin-bottom: 14px;
+
+    .concept-chart-inner {
+      width: 100%;
+      height: 300px;
     }
   }
 
@@ -412,6 +488,9 @@ onMounted(() => {
 @media (max-width: 1100px) {
   .rank-grid {
     grid-template-columns: 1fr;
+  }
+  .concept-chart-inner {
+    height: 260px;
   }
 }
 </style>

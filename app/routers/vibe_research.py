@@ -178,6 +178,22 @@ async def market_emotion(current_user: dict = Depends(get_optional_current_user)
         return ok({})
 
 
+@router.get("/market/synthesis")
+async def market_synthesis(current_user: dict = Depends(get_optional_current_user)):
+    """市场综合研判：聚合大盘看板/短线情绪/概念分析/资讯 + 市场环境 → 纯 LLM 研判结论 + 个股买卖清单。
+
+    LLM 不可用/失败时降级为基于市场环境的规则结论（llm_available=False），页面不空白。
+    买卖清单来自 intraday_guide（建议买入触达 + 持仓卖出建议），确定性。
+    """
+    from app.services.market_synthesis import build_market_synthesis
+    try:
+        data = await build_market_synthesis(_get_user_id(current_user))
+        return ok(data)
+    except Exception as e:
+        logger.error(f"市场综合研判异常: {e}", exc_info=True)
+        return ok({})
+
+
 @router.get("/market/turnover-top")
 async def market_turnover_top(current_user: dict = Depends(get_optional_current_user)):
     """全市场成交额Top20，分级TTL缓存"""

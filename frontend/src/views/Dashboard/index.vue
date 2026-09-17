@@ -13,36 +13,6 @@
       </div>
     </div>
 
-    <!-- 今日作战入口条：大盘方向/置信/建议 + 买卖操作计数 + 进入作战室（与作战室同源） -->
-    <div class="today-flow-bar" @click="goWarRoom">
-      <div class="flow-left">
-        <el-icon class="flow-flag"><Aim /></el-icon>
-        <span class="flow-title">今日作战</span>
-      </div>
-      <div class="flow-right">
-        <span class="flow-op is-buy">买 {{ opsBuy }}</span>
-        <span class="flow-op is-sell">卖 {{ opsSell }}</span>
-        <el-button type="primary" size="small" @click.stop="goWarRoom">
-          进入作战室 <el-icon><ArrowRight /></el-icon>
-        </el-button>
-      </div>
-      <!-- 今日作战情况：大盘方向 + 置信 + 行动建议 -->
-      <div class="flow-macro">
-        <template v-if="macroStatus !== 'none'">
-          <em class="fs-chip" :class="macroCls">{{ macroStatus }}</em>
-          <span class="fs-conf">置信 {{ macroConf == null ? '—' : macroConf + '%' }}</span>
-          <span class="fs-advice">{{ macroAdvice }}</span>
-          <span class="fs-meta">· 买{{ opsBuy }} 卖{{ opsSell }} 见作战室</span>
-        </template>
-        <template v-else-if="macroAuto">
-          <span class="fs-advice">大盘快照正在自动生成…</span>
-        </template>
-        <template v-else>
-          <span class="fs-advice">大盘快照未生成，进入作战室查看 / 生成</span>
-        </template>
-      </div>
-    </div>
-
     <!-- 监控中心（简要触发记录，查看详情跳转监控中心） -->
     <MonitorSummary style="margin-bottom: 24px;" />
 
@@ -224,7 +194,6 @@ defineOptions({ name: 'DashboardHome' })
 import { ref, reactive, computed, onMounted, onBeforeUnmount, onActivated } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  Aim,
   ArrowRight,
   CircleCheckFilled,
   DArrowRight,
@@ -242,7 +211,6 @@ import DataHealthCard from '@/components/Dashboard/DataHealthCard.vue'
 import MonitorSummary from '@/components/Dashboard/MonitorSummary.vue'
 import { favoritesApi } from '@/api/favorites'
 import { paperApi, type PaperAccountSummary } from '@/api/paper'
-import { warRoomApi } from '@/api/warRoom'
 import * as syncApi from '@/api/sync'
 import * as schedulerApi from '@/api/scheduler'
 import { screeningApi } from '@/api/screening'
@@ -257,53 +225,6 @@ const favoriteStocks = ref<any[]>([])
 
 // P5-12：SSE 实时行情信号是否进入降级态（断连后依赖定时刷新兜底）
 const quotesStale = ref(false)
-
-// 今日作战情况：大盘方向/置信/建议 + 买入/卖出操作计数（与作战室同源）
-const macroSnap = ref<any>(null)
-const macroAuto = ref(false)
-const guide = ref<any>(null)
-const loadWarRoomSummary = async () => {
-  const [m, g] = await Promise.allSettled([warRoomApi.getMacroOverview(), warRoomApi.getIntradayGuide()])
-  const mr = m.status === 'fulfilled' ? m.value : null
-  macroSnap.value = mr?.snapshot ?? null
-  macroAuto.value = !!mr?.auto_generating
-  guide.value = g.status === 'fulfilled' ? (g.value || null) : null
-}
-const macroStatus = computed(() => {
-  const b = macroSnap.value?.basis
-  if (b?.status) return String(b.status)
-  const d = macroSnap.value?.rule?.direction
-  if (!d) return 'none'
-  if (String(d).includes('多')) return '偏多'
-  if (String(d).includes('空')) return '偏空'
-  return '中性(观望)'
-})
-const macroCls = computed(() => {
-  const s = macroStatus.value
-  if (s.includes('空')) return 'bear'
-  if (s.includes('多')) return 'bull'
-  if (s === '中性(观望)') return 'neutral'
-  return 'nodata'
-})
-const macroConf = computed(() => macroSnap.value?.basis?.confidence ?? macroSnap.value?.rule?.confidence ?? null)
-const macroAdvice = computed(() => {
-  const b = macroSnap.value?.basis
-  if (!b?.status || b.status === '数据不足') return '数据不足：今日方向不明，谨慎为主'
-  if (b.low_confidence || b.status === '中性(观望)') return `置信度 ${b.confidence ?? 0}% 不足 → 观望为主，仓位减半`
-  if (b.status.includes('多')) return '大盘偏多 → 可进取：按计划执行买入，严守止损纪律'
-  if (b.status.includes('空')) return '大盘偏空 → 减仓避险为主：暂缓新开仓，执行卖出计划'
-  return b.direction || '观望'
-})
-// 可执行买入 = 已确认且触达；卖出 = 有明确卖出信号（排除持有/等待行情）
-const opsBuy = computed(() => (guide.value?.buys || []).filter((b: any) => b.triggered && b.confirmed !== false).length)
-const opsSell = computed(() => (guide.value?.sells || []).filter((s: any) => {
-  const a = String(s.advice_label || s.advice || '')
-  return !/持有|等待实时价/.test(a)
-}).length)
-
-const goWarRoom = () => {
-  router.push('/war-room')
-}
 
 // 模拟交易账户数据
 const paperAccount = ref<PaperAccountSummary | null>(null)
@@ -774,7 +695,6 @@ let favSseUnsubscribe: (() => void) | null = null
 
 // 生命周期
 onMounted(async () => {
-  await loadWarRoomSummary()
   await loadFavoriteStocks()
   await loadPaperAccount()
   // 收到行情更新信号立即刷新自选股（延迟约 0-2 秒）。
@@ -807,7 +727,6 @@ onMounted(async () => {
 let dashInited = false
 onActivated(() => {
   if (dashInited) {
-    loadWarRoomSummary()
     loadFavoriteStocks()
     loadPaperAccount()
   }
@@ -818,59 +737,6 @@ onActivated(() => {
 <style lang="scss" scoped>
 .dashboard {
   // 页面容器交给全局 .app-page；顶部横幅由全局 .page-hero 提供
-
-  // 今日流程引导条（P4）
-  .today-flow-bar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 12px;
-    padding: 12px 16px;
-    margin-bottom: 24px;
-    background: var(--el-bg-color);
-    border: 1px solid var(--el-border-color-light);
-    border-radius: 10px;
-    cursor: pointer;
-    transition: box-shadow .2s;
-    &:hover { box-shadow: var(--el-box-shadow-light); }
-
-    .flow-left { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-    .flow-flag { color: var(--el-color-primary); }
-    .flow-title { font-weight: 600; margin-right: 6px; }
-    .flow-right { display: flex; align-items: center; gap: 12px; }
-
-    // 今日操作计数（买/卖）
-    .flow-op {
-      display: inline-flex; align-items: center; gap: 4px;
-      font-size: 13px; font-weight: 700;
-      padding: 2px 10px; border-radius: 12px;
-      &.is-buy { color: var(--el-color-danger); background: var(--el-color-danger-light-9); }
-      &.is-sell { color: var(--el-color-success); background: var(--el-color-success-light-9); }
-    }
-
-    // 今日作战情况第二行：方向 + 置信 + 建议
-    .flow-macro {
-      display: flex; align-items: center; gap: 10px;
-      flex-wrap: wrap;
-      width: 100%;
-      margin-top: 4px;
-      padding-top: 8px;
-      border-top: 1px dashed var(--el-border-color-lighter);
-      font-size: 13px;
-      .fs-chip {
-        font-style: normal; font-weight: 700;
-        padding: 2px 10px; border-radius: 12px;
-        &.bull { color: #fff; background: var(--el-color-danger); }
-        &.bear { color: #fff; background: var(--el-color-success); }
-        &.neutral { color: var(--el-color-warning-dark-2); background: var(--el-color-warning-light-9); }
-        &.nodata { color: var(--el-text-color-secondary); background: var(--el-fill-color-light); }
-      }
-      .fs-conf { font-size: 12px; color: var(--el-text-color-secondary); }
-      .fs-advice { color: var(--el-text-color-primary); font-weight: 500; }
-      .fs-meta { font-size: 12px; color: var(--el-text-color-placeholder); }
-    }
-  }
 
   // 顶部卡片统一样式
   .monitor-top {

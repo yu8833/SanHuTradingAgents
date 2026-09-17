@@ -103,11 +103,11 @@ const { width } = useWindowSize()
 // 缓存高频返回的列表/工作台页面，保留滚动位置与查询状态。
 const keepAliveComponents = computed(() => [
   'DashboardHome',       // 仪表盘
-  'WarRoomHome',         // 作战室
   'StockScreeningCommon',// 常用策略
   'TaskCenterHome',      // 任务中心
   'FavoritesHome',       // 自选股
   'ReportsHome',         // 历史报告
+  'Synthesis',           // 综合研判
   'ReviewOverview'       // 大盘看板
 ])
 
