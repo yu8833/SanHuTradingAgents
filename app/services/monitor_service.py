@@ -460,6 +460,57 @@ class MonitorService:
         rule.pop("_id", None)
         return rule
 
+    # ── 三买三卖监控（type=tbs）启停/状态 ─────────────
+    def _tbs_monitor_rule_id(self, user_id: str) -> str:
+        """当前用户三买三卖监控规则 id（幂等，按用户作用域唯一）。"""
+        suffix = hashlib.sha1(user_id.encode()).hexdigest()[:8]
+        return f"tbs_mon_positions_{suffix}"
+
+    async def get_tbs_monitoring(self, user_id: str) -> dict:
+        """返回三买三卖监控开关状态（未配置规则视为关闭）。"""
+        db = await self._get_db()
+        rule = await db[self.rules_coll].find_one({"id": self._tbs_monitor_rule_id(user_id)})
+        return {"enabled": bool(rule and rule.get("enabled"))}
+
+    async def set_tbs_monitoring(self, user_id: str, enabled: bool) -> dict:
+        """开启/关闭三买三卖监控。
+
+        开启时创建（幂等）一条 type=tbs 规则：scope=positions 盯全部持仓，S1/S2/S3 卖出信号
+        命中即生成待确认卖出指令（配 SSE 弹窗）；关闭时仅置 enabled=False，保留规则便于再次开启。
+        """
+        db = await self._get_db()
+        rule_id = self._tbs_monitor_rule_id(user_id)
+        existing = await db[self.rules_coll].find_one({"id": rule_id})
+        if existing:
+            if existing.get("enabled") != enabled:
+                await db[self.rules_coll].update_one(
+                    {"id": rule_id}, {"$set": {"enabled": enabled}})
+                existing["enabled"] = enabled
+            existing.pop("_id", None)
+            return existing
+
+        rule = {
+            "id": rule_id,
+            "name": "三买三卖·持仓卖出监控",
+            "enabled": enabled,
+            "type": "tbs",
+            "scope": "positions",
+            "symbols": [],
+            "user_id": user_id,
+            "conditions": [],
+            "logic": "and",
+            "cooldown_seconds": 3600,
+            "severity": "critical",
+            "message": "三买三卖加速卖点/跌破卖点/清仓卖出信号：持仓触发卖出点",
+            "tbs_dir": "sell",
+            "tbs_signals": ["S1", "S2", "S3"],
+            "builtin": False,
+            "created_at": now_tz().isoformat(),
+        }
+        await db[self.rules_coll].insert_one(rule)
+        rule.pop("_id", None)
+        return rule
+
     # ── 告警存储 ──────────────────────────────────────
     async def list_alerts(self, days: int = 7, limit: int = 500,
                           source: str | None = None) -> tuple[list[dict], int]:
@@ -928,10 +979,10 @@ class MonitorService:
                     if trading:
                         sig_res = await asyncio.to_thread(
                             screener.run_strategy_signals_intraday,
-                            db_sync, strategy_id, sell_pool)
+                            db_sync, strategy_id, sell_pool, True)
                     else:
                         sig_res = await asyncio.to_thread(
-                            screener.run_strategy_signals, db_sync, strategy_id, sell_pool, None)
+                            screener.run_strategy_signals, db_sync, strategy_id, sell_pool, None, True)
                 except Exception as e:
                     logger.error(f"❌ 策略 {strategy_id} 卖出监控扫描失败: {e}", exc_info=True)
                     sig_res = {"entry": [], "exit": []}

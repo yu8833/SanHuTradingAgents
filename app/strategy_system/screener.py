@@ -1016,17 +1016,31 @@ def _build_signal_context(
     return out
 
 
+# 均线下穿类离场信号的"持续离场"映射：对监控持仓，收盘持续位于均线下方的持仓
+# 同样视为离场（修复"跌破首日被 T+1 跳过/漏扫后就永不触发"的缺口 —— 如买入当日
+# 即破位、之后一路阴跌的持仓，signal_maX_breakdown 只在那一天为 True，后续不再提醒）
+_BREAKDOWN_PERSISTENT: dict[str, str] = {
+    "signal_ma5_breakdown": "ma5",
+    "signal_ma10_breakdown": "ma10",
+    "signal_ma20_breakdown": "ma20",
+}
+
+
 def run_strategy_signals(
     db,
     strategy_id: str,
     pool: list[str] | None = None,
     as_of: str | None = None,
+    persistent_exit: bool = False,
 ) -> dict:
     """对指定股票池运行策略，返回筛选命中与离场信号命中的代码列表。
 
     供「常用策略监控」使用：
       - entry: 策略筛选命中（买入信号）的股票代码
       - exit:  策略离场信号（exit_signals 任一布尔列触发）的股票代码
+
+    persistent_exit=True（卖出监控专用）：均线下穿类离场信号额外把"收盘持续位于
+    均线下方"视为离场，避免错过跌破首日（T+1 跳过/漏扫）后就再也没有提醒。
 
     复用面板/指标缓存，小池子（自选/持仓）开销可控。
     """
@@ -1046,14 +1060,18 @@ def run_strategy_signals(
     mask = run_strategy_filter(strategy_id, target, {}).fillna(False)
     entry_codes = [str(s) for s in target.loc[mask, "symbol"]]
 
-    # 卖出：任一 exit_signal 布尔列触发
+    # 卖出：任一 exit_signal 布尔列触发（persistent_exit 时含持续离场）
     exit_codes: list[str] = []
     exit_sigs = strategy.get("exit_signals", []) or []
     if exit_sigs:
         exit_mask = pd.Series(False, index=target.index)
         for sig in exit_sigs:
-            if sig in target.columns:
-                exit_mask |= target[sig].fillna(False).astype(bool)
+            if sig not in target.columns:
+                continue
+            exit_mask |= target[sig].fillna(False).astype(bool)
+            ma_col = _BREAKDOWN_PERSISTENT.get(sig)
+            if persistent_exit and ma_col and ma_col in target.columns:
+                exit_mask |= (target["close"] < target[ma_col]).fillna(False)
         exit_codes = [str(s) for s in target.loc[exit_mask, "symbol"]]
 
     return {
@@ -1147,6 +1165,7 @@ def run_strategy_signals_intraday(
     db,
     strategy_id: str,
     pool: list[str] | None,
+    persistent_exit: bool = False,
 ) -> dict:
     """盘中实时扫描自选+持仓的增强面板（昨收日K + 今日实时bar）。
 
@@ -1156,6 +1175,9 @@ def run_strategy_signals_intraday(
 
     注意：今日量能仅为盘中已成交量，vol_ratio 类过滤在盘中会失真；策略过滤是否
     依赖量能由具体策略决定（MACD金叉不依赖量能，可安全盘中实时触发）。
+
+    persistent_exit=True（卖出监控专用）：均线下穿类离场信号额外把"收盘持续位于
+    均线下方"视为离场，与 run_strategy_signals 口径一致。
     """
     strategy = get_strategy(strategy_id)
     if strategy is None:
@@ -1167,7 +1189,7 @@ def run_strategy_signals_intraday(
     as_of_date = _resolve_as_of(db, None)
     today = date.today().strftime("%Y-%m-%d")
     if as_of_date == today:
-        return run_strategy_signals(db, strategy_id, pool, as_of=today)
+        return run_strategy_signals(db, strategy_id, pool, as_of=today, persistent_exit=persistent_exit)
 
     df = _load_raw_panel(db, pool, as_of_date)
     if df.empty:
@@ -1191,14 +1213,18 @@ def run_strategy_signals_intraday(
     mask = run_strategy_filter(strategy_id, target, {}).fillna(False)
     entry_codes = [str(s) for s in target.loc[mask, "symbol"]]
 
-    # 卖出：任一 exit_signal 布尔列触发
+    # 卖出：任一 exit_signal 布尔列触发（persistent_exit 时含持续离场）
     exit_codes: list[str] = []
     exit_sigs = strategy.get("exit_signals", []) or []
     if exit_sigs:
         exit_mask = pd.Series(False, index=target.index)
         for sig in exit_sigs:
-            if sig in target.columns:
-                exit_mask |= target[sig].fillna(False).astype(bool)
+            if sig not in target.columns:
+                continue
+            exit_mask |= target[sig].fillna(False).astype(bool)
+            ma_col = _BREAKDOWN_PERSISTENT.get(sig)
+            if persistent_exit and ma_col and ma_col in target.columns:
+                exit_mask |= (target["close"] < target[ma_col]).fillna(False)
         exit_codes = [str(s) for s in target.loc[exit_mask, "symbol"]]
 
     return {

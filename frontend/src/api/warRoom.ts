@@ -327,6 +327,14 @@ export const warRoomApi = {
     return res.data
   },
 
+  // 确认并自动执行卖出计划：置已确认 → 按当前持仓市价卖出即时成交 → 计划标记已执行
+  async executeSellPlan(planId: string) {
+    const res = await ApiClient.post<{ plan_id: string; code: string; order: any }>(
+      `/api/plans/${planId}/execute-sell`
+    )
+    return res.data
+  },
+
   // 5.3 今日计划快照（盘前 8:15 预生成落库，打开即读、秒回）
   async getTodayPlan() {
     const res = await ApiClient.get<{

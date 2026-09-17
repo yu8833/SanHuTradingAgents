@@ -38,6 +38,19 @@ EVENT_CAP = 10       # 事件计分上限条数。高于前端"重要事件"默�
                      # 已按 |impact_score| 过滤且每条权重 ±2，条数上限只作兜底防极端堆积。
 INDEX_WEIGHT = 1
 
+# B 档：事件"概率×幅度"分级用的弱证据词（与 news_classifier._HEDGE_WORDS 语义对齐）。
+# 命中任一 → 事件为"预期/传闻"类（未落地），影响概率打折；
+# 未命中 → 视为"已落地事实/正式表态"，影响概率较高。
+_EVENT_HEDGE_WORDS = ("否认", "辟谣", "澄清", "传闻", "考虑", "据悉", "拟", "据称", "或将", "或考虑")
+
+# 事件类型 → 影响概率（确定性公式，不引入 LLM 主观）：
+#   fact(已落地/正式) 0.8 — 正式数据/政策/声明，方向大概率兑现
+#   expectation(预期/传闻) 0.5 — 尚未落地，兑现概率对半
+# 叠加 |impact| 调节：影响度>80 权重上调 0.05，<60 下调 0.10，边界截断在 [0.3, 0.9]。
+_EVENT_PROB_FACT = 0.80
+_EVENT_PROB_EXPECT = 0.50
+_EVENT_PROB_MIN, _EVENT_PROB_MAX = 0.30, 0.90
+
 # 事件极性关键词（利好/利空）；命中多者取数量差符号
 _BULL_WORDS = (
     "上涨", "利好", "增长", "超预期", "降准", "降息", "宽松", "支持",
@@ -120,6 +133,20 @@ def _event_topic(title: str) -> str | None:
     return None
 
 
+def _event_probability(polarity: int, impact: float, title: str) -> tuple[str, float]:
+    """事件类型判定 + 影响概率（确定性公式）。
+
+    - 命中弱证据词（拟/考虑/传闻/据悉/或将…）→ 'expectation' 预期类，方向存疑、概率打折；
+    - 否则 → 'fact' 已落地/正式表态类，方向可信度较高。
+    - 概率 = 基值 + |影响度| 微调，边界截断在 [0.3, 0.9]。
+    """
+    hedged = any(w in title for w in _EVENT_HEDGE_WORDS)
+    base = _EVENT_PROB_EXPECT if hedged else _EVENT_PROB_FACT
+    adj = 0.05 if impact >= 80 else (-0.10 if impact < 60 else 0.0)
+    prob = max(_EVENT_PROB_MIN, min(_EVENT_PROB_MAX, base + adj))
+    return ("expectation" if hedged else "fact"), round(prob, 2)
+
+
 def _score_events(news: list[dict]) -> tuple[list[dict], int]:
     """高重要性政策/数据事件：利多 +2（影响度≥80 为 +3）/ 利空对称，最多计 EVENT_CAP 条。
 
@@ -178,6 +205,9 @@ def _score_events(news: list[dict]) -> tuple[list[dict], int]:
         score = c["polarity"] * c["contrib"]
         total += score
         note = f"（同主题合并计1条）" if c["topic"] else ""
+        # B 档：事件"概率×幅度"分级（事实/预期 + 影响概率 + 解读/板块透传）
+        event_type, prob = _event_probability(c["polarity"], c["impact"], c["title"] or "")
+        item = c["item"]
         signals.append({
             "name": "高重要性政策/数据事件",
             "value": c["title"][:40],
@@ -188,6 +218,10 @@ def _score_events(news: list[dict]) -> tuple[list[dict], int]:
             "title": c["title"],
             "url": c["item"].get("url") or "",
             "impact_score": c["v5"],
+            "event_type": event_type,          # fact=已落地 / expectation=预期/传闻
+            "probability": prob,               # 影响兑现概率（确定性公式）
+            "analysis": item.get("analysis") or "",
+            "related_sectors": item.get("related_sectors") or [],
         })
     return signals, total
 

@@ -444,6 +444,17 @@ async def lifespan(app: FastAPI):
                 )
                 logger.info(f"⏱ 监控中心规则评估已启动: 每 {settings.MONITOR_INTERVAL_SECONDS}s")
 
+        # 止损自动执行（A：跌破持仓止损位自动市价卖出；仅交易时段在函数内部生效）
+        if settings.STOP_LOSS_AUTO_EXECUTE_ENABLED:
+            from app.services.plan_service import scan_stop_loss_auto_execute
+            scheduler.add_job(
+                scan_stop_loss_auto_execute,
+                IntervalTrigger(seconds=settings.MONITOR_INTERVAL_SECONDS, timezone=get_tz()),
+                id="stop_loss_auto_execute",
+                name="止损自动执行（跌破止损位自动卖出）",
+            )
+            logger.info(f"⏱ 止损自动执行已启动: 每 {settings.MONITOR_INTERVAL_SECONDS}s（仅交易时段生效）")
+
         # Tushare统一数据同步任务配置
         logger.info("🔄 配置Tushare统一数据同步任务...")
 

@@ -70,33 +70,46 @@
       </div>
     </div>
 
-    <!-- 常用策略监控概览 -->
+    <!-- 策略监控概览：三买三卖开关常驻 + 常用策略仅展示已开启 -->
     <div class="strategy-overview">
       <div class="overview-head">
         <div class="overview-title">
           <el-icon><MagicStick /></el-icon>
-          <span>常用策略监控</span>
-          <span class="overview-sub">在「常用策略」页开启监控开关，命中即自动入自选并生成待确认指令</span>
+          <span>策略监控</span>
+          <span class="overview-sub">可打开或关闭三买三卖监控开关；在「常用策略」页开启监控开关，命中即自动入自选并生成待确认指令</span>
         </div>
         <el-button size="small" @click="goCommon" text>
           <el-icon><Right /></el-icon> 去配置
         </el-button>
       </div>
-      <el-empty v-if="!loading && strategyMonitors.length === 0" description="尚未开启任何策略监控" :image-size="70">
+
+      <!-- 三买三卖监控开关：常驻显示（无论开或关） -->
+      <div class="tbs-monitor-row">
+        <div class="tbs-monitor-ico"><el-icon><Sell /></el-icon></div>
+        <div class="tbs-monitor-main">
+          <div class="tbs-monitor-name">三买三卖监控</div>
+          <div class="tbs-monitor-desc">{{ tbsMonitorOn ? '已开启：盯全部持仓 S1/S2/S3 卖出信号，命中生成待确认卖出指令' : '已关闭：需手动去「监控规则」开启后生效' }}</div>
+        </div>
+        <el-switch :model-value="tbsMonitorOn" size="small" :loading="tbsMonitorToggling"
+          @change="(v) => toggleTbsMonitor(v)" />
+      </div>
+
+      <!-- 常用策略：仅显示已开启监控的策略；关闭的不展示，去「常用策略」页开启 -->
+      <el-empty v-if="!loading && activeStrategyMonitors.length === 0" description="尚未开启任何常用策略监控" :image-size="70">
         <p class="empty-hint">前往「常用策略」页，在策略卡片上打开「监控」开关，即可自动跟踪命中股票。</p>
       </el-empty>
       <div v-else class="strategy-chip-grid">
         <div
-          v-for="sm in strategyMonitors"
+          v-for="sm in activeStrategyMonitors"
           :key="sm.strategy_id"
-          :class="['strategy-chip', { on: sm.enabled }]"
+          class="strategy-chip on"
         >
-          <div class="chip-ico"><el-icon><component :is="chipIcon(sm.strategy_id)" /></el-icon></div>
+          <div class="chip-ico on"><el-icon><component :is="chipIcon(sm.strategy_id)" /></el-icon></div>
           <div class="chip-main">
             <div class="chip-name">{{ sm.name }}</div>
-            <div class="chip-desc">{{ sm.enabled ? (strategyHitCount[sm.strategy_id] ?? 0) + ' 只命中待跟踪' : '未开启' }}</div>
+            <div class="chip-desc">{{ (strategyHitCount[sm.strategy_id] ?? 0) + ' 只命中待跟踪' }}</div>
           </div>
-          <el-switch :model-value="sm.enabled" size="small" :loading="strategyToggling === sm.strategy_id"
+          <el-switch :model-value="true" size="small" :loading="strategyToggling === sm.strategy_id"
             @change="(v) => toggleStrategyMonitor(sm, v)" />
         </div>
       </div>
@@ -582,10 +595,16 @@ const execConfirmVisible = ref(false)
 const execOrder = ref<TbsOrder | null>(null)
 const execQty = ref(100)
 
-// ── 常用策略监控概览 ────────────────────────────────────
+// ── 策略监控概览（三买三卖 + 常用策略） ──────────────
+const tbsMonitorOn = ref(false)
+const tbsMonitorToggling = ref(false)
 const strategyMonitors = ref<StrategyMonitorStatus[]>([])
 const strategyHitCount = ref<Record<string, number>>({})
 const strategyToggling = ref<string | null>(null)
+// 常用策略：仅展示已开启监控的（关闭的不显示，去「常用策略」页开启）
+const activeStrategyMonitors = computed(() =>
+  strategyMonitors.value.filter((sm: any) => sm.enabled)
+)
 const strategyIcons: Record<string, any> = {
   ma_golden_cross: TrendCharts, macd_golden: TrendCharts, n_day_high_breakout: Aim,
   n_day_low_reversal: FullScreen, oversold_bounce: Refresh, trend_breakout: TrendCharts,
@@ -599,11 +618,15 @@ const goCommon = () => { window.location.href = '/screening/common' }
 
 const loadStrategyMonitors = async () => {
   try {
-    // 并行：监控状态 + 各策略命中数
-    const [statusRes, listRes] = await Promise.allSettled([
+    // 并行：三买三卖监控状态 + 常用策略监控状态 + 各策略命中数
+    const [tbsRes, statusRes, listRes] = await Promise.allSettled([
+      monitorApi.tbsMonitorStatus(),
       monitorApi.strategyMonitorStatus(),
       strategyApi.runAll({ as_of: null, limit: 30, refresh: false }),
     ])
+    if (tbsRes.status === 'fulfilled') {
+      tbsMonitorOn.value = !!(tbsRes.value as any)?.data?.enabled
+    }
     if (statusRes.status === 'fulfilled') {
       const items = (statusRes.value as any)?.data?.items ?? []
       strategyMonitors.value = items
@@ -616,6 +639,19 @@ const loadStrategyMonitors = async () => {
     }
   } catch (e) {
     console.warn('加载策略监控概览失败', e)
+  }
+}
+
+const toggleTbsMonitor = async (on: boolean) => {
+  tbsMonitorToggling.value = true
+  try {
+    await monitorApi.toggleTbsMonitor(on)
+    tbsMonitorOn.value = on
+    ElMessage.success(on ? '三买三卖监控已开启：盯全部持仓卖出信号' : '三买三卖监控已关闭')
+  } catch (e: any) {
+    ElMessage.error('操作失败：' + (e?.message || '未知错误'))
+  } finally {
+    tbsMonitorToggling.value = false
   }
 }
 
@@ -1083,6 +1119,29 @@ onBeforeUnmount(() => { stopPolling() })
     .strategy-chip-grid {
       display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px;
     }
+
+    // 三买三卖监控：常驻开关行（无论开或关都显示）
+    .tbs-monitor-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 14px;
+      margin-bottom: 10px;
+      border: 1px solid var(--el-color-primary-light-5);
+      border-radius: 10px;
+      background: var(--el-color-primary-light-9);
+
+      .tbs-monitor-ico {
+        width: 34px; height: 34px; border-radius: 8px;
+        display: flex; align-items: center; justify-content: center;
+        color: #fff; font-size: 17px; background: var(--el-color-primary); flex-shrink: 0;
+      }
+      .tbs-monitor-main { flex: 1; min-width: 0;
+        .tbs-monitor-name { font-size: 13px; font-weight: 700; color: var(--el-text-color-primary); }
+        .tbs-monitor-desc { font-size: 11px; color: var(--el-text-color-secondary); margin-top: 2px; }
+      }
+    }
+
     .strategy-chip {
       display: flex; align-items: center; gap: 10px; padding: 12px;
       border: 1px solid var(--el-border-color-lighter); border-radius: 10px;

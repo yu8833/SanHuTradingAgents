@@ -1075,12 +1075,20 @@ let realtimeTimer: number | undefined
           display: flex;
           align-items: center;
           gap: 6px;
+          padding: 3px 8px;
+          border-radius: 16px;
+          transition: background .2s, box-shadow .2s;
+          // 监控开启：高亮，一眼找到已开启监控的策略
+          &:has(.el-switch.is-checked) {
+            background: color-mix(in srgb, var(--sc) 14%, transparent);
+            box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sc) 45%, transparent);
+          }
 
           .monitor-label {
             font-size: 12px;
             font-weight: 600;
             color: var(--el-text-color-secondary);
-            &.on { color: var(--sc); }
+            &.on { color: var(--sc); font-weight: 700; }
           }
         }
 

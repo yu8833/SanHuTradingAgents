@@ -162,4 +162,12 @@ export const monitorApi = {
   async toggleStrategyMonitor(strategyId: string, enabled: boolean, name?: string) {
     return ApiClient.post<{ rule: MonitorRule }>(`/api/monitor/strategies/${strategyId}/monitor`, { enabled, name })
   },
+
+  // 三买三卖监控（type=tbs，盯全部持仓卖出信号）
+  async tbsMonitorStatus() {
+    return ApiClient.get<{ enabled: boolean }>('/api/monitor/tbs/status')
+  },
+  async toggleTbsMonitor(enabled: boolean) {
+    return ApiClient.post<{ rule: MonitorRule }>('/api/monitor/tbs/monitor', { enabled })
+  },
 }

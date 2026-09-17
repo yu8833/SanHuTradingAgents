@@ -210,6 +210,11 @@ class Settings(BaseSettings):
         default=120,
         description="监控中心规则评估间隔（秒）。行情入库 120s 一更，评估 120s 一次即可（与行情频率对齐，实时性无损失，且每次评估内部会调用三买三卖池扫描，频率过高会造成无效资源消耗并产生大量执行记录）"
     )
+    # 止损自动执行（A：跌破持仓止损位自动市价卖出，硬止损不依赖人工确认）
+    STOP_LOSS_AUTO_EXECUTE_ENABLED: bool = Field(
+        default=True,
+        description="止损自动执行：持仓现价跌破 stop_loss_price 时自动市价卖出全部持仓（仅交易时段生效）",
+    )
 
     # 实时行情入库任务
     QUOTES_INGEST_ENABLED: bool = Field(default=True)

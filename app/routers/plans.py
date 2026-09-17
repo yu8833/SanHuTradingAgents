@@ -129,6 +129,22 @@ async def update_plan_detail(plan_id: str, req: PlanDetailUpdateRequest,
         raise HTTPException(status_code=500, detail=f"修改计划失败: {e}") from None
 
 
+@router.post("/{plan_id}/execute-sell")
+async def execute_sell_plan(plan_id: str, user: dict = Depends(get_current_user)):
+    """确认并自动执行卖出计划：置已确认 → 按当前持仓市价卖出即时成交 → 计划标记已执行。
+
+    解决「确认了卖出计划却没卖出」的断链（纸面盘确认≠成交，此前需手动去交易页）。
+    """
+    try:
+        result = await plan_service.confirm_and_execute_sell(user["id"], plan_id)
+        return ok(result)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
+    except Exception as e:
+        logger.error(f"自动执行卖出计划失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"自动执行卖出计划失败: {e}") from None
+
+
 @router.delete("/{plan_id}")
 async def delete_plan(plan_id: str, user: dict = Depends(get_current_user)):
     """5.4 人工删除：仅允许删除未执行(pending)的计划。"""

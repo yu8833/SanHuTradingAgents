@@ -254,6 +254,63 @@ async def update_plan_detail(user_id: str, plan_id: str, fields: dict) -> dict |
         return None
 
 
+async def confirm_and_execute_sell(user_id: str, plan_id: str) -> dict:
+    """确认卖出计划并立即按现价市价自动卖出（自动执行卖出计划）。
+
+    确认=执行：pending 卖出计划 → 置已确认 → 按当前持仓数量市价卖出即时成交 →
+    显式标记计划 executed 并关联成交 id（计划 date 可能早于今日，不依赖
+    execute_market_order 内部的"当日"自动关联）。解决「确认了卖出计划却没卖出」断链。
+    """
+    db = get_mongo_db()
+    from bson import ObjectId
+    if not ObjectId.is_valid(plan_id):
+        raise ValueError("计划不存在或无权访问")
+    doc = await db[COLLECTION].find_one({"_id": ObjectId(plan_id), "user_id": user_id})
+    if not doc:
+        raise ValueError("计划不存在或无权访问")
+    if doc.get("direction") != DIRECTION_SELL:
+        raise ValueError("仅支持卖出计划自动执行")
+    if doc.get("status") and doc["status"] != STATUS_PENDING:
+        raise ValueError(f"计划已{_STATUS_LABELS.get(doc['status'], doc['status'])}，不可重复卖出")
+    code = str(doc.get("code") or "").strip()
+    if not code:
+        raise ValueError("计划缺少标的代码")
+
+    # 1) 置为已确认（进入自动执行；幂等）
+    if not doc.get("confirmed"):
+        await update_plan_detail(user_id, plan_id, {"confirmed": True})
+
+    # 2) 读取当前持仓数量：市价卖出全量持仓（T+1 冻结/可用数量由执行器内部校验）
+    pos = await db["paper_positions"].find_one({"user_id": user_id, "code": code})
+    qty = int((pos or {}).get("quantity") or 0)
+    if qty <= 0:
+        raise ValueError(f"{doc.get('name') or code} 无持仓，无需卖出")
+
+    # 3) 市价卖出即时成交（与监控中心/交易页共用同一成交入口）
+    from app.services.paper_executor import execute_market_order
+    order = await execute_market_order(
+        user_id=user_id,
+        code=code,
+        side="sell",
+        quantity=qty,
+        stock_name=doc.get("name") or None,
+        thesis=f"卖出计划自动执行：{doc.get('sell_condition') or '触发卖出信号'}",
+    )
+
+    # 4) 显式标记计划已执行并关联成交 id（按 request_id 反查 paper_trades）
+    trade_id = ""
+    req_id = (order or {}).get("request_id")
+    if req_id:
+        tr = await db["paper_trades"].find_one(
+            {"user_id": user_id, "code": code, "request_id": req_id}
+        )
+        if tr:
+            trade_id = str(tr.get("_id") or "")
+    if trade_id:
+        await update_plan_status(user_id, plan_id, STATUS_EXECUTED, executed_trade_id=trade_id)
+    return {"plan_id": plan_id, "code": code, "order": order}
+
+
 async def delete_plan(user_id: str, plan_id: str) -> bool:
     """删除计划（5.4 人工删除，仅允许删除未执行的计划）。"""
     db = get_mongo_db()
@@ -350,3 +407,114 @@ async def get_today_summary(user_id: str) -> dict:
     except Exception as e:
         logger.error(f"当日计划摘要失败: {e}", exc_info=True)
         return {"pending": 0, "executed": 0, "cancelled": 0}
+
+
+# ============================================================
+# 止损自动执行（A：跌破持仓止损位 → 自动市价卖出，硬止损不依赖人工确认）
+# ============================================================
+
+async def auto_execute_stop_loss(user_id: str, position: dict, price: float) -> dict:
+    """持仓现价已跌破 stop_loss_price → 立即市价卖出全部持仓（硬止损自动执行）。
+
+    - 当日已有该标的 pending 卖出计划 → 直接复用执行（confirm_and_execute_sell），
+      避免生成重复计划；
+    - 否则先创建"止损离场"卖出计划（confirmed）再执行，计划与成交自动关联；
+    - T+1：当日买入的 A股 不可当日卖出（执行器内部另有可用数量校验兜底）。
+
+    Returns:
+        {"executed": bool, "reason": str, "plan_id": str | None, "order": dict | None}
+    """
+    code = str(position.get("code") or "").strip()
+    qty = int(position.get("quantity") or 0)
+    stop = float(position.get("stop_loss_price") or 0)
+    if not code or qty <= 0 or stop <= 0:
+        return {"executed": False, "reason": "invalid_position"}
+    if price is None or price <= 0:
+        return {"executed": False, "reason": "no_price"}
+    if price > stop:
+        return {"executed": False, "reason": "not_breached"}
+    # T+1：当日买入不得当日卖出
+    buy_date = str(position.get("buy_date") or "")
+    if buy_date == _today():
+        return {"executed": False, "reason": "t_plus_1"}
+
+    db = get_mongo_db()
+    try:
+        existing = await db[COLLECTION].find_one({
+            "user_id": user_id, "code": code, "direction": DIRECTION_SELL,
+            "status": STATUS_PENDING,
+        })
+        if existing:
+            plan_id = str(existing["_id"])
+        else:
+            plan = await create_plan(user_id, {
+                "code": code,
+                "name": position.get("stock_name") or "",
+                "direction": DIRECTION_SELL,
+                "trigger_price": stop,
+                "sell_condition": (
+                    f"止损自动执行：现价 {price} 已跌破止损位 {stop}，无条件止损离场"
+                ),
+                "confirmed": True,
+                "notes": "系统止损自动执行（跌破止损位，无需人工确认）",
+            })
+            plan_id = plan["id"]
+
+        result = await confirm_and_execute_sell(user_id, plan_id)
+        return {
+            "executed": True,
+            "reason": "stop_loss_breached",
+            "plan_id": plan_id,
+            "order": result.get("order"),
+        }
+    except Exception as e:
+        logger.warning(f"⚠️ 止损自动执行失败 {code}: {e}")
+        return {"executed": False, "reason": f"execute_failed: {e}"}
+
+
+async def scan_stop_loss_auto_execute() -> dict:
+    """全量止损自动执行扫描（定时任务入口）。
+
+    遍历所有带止损位的未平仓持仓，现价 ≤ 止损位且满足 T+1 时自动市价卖出。
+    仅交易时段生效（9:30-11:30 / 13:00-15:00，含收盘后缓冲），盘外调用空转。
+    """
+    from app.utils.trading_time import is_trading_time
+    if not is_trading_time():
+        return {"checked": 0, "executed": 0, "skipped_non_trading": True}
+    try:
+        db = get_mongo_db()
+        positions = await db["paper_positions"].find({
+            "quantity": {"$gt": 0},
+            "stop_loss_price": {"$gt": 0},
+        }).to_list(None)
+    except Exception as e:
+        logger.error(f"止损自动执行扫描读取持仓失败: {e}", exc_info=True)
+        return {"checked": 0, "executed": 0, "error": str(e)}
+    if not positions:
+        return {"checked": 0, "executed": 0}
+
+    from app.services.paper_executor import get_last_price
+
+    checked = 0
+    executed: list[dict] = []
+    for pos in positions:
+        uid = pos.get("user_id")
+        code = str(pos.get("code") or "").strip()
+        if not uid or not code:
+            continue
+        market = str(pos.get("market") or "CN").upper()
+        try:
+            price = await get_last_price(code, market)
+        except Exception as e:
+            logger.debug(f"止损执行取价失败 {code}: {e}")
+            continue
+        if price is None or price <= 0:
+            continue
+        checked += 1
+        result = await auto_execute_stop_loss(uid, pos, price)
+        if result.get("executed"):
+            executed.append({"code": code, "name": pos.get("stock_name"), "price": price,
+                             "plan_id": result.get("plan_id")})
+    if executed:
+        logger.info(f"🔴 止损自动执行: 共 {len(executed)} 笔自动卖出 {[e['code'] for e in executed]}")
+    return {"checked": checked, "executed": len(executed), "executed_items": executed}

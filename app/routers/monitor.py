@@ -155,6 +155,29 @@ async def strategy_monitor_toggle(strategy_id: str, req: StrategyMonitorRequest,
         raise HTTPException(status_code=500, detail=f"切换策略监控失败: {str(e)}")
 
 
+# ── 三买三卖监控（type=tbs）启停/状态 ────────────────
+@router.get("/tbs/status")
+async def tbs_monitor_status(current_user: dict = Depends(get_current_user)):
+    """返回三买三卖监控开关状态（盯全部持仓卖出信号）。"""
+    try:
+        status = await monitor_service.get_tbs_monitoring(current_user["id"])
+        return ok(status)
+    except Exception as e:
+        logger.error(f"❌ 获取三买三卖监控状态失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取三买三卖监控状态失败: {str(e)}")
+
+
+@router.post("/tbs/monitor")
+async def tbs_monitor_toggle(req: StrategyMonitorRequest, current_user: dict = Depends(get_current_user)):
+    """开启/关闭三买三卖监控（盯全部持仓 S1/S2/S3 卖出信号，命中生成待确认卖出指令）。"""
+    try:
+        rule = await monitor_service.set_tbs_monitoring(current_user["id"], req.enabled)
+        return ok({"rule": rule}, "三买三卖监控已开启" if req.enabled else "三买三卖监控已关闭")
+    except Exception as e:
+        logger.error(f"❌ 切换三买三卖监控失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"切换三买三卖监控失败: {str(e)}")
+
+
 # ── 触发记录 ─────────────────────────────────────────────
 @router.get("/alerts")
 async def list_alerts(
