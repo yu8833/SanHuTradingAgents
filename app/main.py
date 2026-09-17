@@ -1064,6 +1064,48 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"🚨 常用策略收盘定格预计算注册失败: {e}", exc_info=True)
 
+        # ==================== market_quotes 日终校准（收盘后自动执行） ====================
+        # 背景（bug-013 数据治理）：盘中最末轮实时采集通常停在 14:59 左右，收盘后若日线
+        # 已同步完成而行情不再更新，这些 amount/volume 会永久滞留为盘中累计值（与日线差
+        # 1.5%~2%），导致 market_quotes 与 stock_daily_quotes 一致性校验失败。
+        # 该任务原仅依赖「非交易时段的容器重启」偶发触发（verify_and_repair/backfill 均在
+        # 启动路径且被 _is_trading_time() 门控），无收盘后兜底。此处新增固定定时任务，让
+        # 日终校准成为每个交易日收盘后的确定性动作，而非运气驱动。
+        # 15:40 已过交易时段判定（is_trading_time 含缓冲期至 15:30），calibrate 会正常执行；
+        # 若当日日线尚未同步完成，calibrate_to_daily_close 返回 0 且不设标记，下轮重试。
+        _CLOSE_CALIBRATE_CRON = "40 15 * * 1-5"  # 周一至周五 15:40（北京时区）
+        try:
+            from app.core.database import get_mongo_db as _get_calib_db
+            from app.services.quotes_ingestion_service import QuotesIngestionService as _CalibService
+
+            async def run_close_calibrate():
+                """收盘后日终校准：清理盘中滞留在 market_quotes 的 14:59 前后快照为日线收盘值。"""
+                try:
+                    qi = _CalibService()
+                    _db = _get_calib_db()
+                    _latest = await _db["stock_daily_quotes"].find_one(
+                        {"period": "daily"}, sort=[("trade_date", -1)]
+                    )
+                    latest_td = _latest.get("trade_date") if _latest else None
+                    calibrated = await qi.calibrate_to_daily_close(latest_td)
+                    logger.info(
+                        f"🧭 [APScheduler] 收盘后日终校准完成: latest_td={latest_td}, "
+                        f"校准={calibrated} 只股票"
+                    )
+                except Exception as e:
+                    logger.error(f"❌ [APScheduler] 收盘后日终校准失败: {e}", exc_info=True)
+
+            scheduler.add_job(
+                run_close_calibrate,
+                cron_trigger(_CLOSE_CALIBRATE_CRON, timezone=get_tz()),
+                id="market_quotes_close_calibrate",
+                name="market_quotes收盘后日终校准",
+                replace_existing=True,
+            )
+            logger.info("✅ market_quotes 收盘后日终校准已注册: 工作日 15:40")
+        except Exception as e:
+            logger.error(f"🚨 market_quotes 收盘后日终校准注册失败: {e}", exc_info=True)
+
         # ==================== ΔG 景气度数据季度刷新 ====================
         # 每月1日凌晨5:00从 Tushare fina_indicator 拉取全 A 股最近 8 个季度的财务指标，
         # 计算 ΔG（环比差值）用于戴维斯双杀象限判断。
