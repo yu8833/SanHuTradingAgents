@@ -8,7 +8,7 @@
         </div>
         <div class="page-hero-text">
           <h2 class="page-hero-title">{{ today }} · 综合研判</h2>
-          <p class="page-hero-sub">汇聚大盘 / 情绪 / 概念 / 资讯四维数据，AI 综合研判并给出买卖清单</p>
+          <p class="page-hero-sub">汇聚大盘 / 情绪 / 概念 / 资讯四维数据，AI 综合研判市场方向（个股买卖清单已移至模拟交易页）</p>
         </div>
       </div>
       <div class="page-hero-meta">
@@ -67,106 +67,6 @@
         </div>
       </section>
 
-      <!-- ├─ ② 个股买卖清单 -->
-      <section class="sect sect-in vs-2">
-        <div class="sect-head">
-          <span class="sect-title">个股买卖清单</span>
-          <span class="sect-sub">来源于现有买卖信号（确定性规则），非 AI 生成</span>
-        </div>
-
-        <div class="list-wrap">
-          <!-- 建议买入 -->
-          <div class="ms-card ms-card-buy">
-            <div class="ms-card-head">
-              <span class="ms-card-title">
-                <span class="dot dot-buy"></span>建议买入
-                <el-tag v-if="syn?.buy_count" size="small" type="danger" effect="plain">{{ syn.buy_count }}</el-tag>
-              </span>
-            </div>
-            <el-table v-if="buys.length" :data="buys" size="small" class="ms-table">
-              <el-table-column label="股票" min-width="120">
-                <template #default="{ row }">
-                  <div class="stk">
-                    <router-link class="stk-name" :to="`/stocks/${row.code}`">{{ row.name || row.code }}</router-link>
-                    <span class="stk-code">{{ row.code }}</span>
-                  </div>
-                </template>
-              </el-table-column>
-              <el-table-column label="信号" min-width="90">
-                <template #default="{ row }">
-                  <el-tag size="small" effect="plain" :type="row.signal_label ? 'danger' : 'info'">
-                    {{ row.signal_label || (row.triggered ? '已触发' : '待触发') }}
-                  </el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column label="触发价" width="90" align="right">
-                <template #default="{ row }">
-                  <span class="money">{{ row.trigger_price ?? '—' }}</span>
-                </template>
-              </el-table-column>
-              <el-table-column label="现价" width="90" align="right">
-                <template #default="{ row }">
-                  <span class="money">{{ row.last_price ?? '—' }}</span>
-                </template>
-              </el-table-column>
-              <el-table-column label="距触发" width="90" align="right">
-                <template #default="{ row }">
-                  <span class="pct" :class="pctClass(row.distance_pct)">{{ fmtPct(row.distance_pct) }}</span>
-                </template>
-              </el-table-column>
-              <el-table-column label="建议" min-width="120">
-                <template #default="{ row }">
-                  <span class="advice">{{ row.advice || '—' }}</span>
-                </template>
-              </el-table-column>
-            </el-table>
-            <el-empty v-else description="暂无建议买入" :image-size="60" />
-          </div>
-
-          <!-- 持仓卖出 -->
-          <div class="ms-card ms-card-sell">
-            <div class="ms-card-head">
-              <span class="ms-card-title">
-                <span class="dot dot-sell"></span>持仓卖出建议
-                <el-tag v-if="syn?.sell_count" size="small" type="success" effect="plain">{{ syn.sell_count }}</el-tag>
-              </span>
-            </div>
-            <el-table v-if="sells.length" :data="sells" size="small" class="ms-table">
-              <el-table-column label="股票" min-width="120">
-                <template #default="{ row }">
-                  <div class="stk">
-                    <router-link class="stk-name" :to="`/stocks/${row.code}`">{{ row.name || row.code }}</router-link>
-                    <span class="stk-code">{{ row.code }}</span>
-                  </div>
-                </template>
-              </el-table-column>
-              <el-table-column label="盈亏" width="90" align="right">
-                <template #default="{ row }">
-                  <span class="pct" :class="pctClass(row.profit_loss_rate)">{{ fmtPct(row.profit_loss_rate) }}</span>
-                </template>
-              </el-table-column>
-              <el-table-column label="卖出比例" width="90" align="right">
-                <template #default="{ row }">
-                  <span class="money">{{ row.sell_pct != null ? row.sell_pct + '%' : '—' }}</span>
-                </template>
-              </el-table-column>
-              <el-table-column label="止损" width="80" align="right">
-                <template #default="{ row }"><span class="money">{{ row.stop_loss_price ?? '—' }}</span></template>
-              </el-table-column>
-              <el-table-column label="建议" min-width="160">
-                <template #default="{ row }">
-                  <div class="advice">
-                    <b v-if="row.advice_label" class="advice-label">{{ row.advice_label }}</b>
-                    {{ row.advice_text || row.advice || '—' }}
-                  </div>
-                </template>
-              </el-table-column>
-            </el-table>
-            <el-empty v-else description="暂无卖出建议" :image-size="60" />
-          </div>
-        </div>
-      </section>
-
       <div class="disclaimer">以上内容由 AI 依据公开市场数据综合研判，仅供参考，不构成任何投资建议。股市有风险，投资需谨慎。</div>
     </template>
   </div>
@@ -178,10 +78,7 @@ import { ElMessage } from 'element-plus'
 import {
   vibeApi,
   type MarketSynthesis,
-  type SynthesisBuyItem,
-  type SynthesisSellItem,
 } from '@/api/vibe'
-import { fmtPct } from '@/utils/format'
 import { Refresh, Loading, Aim, Opportunity, WarnTriangleFilled } from '@element-plus/icons-vue'
 
 defineOptions({ name: 'VibeSynthesis' })
@@ -221,16 +118,6 @@ const confRingStyle = computed(() => {
   const color = v?.dirClass === 'bull' ? '#f56c6c' : v?.dirClass === 'bear' ? '#67c23a' : '#2b6cb0'
   return { '--pct': `${c != null ? c : 0}%`, '--ring-color': color }
 })
-
-const buys = computed<SynthesisBuyItem[]>(() => syn.value?.buys || [])
-const sells = computed<SynthesisSellItem[]>(() => syn.value?.sells || [])
-
-const pctClass = (v: number | null | undefined) => {
-  if (v == null) return 'flat'
-  if (v > 0) return 'up'
-  if (v < 0) return 'down'
-  return 'flat'
-}
 
 function fmtClock(s: string | null | undefined): string {
   if (!s) return '—'
@@ -296,37 +183,9 @@ onActivated(() => {
   animation: sectIn .5s ease both;
 }
 .vs-1 { animation-delay: .04s; }
-.vs-2 { animation-delay: .12s; }
 @keyframes sectIn {
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: none; }
-}
-.sect-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 12px;
-}
-.sect-title {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--el-text-color-primary);
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  letter-spacing: .5px;
-}
-.sect-title::before {
-  content: '';
-  width: 4px;
-  height: 16px;
-  border-radius: 2px;
-  background: linear-gradient(180deg, #2b6cb0, #4299e1);
-}
-.sect-sub {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
 }
 
 /* ── ① 研判结论横幅 ── */
@@ -477,86 +336,6 @@ onActivated(() => {
   color: var(--el-text-color-regular);
 }
 
-/* ── ② 买卖清单 ── */
-.list-wrap {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-}
-.ms-card {
-  background: var(--el-fill-color-blank);
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: var(--app-radius);
-  padding: 14px 16px;
-  box-shadow: var(--app-shadow);
-}
-.ms-card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
-}
-.ms-card-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
-}
-.dot { width: 9px; height: 9px; border-radius: 50%; }
-.dot-buy { background: var(--app-up); }
-.dot-sell { background: var(--app-down); }
-.ms-card :deep(.el-table) {
-  --el-table-border-color: var(--el-border-color-lighter);
-  --el-table-header-bg-color: var(--el-fill-color-lighter);
-}
-.ms-card :deep(.el-table th.el-table__cell) {
-  color: var(--el-text-color-secondary);
-  font-weight: 600;
-}
-.ms-table :deep(.el-table__row) { cursor: default; }
-.stk {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.3;
-}
-.stk-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
-  text-decoration: none;
-}
-.stk-name:hover { color: var(--el-color-primary); }
-.stk-code {
-  font-size: 11px;
-  color: var(--el-text-color-placeholder);
-}
-.money {
-  font-family: var(--app-font-mono);
-  font-size: 12px;
-  color: var(--el-text-color-regular);
-}
-.pct {
-  font-family: var(--app-font-mono);
-  font-size: 12px;
-  font-weight: 600;
-}
-.pct.up { color: var(--app-up); }
-.pct.down { color: var(--app-down); }
-.pct.flat { color: var(--el-text-color-regular); }
-.advice {
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--el-text-color-regular);
-}
-.advice-label {
-  color: var(--el-text-color-primary);
-  margin-right: 4px;
-}
-
 .disclaimer {
   margin-top: 8px;
   font-size: 12px;
@@ -564,9 +343,6 @@ onActivated(() => {
   text-align: center;
 }
 
-@media (max-width: 1200px) {
-  .list-wrap { grid-template-columns: 1fr; }
-}
 @media (max-width: 768px) {
   /* ── 结论横幅 · 手机适配 ── */
   .vb-main { flex-direction: column; gap: 14px; padding: 16px; }

@@ -190,6 +190,111 @@
       </el-col>
     </el-row>
 
+    <!-- 📋 个股买卖清单（来自综合研判的确定性信号） -->
+    <el-card shadow="hover" class="signal-card" style="margin-top:16px">
+      <template #header>
+        <div class="card-hd">
+          个股买卖清单
+          <span class="card-hd-sub">来源于现有买卖信号（确定性规则），非 AI 生成</span>
+        </div>
+      </template>
+      <div v-if="synLoading" class="syn-loading">
+        <el-skeleton :rows="3" animated />
+        <div class="syn-loading-tip">正在加载买卖清单…</div>
+      </div>
+      <div v-else-if="syn" class="list-wrap">
+        <!-- 建议买入 -->
+        <div class="ms-card ms-card-buy">
+          <div class="ms-card-head">
+            <span class="ms-card-title">
+              <span class="dot dot-buy"></span>建议买入
+              <el-tag v-if="syn.buy_count" size="small" type="danger" effect="plain">{{ syn.buy_count }}</el-tag>
+            </span>
+          </div>
+          <el-table v-if="buys.length" :data="buys" size="small" class="ms-table">
+            <el-table-column label="股票" min-width="120">
+              <template #default="{ row }">
+                <div class="stk">
+                  <router-link class="stk-name" :to="`/stocks/${row.code}`">{{ row.name || row.code }}</router-link>
+                  <span class="stk-code">{{ row.code }}</span>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="信号" min-width="90">
+              <template #default="{ row }">
+                <el-tag size="small" effect="plain" :type="row.signal_label ? 'danger' : 'info'">
+                  {{ row.signal_label || (row.triggered ? '已触发' : '待触发') }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="触发价" width="90" align="right">
+              <template #default="{ row }">
+                <span class="money">{{ row.trigger_price ?? '—' }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="现价" width="90" align="right">
+              <template #default="{ row }">
+                <span class="money">{{ row.last_price ?? '—' }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="距触发" width="90" align="right">
+              <template #default="{ row }">
+                <span class="pct" :class="pctClass(row.distance_pct)">{{ fmtPct(row.distance_pct) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="建议" min-width="120">
+              <template #default="{ row }">
+                <span class="advice">{{ row.advice || '—' }}</span>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-empty v-else description="暂无建议买入" :image-size="60" />
+        </div>
+
+        <!-- 持仓卖出 -->
+        <div class="ms-card ms-card-sell">
+          <div class="ms-card-head">
+            <span class="ms-card-title">
+              <span class="dot dot-sell"></span>持仓卖出建议
+              <el-tag v-if="syn.sell_count" size="small" type="success" effect="plain">{{ syn.sell_count }}</el-tag>
+            </span>
+          </div>
+          <el-table v-if="sells.length" :data="sells" size="small" class="ms-table">
+            <el-table-column label="股票" min-width="120">
+              <template #default="{ row }">
+                <div class="stk">
+                  <router-link class="stk-name" :to="`/stocks/${row.code}`">{{ row.name || row.code }}</router-link>
+                  <span class="stk-code">{{ row.code }}</span>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="盈亏" width="90" align="right">
+              <template #default="{ row }">
+                <span class="pct" :class="pctClass(row.profit_loss_rate)">{{ fmtPct(row.profit_loss_rate) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="卖出比例" width="90" align="right">
+              <template #default="{ row }">
+                <span class="money">{{ row.sell_pct != null ? row.sell_pct + '%' : '—' }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="止损" width="80" align="right">
+              <template #default="{ row }"><span class="money">{{ row.stop_loss_price ?? '—' }}</span></template>
+            </el-table-column>
+            <el-table-column label="建议" min-width="160">
+              <template #default="{ row }">
+                <div class="advice">
+                  <b v-if="row.advice_label" class="advice-label">{{ row.advice_label }}</b>
+                  {{ row.advice_text || row.advice || '—' }}
+                </div>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-empty v-else description="暂无卖出建议" :image-size="60" />
+        </div>
+      </div>
+    </el-card>
+
     <el-dialog v-model="orderDialog" title="下市场单" width="480px">
       <!-- 分析上下文提示 -->
       <div v-if="(order as any).analysis_id" class="analysis-context" style="margin-bottom:12px">
@@ -248,9 +353,10 @@ import { CreditCard, Refresh, Plus, Delete } from '@element-plus/icons-vue'
 import { paperApi } from '@/api/paper'
 import { analysisApi } from '@/api/analysis'
 import { stocksApi } from '@/api/stocks'
+import { vibeApi, type MarketSynthesis } from '@/api/vibe'
 import { formatDateTime } from '@/utils/datetime'
 import { subscribeQuotesUpdate } from '@/utils/quotesSSE'
-import { fmtPrice, fmtAmount } from '@/utils/format'
+import { fmtPrice, fmtAmount, fmtPct } from '@/utils/format'
 
 // 路由与初始化
 const route = useRoute()
@@ -284,6 +390,36 @@ const filteredOrders = computed(() => {
     return market === activeMarketTab.value
   })
 })
+
+// 个股买卖清单（数据来源于综合研判的确定性买卖信号）
+const syn = ref<MarketSynthesis | null>(null)
+const synLoading = ref(false)
+
+const buys = computed(() => syn.value?.buys || [])
+const sells = computed(() => syn.value?.sells || [])
+
+const pctClass = (v: number | null | undefined) => {
+  if (v == null) return 'flat'
+  if (v > 0) return 'up'
+  if (v < 0) return 'down'
+  return 'flat'
+}
+
+async function loadSynthesis() {
+  synLoading.value = true
+  try {
+    const res: any = await vibeApi.getSynthesis()
+    if (res?.code === 401) {
+      // 登录过期：不打断交易操作，静默跳过
+      return
+    }
+    syn.value = res || null
+  } catch (e) {
+    console.warn('[PaperTrading] 买卖清单加载失败', e)
+  } finally {
+    synLoading.value = false
+  }
+}
 
 // 分析上下文
 const analysisContext = ref<any | null>(null)
@@ -573,6 +709,8 @@ onMounted(() => {
     orderDialog.value = true
   }
   refreshAll()
+  // 并行加载个股买卖清单（一次，避免频繁触发综合研判 AI 重算）
+  loadSynthesis()
 
   // 盘中持仓自动刷新：15 秒轮询兜底 + SSE 信号触发
   positionTimer = setInterval(refreshPositionsOnly, 15000)
@@ -598,7 +736,105 @@ onUnmounted(() => {
 .paper-trading { padding: 24px; }
 .card-hd { font-weight: 600; }
 
+/* ============ 个股买卖清单 ============ */
+.card-hd-sub {
+  margin-left: 8px;
+  font-size: 12px;
+  color: #909399;
+  font-weight: normal;
+}
+.syn-loading { padding: 8px 0; }
+.syn-loading-tip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
+.list-wrap {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.ms-card {
+  background: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--app-radius);
+  padding: 14px 16px;
+  box-shadow: var(--app-shadow);
+}
+.ms-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+.ms-card-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+.dot { width: 9px; height: 9px; border-radius: 50%; }
+.dot-buy { background: var(--app-up); }
+.dot-sell { background: var(--app-down); }
+.ms-card :deep(.el-table) {
+  --el-table-border-color: var(--el-border-color-lighter);
+  --el-table-header-bg-color: var(--el-fill-color-lighter);
+}
+.ms-card :deep(.el-table th.el-table__cell) {
+  color: var(--el-text-color-secondary);
+  font-weight: 600;
+}
+.ms-table :deep(.el-table__row) { cursor: default; }
+.stk {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+}
+.stk-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  text-decoration: none;
+}
+.stk-name:hover { color: var(--el-color-primary); }
+.stk-code {
+  font-size: 11px;
+  color: var(--el-text-color-placeholder);
+}
+.money {
+  font-family: var(--app-font-mono);
+  font-size: 12px;
+  color: var(--el-text-color-regular);
+}
+.pct {
+  font-family: var(--app-font-mono);
+  font-size: 12px;
+  font-weight: 600;
+}
+.pct.up { color: var(--app-up); }
+.pct.down { color: var(--app-down); }
+.pct.flat { color: var(--el-text-color-regular); }
+.advice {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--el-text-color-regular);
+}
+.advice-label {
+  color: var(--el-text-color-primary);
+  margin-right: 4px;
+}
+
 /* ============ 响应式：手机端适配 ============ */
+@media (max-width: 1200px) {
+  .list-wrap { grid-template-columns: 1fr; }
+}
 @media (max-width: 768px) {
   .paper-trading {
     padding: 12px;

@@ -1280,6 +1280,64 @@ async def lifespan(app: FastAPI):
                             _catchup_jobs_added += 1
                 except Exception as _e:
                     logger.warning(f"⚠️ 判断历史同步是否需要补跑失败 [{_cron}]: {_e}")
+
+            # 🔥 当日计划快照 catchup：APScheduler 内存 job store 不补跑错过的时间点。
+            # 场景：工作日 8:15 宏观快扫 / 9:00 候选池与计划快照（macro_scan_plan）若因容器
+            # 在 9:00 后才启动（重启/恢复）而错过，当日宏观快照与 daily_plan_snapshots 双双
+            # 缺失 → 计划生成时环境步「未就绪」、综合研判「建议买入」、作战室当日计划全部
+            # 为空直到次日。修复：补跑前先确保当日宏观快照存在（缺失则先 refresh，整体
+            # 有界 ~100s），再补跑候选池/计划快照。幂等：当天已有快照则跳过。
+            try:
+                from app.services.plan_generation_service import load_daily_plan_snapshot
+                from app.utils.trading_time import is_trading_day as _is_trading_day_plan
+                _plan_snap_exists = await load_daily_plan_snapshot(_now.strftime("%Y-%m-%d"))
+                # 快照"有效"判定：有行业池或候选（空快照 = 宏观未就绪时的降级产物，
+                # 宏观快照补齐后应重跑，不能因"存在"而跳过）
+                _plan_snap_valid = bool(
+                    _plan_snap_exists
+                    and (
+                        (_plan_snap_exists.get("industries") or _plan_snap_exists.get("candidates") or [])
+                    )
+                )
+                if (not _plan_snap_valid) and _is_trading_day_plan(_now):
+                    async def _plan_snapshot_catchup_runner():
+                        """先补宏观快照（计划环境步依赖），再补当日候选池/计划快照。"""
+                        try:
+                            from app.services.macro import macro_service
+                            existing = await macro_service.get_macro_snapshot()
+                            if existing is None:
+                                logger.info("🌅 [补跑] 当日宏观快照缺失，先补生成…")
+                                snap = await macro_service.refresh_macro_snapshot()
+                                logger.info(
+                                    f"🌅 [补跑] 宏观快照补生成完成: date={snap.get('date')}, "
+                                    f"方向={(snap.get('rule') or {}).get('direction')}"
+                                )
+                            else:
+                                logger.info("🌅 [补跑] 当日宏观快照已存在，直接补计划快照")
+                        except Exception as _e4:
+                            logger.warning(f"⚠️ [补跑] 宏观快照补生成失败（计划将按现状执行）: {_e4}")
+                        await run_macro_scan_plan()
+
+                    _delay_plan = 30 + _catchup_jobs_added * 60 + 30
+                    scheduler.add_job(
+                        _plan_snapshot_catchup_runner,
+                        trigger="date",
+                        run_date=_now + timedelta(seconds=_delay_plan),
+                        id="macro_scan_plan_catchup",
+                        name="启动补跑-宏观+当日候选池与计划快照(8:15/9:00)",
+                        kwargs={},
+                        replace_existing=True,
+                        misfire_grace_time=600,
+                    )
+                    logger.info(
+                        f"⏰ 启动时发现当日计划快照缺失（错过 9:00 cron），"
+                        f"将在 {_delay_plan}s 后先补宏观快照再补跑生成（当前={_now.strftime('%H:%M')}）"
+                    )
+                    _catchup_jobs_added += 1
+                elif _plan_snap_valid:
+                    logger.info("⏭️ 启动时发现当日计划快照已存在，跳过补跑（job_id=macro_scan_plan_catchup）")
+            except Exception as _e3:
+                logger.warning(f"⚠️ 当日计划快照补跑逻辑异常，跳过（不影响主流程）: {_e3}")
         except Exception as _e:
             logger.warning(f"⚠️ 启动时历史同步补跑逻辑异常，跳过（不影响主流程）: {_e}")
 

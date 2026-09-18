@@ -443,14 +443,27 @@ async def _build_stock_step(user_id: str, direction: str | None, basis: dict | N
     verified_items = await _collect_verified_items()
     strategy = await _active_strategy(direction)
 
-    # code → 本地细类行业 映射（补全无 industry 字段的已验证信号；纯读 stock_basic_info）
+    # code → 本地细类行业 映射（纯读 stock_basic_info）。
+    # stock_basic_info 同一 code 有多数据源记录：akshare 行业常为空、baostock 是证监会
+    # 标准分类、tushare 是本地细类（与预测行业池同命名，如"普钢"/"通信设备"）。
+    # 已验证信号（signal_tracking）的 industry 是证监会标准分类（来自扫描时聚合），
+    # 与预测行业池命名空间不一致，直接硬绑定会全部误杀（实测近一周 kept=0）。
+    # 因此按 tushare > baostock 优先解析本地细类，统一映射到预测行业池命名。
     code_industry: dict[str, str] = {}
     try:
         from app.core.database import get_mongo_db_sync
-        codes = {str(it.get("code")) for it in pool_items if it.get("code")}
-        cursor = get_mongo_db_sync()["stock_basic_info"].find(
-            {"code": {"$in": [c for c in codes if c]}}, {"_id": 0, "code": 1, "industry": 1})
-        code_industry = {str(d.get("code")): str(d.get("industry") or "") for d in cursor}
+        _SRC_PRIORITY = {"tushare": 3, "baostock": 2, "akshare": 1}
+        codes = {str(it.get("code")) for it in (*pool_items, *verified_items) if it.get("code")}
+        for d in get_mongo_db_sync()["stock_basic_info"].find(
+            {"code": {"$in": [c for c in codes if c]}, "industry": {"$ne": "", "$type": "string"}},
+            {"_id": 0, "code": 1, "industry": 1, "source": 1},
+        ):
+            c, ind, src = str(d.get("code")), str(d.get("industry") or ""), str(d.get("source") or "").lower()
+            if not ind:
+                continue
+            cur = code_industry.get(c)
+            if cur is None or _SRC_PRIORITY.get(src, 0) > _SRC_PRIORITY.get(cur.get("src", ""), 0):
+                code_industry[c] = {"ind": ind, "src": src}
     except Exception as e:
         logger.warning(f"个股行业映射读取失败（跳过）: {e}")
 
@@ -468,9 +481,10 @@ async def _build_stock_step(user_id: str, direction: str | None, basis: dict | N
     for it in merged.values():
         code = it.get("code")
         sig_type = it.get("signal_type") or it.get("primary_signal_type") or ""
-        industry = str(it.get("industry") or "").strip()
-        if not industry and code:
-            industry = code_industry.get(str(code), "")
+        # 行业以本地细类为准（stock_basic_info tushare/baostock 覆盖，纠正 signal_tracking 的证监会分类名）
+        industry = str((code_industry.get(str(code)) or {}).get("ind") or "") if code else ""
+        if not industry:
+            industry = str(it.get("industry") or "").strip()
         it["industry"] = industry
         # 去重：已在当日计划中的标的（人工确认/手动添加）不再重复推荐
         if code and str(code).strip() in planned_codes:

@@ -495,6 +495,11 @@ async def get_candidate_stocks_overview(top_n: int = 10, per_industry: int = 3,
         if c in seen:
             continue
         seen.add(c)
+        # 概览是「买入候选池」入口：只保留 B1/B2/B3 买入信号，S1/S2/S3 卖出预警
+        # 不入池（避免出现"候选池 20 只全是 S2 主减仓"的无效产物，进一步导致
+        # 当日计划生成时被 _SELL_SIGNAL_TYPES 全部剔除 → 建议买入恒为空）。
+        if str(it.get("signal_type") or "") not in ("B1", "B2", "B3"):
+            continue
         uniq.append(it)
         if len(uniq) >= limit:
             break

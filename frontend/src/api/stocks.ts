@@ -202,9 +202,13 @@ export const stocksApi = {
   /**
    * 获取三买三卖买卖点检查 + 辅助检查点
    * @param symbol 6位股票代码
+   * 注意：次新股/历史数据不足（<70日）时后端返回 404「数据不足」。这是业务性缺失而非
+   * 资源不存在，前端详情页已有「三买三卖数据暂不可用」空态承接，故跳过全局错误弹窗。
    */
   async getBuySellCheck(symbol: string) {
-    return ApiClient.get<any>(`/api/stocks/${symbol}/buy-sell-check`)
+    return ApiClient.get<any>(`/api/stocks/${symbol}/buy-sell-check`, undefined, {
+      skipErrorHandler: true
+    } as any)
   }
 }
 
