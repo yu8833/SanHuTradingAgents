@@ -290,7 +290,7 @@ class DebateConvergenceEvaluator:
         segments = re.split(r'\n(?=[A-Z][a-z]+ (Analyst|Researcher):)', history)
 
         arguments = []
-        for i, segment in enumerate(segments):
+        for segment in segments:
             if not segment.strip():
                 continue
 
@@ -571,8 +571,6 @@ class DebateConvergenceEvaluator:
 
     def _find_agreements(self) -> List[str]:
         """找到双方一致的观点"""
-        agreements = []
-
         # 提取双方都提到的关键词
         bull_keywords = set()
         bear_keywords = set()

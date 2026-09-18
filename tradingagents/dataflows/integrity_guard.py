@@ -293,7 +293,7 @@ def check_integrity(result: str, method: str, args: tuple) -> str:
                                             )
                                     else:
                                         # 无法提取日期，放行（不阻断）
-                                        return new_result + f"\n\n⚠️ [数据时效性] 补数后无法确认数据日期，请谨慎使用。"
+                                        return new_result + "\n\n⚠️ [数据时效性] 补数后无法确认数据日期，请谨慎使用。"
                             except DataStaleError:
                                 raise
                             except Exception as e:

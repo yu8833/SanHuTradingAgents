@@ -14,7 +14,7 @@ Data sources:
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any, Dict, Optional
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 import json as _json
@@ -118,7 +118,7 @@ def _safe_format_value(value, field_name: str, suffix: str = "") -> str:
 
     import math
     if math.isnan(num) or math.isinf(num):
-        return f"[异常值: NaN/Inf]"
+        return "[异常值: NaN/Inf]"
 
     constraint = _VALUE_CONSTRAINTS.get(field_name)
     if constraint is None:
@@ -1623,7 +1623,7 @@ def get_profit_forecast(
 
         lines = [
             f"# Consensus EPS Forecast for {code} (A-stock)",
-            f"# Source: 同花顺 analyst consensus (direct HTTP)",
+            "# Source: 同花顺 analyst consensus (direct HTTP)",
             f"# Retrieved: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             "",
         ]
@@ -1740,7 +1740,7 @@ def get_hot_stocks(
 
         lines = [
             f"# Hot Stocks with Topic Attribution ({curr_date})",
-            f"# Source: 同花顺 editorial (human-curated reason tags)",
+            "# Source: 同花顺 editorial (human-curated reason tags)",
             f"# Total: {len(rows)} stocks",
             "",
         ]
@@ -1770,7 +1770,7 @@ def get_hot_stocks(
 
         if all_tags:
             cnt = Counter(all_tags)
-            lines.append(f"\n## Theme Frequency (top 15)")
+            lines.append("\n## Theme Frequency (top 15)")
             for tag, n in cnt.most_common(15):
                 lines.append(f"  {tag}: {n} stocks")
 
@@ -1961,7 +1961,7 @@ def get_fund_flow(
     secid = f"1.{code}" if code.startswith("6") else f"0.{code}"
     lines = [
         f"# Fund Flow for {code} (A-stock)",
-        f"# Source: 东财 push2 (Eastmoney)",
+        "# Source: 东财 push2 (Eastmoney)",
         f"# Retrieved: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
         "",
     ]
@@ -2310,7 +2310,7 @@ def get_concept_blocks(
 
         lines = [
             f"# Concept & Sector Blocks for {code} (A-stock)",
-            f"# Source: 百度股市通 (Baidu PAE)",
+            "# Source: 百度股市通 (Baidu PAE)",
             f"# Retrieved: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             "",
         ]
@@ -2962,7 +2962,7 @@ def get_risk_scan(
 
         score = max(0, min(100, 100 - num * 5)) if total > 0 else 0
 
-        lines.append(f"## 风险概览")
+        lines.append("## 风险概览")
         lines.append(f"- **股票名称**: {name}")
         lines.append(f"- **总检查项**: {total}")
         lines.append(f"- **风险项数**: 🔴 {num}")

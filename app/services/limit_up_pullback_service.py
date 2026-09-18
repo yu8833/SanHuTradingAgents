@@ -783,7 +783,6 @@ class LimitUpPullbackService:
         """
         import time
         from collections import defaultdict
-        from datetime import datetime, timedelta
         start_time = time.time()
 
         if params is None:
@@ -1558,7 +1557,6 @@ class LimitUpPullbackService:
         """
         import time
         from collections import defaultdict
-        from datetime import datetime, timedelta
 
         start_time = time.time()
 

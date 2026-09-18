@@ -116,8 +116,8 @@ class AccuracyGuardianReport:
             "",
             "## 整体评估",
             "",
-            f"| 指标 | 值 |",
-            f"|------|-----|",
+            "| 指标 | 值 |",
+            "|------|-----|",
             f"| 整体质量分数 | {self.overall_quality_score:.0%} |",
             f"| 质量等级 | {self.quality_grade.value} |",
             f"| 置信度 | {self.confidence_level.value} |",
@@ -498,9 +498,6 @@ class AccuracyGuardian:
                 issues.append("缺少风控辩论收敛度报告")
         else:
             # 从辩论历史中直接评估
-            investment_history = state.get("investment_debate_state", {}).get("history", "")
-            risk_history = state.get("risk_debate_state", {}).get("history", "")
-
             # 简化评估：基于辩论长度和轮次
             inv_rounds = state.get("investment_debate_state", {}).get("count", 0)
             risk_rounds = state.get("risk_debate_state", {}).get("count", 0)
@@ -561,7 +558,6 @@ class AccuracyGuardian:
             # 评级方向应该一致（Buy/Overweight vs Sell/Underweight）
             bullish_ratings = {"Buy", "Overweight", "买入", "增持"}
             bearish_ratings = {"Sell", "Underweight", "卖出", "减持"}
-            neutral_ratings = {"Hold", "持有"}
 
             if investment_rating in bullish_ratings and final_rating in bearish_ratings:
                 issues.append(f"投资建议 ({investment_rating}) 和最终决策 ({final_rating}) 方向相反")

@@ -150,7 +150,7 @@ You may confirm, supplement, or challenge these findings based on your specializ
 """
 
         return context
-    except Exception as e:
+    except Exception:
         # 如果格式化失败，返回空字符串而不是崩溃
         return ""
 

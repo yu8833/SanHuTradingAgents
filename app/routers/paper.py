@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Any, Literal
 from app.utils.timezone import now_tz
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.core.database import get_mongo_db

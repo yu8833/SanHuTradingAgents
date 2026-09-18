@@ -179,7 +179,7 @@ async def get_candidate_industries(top_n: int = 20, as_of=None) -> dict:
                 *[dg_svc.get_sector_dg(n) for n in ind_names],
                 return_exceptions=True,
             )
-            for ind, res in zip(industries, results):
+            for ind, res in zip(industries, results, strict=True):
                 if isinstance(res, dict):
                     ind["sector_dg"] = res
                 else:

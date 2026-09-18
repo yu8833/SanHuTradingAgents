@@ -217,7 +217,7 @@ class AkshareProvider:
                 return quotes
             
             # 如果快速查询失败，回退到全市场获取（作为兜底）
-            logger.warning(f"[AkshareProvider] 单只股票快速查询失败，回退到全市场获取")
+            logger.warning("[AkshareProvider] 单只股票快速查询失败，回退到全市场获取")
             all_quotes = await self.get_batch_stock_quotes()
             return all_quotes.get(symbol6)
         except Exception as e:

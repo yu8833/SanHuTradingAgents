@@ -156,7 +156,7 @@ async def _attach_sector_dg(items: list[dict]) -> None:
             return_exceptions=True,
         )
         local_dg: dict[str, dict] = {}
-        for n, res in zip(local_names, results):
+        for n, res in zip(local_names, results, strict=True):
             if isinstance(res, dict) and res.get("member_count"):
                 local_dg[n] = res
 

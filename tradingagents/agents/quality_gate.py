@@ -160,7 +160,7 @@ def create_quality_gate(llm):
         ticker = state["company_of_interest"]
 
         reports = {}
-        for analyst_type, field in REPORT_FIELDS.items():
+        for _analyst_type, field in REPORT_FIELDS.items():
             reports[field] = state.get(field, "")
 
         formula_scores = state.get("_formula_scores") or {}

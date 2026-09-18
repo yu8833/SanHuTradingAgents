@@ -204,7 +204,6 @@ def _score_events(news: list[dict]) -> tuple[list[dict], int]:
     for c in selected:
         score = c["polarity"] * c["contrib"]
         total += score
-        note = f"（同主题合并计1条）" if c["topic"] else ""
         # B 档：事件"概率×幅度"分级（事实/预期 + 影响概率 + 解读/板块透传）
         event_type, prob = _event_probability(c["polarity"], c["impact"], c["title"] or "")
         item = c["item"]

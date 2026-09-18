@@ -212,7 +212,7 @@ class MongoCacheAdapter:
                 ))
 
             if operations:
-                result = coll.bulk_write(operations)
+                coll.bulk_write(operations)
                 logger.info(f"✅ MongoDB缓存保存: {code}, period={period}, {len(operations)}条")
                 return True
 

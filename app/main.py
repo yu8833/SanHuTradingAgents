@@ -533,7 +533,7 @@ async def lifespan(app: FastAPI):
                 )
                 logger.info(f"📈 Tushare每日估值数据同步已配置（独立任务，历史同步禁用兜底）: {settings.TUSHARE_DAILY_BASIC_SYNC_CRON}")
             elif settings.TUSHARE_DAILY_BASIC_SYNC_ENABLED:
-                logger.info(f"📈 Tushare每日估值数据同步已合并进历史同步任务（23:00串行）")
+                logger.info("📈 Tushare每日估值数据同步已合并进历史同步任务（23:00串行）")
 
             # 数据源状态检查已合并进 basics_sync_service（每日基础信息同步尾部串行），
             # 不再单独注册 tushare_status_check，减少一个独立调度条目。

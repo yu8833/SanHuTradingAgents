@@ -278,7 +278,6 @@ class RetryableLLMCaller:
             最后一次重试失败后抛出原始异常
         """
         last_error = None
-        start_time = time.time()
 
         for attempt in range(self.config.max_retries + 1):
             attempt_start = time.time()

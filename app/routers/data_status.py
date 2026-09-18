@@ -34,7 +34,7 @@ async def _check_realtime_quotes_status() -> dict:
 
         # 计算最新的抓取时间
         latest_time = None
-        for code, data in result.items():
+        for _code, data in result.items():
             fetched_at = data.get("fetched_at")
             if fetched_at:
                 if latest_time is None or fetched_at > latest_time:

@@ -108,8 +108,8 @@ class AnalystIntegrityReport:
         lines = [
             f"## 📊 {self.analyst_name} 数据完整性报告",
             "",
-            f"| 指标 | 值 |",
-            f"|------|-----|",
+            "| 指标 | 值 |",
+            "|------|-----|",
             f"| 完整性级别 | {self.quality_label} |",
             f"| 总调用次数 | {self.total_calls} |",
             f"| 成功调用 | {self.successful_calls} |",

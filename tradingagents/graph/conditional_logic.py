@@ -98,7 +98,6 @@ class ConditionalLogic:
         重要：确保 Bull 和 Bear 至少各发言一次，再进入 Research Manager
         """
         debate_state = state["investment_debate_state"]
-        debate_count = debate_state.get("count", 0)
         has_bull_spoken = bool(debate_state.get("bull_history", "").strip())
         has_bear_spoken = bool(debate_state.get("bear_history", "").strip())
 
@@ -115,7 +114,7 @@ class ConditionalLogic:
 
         # 确保双方至少各发言一次：如果 Bull 说了但 Bear 还没说，强制让 Bear 发言
         if has_bull_spoken and not has_bear_spoken:
-            logger.info(f"🔄 投资辩论：确保看跌研究员至少发言一次")
+            logger.info("🔄 投资辩论：确保看跌研究员至少发言一次")
             return "Bear Researcher"
 
         if not should_continue:
@@ -137,7 +136,6 @@ class ConditionalLogic:
         重要：确保 Aggressive、Conservative、Neutral 三方都至少发言一次，再进入 Portfolio Manager
         """
         risk_state = state["risk_debate_state"]
-        debate_count = risk_state.get("count", 0)
         has_aggressive_spoken = bool(risk_state.get("aggressive_history", "").strip())
         has_conservative_spoken = bool(risk_state.get("conservative_history", "").strip())
         has_neutral_spoken = bool(risk_state.get("neutral_history", "").strip())
@@ -156,10 +154,10 @@ class ConditionalLogic:
 
         # 确保三方至少各发言一次
         if has_aggressive_spoken and not has_conservative_spoken:
-            logger.info(f"🔄 风控辩论：确保保守风控至少发言一次")
+            logger.info("🔄 风控辩论：确保保守风控至少发言一次")
             return "Conservative Analyst"
         if has_aggressive_spoken and has_conservative_spoken and not has_neutral_spoken:
-            logger.info(f"🔄 风控辩论：确保中性风控至少发言一次")
+            logger.info("🔄 风控辩论：确保中性风控至少发言一次")
             return "Neutral Analyst"
 
         if not should_continue:

@@ -136,7 +136,7 @@ def render_research_plan(plan: ResearchPlan) -> str:
     }.get(plan.recommendation.value, plan.recommendation.value)
 
     lines = [
-        f"# 投资研究方案",
+        "# 投资研究方案",
         "",
         f"## 🎯 投资评级：{rating_cn}",
         "",
@@ -272,7 +272,7 @@ def render_trader_proposal(proposal: TraderProposal) -> str:
     }.get(proposal.action.value, proposal.action.value)
 
     lines = [
-        f"# 交易员执行方案",
+        "# 交易员执行方案",
         "",
         f"## 🎯 交易决策：{action_cn}",
         "",
@@ -451,7 +451,7 @@ def render_risk_control_decision(decision: RiskControlDecision) -> str:
     }.get(decision.risk_rating.value, decision.risk_rating.value)
 
     lines = [
-        f"# 风控约束报告",
+        "# 风控约束报告",
         "",
         f"## ⚠️ 风险评级：{risk_rating_cn}",
         "",
@@ -597,7 +597,7 @@ def render_pm_decision(decision: PortfolioDecision) -> str:
     }.get(decision.rating.value, decision.rating.value)
 
     lines = [
-        f"# 最终交易决策",
+        "# 最终交易决策",
         "",
         f"## 🎯 投资评级：{rating_cn} ({decision.rating.value})",
         "",

@@ -189,7 +189,6 @@ async def generate_weekly_review(user_id: str) -> dict:
     """生成本周复盘（定量统计 + 持仓全红率 + 沪深300对比 + 信号有效性），落库并返回。"""
     db = get_mongo_db()
     week_start_str, today_str = _week_bounds()
-    week_start_date = date.fromisoformat(week_start_str)
 
     trades = await _fetch_week_trades(user_id, week_start_str)
     trade_count = len(trades)

@@ -291,9 +291,9 @@ def get_insider_transactions(
         if df is not None and not df.empty:
             # 只取前10大股东
             top10 = df.head(10)
-            lines.append(f"# 主要股东持股 (akshare 东方财富)")
+            lines.append("# 主要股东持股 (akshare 东方财富)")
             lines.append(f"# 股票代码: {code}")
-            lines.append(f"# 数据来源: 东方财富网")
+            lines.append("# 数据来源: 东方财富网")
             lines.append("")
             lines.append("## 前10大股东")
             lines.append(_df_to_str(top10, 10))
@@ -373,14 +373,14 @@ def get_northbound_flow(
     try:
         df = ak.stock_hsgt_north_net_flow_in_em(symbol="北向")
         if df is not None and not df.empty:
-            lines.append(f"=== 北向资金净流入 (akshare)\n" + _df_to_str(df.tail(20), 20))
+            lines.append("=== 北向资金净流入 (akshare)\n" + _df_to_str(df.tail(20), 20))
     except Exception as e:
         raise ValueError(f"akshare 北向资金数据获取失败: {e}")
 
     try:
         south = ak.stock_hsgt_south_net_flow_in_em(symbol="南向")
         if south is not None and not south.empty:
-            lines.append(f"\n=== 南向资金净流入 (akshare)\n" + _df_to_str(south.tail(10), 10))
+            lines.append("\n=== 南向资金净流入 (akshare)\n" + _df_to_str(south.tail(10), 10))
     except Exception:
         pass
 
@@ -485,7 +485,6 @@ def get_industry_comparison(
 ) -> str:
     """Get industry sector comparison via akshare (东方财富行业板块)."""
     ak = _ensure_akshare()
-    code = _normalize_code(ticker)
     try:
         df = ak.stock_board_industry_name_em()
         if df is not None and not df.empty:

@@ -361,7 +361,7 @@ def _load_dividend_panel(db, symbols, df: pd.DataFrame,
     panel_ord = np.array([d.toordinal() for d in dates], dtype=np.int64)  # 与分红记录 toordinal 同尺度
     panel_year = np.array([d.year for d in dates], dtype=np.int64)
     date_to_str = {int(o): d.strftime("%Y-%m-%d")
-                   for o, d in zip(panel_ord, dates)}
+                   for o, d in zip(panel_ord, dates, strict=True)}
 
     codes = sorted(by_code.keys())
     total = len(codes)

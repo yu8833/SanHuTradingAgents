@@ -920,7 +920,6 @@ async def get_kline(
     - 收盘后：检查历史数据是否有当天数据，没有则从 market_quotes 获取
     """
     import logging
-    from datetime import datetime, timedelta
     import asyncio
     logger = logging.getLogger(__name__)
 
@@ -988,8 +987,6 @@ async def get_kline(
     from app.utils.timezone import get_tz
     tz = get_tz()
     now = datetime.now(tz)
-    today_str_yyyymmdd = now.strftime("%Y%m%d")  # 格式：20251028（用于查询）
-    today_str_formatted = now.strftime("%Y-%m-%d")  # 格式：2025-10-28（用于返回）
 
     db = get_mongo_db()
 

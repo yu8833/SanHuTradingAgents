@@ -268,11 +268,11 @@ class TradingAgentsGraph:
                     return None, None, None
                 stock_rows = [
                     (d.isoformat()[:10], float(c))
-                    for d, c in zip(stock_df.index, stock_df["Close"])
+                    for d, c in zip(stock_df.index, stock_df["Close"], strict=True)
                 ]
                 bench_rows = [
                     (d.isoformat()[:10], float(c))
-                    for d, c in zip(bench_df.index, bench_df["Close"])
+                    for d, c in zip(bench_df.index, bench_df["Close"], strict=True)
                 ]
 
             actual_days = min(holding_days, len(stock_rows) - 1, len(bench_rows) - 1)

@@ -286,7 +286,7 @@ def compute_market_context(db) -> dict:
     # 近20交易日波动/震荡判定：价格振幅 + 涨跌家数日内摆动幅度
     avg_abs20 = sum(r["avg_abs"] for r in rows) / max(len(rows), 1)
     # 涨跌家数日内摆动 = 相邻交易日涨家占比之差的绝对值均值，反映行情方向反转的剧烈程度
-    broad_ratios = [(r["up"] / t) if t else 0.5 for r, t in zip(rows, [r["up"] + r["down"] for r in rows])]
+    broad_ratios = [(r["up"] / t) if t else 0.5 for r, t in zip(rows, [r["up"] + r["down"] for r in rows], strict=True)]
     if len(broad_ratios) >= 2:
         broad_swing = sum(abs(broad_ratios[i] - broad_ratios[i - 1]) for i in range(1, len(broad_ratios))) / (
             len(broad_ratios) - 1

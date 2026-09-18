@@ -90,8 +90,6 @@ class QuickAnalysisHandler(AnalysisModeHandler):
 
     async def save_result(self, result: dict[str, Any]) -> bool:
         """保存速览分析结果"""
-        from datetime import datetime
-
         from app.services.simple_analysis_service import get_mongo_pool
 
         try:
@@ -271,8 +269,6 @@ class DeepAnalysisHandler(AnalysisModeHandler):
 
     async def save_result(self, result: dict[str, Any]) -> bool:
         """保存深度分析结果"""
-        from datetime import datetime
-
         from app.services.simple_analysis_service import get_mongo_pool
 
         try:

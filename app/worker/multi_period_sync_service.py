@@ -216,7 +216,6 @@ class MultiPeriodSyncService:
         stats = {"records": 0, "success": 0, "errors": 0}
 
         # 🔧 防御性检查: 确保日期不为空
-        from datetime import datetime
         if end_date is None:
             end_date = now_tz().strftime('%Y-%m-%d')
         if start_date is None:

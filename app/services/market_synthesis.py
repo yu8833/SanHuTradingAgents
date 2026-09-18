@@ -136,10 +136,10 @@ def _prompt_concept(c: dict) -> str:
     if g:
         lines.append("- 领涨概念: " + "、".join(
             f"{x.get('name')}{_fmt_pct(x.get('pct_chg'))}" for x in g[:5]))
-    l = c.get("losers") or []
-    if l:
+    losers = c.get("losers") or []
+    if losers:
         lines.append("- 领跌概念: " + "、".join(
-            f"{x.get('name')}{_fmt_pct(x.get('pct_chg'))}" for x in l[:5]))
+            f"{x.get('name')}{_fmt_pct(x.get('pct_chg'))}" for x in losers[:5]))
     m = c.get("money_leaders") or []
     if m:
         lines.append("- 资金流入: " + "、".join(
@@ -329,7 +329,6 @@ async def build_market_synthesis(user_id: str) -> dict:
     llm_available = False
     cfg = _get_llm_cfg()
     if cfg:
-        base = " ".join(x for x in (emotion.get("date"), dashboard.get("updated")) if x)
         for attempt in (1, 2):
             try:
                 prompt = _build_prompt(dashboard, emotion, concept, radar, regime, guide)
