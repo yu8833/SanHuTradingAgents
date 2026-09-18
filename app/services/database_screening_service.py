@@ -203,7 +203,7 @@ class DatabaseScreeningService:
             
         except Exception as e:
             logger.error(f"❌ 数据库筛选失败: {e}")
-            raise Exception(f"数据库筛选失败: {str(e)}")
+            raise Exception(f"数据库筛选失败: {str(e)}") from e
     
     async def _build_query(self, conditions: list[dict[str, Any]]) -> dict[str, Any]:
         """构建MongoDB查询条件"""

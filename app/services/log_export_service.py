@@ -220,7 +220,7 @@ class LogExportService:
         level: str | None = None,
         start_time: str | None = None,
         end_time: str | None = None,
-        format: str = "zip"
+        fmt: str = "zip"
     ) -> str:
         """
         导出日志文件
@@ -252,7 +252,7 @@ class LogExportService:
             # 生成导出文件名
             timestamp = now_tz().strftime("%Y%m%d_%H%M%S")
             
-            if format == "zip":
+            if fmt == "zip":
                 export_path = export_dir / f"logs_export_{timestamp}.zip"
                 
                 # 创建ZIP文件
@@ -279,7 +279,7 @@ class LogExportService:
                 logger.info(f"✅ 日志导出成功: {export_path}")
                 return str(export_path)
             
-            elif format == "txt":
+            elif fmt == "txt":
                 export_path = export_dir / f"logs_export_{timestamp}.txt"
                 
                 # 合并所有日志到一个文本文件
@@ -308,7 +308,7 @@ class LogExportService:
                 return str(export_path)
             
             else:
-                raise ValueError(f"不支持的导出格式: {format}")
+                raise ValueError(f"不支持的导出格式: {fmt}")
                 
         except Exception as e:
             logger.error(f"❌ 导出日志失败: {e}")

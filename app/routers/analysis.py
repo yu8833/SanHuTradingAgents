@@ -146,7 +146,7 @@ async def submit_single_analysis(
         }
     except Exception as e:
         logger.error(f"❌ 提交单股分析任务失败: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 # 测试路由 - 验证路由是否被正确注册
@@ -384,7 +384,7 @@ async def get_task_status_new(
         raise
     except Exception as e:
         logger.error(f"❌ 获取任务状态失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.get("/tasks/{task_id}/result", response_model=dict[str, Any])
 async def get_task_result(
@@ -943,7 +943,7 @@ async def get_task_result(
         raise
     except Exception as e:
         logger.error(f"❌ [RESULT] 获取任务结果失败: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 @router.get("/tasks/all", response_model=dict[str, Any])
 async def list_all_tasks(
@@ -976,7 +976,7 @@ async def list_all_tasks(
 
     except Exception as e:
         logger.error(f"❌ 获取任务列表失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.get("/tasks", response_model=dict[str, Any])
 async def list_user_tasks(
@@ -1010,7 +1010,7 @@ async def list_user_tasks(
 
     except Exception as e:
         logger.error(f"❌ 获取任务列表失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.post("/batch", response_model=dict[str, Any])
 async def submit_batch_analysis(
@@ -1144,7 +1144,7 @@ async def submit_batch_analysis(
         }
     except Exception as e:
         logger.error(f"❌ [批量分析] 提交失败: {e}", exc_info=True)
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 # 兼容性：保留原有端点
 @router.post("/analyze")
@@ -1162,7 +1162,7 @@ async def analyze_single(
         )
         return {"task_id": task_id, "status": "queued"}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 @router.post("/analyze/batch")
 async def analyze_batch(
@@ -1179,7 +1179,7 @@ async def analyze_batch(
         )
         return {"batch_id": batch_id, "submitted": submitted}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 @router.get("/batches/{batch_id}")
 async def get_batch(batch_id: str, user: dict = Depends(get_current_user)):
@@ -1272,7 +1272,7 @@ async def get_batch(batch_id: str, user: dict = Depends(get_current_user)):
         raise
     except Exception as e:
         logger.error(f"❌ 获取批次进度失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 async def batch_progress_generator(batch_id: str, user_id: str):
@@ -1431,7 +1431,7 @@ async def cancel_task(
         else:
             raise HTTPException(status_code=400, detail="取消任务失败")
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 @router.get("/user/queue-status")
 async def get_user_queue_status(
@@ -1446,7 +1446,7 @@ async def get_user_queue_status(
             "data": status
         }
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 @router.get("/user/history")
 async def get_user_analysis_history(
@@ -1625,7 +1625,7 @@ async def get_user_analysis_history(
             "message": "历史查询成功",
         }
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 # WebSocket 端点
 @router.websocket("/ws/task/{task_id}")
@@ -1705,7 +1705,7 @@ async def get_zombie_tasks(
         }
     except Exception as e:
         logger.error(f"❌ 获取僵尸任务失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取僵尸任务失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取僵尸任务失败: {str(e)}") from e
 
 
 @router.post("/admin/cleanup-zombie-tasks")
@@ -1732,7 +1732,7 @@ async def cleanup_zombie_tasks(
         }
     except Exception as e:
         logger.error(f"❌ 清理僵尸任务失败: {e}")
-        raise HTTPException(status_code=500, detail=f"清理僵尸任务失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"清理僵尸任务失败: {str(e)}") from e
 
 
 @router.post("/tasks/{task_id}/mark-failed")
@@ -1788,7 +1788,7 @@ async def mark_task_as_failed(
             }
     except Exception as e:
         logger.error(f"❌ 标记任务失败: {e}")
-        raise HTTPException(status_code=500, detail=f"标记任务失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"标记任务失败: {str(e)}") from e
 
 
 @router.delete("/tasks/{task_id}")
@@ -1826,4 +1826,4 @@ async def delete_task(
             }
     except Exception as e:
         logger.error(f"❌ 删除任务失败: {e}")
-        raise HTTPException(status_code=500, detail=f"删除任务失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"删除任务失败: {str(e)}") from e

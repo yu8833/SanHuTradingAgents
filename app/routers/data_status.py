@@ -239,4 +239,4 @@ async def get_data_status():
         }
     except Exception as e:
         logger.error(f"获取数据状态失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取数据状态失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取数据状态失败: {str(e)}") from e

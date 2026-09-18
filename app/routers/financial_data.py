@@ -85,7 +85,7 @@ async def query_financial_data(
         
     except Exception as e:
         logger.error(f"❌ 查询财务数据失败 {symbol}: {e}")
-        raise HTTPException(status_code=500, detail=f"查询财务数据失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"查询财务数据失败: {str(e)}") from e
 
 
 @router.get("/latest/{symbol}", summary="获取最新财务数据")
@@ -118,7 +118,7 @@ async def get_latest_financial_data(
         
     except Exception as e:
         logger.error(f"❌ 获取最新财务数据失败 {symbol}: {e}")
-        raise HTTPException(status_code=500, detail=f"获取最新财务数据失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取最新财务数据失败: {str(e)}") from e
 
 
 @router.get("/statistics", summary="获取财务数据统计")
@@ -142,7 +142,7 @@ async def get_financial_statistics() -> dict:
         
     except Exception as e:
         logger.error(f"❌ 获取财务数据统计失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取财务数据统计失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取财务数据统计失败: {str(e)}") from e
 
 
 @router.post("/sync/start", summary="启动财务数据同步")
@@ -178,7 +178,7 @@ async def start_financial_sync(
         
     except Exception as e:
         logger.error(f"❌ 启动财务数据同步失败: {e}")
-        raise HTTPException(status_code=500, detail=f"启动财务数据同步失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"启动财务数据同步失败: {str(e)}") from e
 
 
 @router.post("/sync/single", summary="同步单只股票财务数据")
@@ -215,7 +215,7 @@ async def sync_single_stock_financial(
         
     except Exception as e:
         logger.error(f"❌ 单股票财务数据同步失败 {request.symbol}: {e}")
-        raise HTTPException(status_code=500, detail=f"单股票财务数据同步失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"单股票财务数据同步失败: {str(e)}") from e
 
 
 @router.get("/sync/statistics", summary="获取同步统计信息")
@@ -236,7 +236,7 @@ async def get_sync_statistics() -> dict:
         
     except Exception as e:
         logger.error(f"❌ 获取同步统计信息失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取同步统计信息失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取同步统计信息失败: {str(e)}") from e
 
 
 @router.get("/health", summary="财务数据服务健康检查")

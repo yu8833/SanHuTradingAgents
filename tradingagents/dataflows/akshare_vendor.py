@@ -273,7 +273,7 @@ def get_global_news(
             df = df.head(limit)
             return f"=== 全球财经新闻 (akshare 财联社)\n共 {len(df)} 条\n" + _df_to_str(df, limit)
     except Exception as e:
-        raise ValueError(f"akshare 全球新闻获取失败: {e}")
+        raise ValueError(f"akshare 全球新闻获取失败: {e}") from e
     raise ValueError("akshare 无全球新闻数据")
 
 
@@ -375,7 +375,7 @@ def get_northbound_flow(
         if df is not None and not df.empty:
             lines.append("=== 北向资金净流入 (akshare)\n" + _df_to_str(df.tail(20), 20))
     except Exception as e:
-        raise ValueError(f"akshare 北向资金数据获取失败: {e}")
+        raise ValueError(f"akshare 北向资金数据获取失败: {e}") from e
 
     try:
         south = ak.stock_hsgt_south_net_flow_in_em(symbol="南向")
@@ -473,7 +473,7 @@ def get_lockup_expiry(
         if detail is not None and not detail.empty:
             return f"=== {code} 限售解禁明细 (akshare)\n" + _df_to_str(detail, 30)
     except Exception as e:
-        raise ValueError(f"akshare 限售解禁数据获取失败: {e}")
+        raise ValueError(f"akshare 限售解禁数据获取失败: {e}") from e
 
     raise ValueError(f"akshare 无解禁数据: {code}")
 
@@ -490,5 +490,5 @@ def get_industry_comparison(
         if df is not None and not df.empty:
             return f"=== 行业板块涨跌幅排行 (akshare)\n共 {len(df)} 个行业\n" + _df_to_str(df, top_n * 2)
     except Exception as e:
-        raise ValueError(f"akshare 行业对比数据获取失败: {e}")
+        raise ValueError(f"akshare 行业对比数据获取失败: {e}") from e
     raise ValueError("akshare 无行业对比数据")

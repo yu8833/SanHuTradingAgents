@@ -52,7 +52,7 @@ async def get_usage_records(
         }
     except Exception as e:
         logger.error(f"获取使用记录失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/statistics", summary="获取使用统计")
@@ -77,7 +77,7 @@ async def get_usage_statistics(
         }
     except Exception as e:
         logger.error(f"获取使用统计失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/cost/by-provider", summary="按供应商统计成本")
@@ -96,7 +96,7 @@ async def get_cost_by_provider(
         }
     except Exception as e:
         logger.error(f"获取成本统计失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/cost/by-model", summary="按模型统计成本")
@@ -115,7 +115,7 @@ async def get_cost_by_model(
         }
     except Exception as e:
         logger.error(f"获取成本统计失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/cost/daily", summary="每日成本统计")
@@ -134,7 +134,7 @@ async def get_daily_cost(
         }
     except Exception as e:
         logger.error(f"获取每日成本失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.delete("/records/old", summary="删除旧记录")
@@ -153,5 +153,5 @@ async def delete_old_records(
         }
     except Exception as e:
         logger.error(f"删除旧记录失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 

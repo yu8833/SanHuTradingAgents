@@ -97,7 +97,7 @@ class DatabaseService:
                 "collections": collections_info
             }
         except Exception as e:
-            raise Exception(f"获取数据库统计失败: {str(e)}")
+            raise Exception(f"获取数据库统计失败: {str(e)}") from e
 
     async def test_connections(self) -> dict[str, Any]:
         """测试数据库连接（委托子模块）"""
@@ -157,14 +157,14 @@ class DatabaseService:
         """清理操作日志（委托子模块）"""
         return await _db_cleanup.cleanup_operation_logs(days)
 
-    async def import_data(self, content: bytes, collection: str, format: str = "json",
+    async def import_data(self, content: bytes, collection: str, fmt: str = "json",
                          overwrite: bool = False, filename: str = None) -> dict[str, Any]:
         """导入数据（委托子模块）"""
-        return await _db_backups.import_data(content, collection, format=format, overwrite=overwrite, filename=filename)
+        return await _db_backups.import_data(content, collection, fmt=fmt, overwrite=overwrite, filename=filename)
 
-    async def export_data(self, collections: list[str] = None, format: str = "json", sanitize: bool = False) -> str:
+    async def export_data(self, collections: list[str] = None, fmt: str = "json", sanitize: bool = False) -> str:
         """导出数据（委托子模块）"""
-        return await _db_backups.export_data(collections, export_dir=self.export_dir, format=format, sanitize=sanitize)
+        return await _db_backups.export_data(collections, export_dir=self.export_dir, fmt=fmt, sanitize=sanitize)
 
     def _serialize_document(self, doc: dict) -> dict:
         """序列化文档，处理特殊类型（委托子模块）"""

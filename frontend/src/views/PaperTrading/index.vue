@@ -110,10 +110,10 @@
               <span class="col-title">
                 <span class="dot dot-sell"></span>持仓卖出
               </span>
-              <el-tag v-if="sells.length" size="small" type="success" effect="plain">{{ sells.length }}</el-tag>
+              <el-tag v-if="sells.length" size="small" type="success" effect="plain">{{ realSells.length }}</el-tag>
               <span v-else class="col-empty-note">暂无信号</span>
             </div>
-            <el-table v-if="sells.length" :data="sells" size="small" class="ms-table">
+            <el-table v-if="sells.length" :data="sortedSells" size="small" class="ms-table" :row-class-name="sellRowClass">
               <el-table-column label="股票" min-width="120">
                 <template #default="{ row }">
                   <div class="stk">
@@ -145,10 +145,11 @@
               </el-table-column>
               <el-table-column label="" width="76" align="right">
                 <template #default="{ row }">
-                  <el-button size="small" class="act act-sell" @click="sellFromSignal(row)">卖出</el-button>
+                  <el-button size="small" class="act act-sell" :disabled="isHoldSell(row)" @click="sellFromSignal(row)">卖出</el-button>
                 </template>
               </el-table-column>
             </el-table>
+            <div v-if="holdSells.length" class="hold-hint">置灰行 = 卖出信号外的持仓评估（继续持有），不参与卖出操作</div>
             <el-empty v-else description="暂无卖出建议" :image-size="56" />
             <p class="col-note" v-if="!sells.length">持仓暂无卖点触达，止损/止盈建议将在此汇总。</p>
           </div>
@@ -253,6 +254,21 @@ const monitorStatus = computed(() => {
 // 信号清单直接采用综合研判结果（三买三卖体系已废弃，不再按监控开关隐藏信号）
 const buys = computed(() => syn.value?.buys || [])
 const sells = computed(() => syn.value?.sells || [])
+
+/** 是否真正卖出内容（sell_pct>0 为实质卖出建议；=0 的「继续持有」仅做持仓评估展示，非卖出） */
+function isHoldSell(row: any): boolean {
+  return !(Number(row?.sell_pct || 0) > 0)
+}
+
+/** 持仓卖出排序：真实卖出信号在前，非卖出的「继续持有」置灰并排在最低部 */
+const realSells = computed(() => (sells.value || []).filter(s => !isHoldSell(s)))
+const holdSells = computed(() => (sells.value || []).filter(isHoldSell))
+const sortedSells = computed(() => [...realSells.value, ...holdSells.value])
+
+/** 置灰行样式（非卖出内容） */
+function sellRowClass({ row }: any): string {
+  return isHoldSell(row) ? 'sell-row-hold' : ''
+}
 
 /** 买入信号来源徽标（来源类型，信号名由顶部 sig-badge 单独展示，避免重复） */
 function buySource(b: any): { type: string; text: string; full: string } {
@@ -746,6 +762,19 @@ onMounted(() => {
   color: var(--el-text-color-secondary);
   font-weight: 600;
   background: var(--el-fill-color-lighter);
+}
+/* 非卖出内容置灰（继续持有类持仓评估，排在最低部） */
+.ms-table :deep(.sell-row-hold) {
+  opacity: .45;
+  background: var(--el-fill-color-lighter);
+}
+.ms-table :deep(.sell-row-hold .el-button.is-disabled) {
+  opacity: .55;
+}
+.hold-hint {
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--el-text-color-placeholder);
 }
 .stk {
   display: flex;

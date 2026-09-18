@@ -136,11 +136,11 @@ class RetryableLLMWrapper:
         """获取重试配置"""
         return self._caller.config
 
-    async def invoke(self, input: Any, **kwargs) -> Any:
+    async def invoke(self, input: Any, **kwargs) -> Any:  # noqa: A002 langchain 标准签名
         """带重试的 invoke 调用"""
         return await self._caller.call(self._base_llm.invoke, input, **kwargs)
 
-    async def ainvoke(self, input: Any, **kwargs) -> Any:
+    async def ainvoke(self, input: Any, **kwargs) -> Any:  # noqa: A002 langchain 标准签名
         """带重试的 ainvoke 调用"""
         return await self._caller.call(self._base_llm.ainvoke, input, **kwargs)
 
@@ -205,7 +205,7 @@ class RetryableLLM(RetryableLLMWrapper):
     继承自 RetryableLLMWrapper，添加 LangChain 所需的标准方法。
     """
 
-    def invoke(self, input: Any, config: Any = None, **kwargs) -> Any:
+    def invoke(self, input: Any, config: Any = None, **kwargs) -> Any:  # noqa: A002 langchain 标准签名
         """同步调用（LangChain 标准接口）"""
         try:
             loop = asyncio.get_event_loop()
@@ -228,7 +228,7 @@ class RetryableLLM(RetryableLLMWrapper):
                 self._caller.call(self._base_llm.invoke, input, **kwargs)
             )
 
-    async def ainvoke(self, input: Any, config: Any = None, **kwargs) -> Any:
+    async def ainvoke(self, input: Any, config: Any = None, **kwargs) -> Any:  # noqa: A002 langchain 标准签名
         """异步调用（LangChain AsyncLLM 接口）"""
         return await self._caller.call(self._base_llm.ainvoke, input, **kwargs)
 

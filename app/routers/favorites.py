@@ -89,7 +89,7 @@ async def get_favorites(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取自选股失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.post("/", response_model=dict)
@@ -152,7 +152,7 @@ async def add_favorite(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"添加自选股失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.put("/{stock_code}", response_model=dict)
@@ -186,7 +186,7 @@ async def update_favorite(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"更新自选股失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.delete("/{stock_code}", response_model=dict)
@@ -212,7 +212,7 @@ async def remove_favorite(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"删除自选股失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.post("/batch-remove", response_model=dict)
@@ -239,7 +239,7 @@ async def batch_remove_favorites(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"批量删除自选股失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.get("/check/{stock_code}", response_model=dict)
@@ -255,7 +255,7 @@ async def check_favorite(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"检查自选股状态失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.get("/tags", response_model=dict)
@@ -270,7 +270,7 @@ async def get_user_tags(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取标签失败: {str(e)}"
-        )
+        ) from e
 
 
 class SyncFavoritesRequest(BaseModel):
@@ -356,4 +356,4 @@ async def sync_favorites_realtime(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"同步失败: {str(e)}"
-        )
+        ) from e

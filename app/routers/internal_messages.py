@@ -96,7 +96,7 @@ async def save_internal_messages(request: InternalMessageBatchRequest):
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"保存内部消息失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"保存内部消息失败: {str(e)}") from e
 
 
 @router.post("/query", response_model=dict)
@@ -138,7 +138,7 @@ async def query_internal_messages(request: InternalMessageQueryRequest):
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"查询内部消息失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"查询内部消息失败: {str(e)}") from e
 
 
 @router.get("/latest/{symbol}", response_model=dict)
@@ -164,7 +164,7 @@ async def get_latest_messages(
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取最新消息失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取最新消息失败: {str(e)}") from e
 
 
 @router.get("/search", response_model=dict)
@@ -190,7 +190,7 @@ async def search_messages(
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"搜索消息失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"搜索消息失败: {str(e)}") from e
 
 
 @router.get("/research-reports/{symbol}", response_model=dict)
@@ -214,7 +214,7 @@ async def get_research_reports(
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取研究报告失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取研究报告失败: {str(e)}") from e
 
 
 @router.get("/analyst-notes/{symbol}", response_model=dict)
@@ -238,7 +238,7 @@ async def get_analyst_notes(
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取分析师笔记失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取分析师笔记失败: {str(e)}") from e
 
 
 @router.get("/statistics", response_model=dict)
@@ -269,7 +269,7 @@ async def get_statistics(
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取统计信息失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取统计信息失败: {str(e)}") from e
 
 
 @router.get("/message-types", response_model=dict)
@@ -364,4 +364,4 @@ async def health_check():
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"健康检查失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"健康检查失败: {str(e)}") from e

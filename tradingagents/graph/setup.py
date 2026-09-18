@@ -30,7 +30,7 @@ class GraphSetup:
 
     def setup_graph(
         self,
-        selected_analysts=["market", "social", "news", "fundamentals", "policy", "hot_money", "lockup"],
+        selected_analysts=None,
         mode="full",
     ):
         """Set up and compile the agent workflow graph.
@@ -48,6 +48,8 @@ class GraphSetup:
                 - "full": 完整链（含多空辩论 + 风险辩论 + 组合经理二审）
                 - "light": 精简链（跳过辩论与风控二审，更快出结论）
         """
+        if selected_analysts is None:
+            selected_analysts = ["market", "social", "news", "fundamentals", "policy", "hot_money", "lockup"]
         if len(selected_analysts) == 0:
             raise ValueError("Trading Agents Graph Setup Error: no analysts selected!")
 

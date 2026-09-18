@@ -100,7 +100,7 @@ async def get_database_status():
         
     except Exception as e:
         logger.error(f"获取数据库状态失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取数据库状态失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取数据库状态失败: {str(e)}") from e
 
 
 @router.get("/connection-test")
@@ -137,7 +137,7 @@ async def test_akshare_connection():
         
     except Exception as e:
         logger.error(f"AKShare连接测试失败: {e}")
-        raise HTTPException(status_code=500, detail=f"连接测试失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"连接测试失败: {str(e)}") from e
 
 
 @router.post("/start-full")
@@ -195,7 +195,7 @@ async def start_full_initialization(
     except Exception as e:
         _initialization_status["is_running"] = False
         logger.error(f"启动完整初始化失败: {e}")
-        raise HTTPException(status_code=500, detail=f"启动初始化失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"启动初始化失败: {str(e)}") from e
 
 
 @router.post("/start-basic-sync")
@@ -251,7 +251,7 @@ async def start_basic_sync(
     except Exception as e:
         _initialization_status["is_running"] = False
         logger.error(f"启动基础信息同步失败: {e}")
-        raise HTTPException(status_code=500, detail=f"启动同步失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"启动同步失败: {str(e)}") from e
 
 
 @router.get("/initialization-status")
@@ -318,7 +318,7 @@ async def stop_initialization(current_user: dict = Depends(get_current_user)):
         
     except Exception as e:
         logger.error(f"停止初始化任务失败: {e}")
-        raise HTTPException(status_code=500, detail=f"停止任务失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"停止任务失败: {str(e)}") from e
 
 
 async def _run_full_initialization_background(historical_days: int, force: bool):

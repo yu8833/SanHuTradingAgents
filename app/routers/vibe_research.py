@@ -561,7 +561,7 @@ async def sectors(current_user: dict = Depends(get_optional_current_user)):
         return ok(data)
     except Exception as e:
         logger.error(f"板块数据读取异常: {e}")
-        raise HTTPException(500, f"板块数据读取异常: {e}")
+        raise HTTPException(500, f"板块数据读取异常: {e}") from e
 
 
 # ---------------------------------------------------------------------------

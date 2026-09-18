@@ -85,8 +85,8 @@ async def create_backup_native(name: str, backup_dir: str, collections: list[str
     try:
         await asyncio.to_thread(_run_mongodump)
         logger.info(f"✅ mongodump 备份完成: {name}")
-    except subprocess.TimeoutExpired:
-        raise Exception("备份超时（超过1小时）")
+    except subprocess.TimeoutExpired as e:
+        raise Exception("备份超时（超过1小时）") from e
     except Exception as e:
         logger.error(f"❌ mongodump 备份失败: {e}")
         # 清理失败的备份目录
@@ -264,7 +264,7 @@ def _convert_date_fields(doc: dict) -> dict:
     return doc
 
 
-async def import_data(content: bytes, collection: str, *, format: str = "json", overwrite: bool = False, filename: str | None = None) -> dict[str, Any]:
+async def import_data(content: bytes, collection: str, *, fmt: str = "json", overwrite: bool = False, filename: str | None = None) -> dict[str, Any]:
     """
     导入数据到数据库
 
@@ -274,14 +274,14 @@ async def import_data(content: bytes, collection: str, *, format: str = "json", 
     """
     db = get_mongo_db()
 
-    if format.lower() == "json":
+    if fmt.lower() == "json":
         # 🔥 使用 asyncio.to_thread 将阻塞的 JSON 解析放到线程池执行
         def _parse_json():
             return json.loads(content.decode("utf-8"))
 
         data = await asyncio.to_thread(_parse_json)
     else:
-        raise Exception(f"不支持的格式: {format}")
+        raise Exception(f"不支持的格式: {fmt}")
 
     # 检测是否为多集合导出格式
     logger.info(f"🔍 [导入检测] 数据类型: {type(data)}")
@@ -351,7 +351,7 @@ async def import_data(content: bytes, collection: str, *, format: str = "json", 
             "total_collections": len(imported_collections),
             "total_inserted": total_inserted,
             "filename": filename,
-            "format": format,
+            "format": fmt,
             "overwrite": overwrite,
         }
     else:
@@ -396,7 +396,7 @@ async def import_data(content: bytes, collection: str, *, format: str = "json", 
             "collection": collection,
             "inserted_count": inserted_count,
             "filename": filename,
-            "format": format,
+            "format": fmt,
             "overwrite": overwrite,
         }
 
@@ -447,7 +447,7 @@ def _sanitize_document(doc: Any) -> Any:
         return doc
 
 
-async def export_data(collections: list[str] | None = None, *, export_dir: str, format: str = "json", sanitize: bool = False) -> str:
+async def export_data(collections: list[str] | None = None, *, export_dir: str, fmt: str = "json", sanitize: bool = False) -> str:
     import pandas as pd
 
     # 🔥 使用异步数据库连接
@@ -480,14 +480,14 @@ async def export_data(collections: list[str] | None = None, *, export_dir: str, 
     if sanitize:
         all_data = _sanitize_document(all_data)
 
-    if format.lower() == "json":
+    if fmt.lower() == "json":
         filename = f"export_{timestamp}.json"
         file_path = os.path.join(export_dir, filename)
         export_data_dict = {
             "export_info": {
                 "created_at": now_tz().isoformat(),
                 "collections": collections,
-                "format": format,
+                "format": fmt,
             },
             "data": all_data,
         }
@@ -500,7 +500,7 @@ async def export_data(collections: list[str] | None = None, *, export_dir: str, 
         await asyncio.to_thread(_write_json)
         return file_path
 
-    if format.lower() == "csv":
+    if fmt.lower() == "csv":
         filename = f"export_{timestamp}.csv"
         file_path = os.path.join(export_dir, filename)
         rows: list[dict] = []
@@ -520,7 +520,7 @@ async def export_data(collections: list[str] | None = None, *, export_dir: str, 
         await asyncio.to_thread(_write_csv)
         return file_path
 
-    if format.lower() in ["xlsx", "excel"]:
+    if fmt.lower() in ["xlsx", "excel"]:
         filename = f"export_{timestamp}.xlsx"
         file_path = os.path.join(export_dir, filename)
 
@@ -535,5 +535,5 @@ async def export_data(collections: list[str] | None = None, *, export_dir: str, 
         await asyncio.to_thread(_write_excel)
         return file_path
 
-    raise Exception(f"不支持的导出格式: {format}")
+    raise Exception(f"不支持的导出格式: {fmt}")
 

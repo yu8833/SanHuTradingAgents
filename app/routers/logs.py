@@ -82,7 +82,7 @@ async def list_log_files(
         
     except Exception as e:
         logger.error(f"❌ 获取日志文件列表失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取日志文件列表失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取日志文件列表失败: {str(e)}") from e
 
 
 @router.post("/read", response_model=LogContentResponse)
@@ -115,10 +115,10 @@ async def read_log_file(
         return content
         
     except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
         logger.error(f"❌ 读取日志文件失败: {e}")
-        raise HTTPException(status_code=500, detail=f"读取日志文件失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"读取日志文件失败: {str(e)}") from e
 
 
 @router.post("/export")
@@ -147,7 +147,7 @@ async def export_logs(
             level=request.level,
             start_time=request.start_time,
             end_time=request.end_time,
-            format=request.format
+            fmt=request.format
         )
         
         # 返回文件下载
@@ -163,10 +163,10 @@ async def export_logs(
         )
         
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error(f"❌ 导出日志文件失败: {e}")
-        raise HTTPException(status_code=500, detail=f"导出日志文件失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"导出日志文件失败: {str(e)}") from e
 
 
 @router.get("/statistics", response_model=LogStatisticsResponse)
@@ -193,7 +193,7 @@ async def get_log_statistics(
         
     except Exception as e:
         logger.error(f"❌ 获取日志统计失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取日志统计失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取日志统计失败: {str(e)}") from e
 
 
 @router.delete("/files/{filename}")
@@ -230,5 +230,5 @@ async def delete_log_file(
         raise
     except Exception as e:
         logger.error(f"❌ 删除日志文件失败: {e}")
-        raise HTTPException(status_code=500, detail=f"删除日志文件失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"删除日志文件失败: {str(e)}") from e
 

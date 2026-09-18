@@ -1841,7 +1841,7 @@ async def get_reports_list(
 
     except Exception as e:
         logger.error(f"❌ 获取报告列表失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.get("/{report_id}/detail")
 async def get_report_detail(
@@ -2034,7 +2034,7 @@ async def get_report_detail(
         raise
     except Exception as e:
         logger.error(f"❌ 获取报告详情失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.get("/{report_id}/content/{module}")
 async def get_report_module_content(
@@ -2080,7 +2080,7 @@ async def get_report_module_content(
         raise
     except Exception as e:
         logger.error(f"❌ 获取报告模块内容失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.delete("/{report_id}")
 async def delete_report(
@@ -2111,12 +2111,12 @@ async def delete_report(
         raise
     except Exception as e:
         logger.error(f"❌ 删除报告失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 @router.get("/{report_id}/download")
 async def download_report(
     report_id: str,
-    format: str = Query("markdown", description="下载格式: markdown, json, pdf, docx"),
+    format: str = Query("markdown", description="下载格式: markdown, json, pdf, docx"),  # noqa: A002 API query 字段名，不能改
     user: dict = Depends(get_current_user)
 ):
     """下载报告
@@ -2268,7 +2268,7 @@ async def download_report(
                 )
             except Exception as e:
                 logger.error(f"❌ Word 文档生成失败: {e}")
-                raise HTTPException(status_code=500, detail=f"Word 文档生成失败: {str(e)}")
+                raise HTTPException(status_code=500, detail=f"Word 文档生成失败: {str(e)}") from e
 
         elif format == "pdf":
             # PDF 格式下载
@@ -2297,15 +2297,15 @@ async def download_report(
                         "Content-Disposition": f"attachment; filename={filename}; filename*=UTF-8''{filename_zh_encoded}"
                     }
                 )
-            except FileNotFoundError:
+            except FileNotFoundError as e:
                 logger.error("❌ wkhtmltopdf 命令未找到")
                 raise HTTPException(
                     status_code=400,
                     detail="PDF 导出功能不可用：缺少 wkhtmltopdf。请先安装后再试。"
-                )
+                ) from e
             except Exception as e:
                 logger.error(f"❌ PDF 文档生成失败: {e}")
-                raise HTTPException(status_code=500, detail=f"PDF 文档生成失败: {str(e)}")
+                raise HTTPException(status_code=500, detail=f"PDF 文档生成失败: {str(e)}") from e
 
         else:
             raise HTTPException(status_code=400, detail=f"不支持的下载格式: {format}")
@@ -2314,4 +2314,4 @@ async def download_report(
         raise
     except Exception as e:
         logger.error(f"❌ 下载报告失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e

@@ -249,7 +249,7 @@ class PortfolioService:
 
         except Exception as e:
             logger.error(f"❌ 创建持仓失败: {e}", exc_info=True)
-            raise Exception(f"创建持仓失败: {str(e)}")
+            raise Exception(f"创建持仓失败: {str(e)}") from e
 
     async def get_positions(self, user_id: str) -> list[dict[str, Any]]:
         """获取用户所有持仓（quantity > 0 的未平仓持仓）"""
@@ -267,7 +267,7 @@ class PortfolioService:
 
         except Exception as e:
             logger.error(f"❌ 获取持仓列表失败: {e}", exc_info=True)
-            raise Exception(f"获取持仓列表失败: {str(e)}")
+            raise Exception(f"获取持仓列表失败: {str(e)}") from e
 
     async def update_position(self, position_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
         """
@@ -315,7 +315,7 @@ class PortfolioService:
 
         except Exception as e:
             logger.error(f"❌ 更新持仓失败: {e}", exc_info=True)
-            raise Exception(f"更新持仓失败: {str(e)}")
+            raise Exception(f"更新持仓失败: {str(e)}") from e
 
     async def delete_position(self, position_id: str) -> bool:
         """删除持仓记录（仅用于手动管理，模拟交易卖出时自动删除）"""
@@ -334,7 +334,7 @@ class PortfolioService:
 
         except Exception as e:
             logger.error(f"❌ 删除持仓失败: {e}", exc_info=True)
-            raise Exception(f"删除持仓失败: {str(e)}")
+            raise Exception(f"删除持仓失败: {str(e)}") from e
 
     async def close_position(
         self,
@@ -381,7 +381,7 @@ class PortfolioService:
 
         except Exception as e:
             logger.error(f"❌ 平仓失败: {e}", exc_info=True)
-            raise Exception(f"平仓失败: {str(e)}")
+            raise Exception(f"平仓失败: {str(e)}") from e
 
     async def get_open_positions(self, user_id: str) -> list[dict[str, Any]]:
         """获取用户所有未平仓持仓（quantity > 0）"""
@@ -396,7 +396,7 @@ class PortfolioService:
             return [await self._serialize_position(p) for p in positions]
         except Exception as e:
             logger.error(f"❌ 获取未平仓持仓失败: {e}", exc_info=True)
-            raise Exception(f"获取未平仓持仓失败: {str(e)}")
+            raise Exception(f"获取未平仓持仓失败: {str(e)}") from e
 
     async def get_positions_by_strategy(
         self, user_id: str, strategy: str
@@ -414,7 +414,7 @@ class PortfolioService:
             return [await self._serialize_position(p) for p in positions]
         except Exception as e:
             logger.error(f"❌ 按策略获取持仓失败: {e}", exc_info=True)
-            raise Exception(f"按策略获取持仓失败: {str(e)}")
+            raise Exception(f"按策略获取持仓失败: {str(e)}") from e
 
     async def get_closed_positions(
         self, user_id: str, strategy: str | None = None
@@ -459,7 +459,7 @@ class PortfolioService:
             return closed
         except Exception as e:
             logger.error(f"❌ 获取已平仓持仓失败: {e}", exc_info=True)
-            raise Exception(f"获取已平仓持仓失败: {str(e)}")
+            raise Exception(f"获取已平仓持仓失败: {str(e)}") from e
 
     async def get_strategy_performance(
         self, user_id: str, strategy: str | None = None
@@ -524,7 +524,7 @@ class PortfolioService:
             }
         except Exception as e:
             logger.error(f"❌ 获取策略表现失败: {e}", exc_info=True)
-            raise Exception(f"获取策略表现失败: {str(e)}")
+            raise Exception(f"获取策略表现失败: {str(e)}") from e
 
     async def import_positions(self, positions: list[Position]) -> int:
         """批量导入持仓（写入 paper_positions，附带策略元数据）"""
@@ -568,7 +568,7 @@ class PortfolioService:
 
         except Exception as e:
             logger.error(f"❌ 批量导入持仓失败: {e}", exc_info=True)
-            raise Exception(f"批量导入持仓失败: {str(e)}")
+            raise Exception(f"批量导入持仓失败: {str(e)}") from e
 
     async def get_position_summary(self, user_id: str) -> dict[str, Any]:
         """获取持仓汇总（持仓数量、总成本、市值、盈亏等）"""
@@ -652,7 +652,7 @@ class PortfolioService:
 
         except Exception as e:
             logger.error(f"❌ 获取持仓汇总失败: {e}", exc_info=True)
-            raise Exception(f"获取持仓汇总失败: {str(e)}")
+            raise Exception(f"获取持仓汇总失败: {str(e)}") from e
 
 
 # 创建全局实例

@@ -128,7 +128,7 @@ async def query_stock_news(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"查询股票新闻失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.post("/query", response_model=dict)
@@ -178,7 +178,7 @@ async def query_news_advanced(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"高级新闻查询失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.get("/latest", response_model=dict)
@@ -223,7 +223,7 @@ async def get_latest_news(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取最新新闻失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.get("/search", response_model=dict)
@@ -267,7 +267,7 @@ async def search_news(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"新闻搜索失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.get("/statistics", response_model=dict)
@@ -324,7 +324,7 @@ async def get_news_statistics(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取新闻统计失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.post("/sync/start", response_model=dict)
@@ -376,7 +376,7 @@ async def start_news_sync(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"启动新闻同步失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.post("/sync/single", response_model=dict)
@@ -429,7 +429,7 @@ async def sync_single_stock_news(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"同步股票新闻失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.delete("/cleanup", response_model=dict)
@@ -463,7 +463,7 @@ async def cleanup_old_news(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"清理过期新闻失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.get("/health", response_model=dict)
@@ -484,7 +484,7 @@ async def health_check():
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"健康检查失败: {str(e)}"
-        )
+        ) from e
 
 
 # 后台任务执行函数

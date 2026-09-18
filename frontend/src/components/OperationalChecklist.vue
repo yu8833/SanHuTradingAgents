@@ -46,7 +46,7 @@ const cl = computed(() => (props.checklist && typeof props.checklist === 'object
 const hasData = computed(() => Object.keys(cl.value).length > 0)
 
 /** 点位格：kind 控制颜色 —— 买点/目标=红(看涨)，止损=绿(风险)，其余中性。
- *  减持/卖出 评级的"目标"实为下行退出位、"止损"实为上方失效位，按评级纠正标签与颜色。 */
+ *  减持/卖出 评级时目标位改为「止盈1/止盈2」、止损方向颜色反转（涨破止损=红）。 */
 const pointCells = computed(() => {
   const cells: Array<{ label: string; value: string; kind: 'up' | 'down' | 'flat' | 'warn' }> = []
   const action = String(cl.value['操作方向'] || cl.value['方向'] || '')
@@ -62,10 +62,10 @@ const pointCells = computed(() => {
   }
   push('操作方向', '操作方向', 'flat', true)
   push('入场', '入场', isSell ? 'warn' : 'up', true)
-  // 减持/卖出：目标1/目标2 为下行退出位（绿），止损为上方失效位（红）
-  push(isSell ? '退出位1' : '目标1', '目标1', isSell ? 'down' : 'up', true)
-  push(isSell ? '退出位2' : '目标2', '目标2', isSell ? 'down' : 'up', true)
-  push(isSell ? '上方失效位' : '止损', '止损', isSell ? 'up' : 'down', true)
+  // 减持/卖出：目标1/目标2 为止盈位（绿，下跌到位止盈），止损为上方止损位（红，涨破止损）
+  push(isSell ? '止盈1' : '目标1', '目标1', isSell ? 'down' : 'up', true)
+  push(isSell ? '止盈2' : '目标2', '目标2', isSell ? 'down' : 'up', true)
+  push('止损', '止损', isSell ? 'up' : 'down', true)
   push('风险/回报比', '风险回报比', 'warn', true)
   push('建议仓位', '建议仓位')
   push('持有周期', '持有周期')

@@ -38,7 +38,7 @@ async def list_tags(current_user: dict = Depends(get_current_user)):
         tags = await tags_service.list_tags(current_user["id"])
         return ok(tags)
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"获取标签失败: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"获取标签失败: {e}") from e
 
 
 @router.post("/", response_model=dict)
@@ -53,7 +53,7 @@ async def create_tag(payload: TagCreate, current_user: dict = Depends(get_curren
         return ok(tag, "创建成功")
     except Exception as e:
         # 可能违反唯一索引（同名），返回400
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"创建标签失败: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"创建标签失败: {e}") from e
 
 
 @router.put("/{tag_id}", response_model=dict)
@@ -72,7 +72,7 @@ async def update_tag(tag_id: str, payload: TagUpdate, current_user: dict = Depen
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"更新标签失败: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"更新标签失败: {e}") from e
 
 
 @router.delete("/{tag_id}", response_model=dict)
@@ -85,5 +85,5 @@ async def delete_tag(tag_id: str, current_user: dict = Depends(get_current_user)
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"删除标签失败: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"删除标签失败: {e}") from e
 

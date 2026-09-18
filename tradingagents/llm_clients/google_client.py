@@ -13,7 +13,7 @@ class NormalizedChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
     This normalizes to string for consistent downstream handling.
     """
 
-    def invoke(self, input, config=None, **kwargs):
+    def invoke(self, input, config=None, **kwargs):  # noqa: A002 langchain 标准签名
         return normalize_content(super().invoke(input, config, **kwargs))
 
 

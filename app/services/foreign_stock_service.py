@@ -1829,7 +1829,7 @@ class ForeignStockService:
                 return news_list
             except Exception as e:
                 logger.debug(f"AKShare 东方财富接口失败: {e}")
-                raise Exception("AKShare 暂不支持港股新闻")
+                raise Exception("AKShare 暂不支持港股新闻") from e
 
         except Exception as e:
             logger.warning(f"⚠️ AKShare获取港股新闻失败: {e}")

@@ -106,7 +106,7 @@ async def get_database_status(
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取数据库状态失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取数据库状态失败: {str(e)}") from e
 
 
 @router.get("/initialization-status", response_model=dict)
@@ -131,7 +131,7 @@ async def get_initialization_status(
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取初始化状态失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取初始化状态失败: {str(e)}") from e
 
 
 @router.post("/start-basic", response_model=dict)
@@ -155,7 +155,7 @@ async def start_basic_initialization(
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"启动基础信息初始化失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"启动基础信息初始化失败: {str(e)}") from e
 
 
 @router.post("/start-full", response_model=dict)
@@ -188,7 +188,7 @@ async def start_full_initialization(
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"启动完整数据初始化失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"启动完整数据初始化失败: {str(e)}") from e
 
 
 @router.post("/stop", response_model=dict)
@@ -221,7 +221,7 @@ async def stop_initialization(
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"停止初始化任务失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"停止初始化任务失败: {str(e)}") from e
 
 
 async def _run_basic_initialization():

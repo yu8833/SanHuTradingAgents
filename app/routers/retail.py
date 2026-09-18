@@ -147,7 +147,7 @@ async def detect_regime_auto(user=Depends(get_current_user)):
         }
     except Exception as e:
         logger.error(f"自动检测市场环境失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"自动检测市场环境失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"自动检测市场环境失败: {str(e)}") from e
 
 
 @router.get("/strategies")

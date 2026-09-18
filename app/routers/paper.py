@@ -325,7 +325,7 @@ async def place_order(payload: PlaceOrderRequest, current_user: dict = Depends(g
         )
         return ok({"order": order})
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.get("/positions", response_model=dict)
@@ -413,8 +413,8 @@ async def delete_order(order_id: str, current_user: dict = Depends(get_current_u
     db = get_mongo_db()
     try:
         oid = ObjectId(order_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="无效的订单 ID")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="无效的订单 ID") from e
     result = await db["paper_orders"].delete_one({"_id": oid, "user_id": current_user["id"]})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="订单不存在")

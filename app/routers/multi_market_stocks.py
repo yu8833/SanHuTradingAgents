@@ -129,7 +129,7 @@ async def search_stocks(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"搜索失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.get("/{market}/stocks/{code}/info", response_model=dict)
@@ -192,7 +192,7 @@ async def get_stock_info(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取股票信息失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.get("/{market}/stocks/{code}/quote", response_model=dict)
@@ -253,7 +253,7 @@ async def get_stock_quote(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取股票行情失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.get("/{market}/stocks/{code}/daily", response_model=dict)
@@ -323,5 +323,5 @@ async def get_stock_daily_quotes(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取历史K线失败: {str(e)}"
-        )
+        ) from e
 

@@ -32,7 +32,7 @@ async def get_alerts(
         return ok(alerts)
     except Exception as e:
         logger.error(f"❌ 获取预警列表失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取预警列表失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取预警列表失败: {str(e)}") from e
 
 
 @router.post("/alerts", response_model=dict)
@@ -54,7 +54,7 @@ async def create_alert(
         raise
     except Exception as e:
         logger.error(f"❌ 创建预警失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"创建预警失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"创建预警失败: {str(e)}") from e
 
 
 @router.put("/alerts/{alert_id}", response_model=dict)
@@ -73,7 +73,7 @@ async def update_alert(
         raise
     except Exception as e:
         logger.error(f"❌ 更新预警失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"更新预警失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"更新预警失败: {str(e)}") from e
 
 
 @router.delete("/alerts/{alert_id}", response_model=dict)
@@ -91,4 +91,4 @@ async def delete_alert(
         raise
     except Exception as e:
         logger.error(f"❌ 删除预警失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"删除预警失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"删除预警失败: {str(e)}") from e

@@ -45,7 +45,7 @@ async def get_stock_basic_info(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取股票基础信息失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.get("/quotes/{symbol}", response_model=MarketQuotesResponse)
@@ -82,7 +82,7 @@ async def get_market_quotes(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取实时行情失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.get("/list", response_model=StockListResponse)
@@ -139,7 +139,7 @@ async def get_stock_list(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取股票列表失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.get("/combined/{symbol}")
@@ -197,7 +197,7 @@ async def get_combined_stock_data(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取股票综合数据失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.get("/search")
@@ -284,7 +284,7 @@ async def search_stocks(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"搜索股票失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.get("/markets")
@@ -337,7 +337,7 @@ async def get_market_summary(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取市场概览失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.get("/sync-status/quotes")
@@ -379,4 +379,4 @@ async def get_quotes_sync_status(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取同步状态失败: {str(e)}"
-        )
+        ) from e

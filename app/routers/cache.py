@@ -55,7 +55,7 @@ async def get_cache_stats(current_user: dict = Depends(get_current_user)):
         raise HTTPException(
             status_code=500,
             detail=f"获取缓存统计失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.delete("/cleanup")
@@ -92,7 +92,7 @@ async def cleanup_old_cache(
         raise HTTPException(
             status_code=500,
             detail=f"清理缓存失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.delete("/clear")
@@ -124,7 +124,7 @@ async def clear_all_cache(current_user: dict = Depends(get_current_user)):
         raise HTTPException(
             status_code=500,
             detail=f"清空缓存失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.delete("/item/{cache_type}/{symbol}")
@@ -167,7 +167,7 @@ async def delete_cache_item(
         raise HTTPException(
             status_code=500,
             detail=f"删除缓存项失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.get("/details")
@@ -216,7 +216,7 @@ async def get_cache_details(
         raise HTTPException(
             status_code=500,
             detail=f"获取缓存详情失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.get("/backend-info")
@@ -255,5 +255,5 @@ async def get_cache_backend_info(current_user: dict = Depends(get_current_user))
         raise HTTPException(
             status_code=500,
             detail=f"获取缓存后端信息失败: {str(e)}"
-        )
+        ) from e
 

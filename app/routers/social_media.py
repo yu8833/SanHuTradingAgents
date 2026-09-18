@@ -85,7 +85,7 @@ async def save_social_media_messages(request: SocialMediaBatchRequest):
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"保存社媒消息失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"保存社媒消息失败: {str(e)}") from e
 
 
 @router.post("/query", response_model=dict)
@@ -126,7 +126,7 @@ async def query_social_media_messages(request: SocialMediaQueryRequest):
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"查询社媒消息失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"查询社媒消息失败: {str(e)}") from e
 
 
 @router.get("/latest/{symbol}", response_model=dict)
@@ -150,7 +150,7 @@ async def get_latest_messages(
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取最新消息失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取最新消息失败: {str(e)}") from e
 
 
 @router.get("/search", response_model=dict)
@@ -177,7 +177,7 @@ async def search_messages(
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"搜索消息失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"搜索消息失败: {str(e)}") from e
 
 
 @router.get("/statistics", response_model=dict)
@@ -208,7 +208,7 @@ async def get_statistics(
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取统计信息失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取统计信息失败: {str(e)}") from e
 
 
 @router.get("/platforms", response_model=dict)
@@ -331,7 +331,7 @@ async def get_sentiment_analysis(
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"情绪分析失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"情绪分析失败: {str(e)}") from e
 
 
 @router.get("/health", response_model=dict)
@@ -353,4 +353,4 @@ async def health_check():
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"健康检查失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"健康检查失败: {str(e)}") from e

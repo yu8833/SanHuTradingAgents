@@ -87,7 +87,7 @@ async def get_positions(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取持仓列表失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.post("/positions", response_model=dict)
@@ -126,7 +126,7 @@ async def add_position(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"添加持仓失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.put("/positions/{position_id}", response_model=dict)
@@ -181,7 +181,7 @@ async def update_position(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"更新持仓失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.delete("/positions/{position_id}", response_model=dict)
@@ -212,7 +212,7 @@ async def delete_position(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"删除持仓失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.post("/positions/import", response_model=dict)
@@ -264,7 +264,7 @@ async def import_positions(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"批量导入持仓失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.post("/positions/import-csv", response_model=dict)
@@ -398,7 +398,7 @@ async def import_positions_csv(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"CSV导入失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.get("/summary", response_model=dict)
@@ -424,7 +424,7 @@ async def get_portfolio_summary(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取持仓汇总失败: {str(e)}"
-        )
+        ) from e
 
 
 # ============================================================
@@ -465,7 +465,7 @@ async def close_position(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"平仓失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.get("/open/list")
@@ -479,7 +479,7 @@ async def get_open_positions(user=Depends(get_current_user)):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取未平仓持仓失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.get("/strategy/{strategy}/positions")
@@ -498,7 +498,7 @@ async def get_positions_by_strategy(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"按策略获取持仓失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.get("/strategy/performance")
@@ -517,4 +517,4 @@ async def get_strategy_performance(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取策略表现失败: {str(e)}"
-        )
+        ) from e

@@ -284,7 +284,7 @@ async def get_quote(
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"获取行情失败: {str(e)}"
-            )
+            ) from e
 
     # A股：使用现有逻辑
     db = get_mongo_db()
@@ -663,7 +663,7 @@ async def get_fundamentals(
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"获取基础信息失败: {str(e)}"
-            )
+            ) from e
 
     # A股：使用现有逻辑
     db = get_mongo_db()
@@ -950,7 +950,7 @@ async def get_kline(
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"获取K线数据失败: {str(e)}"
-            )
+            ) from e
 
     # A股：使用现有逻辑
     code_padded = normalized_code
@@ -2079,13 +2079,13 @@ async def get_risk_analysis(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="未找到该股票的风险分析数据"
-        )
+        ) from e
     except Exception as e:
         logger.error(f"获取风险分析数据失败: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取风险分析数据失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.get("/{code}/volume-price", response_model=dict)
@@ -2149,7 +2149,7 @@ async def get_volume_price_analysis(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"量价分析失败: {str(e)}"
-        )
+        ) from e
 
 
 @router.get("/{code}/buy-sell-check", response_model=dict)
@@ -2211,5 +2211,5 @@ async def get_buy_sell_check(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"三买三卖检查失败: {str(e)}"
-        )
+        ) from e
 

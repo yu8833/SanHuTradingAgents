@@ -84,7 +84,7 @@ async def get_data_sources_status():
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get data sources status: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get data sources status: {str(e)}") from e
 
 
 @router.get("/sources/current")
@@ -133,7 +133,7 @@ async def get_current_data_source():
             data=result
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get current data source: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get current data source: {str(e)}") from e
 
 
 @router.get("/status")
@@ -150,7 +150,7 @@ async def get_sync_status():
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get sync status: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get sync status: {str(e)}") from e
 
 
 @router.post("/stock_basics/run")
@@ -202,7 +202,7 @@ async def run_stock_basics_sync(
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to run synchronization: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to run synchronization: {str(e)}") from e
 
 
 async def _test_single_adapter(adapter) -> dict:
@@ -361,7 +361,7 @@ async def test_data_sources(request: TestSourceRequest = TestSourceRequest()):
         raise
     except Exception as e:
         logger.error(f"❌ 测试数据源时出错: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to test data sources: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to test data sources: {str(e)}") from e
 
 
 @router.get("/recommendations")
@@ -414,7 +414,7 @@ async def get_sync_recommendations():
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to generate recommendations: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate recommendations: {str(e)}") from e
 
 
 @router.get("/history")
@@ -463,7 +463,7 @@ async def get_sync_history(
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get sync history: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get sync history: {str(e)}") from e
 
 
 @router.delete("/cache")
@@ -505,4 +505,4 @@ async def clear_sync_cache():
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to clear cache: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to clear cache: {str(e)}") from e

@@ -68,7 +68,7 @@ async def start_multi_period_sync(
         
     except Exception as e:
         logger.error(f"启动多周期同步失败: {e}")
-        raise HTTPException(status_code=500, detail=f"启动同步失败: {e}")
+        raise HTTPException(status_code=500, detail=f"启动同步失败: {e}") from e
 
 
 @router.post("/start-daily", response_model=MultiPeriodSyncResponse)
@@ -99,7 +99,7 @@ async def start_daily_sync(
         
     except Exception as e:
         logger.error(f"启动日线同步失败: {e}")
-        raise HTTPException(status_code=500, detail=f"启动日线同步失败: {e}")
+        raise HTTPException(status_code=500, detail=f"启动日线同步失败: {e}") from e
 
 
 @router.post("/start-weekly", response_model=MultiPeriodSyncResponse)
@@ -130,7 +130,7 @@ async def start_weekly_sync(
         
     except Exception as e:
         logger.error(f"启动周线同步失败: {e}")
-        raise HTTPException(status_code=500, detail=f"启动周线同步失败: {e}")
+        raise HTTPException(status_code=500, detail=f"启动周线同步失败: {e}") from e
 
 
 @router.post("/start-monthly", response_model=MultiPeriodSyncResponse)
@@ -161,7 +161,7 @@ async def start_monthly_sync(
 
     except Exception as e:
         logger.error(f"启动月线同步失败: {e}")
-        raise HTTPException(status_code=500, detail=f"启动月线同步失败: {e}")
+        raise HTTPException(status_code=500, detail=f"启动月线同步失败: {e}") from e
 
 
 @router.post("/start-all-history", response_model=MultiPeriodSyncResponse)
@@ -198,7 +198,7 @@ async def start_all_history_sync(
 
     except Exception as e:
         logger.error(f"启动全历史同步失败: {e}")
-        raise HTTPException(status_code=500, detail=f"启动全历史同步失败: {e}")
+        raise HTTPException(status_code=500, detail=f"启动全历史同步失败: {e}") from e
 
 
 @router.post("/start-incremental", response_model=MultiPeriodSyncResponse)
@@ -243,7 +243,7 @@ async def start_incremental_sync(
 
     except Exception as e:
         logger.error(f"启动增量同步失败: {e}")
-        raise HTTPException(status_code=500, detail=f"启动增量同步失败: {e}")
+        raise HTTPException(status_code=500, detail=f"启动增量同步失败: {e}") from e
 
 
 @router.get("/statistics")
@@ -261,7 +261,7 @@ async def get_sync_statistics():
         
     except Exception as e:
         logger.error(f"获取同步统计失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取统计信息失败: {e}")
+        raise HTTPException(status_code=500, detail=f"获取统计信息失败: {e}") from e
 
 
 @router.get("/period-comparison/{symbol}")
@@ -309,7 +309,7 @@ async def compare_period_data(
         
     except Exception as e:
         logger.error(f"周期数据对比失败 {symbol}: {e}")
-        raise HTTPException(status_code=500, detail=f"周期数据对比失败: {e}")
+        raise HTTPException(status_code=500, detail=f"周期数据对比失败: {e}") from e
 
 
 @router.get("/supported-periods")

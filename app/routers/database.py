@@ -76,7 +76,7 @@ async def get_database_status(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取数据库状态失败: {str(e)}"
-        )
+        ) from e
 
 @router.get("/stats")
 async def get_database_stats(
@@ -96,7 +96,7 @@ async def get_database_stats(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取数据库统计失败: {str(e)}"
-        )
+        ) from e
 
 @router.post("/test")
 async def test_database_connections(
@@ -116,7 +116,7 @@ async def test_database_connections(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"测试数据库连接失败: {str(e)}"
-        )
+        ) from e
 
 @router.post("/backup")
 async def create_backup(
@@ -141,7 +141,7 @@ async def create_backup(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"创建备份失败: {str(e)}"
-        )
+        ) from e
 
 @router.get("/backups")
 async def list_backups(
@@ -160,13 +160,13 @@ async def list_backups(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取备份列表失败: {str(e)}"
-        )
+        ) from e
 
 @router.post("/import")
 async def import_data(
     file: UploadFile = File(...),
     collection: str = "imported_data",
-    format: str = "json",
+    format: str = "json",  # noqa: A002 API query 字段名，不能改
     overwrite: bool = False,
     current_user: dict = Depends(get_current_user)
 ):
@@ -184,7 +184,7 @@ async def import_data(
         result = await database_service.import_data(
             content=content,
             collection=collection,
-            format=format,
+            fmt=format,
             overwrite=overwrite,
             filename=file.filename
         )
@@ -203,7 +203,7 @@ async def import_data(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"导入数据失败: {str(e)}"
-        )
+        ) from e
 
 @router.post("/export")
 async def export_data(
@@ -217,7 +217,7 @@ async def export_data(
 
         file_path = await database_service.export_data(
             collections=request.collections,
-            format=request.format,
+            fmt=request.format,
             sanitize=request.sanitize
         )
 
@@ -231,7 +231,7 @@ async def export_data(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"导出数据失败: {str(e)}"
-        )
+        ) from e
 
 @router.delete("/backups/{backup_id}")
 async def delete_backup(
@@ -251,7 +251,7 @@ async def delete_backup(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"删除备份失败: {str(e)}"
-        )
+        ) from e
 
 @router.post("/cleanup")
 async def cleanup_old_data(
@@ -272,7 +272,7 @@ async def cleanup_old_data(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"清理数据失败: {str(e)}"
-        )
+        ) from e
 
 @router.post("/cleanup/analysis")
 async def cleanup_analysis_results(
@@ -293,7 +293,7 @@ async def cleanup_analysis_results(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"清理分析结果失败: {str(e)}"
-        )
+        ) from e
 
 @router.post("/cleanup/logs")
 async def cleanup_operation_logs(
@@ -314,4 +314,4 @@ async def cleanup_operation_logs(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"清理操作日志失败: {str(e)}"
-        )
+        ) from e

@@ -90,7 +90,7 @@ async def get_historical_data(
         
     except Exception as e:
         logger.error(f"查询历史数据失败 {symbol}: {e}")
-        raise HTTPException(status_code=500, detail=f"查询失败: {e}")
+        raise HTTPException(status_code=500, detail=f"查询失败: {e}") from e
 
 
 @router.post("/query", response_model=HistoricalDataResponse)
@@ -127,7 +127,7 @@ async def query_historical_data(request: HistoricalDataQuery):
         
     except Exception as e:
         logger.error(f"查询历史数据失败 {request.symbol}: {e}")
-        raise HTTPException(status_code=500, detail=f"查询失败: {e}")
+        raise HTTPException(status_code=500, detail=f"查询失败: {e}") from e
 
 
 @router.get("/latest-date/{symbol}")
@@ -152,7 +152,7 @@ async def get_latest_date(
         
     except Exception as e:
         logger.error(f"获取最新日期失败 {symbol}: {e}")
-        raise HTTPException(status_code=500, detail=f"查询失败: {e}")
+        raise HTTPException(status_code=500, detail=f"查询失败: {e}") from e
 
 
 @router.get("/statistics")
@@ -170,7 +170,7 @@ async def get_data_statistics():
         
     except Exception as e:
         logger.error(f"获取统计信息失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取统计信息失败: {e}")
+        raise HTTPException(status_code=500, detail=f"获取统计信息失败: {e}") from e
 
 
 @router.get("/compare/{symbol}")
@@ -215,7 +215,7 @@ async def compare_data_sources(
         
     except Exception as e:
         logger.error(f"数据对比失败 {symbol}: {e}")
-        raise HTTPException(status_code=500, detail=f"数据对比失败: {e}")
+        raise HTTPException(status_code=500, detail=f"数据对比失败: {e}") from e
 
 
 @router.get("/health")

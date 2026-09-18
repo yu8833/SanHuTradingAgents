@@ -89,7 +89,7 @@ async def list_rules(current_user: dict = Depends(get_current_user)):
         return ok({"rules": rules})
     except Exception as e:
         logger.error(f"❌ 获取监控规则失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取监控规则失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取监控规则失败: {str(e)}") from e
 
 
 # ── 新建 / 更新规则 ─────────────────────────────────────
@@ -106,10 +106,10 @@ async def save_rule(req: RuleModel, current_user: dict = Depends(get_current_use
         rule = await monitor_service.save_rule(rule)
         return ok({"rule": rule}, "规则保存成功")
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error(f"❌ 保存监控规则失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"保存监控规则失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"保存监控规则失败: {str(e)}") from e
 
 
 # ── 删除规则 ─────────────────────────────────────────────
@@ -124,10 +124,10 @@ async def delete_rule(rule_id: str, current_user: dict = Depends(get_current_use
     except HTTPException:
         raise
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error(f"❌ 删除监控规则失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"删除监控规则失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"删除监控规则失败: {str(e)}") from e
 
 
 # ── 常用策略监控（type=strategy）启停/状态 ───────────────
@@ -139,7 +139,7 @@ async def strategy_monitor_status(current_user: dict = Depends(get_current_user)
         return ok({"items": items})
     except Exception as e:
         logger.error(f"❌ 获取策略监控状态失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取策略监控状态失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取策略监控状态失败: {str(e)}") from e
 
 
 @router.post("/strategies/{strategy_id}/monitor")
@@ -152,7 +152,7 @@ async def strategy_monitor_toggle(strategy_id: str, req: StrategyMonitorRequest,
         return ok({"rule": rule}, "策略监控已开启" if req.enabled else "策略监控已关闭")
     except Exception as e:
         logger.error(f"❌ 切换策略监控失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"切换策略监控失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"切换策略监控失败: {str(e)}") from e
 
 
 # ── 三买三卖监控（type=tbs）启停/状态 ────────────────
@@ -164,7 +164,7 @@ async def tbs_monitor_status(current_user: dict = Depends(get_current_user)):
         return ok(status)
     except Exception as e:
         logger.error(f"❌ 获取三买三卖监控状态失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取三买三卖监控状态失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取三买三卖监控状态失败: {str(e)}") from e
 
 
 @router.post("/tbs/monitor")
@@ -175,7 +175,7 @@ async def tbs_monitor_toggle(req: StrategyMonitorRequest, current_user: dict = D
         return ok({"rule": rule}, "三买三卖监控已开启" if req.enabled else "三买三卖监控已关闭")
     except Exception as e:
         logger.error(f"❌ 切换三买三卖监控失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"切换三买三卖监控失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"切换三买三卖监控失败: {str(e)}") from e
 
 
 # ── 触发记录 ─────────────────────────────────────────────
@@ -192,7 +192,7 @@ async def list_alerts(
         return ok({"alerts": alerts, "total": total})
     except Exception as e:
         logger.error(f"❌ 获取触发记录失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取触发记录失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取触发记录失败: {str(e)}") from e
 
 
 @router.delete("/alerts")
@@ -203,7 +203,7 @@ async def clear_alerts(current_user: dict = Depends(get_current_user)):
         return ok({"cleared": n}, "记录已清空")
     except Exception as e:
         logger.error(f"❌ 清空触发记录失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"清空触发记录失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"清空触发记录失败: {str(e)}") from e
 
 
 @router.delete("/alerts/{alert_id}")
@@ -218,7 +218,7 @@ async def delete_alert(alert_id: str, current_user: dict = Depends(get_current_u
         raise
     except Exception as e:
         logger.error(f"❌ 删除触发记录失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"删除触发记录失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"删除触发记录失败: {str(e)}") from e
 
 
 # ── 手动触发评估 ─────────────────────────────────────────
@@ -230,7 +230,7 @@ async def manual_check(current_user: dict = Depends(get_current_user)):
         return ok({"triggered": n}, "评估完成")
     except Exception as e:
         logger.error(f"❌ 手动监控评估失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"手动监控评估失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"手动监控评估失败: {str(e)}") from e
 
 
 # ── 三买三卖待确认指令（type=tbs） ───────────────────────
@@ -247,7 +247,7 @@ async def list_tbs_orders(
         return ok({"orders": orders})
     except Exception as e:
         logger.error(f"❌ 获取待确认指令失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取待确认指令失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取待确认指令失败: {str(e)}") from e
 
 
 @router.post("/tbs/orders/{order_id}/execute")
@@ -267,10 +267,10 @@ async def execute_tbs_order(
         )
         return ok({"order": order}, "指令已执行")
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error(f"❌ 执行待确认指令失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"执行待确认指令失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"执行待确认指令失败: {str(e)}") from e
 
 
 @router.post("/tbs/orders/{order_id}/cancel")
@@ -285,7 +285,7 @@ async def cancel_tbs_order(order_id: str, current_user: dict = Depends(get_curre
         raise
     except Exception as e:
         logger.error(f"❌ 取消待确认指令失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"取消待确认指令失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"取消待确认指令失败: {str(e)}") from e
 
 
 @router.post("/tbs/orders/{order_id}/dismiss")
@@ -300,4 +300,4 @@ async def dismiss_tbs_order(order_id: str, current_user: dict = Depends(get_curr
         raise
     except Exception as e:
         logger.error(f"❌ 忽略待确认指令失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"忽略待确认指令失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"忽略待确认指令失败: {str(e)}") from e

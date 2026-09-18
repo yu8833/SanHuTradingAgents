@@ -590,7 +590,7 @@ pre, code {
                     os.unlink(output_file)
             except Exception:
                 pass
-            raise Exception(f"生成 Word 文档失败: {e}")
+            raise Exception(f"生成 Word 文档失败: {e}") from e
     
     def _markdown_to_html(self, md_content: str) -> str:
         """将 Markdown 转换为 HTML"""
@@ -1042,14 +1042,14 @@ pre, code {
             logger.info(f"✅ PDF 生成成功，大小: {len(pdf_bytes)} 字节")
             return pdf_bytes
             
-        except FileNotFoundError:
+        except FileNotFoundError as e:
             error_msg = "wkhtmltopdf 命令未找到，请先安装 wkhtmltopdf"
             logger.error(f"❌ {error_msg}")
-            raise Exception(error_msg)
+            raise Exception(error_msg) from e
         except Exception as e:
             error_msg = f"PDF 生成失败: {e}"
             logger.error(f"❌ {error_msg}")
-            raise Exception(error_msg)
+            raise Exception(error_msg) from e
     
     def _generate_pdf_with_pandoc(self, md_content: str) -> bytes:
         """使用 pandoc 生成 PDF（备选方案）"""

@@ -592,8 +592,8 @@ def _load_ohlcv_astock(symbol: str, curr_date: str) -> pd.DataFrame:
             df = _sina_kline_fallback(code)
             if df.empty:
                 raise ValueError(f"No OHLCV data from sina for {code}")
-        except Exception:
-            raise ValueError(f"No OHLCV data from mootdx/sina for {code}")
+        except Exception as e:
+            raise ValueError(f"No OHLCV data from mootdx/sina for {code}") from e
 
     df, _ = _supplement_stale_ohlcv_with_sina(code, df, curr_date, start_date=None)
 

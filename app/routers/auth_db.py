@@ -199,7 +199,7 @@ async def register(payload: RegisterRequest, request: Request):
         raise
     except Exception as e:
         logger.error(f"❌ 注册失败: {e}")
-        raise HTTPException(status_code=500, detail=f"注册过程中发生系统错误: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"注册过程中发生系统错误: {str(e)}") from e
 
 @router.post("/login")
 async def login(payload: LoginRequest, request: Request):
@@ -302,7 +302,7 @@ async def login(payload: LoginRequest, request: Request):
             ip_address=ip_address,
             user_agent=user_agent
         )
-        raise HTTPException(status_code=500, detail="登录过程中发生系统错误")
+        raise HTTPException(status_code=500, detail="登录过程中发生系统错误") from e
 
 @router.post("/refresh")
 async def refresh_token(payload: RefreshTokenRequest):
@@ -350,7 +350,7 @@ async def refresh_token(payload: RefreshTokenRequest):
         raise
     except Exception as e:
         logger.error(f"❌ Refresh token处理异常: {str(e)}")
-        raise HTTPException(status_code=401, detail=f"Token refresh failed: {str(e)}")
+        raise HTTPException(status_code=401, detail=f"Token refresh failed: {str(e)}") from e
 
 @router.post("/logout")
 async def logout(request: Request, user: dict = Depends(get_current_user)):
@@ -452,7 +452,7 @@ async def update_me(
         raise
     except Exception as e:
         logger.error(f"更新用户信息失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"更新用户信息失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"更新用户信息失败: {str(e)}") from e
 
 @router.post("/change-password")
 async def change_password(
@@ -481,7 +481,7 @@ async def change_password(
         raise
     except Exception as e:
         logger.error(f"修改密码失败: {e}")
-        raise HTTPException(status_code=500, detail=f"修改密码失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"修改密码失败: {str(e)}") from e
 
 @router.post("/reset-password")
 async def reset_password(
@@ -510,7 +510,7 @@ async def reset_password(
         raise
     except Exception as e:
         logger.error(f"重置密码失败: {e}")
-        raise HTTPException(status_code=500, detail=f"重置密码失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"重置密码失败: {str(e)}") from e
 
 @router.post("/create-user")
 async def create_user(
@@ -563,7 +563,7 @@ async def create_user(
         raise
     except Exception as e:
         logger.error(f"创建用户失败: {e}")
-        raise HTTPException(status_code=500, detail=f"创建用户失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"创建用户失败: {str(e)}") from e
 
 @router.get("/users")
 async def list_users(
@@ -591,7 +591,7 @@ async def list_users(
         raise
     except Exception as e:
         logger.error(f"获取用户列表失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取用户列表失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取用户列表失败: {str(e)}") from e
 
 @router.put("/users/{username}/status")
 async def update_user_status(
@@ -656,7 +656,7 @@ async def update_user_status(
         raise
     except Exception as e:
         logger.error(f"更新用户状态失败: {e}")
-        raise HTTPException(status_code=500, detail=f"更新用户状态失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"更新用户状态失败: {str(e)}") from e
 
 @router.delete("/users/{username}")
 async def delete_user(
@@ -705,4 +705,4 @@ async def delete_user(
         raise
     except Exception as e:
         logger.error(f"删除用户失败: {e}")
-        raise HTTPException(status_code=500, detail=f"删除用户失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"删除用户失败: {str(e)}") from e

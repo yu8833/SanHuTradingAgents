@@ -224,7 +224,7 @@ def macro_indices() -> list[dict]:
     out = global_indices()
     vix = vix_quote()
     if vix:
-        out.extend(vix)
+        out.append(vix)
     out.extend(index_futures())
     # 出口兜底：任一路径混入 NaN/Infinity 都会让 JSON 序列化 500，
     # 这里统一丢弃非有限数值项，避免污染缓存与响应

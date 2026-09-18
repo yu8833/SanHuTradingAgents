@@ -94,7 +94,7 @@ def fetch_stock_basic_df():
 
     except Exception as e:
         logger.error(f"❌ 调用 Tushare API 失败: {e}")
-        raise RuntimeError(f"Failed to fetch stock basic DataFrame: {e}")
+        raise RuntimeError(f"Failed to fetch stock basic DataFrame: {e}") from e
 
 
 def find_latest_trade_date() -> str:

@@ -17,7 +17,7 @@ logger = logging.getLogger("webapi.notifications")
 @router.get("/notifications")
 async def list_notifications(
     status: str | None = Query(None, description="状态: unread|read|all"),
-    type: str | None = Query(None, description="类型: analysis|alert|system"),
+    type: str | None = Query(None, description="类型: analysis|alert|system"),  # noqa: A002 API query 字段名，不能改
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     user: dict = Depends(get_current_user)
@@ -31,7 +31,7 @@ async def list_notifications(
 
 @router.get("/notifications/unread_count")
 async def get_unread_count(
-    type: str | None = Query(None, description="类型: analysis|alert|system"),
+    type: str | None = Query(None, description="类型: analysis|alert|system"),  # noqa: A002 API query 字段名，不能改
     user: dict = Depends(get_current_user)
 ):
     svc = get_notifications_service()
@@ -98,4 +98,4 @@ async def debug_redis_pool(user: dict = Depends(get_current_user)):
         })
     except Exception as e:
         logger.error(f"获取 Redis 连接池信息失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e

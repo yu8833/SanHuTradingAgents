@@ -57,7 +57,7 @@ async def get_database_status():
         
     except Exception as e:
         logger.error(f"获取数据库状态失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取数据库状态失败: {e}")
+        raise HTTPException(status_code=500, detail=f"获取数据库状态失败: {e}") from e
 
 
 @router.get("/connection-test", response_model=dict[str, Any])
@@ -78,7 +78,7 @@ async def test_baostock_connection():
         
     except Exception as e:
         logger.error(f"BaoStock连接测试失败: {e}")
-        raise HTTPException(status_code=500, detail=f"连接测试失败: {e}")
+        raise HTTPException(status_code=500, detail=f"连接测试失败: {e}") from e
 
 
 @router.post("/start-full", response_model=InitializationResponse)
@@ -130,7 +130,7 @@ async def start_full_initialization(
     except Exception as e:
         _initialization_status["is_running"] = False
         logger.error(f"启动完整初始化失败: {e}")
-        raise HTTPException(status_code=500, detail=f"启动初始化失败: {e}")
+        raise HTTPException(status_code=500, detail=f"启动初始化失败: {e}") from e
 
 
 @router.post("/start-basic", response_model=InitializationResponse)
@@ -172,7 +172,7 @@ async def start_basic_initialization(background_tasks: BackgroundTasks):
     except Exception as e:
         _initialization_status["is_running"] = False
         logger.error(f"启动基础初始化失败: {e}")
-        raise HTTPException(status_code=500, detail=f"启动初始化失败: {e}")
+        raise HTTPException(status_code=500, detail=f"启动初始化失败: {e}") from e
 
 
 @router.get("/initialization-status", response_model=dict[str, Any])
@@ -216,7 +216,7 @@ async def get_initialization_status():
         
     except Exception as e:
         logger.error(f"获取初始化状态失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取状态失败: {e}")
+        raise HTTPException(status_code=500, detail=f"获取状态失败: {e}") from e
 
 
 @router.post("/stop", response_model=dict[str, Any])
@@ -247,7 +247,7 @@ async def stop_initialization():
         
     except Exception as e:
         logger.error(f"停止初始化任务失败: {e}")
-        raise HTTPException(status_code=500, detail=f"停止任务失败: {e}")
+        raise HTTPException(status_code=500, detail=f"停止任务失败: {e}") from e
 
 
 async def _run_full_initialization_task(historical_days: int, force: bool, task_id: str):
@@ -328,4 +328,4 @@ async def get_service_status():
         
     except Exception as e:
         logger.error(f"获取服务状态失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取服务状态失败: {e}")
+        raise HTTPException(status_code=500, detail=f"获取服务状态失败: {e}") from e

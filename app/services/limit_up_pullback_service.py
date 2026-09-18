@@ -216,7 +216,7 @@ class LimitUpPullbackService:
         limit_up_price = round(prev_close * 1.1, 2)
         return buy_price < limit_up_price * 0.995
 
-    def _can_sell(self, close: float, open: float, prev_close: float) -> bool:
+    def _can_sell(self, close: float, _open: float, prev_close: float) -> bool:
         """判断当天是否可以卖出（非跌停板）"""
         if close <= 0 or prev_close <= 0:
             return True

@@ -20,7 +20,7 @@ async def run_stock_basics_sync(force: bool = False):
         result = await service.run_full_sync(force=force)
         return {"success": True, "data": result}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/stock_basics/status")

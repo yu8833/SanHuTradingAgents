@@ -33,7 +33,6 @@
         <el-icon><Search /></el-icon>
         <span>策略</span>
       </template>
-      <el-menu-item index="/candidate">股票筛选</el-menu-item>
       <el-menu-item index="/screening/common">常用策略</el-menu-item>
       <el-menu-item index="/screening/backtest">策略回测</el-menu-item>
       <!-- 高级变体（折叠，保留但不并列展示） -->
@@ -51,6 +50,7 @@
         <el-icon><CreditCard /></el-icon>
         <span>交易</span>
       </template>
+      <el-menu-item index="/candidate">股票筛选</el-menu-item>
       <el-menu-item index="/paper">模拟交易</el-menu-item>
       <el-menu-item index="/portfolio">持仓追踪</el-menu-item>
       <el-menu-item index="/stock-alerts">监控中心</el-menu-item>

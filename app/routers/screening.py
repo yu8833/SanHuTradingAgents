@@ -86,7 +86,7 @@ async def get_screening_fields(user: dict = Depends(get_current_user)):
 
     except Exception as e:
         logger.error(f"[get_screening_fields] 获取字段配置失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 def _convert_legacy_conditions_to_new_format(legacy_conditions: dict[str, Any]) -> list[ScreeningCondition]:
     """向后兼容的辅助函数（当前已由 run_screening 直接处理）"""
@@ -160,7 +160,7 @@ async def run_screening(request: Request, user: dict = Depends(get_current_user)
 
     except Exception as e:
         logger.error(f"[screening] 处理失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # 新的优化筛选接口
@@ -201,7 +201,7 @@ async def enhanced_screening(req: NewScreeningRequest, user: dict = Depends(get_
 
     except Exception as e:
         logger.error(f"[enhanced_screening] 筛选失败: {e}")
-        raise HTTPException(status_code=500, detail=f"增强筛选失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"增强筛选失败: {str(e)}") from e
 
 
 # 获取单个字段的详细信息
@@ -217,7 +217,7 @@ async def get_field_info(field_name: str, user: dict = Depends(get_current_user)
         raise
     except Exception as e:
         logger.error(f"[screening] 获取字段信息失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取字段信息失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取字段信息失败: {str(e)}") from e
 
 
 # 验证筛选条件
@@ -229,7 +229,7 @@ async def validate_conditions(conditions: list[ScreeningCondition], user: dict =
         return validation_result
     except Exception as e:
         logger.error(f"[screening] 验证条件失败: {e}")
-        raise HTTPException(status_code=500, detail=f"验证条件失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"验证条件失败: {str(e)}") from e
 
 # 重复定义的旧端点移除（保留带日志的版本）
 
@@ -336,7 +336,7 @@ async def get_industries(user: dict = Depends(get_current_user)):
 
     except Exception as e:
         logger.error(f"[get_industries] 获取行业列表失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # ========== 涨停回调策略 ==========
@@ -397,7 +397,7 @@ async def scan_limit_up_pullback(
         
     except Exception as e:
         logger.error(f"[limit_up_pullback] 扫描失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"涨停回调扫描失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"涨停回调扫描失败: {str(e)}") from e
 
 
 class LimitUpPullbackBacktestRequest(LimitUpPullbackRequest):
@@ -459,7 +459,7 @@ async def backtest_limit_up_pullback(
         
     except Exception as e:
         logger.error(f"[limit_up_pullback_backtest] 回测失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"涨停回调回测失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"涨停回调回测失败: {str(e)}") from e
 
 
 # ========== 三买三卖策略 ==========
@@ -536,7 +536,7 @@ async def scan_three_buys_three_sells(
 
     except Exception as e:
         logger.error(f"[three_buys_three_sells] 扫描失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"三买三卖扫描失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"三买三卖扫描失败: {str(e)}") from e
 
 
 class ThreeBuysThreeSellsBacktestRequest(ThreeBuysThreeSellsRequest):
@@ -598,7 +598,7 @@ async def backtest_three_buys_three_sells(
 
     except Exception as e:
         logger.error(f"[three_buys_three_sells_backtest] 回测失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"三买三卖回测失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"三买三卖回测失败: {str(e)}") from e
 
 
 @router.post("/three-buys-three-sells/refresh-dg")
@@ -621,7 +621,7 @@ async def refresh_dg_prosperity(
         return {"success": True, "data": result}
     except Exception as e:
         logger.error(f"[refresh_dg] 刷新失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"ΔG 数据刷新失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"ΔG 数据刷新失败: {str(e)}") from e
 
 
 @router.post("/three-buys-three-sells/compute-dg")
@@ -642,7 +642,7 @@ async def compute_dg_prosperity(
         return {"success": True, "message": "ΔG 环比计算完成"}
     except Exception as e:
         logger.error(f"[compute_dg] 计算失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"ΔG 计算失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"ΔG 计算失败: {str(e)}") from e
 
 
 # ============================================================
@@ -720,7 +720,7 @@ async def scan_extreme_reversal(req: RetailStrategyRequest):
         return RetailStrategyScanResponse(**result)
     except Exception as e:
         logger.error(f"[extreme_reversal_scan] 失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"极端反转扫描失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"极端反转扫描失败: {str(e)}") from e
 
 
 @router.post("/extreme-reversal/backtest", response_model=RetailStrategyBacktestResponse)
@@ -734,7 +734,7 @@ async def backtest_extreme_reversal(req: RetailStrategyBacktestRequest):
         return RetailStrategyBacktestResponse(**result)
     except Exception as e:
         logger.error(f"[extreme_reversal_backtest] 失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"极端反转回测失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"极端反转回测失败: {str(e)}") from e
 
 
 # ---- 困境反转 ----
@@ -750,7 +750,7 @@ async def scan_turnaround(req: RetailStrategyRequest):
         return RetailStrategyScanResponse(**result)
     except Exception as e:
         logger.error(f"[turnaround_scan] 失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"困境反转扫描失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"困境反转扫描失败: {str(e)}") from e
 
 
 @router.post("/turnaround/backtest", response_model=RetailStrategyBacktestResponse)
@@ -764,7 +764,7 @@ async def backtest_turnaround(req: RetailStrategyBacktestRequest):
         return RetailStrategyBacktestResponse(**result)
     except Exception as e:
         logger.error(f"[turnaround_backtest] 失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"困境反转回测失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"困境反转回测失败: {str(e)}") from e
 
 
 # ---- 小盘价值 ----
@@ -780,7 +780,7 @@ async def scan_small_cap_value(req: RetailStrategyRequest):
         return RetailStrategyScanResponse(**result)
     except Exception as e:
         logger.error(f"[small_cap_value_scan] 失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"小盘价值扫描失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"小盘价值扫描失败: {str(e)}") from e
 
 
 @router.post("/small-cap-value/backtest", response_model=RetailStrategyBacktestResponse)
@@ -794,7 +794,7 @@ async def backtest_small_cap_value(req: RetailStrategyBacktestRequest):
         return RetailStrategyBacktestResponse(**result)
     except Exception as e:
         logger.error(f"[small_cap_value_backtest] 失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"小盘价值回测失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"小盘价值回测失败: {str(e)}") from e
 
 
 # ---- 转债博弈 ----
@@ -810,7 +810,7 @@ async def scan_convertible_arbitrage(req: RetailStrategyRequest):
         return RetailStrategyScanResponse(**result)
     except Exception as e:
         logger.error(f"[convertible_arbitrage_scan] 失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"转债博弈扫描失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"转债博弈扫描失败: {str(e)}") from e
 
 
 @router.post("/convertible-arbitrage/backtest", response_model=RetailStrategyBacktestResponse)
@@ -824,7 +824,7 @@ async def backtest_convertible_arbitrage(req: RetailStrategyBacktestRequest):
         return RetailStrategyBacktestResponse(**result)
     except Exception as e:
         logger.error(f"[convertible_arbitrage_backtest] 失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"转债博弈回测失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"转债博弈回测失败: {str(e)}") from e
 
 
 # ========== 新策略：技术分析 ==========
@@ -840,7 +840,7 @@ async def scan_ma_crossover(req: RetailStrategyRequest):
         return RetailStrategyScanResponse(**result)
     except Exception as e:
         logger.error(f"[ma_crossover_scan] 失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"均线交叉扫描失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"均线交叉扫描失败: {str(e)}") from e
 
 
 @router.post("/ma-crossover/backtest", response_model=RetailStrategyBacktestResponse)
@@ -854,7 +854,7 @@ async def backtest_ma_crossover(req: RetailStrategyBacktestRequest):
         return RetailStrategyBacktestResponse(**result)
     except Exception as e:
         logger.error(f"[ma_crossover_backtest] 失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"均线交叉回测失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"均线交叉回测失败: {str(e)}") from e
 
 
 @router.post("/macd-divergence/scan", response_model=RetailStrategyScanResponse)
@@ -868,7 +868,7 @@ async def scan_macd_divergence(req: RetailStrategyRequest):
         return RetailStrategyScanResponse(**result)
     except Exception as e:
         logger.error(f"[macd_divergence_scan] 失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"MACD背离扫描失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"MACD背离扫描失败: {str(e)}") from e
 
 
 @router.post("/macd-divergence/backtest", response_model=RetailStrategyBacktestResponse)
@@ -882,7 +882,7 @@ async def backtest_macd_divergence(req: RetailStrategyBacktestRequest):
         return RetailStrategyBacktestResponse(**result)
     except Exception as e:
         logger.error(f"[macd_divergence_backtest] 失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"MACD背离回测失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"MACD背离回测失败: {str(e)}") from e
 
 
 @router.post("/volume-price/scan", response_model=RetailStrategyScanResponse)
@@ -896,7 +896,7 @@ async def scan_volume_price(req: RetailStrategyRequest):
         return RetailStrategyScanResponse(**result)
     except Exception as e:
         logger.error(f"[volume_price_scan] 失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"量价配合扫描失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"量价配合扫描失败: {str(e)}") from e
 
 
 @router.post("/volume-price/backtest", response_model=RetailStrategyBacktestResponse)
@@ -910,7 +910,7 @@ async def backtest_volume_price(req: RetailStrategyBacktestRequest):
         return RetailStrategyBacktestResponse(**result)
     except Exception as e:
         logger.error(f"[volume_price_backtest] 失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"量价配合回测失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"量价配合回测失败: {str(e)}") from e
 
 
 # ==================== 数据新鲜度检查 ====================
@@ -1140,4 +1140,4 @@ async def check_data_freshness(user: dict = Depends(get_current_user)):
         }
     except Exception as e:
         logger.error(f"数据新鲜度检查失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"检查失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"检查失败: {str(e)}") from e

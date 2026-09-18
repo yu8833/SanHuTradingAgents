@@ -559,7 +559,7 @@ async def sync_single_stock(
         
     except Exception as e:
         logger.error(f"❌ 同步单个股票失败: {e}")
-        raise HTTPException(status_code=500, detail=f"同步失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"同步失败: {str(e)}") from e
 
 
 @router.post("/batch")
@@ -750,7 +750,7 @@ async def sync_batch_stocks(
         
     except Exception as e:
         logger.error(f"❌ 批量同步失败: {e}")
-        raise HTTPException(status_code=500, detail=f"批量同步失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"批量同步失败: {str(e)}") from e
 
 
 @router.get("/status/{symbol}")
@@ -802,5 +802,5 @@ async def get_sync_status(
         
     except Exception as e:
         logger.error(f"❌ 获取同步状态失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取同步状态失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取同步状态失败: {str(e)}") from e
 
