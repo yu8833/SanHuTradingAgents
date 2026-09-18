@@ -90,6 +90,20 @@ def _sectors() -> list[dict]:
         f = f.sort_values("净额", ascending=False)
     except Exception:
         return []
+
+    # 行业名 -> 同花顺行业板块代码（881xxx）。同花顺一级行业与东财
+    # stock_fund_flow_industry 名称完全一致（90/90），供前端热力图点击跳转
+    # 同花顺行业详情页 https://q.10jqka.com.cn/thshy/detail/code/{code}/
+    ths_map: dict[str, str] = {}
+    try:
+        bb = astock._akshare().stock_board_industry_name_ths()
+        ths_map = {
+            str(r["name"]).strip(): str(r["code"]).strip()
+            for _, r in bb.iterrows()
+        }
+    except Exception:
+        pass
+
     out = []
     for _, row in f.iterrows():
         # 金额列已在上面 map(_fund_amount) 归一为「元」，此处仅安全取数值，不再重复换算
@@ -104,6 +118,7 @@ def _sectors() -> list[dict]:
             "inflow": round(float(inflow_val), 2),
             "outflow": round(float(outflow_val), 2),
             "firms": _num(row.get("公司家数")),
+            "ths_code": ths_map.get(str(row["行业"]).strip(), ""),
         })
     return out
 

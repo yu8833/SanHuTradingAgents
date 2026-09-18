@@ -159,35 +159,15 @@
       </div>
     </section>
 
-    <!-- 行业热度 -->
-    <section v-if="dashboard && (dashboard.industry_rank.leading.length || dashboard.industry_rank.lagging.length)" class="block">
+    <!-- 大盘热力图：行业板块全景（左净流入 / 右净流出，中轴零线） -->
+    <section v-if="heatmapReady" class="block">
       <div class="block-head">
-        <span class="block-title"><el-icon><DataLine /></el-icon> 行业热度</span>
-        <span class="block-hint">领涨 / 领跌</span>
+        <span class="block-title"><el-icon><DataAnalysis /></el-icon> 大盘热力图 · 行业板块全景</span>
+        <span class="block-hint">方块大小 = 资金量 · 左净流入 / 右净流出 · 红涨绿跌 · 点击跳转同花顺板块</span>
       </div>
-      <div class="rank-grid">
-        <div class="rank-col">
-          <div class="rank-col-title up">领涨</div>
-          <div v-for="(item, idx) in dashboard.industry_rank.leading" :key="'ld-' + item.name" class="rank-item">
-            <span class="rank-no">{{ idx + 1 }}</span>
-            <div class="rank-main">
-              <div class="rank-name" :title="item.name">{{ item.name }}</div>
-              <div class="rank-sub">{{ item.etf_name || '行业' }} · 净流入{{ item.net }}亿</div>
-            </div>
-            <span class="rank-pct up">{{ fmtPct(item.pct) }}</span>
-          </div>
-        </div>
-        <div class="rank-col">
-          <div class="rank-col-title down">领跌</div>
-          <div v-for="(item, idx) in dashboard.industry_rank.lagging" :key="'lg-' + item.name" class="rank-item">
-            <span class="rank-no">{{ idx + 1 }}</span>
-            <div class="rank-main">
-              <div class="rank-name" :title="item.name">{{ item.name }}</div>
-              <div class="rank-sub">{{ item.etf_name || '行业' }} · 净流出{{ Math.abs(item.net) }}亿</div>
-            </div>
-            <span class="rank-pct down">{{ fmtPct(item.pct) }}</span>
-          </div>
-        </div>
+      <div class="heatmap-wrap">
+        <VChart :option="heatmapOption" autoresize class="heatmap-chart" @click="onHeatmapClick" />
+        <div class="zero-axis"><span>0</span></div>
       </div>
     </section>
 
@@ -292,6 +272,12 @@ import {
   Odometer,
   Position,
 } from '@element-plus/icons-vue'
+import { use as echartsUse } from 'echarts/core'
+import { TreemapChart } from 'echarts/charts'
+import { TooltipComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+import VChart from 'vue-echarts'
+import type { EChartsOption } from 'echarts'
 import {
   vibeApi,
   type IndexQuote,
@@ -300,10 +286,15 @@ import {
 import { warRoomApi } from '@/api/warRoom'
 import { fmtPrice, fmtPct, fmtAbsPct, fmtAmount, fmtSigned, clsByVal } from '@/utils/format'
 
+echartsUse([CanvasRenderer, TreemapChart, TooltipComponent])
+
 const loading = ref(false)
 const activeTab = ref('ashare')
 const indices = ref<IndexQuote[]>([])
 const dashboard = ref<MarketDashboard | null>(null)
+// 行业板块热力图数据（/market/overview → sectors）
+const sectorMap = ref<any[]>([])
+const heatmapReady = computed(() => sectorMap.value.length > 0)
 
 const today = computed(() => {
   const d = new Date()
@@ -493,6 +484,122 @@ const listCols = computed(() => {
   ]
 })
 
+// ── 大盘热力图：行业板块 treemap（面积=公司家数，颜色=涨跌幅 红涨绿跌）──
+const clamp01 = (v: number) => Math.min(1, Math.max(0, v))
+/** 涨跌幅 → 颜色：0% 中性灰，+5% 红，-5% 绿（A股配色） */
+function heatColor(pct: number | null | undefined): string {
+  const t = clamp01(Math.abs(pct || 0) / 5)
+  const gray: [number, number, number] = [226, 232, 240]
+  const red: [number, number, number] = [244, 99, 88]
+  const green: [number, number, number] = [103, 178, 70]
+  const mix = (c1: number[], c2: number[], k: number) => {
+    const [r, g, b] = c1.map((v, i) => Math.round(v + (c2[i] - v) * k))
+    return `rgb(${r},${g},${b})`
+  }
+  return (pct || 0) >= 0 ? mix(gray, red, t) : mix(gray, green, t)
+}
+
+// treemap 数据项：面积=资金量（流入用净额、流出用绝对值），颜色=涨跌幅
+const inflowSectors = computed(() => sectorMap.value.filter(s => (Number(s.net) || 0) >= 0))
+const outflowSectors = computed(() => sectorMap.value.filter(s => (Number(s.net) || 0) < 0))
+
+const mkTreemapData = (list: any[], abs = false) => list.map(s => {
+  const net = Number(s.net) || 0
+  return {
+    name: s.name,
+    // 面积=净流入/净流出资金量（绝对净额），下限兜底避免方块过小
+    value: Math.max(abs ? Math.abs(net) : net, 1e6),
+    pct: s.pct,
+    net,
+    firms: s.firms,
+    ths_code: s.ths_code,
+    itemStyle: { color: heatColor(s.pct) },
+  }
+})
+
+const heatmapOption = computed<EChartsOption>(() => {
+  return {
+    animationDuration: 600,
+    tooltip: {
+      trigger: 'item',
+      backgroundColor: '#fff',
+      borderColor: 'rgba(45, 55, 72, .08)',
+      borderWidth: 1,
+      textStyle: { color: '#2d3748', fontSize: 12 },
+      extraCssText: 'box-shadow: 0 6px 20px rgba(45,55,72,.12); border-radius: 8px;',
+      formatter: (p: any) => {
+        const d = p?.data ?? {}
+        const pct = Number(d.pct) || 0
+        const cls = pct >= 0 ? '#f56c6c' : '#67c23a'
+        const netYi = Number(d.net ?? 0) / 1e8
+        return `<b>${d.name || ''}</b><br/>`
+          + `涨跌 <b style="color:${cls};font-family:monospace">${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%</b><br/>`
+          + `净额 <b style="font-family:monospace">${fmtSigned(netYi)}亿</b><br/>`
+          + `公司家数 <b style="font-family:monospace">${d.firms ?? '—'}</b>`
+      },
+    },
+    graphic: [
+      { type: 'text', left: 14, top: 2, style: { text: '← 净流入', fill: '#f56c6c', fontSize: 12, fontWeight: 600 } },
+      { type: 'text', right: 14, top: 2, style: { text: '净流出 →', fill: '#67c23a', fontSize: 12, fontWeight: 600 } },
+    ],
+    series: [{
+      // 左半：净流入行业（左侧，越靠左资金流入越大）
+      type: 'treemap',
+      roam: false,
+      nodeClick: false,
+      breadcrumb: { show: false },
+      left: 0,
+      top: 22,
+      width: '49%',
+      bottom: 0,
+      itemStyle: { borderColor: '#fff', borderWidth: 2, gapWidth: 2 },
+      label: {
+        show: true,
+        color: '#1f2937',
+        fontSize: 11,
+        formatter: (p: any) => {
+          const d = p?.data ?? {}
+          const pct = Number(d.pct) || 0
+          return `${d.name || ''}\n${pct >= 0 ? '+' : ''}${(pct || 0).toFixed(2)}%`
+        },
+      },
+      upperLabel: { show: false },
+      data: mkTreemapData(inflowSectors.value, false),
+    }, {
+      // 右半：净流出行业（右侧）
+      type: 'treemap',
+      roam: false,
+      nodeClick: false,
+      breadcrumb: { show: false },
+      left: '51%',
+      top: 22,
+      width: '49%',
+      bottom: 0,
+      itemStyle: { borderColor: '#fff', borderWidth: 2, gapWidth: 2 },
+      label: {
+        show: true,
+        color: '#1f2937',
+        fontSize: 11,
+        formatter: (p: any) => {
+          const d = p?.data ?? {}
+          const pct = Number(d.pct) || 0
+          return `${d.name || ''}\n${pct >= 0 ? '+' : ''}${(pct || 0).toFixed(2)}%`
+        },
+      },
+      upperLabel: { show: false },
+      data: mkTreemapData(outflowSectors.value, true),
+    }],
+  }
+})
+
+// 点击行业块 → 跳转同花顺行业板块详情页
+function onHeatmapClick(e: any) {
+  if (e?.componentType !== 'series') return
+  const code = e?.data?.ths_code
+  if (!code) return
+  window.open(`https://q.10jqka.com.cn/thshy/detail/code/${code}/`, '_blank', 'noopener')
+}
+
 // 带超时的请求包装
 const withTimeout = <T>(promise: Promise<T>, timeoutMs: number = 15000): Promise<T> => {
   return Promise.race([
@@ -511,17 +618,21 @@ const loadAll = async () => {
     const results = await Promise.allSettled([
       withTimeout(vibeApi.getIndices(), 15000),
       withTimeout(vibeApi.getDashboard(), 60000),
+      withTimeout(vibeApi.getMarketOverview(), 20000),
       withTimeout(loadOverseas(), 20000),
       withTimeout(loadGlobalStocks(), 20000),
     ])
 
     // 逐个处理结果，失败不影响其他数据显示
-    const [idxRes, dashRes] = results
+    const [idxRes, dashRes, ovRes] = results
     if (idxRes.status === 'fulfilled') {
       indices.value = (idxRes.value as any).data || []
     }
     if (dashRes.status === 'fulfilled') {
       dashboard.value = (dashRes.value as any).data || null
+    }
+    if (ovRes.status === 'fulfilled') {
+      sectorMap.value = (ovRes.value as any).data?.sectors || []
     }
 
     // 统计失败数量，给出提示
@@ -564,6 +675,36 @@ onActivated(() => {
 
 .block {
   margin-bottom: 24px;
+}
+
+.heatmap-wrap {
+  position: relative;
+}
+
+.heatmap-chart {
+  width: 100%;
+  height: 480px;
+}
+
+/* 中轴零线：净流入（左）/ 净流出（右）分界 */
+.zero-axis {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 50%;
+  border-left: 1px dashed var(--el-border-color-dark, #cbd5e0);
+
+  span {
+    position: absolute;
+    top: 4px;
+    left: 7px;
+    font-size: 11px;
+    line-height: 1;
+    color: var(--el-text-color-secondary);
+    background: var(--el-bg-color);
+    padding: 2px 4px;
+    border-radius: 4px;
+  }
 }
 
 .block-head {
@@ -877,77 +1018,6 @@ onActivated(() => {
 .lg-flat { color: var(--app-flat); }
 .lg-down { color: var(--app-down); }
 
-/* 行业热度 */
-.rank-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
-
-.rank-col {
-  background: var(--el-fill-color-blank);
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
-  padding: 12px 14px;
-}
-
-.rank-col-title {
-  font-size: 13px;
-  font-weight: 600;
-  margin-bottom: 8px;
-}
-
-.rank-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 0;
-  border-bottom: 1px dashed var(--el-border-color-lighter);
-}
-
-.rank-item:last-child {
-  border-bottom: none;
-}
-
-.rank-no {
-  width: 18px;
-  height: 18px;
-  border-radius: 4px;
-  background: var(--el-fill-color-light);
-  color: var(--el-text-color-secondary);
-  font-size: 11px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.rank-main {
-  flex: 1;
-  min-width: 0;
-}
-
-.rank-name {
-  font-size: 13px;
-  color: var(--el-text-color-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.rank-sub {
-  font-size: 11px;
-  color: var(--el-text-color-secondary);
-  margin-top: 1px;
-}
-
-.rank-pct {
-  font-family: var(--app-font-mono);
-  font-size: 13px;
-  font-weight: 600;
-  flex-shrink: 0;
-}
-
 /* 四大榜单 */
 .list-grid {
   display: grid;
@@ -1050,6 +1120,6 @@ onActivated(() => {
 
 @media (max-width: 768px) {
   .kpi-row { grid-template-columns: repeat(2, 1fr); }
-  .dash-main, .rank-grid, .list-grid { grid-template-columns: 1fr; }
+  .dash-main, .list-grid { grid-template-columns: 1fr; }
 }
 </style>
