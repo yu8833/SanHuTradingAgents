@@ -8,7 +8,7 @@
         </div>
         <div class="page-hero-text">
           <h2 class="page-hero-title">{{ today }} · 概念分析</h2>
-          <p class="page-hero-sub">概念热度 / 资金流向一屏看全</p>
+          <p class="page-hero-sub">概念涨跌 / 资金流向一屏看全</p>
         </div>
       </div>
       <div class="page-hero-meta">
@@ -48,7 +48,7 @@
     <!-- 领涨 / 领跌 / 资金流 -->
     <section class="block">
       <div class="block-head">
-        <span class="block-title"><el-icon><TrendCharts /></el-icon> 概念热度</span>
+        <span class="block-title"><el-icon><TrendCharts /></el-icon> 概念涨跌</span>
       </div>
       <div class="concept-chart">
         <VChart v-if="chartData" :option="conceptChartOption" autoresize class="concept-chart-inner" />
@@ -56,17 +56,42 @@
       </div>
       <div class="rank-grid">
         <el-card shadow="never" class="rank-card">
-          <div class="rank-title accent">💰 资金流榜</div>
+          <div class="rank-title accent">💰 资金流入榜</div>
           <div v-for="(c, i) in data?.money_leaders || []" :key="c.code" class="rank-row">
             <span class="rank-idx">{{ i + 1 }}</span>
             <span class="rank-name">{{ c.name }}</span>
             <span class="rank-lead">
-              <router-link v-if="c.lead_code" target="_blank" rel="noopener" :to="`/stocks/${c.lead_code}`" class="stock-name">{{ c.lead_name }}</router-link>
+              <a
+                v-if="c.lead_code"
+                :href="thsConceptUrl(c.lead_code)"
+                target="_blank"
+                rel="noopener"
+                class="stock-name"
+              >{{ c.lead_name }}</a>
               <template v-else>{{ c.lead_name }}</template>
             </span>
             <span class="rank-pct up">{{ fmtSigned(c.money_flow) }}亿</span>
           </div>
           <el-empty v-if="!data?.money_leaders?.length" :image-size="48" description="暂无数据" />
+        </el-card>
+        <el-card shadow="never" class="rank-card">
+          <div class="rank-title accent">🚰 资金流出榜</div>
+          <div v-for="(c, i) in data?.money_followers || []" :key="c.code" class="rank-row">
+            <span class="rank-idx">{{ i + 1 }}</span>
+            <span class="rank-name">{{ c.name }}</span>
+            <span class="rank-lead">
+              <a
+                v-if="c.lead_code"
+                :href="thsConceptUrl(c.lead_code)"
+                target="_blank"
+                rel="noopener"
+                class="stock-name"
+              >{{ c.lead_name }}</a>
+              <template v-else>{{ c.lead_name }}</template>
+            </span>
+            <span class="rank-pct down">{{ fmtSigned(c.money_flow) }}亿</span>
+          </div>
+          <el-empty v-if="!data?.money_followers?.length" :image-size="48" description="暂无数据" />
         </el-card>
       </div>
     </section>
@@ -93,6 +118,11 @@ const MONO = "'SFMono-Regular', ui-monospace, Menlo, monospace"
 const today = new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' })
 const loading = ref(false)
 const data = ref<ConceptAnalysis | null>(null)
+
+// 同花顺概念详情页链接：cid 是概念板块代码，非股票代码
+function thsConceptUrl(code: string): string {
+  return `https://q.10jqka.com.cn/gn/detail/code/${code}/`
+}
 
 // ── 领涨 / 领跌 双向条形图 ──
 const chartData = computed(() => {
@@ -241,11 +271,11 @@ onMounted(() => {
 
   .rank-grid {
     display: grid;
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
     gap: 12px;
 
     .rank-card {
-      max-width: 520px;
+      max-width: none;
 
       .rank-title {
         font-weight: 600;
@@ -280,6 +310,14 @@ onMounted(() => {
           overflow: hidden;
           text-overflow: ellipsis;
           max-width: 90px;
+
+          .stock-name {
+            color: var(--el-color-primary);
+            text-decoration: none;
+          }
+          .stock-name:hover {
+            text-decoration: underline;
+          }
         }
 
         .rank-pct {
@@ -298,6 +336,8 @@ onMounted(() => {
 
 @media (max-width: 1100px) {
   .rank-grid {
+    grid-template-columns: 1fr;
+
     .rank-card {
       max-width: none;
     }

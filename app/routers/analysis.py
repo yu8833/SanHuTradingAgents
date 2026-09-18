@@ -672,9 +672,10 @@ async def get_task_result(
             if not result_data.get('recommendation'):
                 rec_candidates = []
                 if isinstance(decision, dict) and decision.get('action'):
+                    sell_kind = decision.get('action') in ("减持", "卖出")
                     parts = [
                         f"操作: {decision.get('action')}",
-                        f"目标价: {decision.get('target_price')}" if decision.get('target_price') else None,
+                        f"{'退出参考价' if sell_kind else '目标价'}: {decision.get('target_price')}" if decision.get('target_price') else None,
                         f"置信度: {decision.get('confidence')}" if decision.get('confidence') is not None else None
                     ]
                     rec_candidates.append("；".join([p for p in parts if p]))
@@ -701,10 +702,11 @@ async def get_task_result(
             if not result_data.get('key_points'):
                 kp = []
                 if isinstance(decision, dict):
+                    sell_kind = decision.get('action') in ("减持", "卖出")
                     if decision.get('action'):
                         kp.append(f"操作建议: {decision.get('action')}")
                     if decision.get('target_price'):
-                        kp.append(f"目标价: {decision.get('target_price')}")
+                        kp.append(f"{'退出参考价' if sell_kind else '目标价'}: {decision.get('target_price')}")
                     if decision.get('confidence') is not None:
                         kp.append(f"置信度: {decision.get('confidence')}")
                 # 从reports中截取前几句作为要点

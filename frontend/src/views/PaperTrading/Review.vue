@@ -1,159 +1,150 @@
 <template>
-  <div class="review-page">
+  <div class="review-page app-page">
     <div class="page-hero">
       <div class="page-hero-main">
+        <div class="page-hero-icon">
+          <el-icon :size="26"><DataAnalysis /></el-icon>
+        </div>
         <div class="page-hero-text">
           <h2 class="page-hero-title">交易复盘</h2>
-          <p class="page-hero-sub">记录与梳理交易中的各种得失，沉淀经验，反哺策略与规则。</p>
+          <p class="page-hero-sub">买入卖出一行览 · 沉淀经验反哺策略</p>
         </div>
+      </div>
+      <div class="page-hero-meta">
+        <el-button :icon="Refresh" text size="small" :loading="loading" @click="loadAll">刷新</el-button>
       </div>
     </div>
 
     <!-- 复盘统计 -->
-    <el-row :gutter="16" class="stats-row" v-if="stats">
-      <el-col :span="5">
-        <el-card shadow="never" class="stat-card">
-          <div class="stat-label">已平仓交易</div>
-          <div class="stat-value">{{ stats.total_cycles }}</div>
-        </el-card>
-      </el-col>
-      <el-col :span="5">
-        <el-card shadow="never" class="stat-card">
-          <div class="stat-label">胜率</div>
-          <div class="stat-value">{{ fmtPctFromFraction(stats.win_rate, 1) }}</div>
-        </el-card>
-      </el-col>
-      <el-col :span="5">
-        <el-card shadow="never" class="stat-card">
-          <div class="stat-label">盈亏比</div>
-          <div class="stat-value">{{ fmtNum(stats.profit_loss_ratio) }}</div>
-        </el-card>
-      </el-col>
-      <el-col :span="5">
-        <el-card shadow="never" class="stat-card">
-          <div class="stat-label">累计盈亏</div>
-          <div class="stat-value" :class="stats.total_pnl >= 0 ? 'up' : 'down'">
-            {{ fmtSigned(stats.total_pnl) }}
-          </div>
-        </el-card>
-      </el-col>
-      <el-col :span="4">
-        <el-card shadow="never" class="stat-card">
-          <div class="stat-label">复盘笔记</div>
-          <div class="stat-value">{{ notes.length }}</div>
-        </el-card>
-      </el-col>
-    </el-row>
+    <section class="stats-strip">
+      <div class="stats-item">
+        <span class="stats-label">已平仓交易</span>
+        <span class="stats-value">{{ stats?.total_cycles ?? '—' }}</span>
+        <span class="stats-sub">完整买卖周期</span>
+      </div>
+      <div class="stats-item">
+        <span class="stats-label">胜率</span>
+        <span class="stats-value" :class="(stats?.win_rate ?? 50) >= 50 ? 'up' : 'down'">{{ stats ? fmtPctFromFraction(stats.win_rate, 1) : '—' }}</span>
+        <span class="stats-sub">已平仓统计</span>
+      </div>
+      <div class="stats-item">
+        <span class="stats-label">盈亏比</span>
+        <span class="stats-value">{{ stats ? fmtNum(stats.profit_loss_ratio) : '—' }}</span>
+        <span class="stats-sub">平均盈利 / 平均亏损</span>
+      </div>
+      <div class="stats-item">
+        <span class="stats-label">累计盈亏</span>
+        <span class="stats-value" :class="(stats?.total_pnl ?? 0) >= 0 ? 'up' : 'down'">{{ stats ? fmtSigned(stats.total_pnl) : '—' }}</span>
+        <span class="stats-sub">已平仓合计</span>
+      </div>
+      <div class="stats-item">
+        <span class="stats-label">复盘笔记</span>
+        <span class="stats-value">{{ notes.length }}</span>
+        <span class="stats-sub">经验沉淀</span>
+      </div>
+    </section>
 
-    <!-- 三个面板 -->
+    <!-- 分区 Tab -->
     <el-tabs v-model="activeTab" class="review-tabs">
-      <!-- 交易记录面板 -->
+      <!-- 交易记录（融合：已平仓 + 持仓中，买卖一行） -->
       <el-tab-pane label="交易记录" name="trades">
-        <el-table :data="cycles" v-loading="loading" stripe empty-text="暂无已平仓交易" class="app-table app-table--trades">
-          <el-table-column label="代码" width="100">
-            <template #default="{ row }">
-              <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
-            </template>
-          </el-table-column>
-          <el-table-column label="名称" min-width="120">
-            <template #default="{ row }">
-              <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-name">{{ row.name || '-' }}</router-link>
-            </template>
-          </el-table-column>
-          <el-table-column prop="strategy" label="策略" width="110">
-            <template #default="{ row }">
-              <el-tag size="small" v-if="row.strategy">{{ strategyLabel(row.strategy) }}</el-tag>
-              <span v-else>-</span>
-            </template>
-          </el-table-column>
-          <el-table-column prop="reason" label="交易原因" min-width="220">
-            <template #default="{ row }">
-              <span class="reason-text">{{ row.reason || '-' }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column prop="buy_price" label="建仓价" width="100" align="right" sortable />
-          <el-table-column prop="sell_price" label="平仓价" width="100" align="right" sortable />
-          <el-table-column prop="quantity" label="数量" width="90" align="right" sortable />
-          <el-table-column prop="pnl" label="盈亏" width="110" align="right" sortable>
-            <template #default="{ row }">
-              <span :class="row.pnl >= 0 ? 'up' : 'down'">{{ row.pnl >= 0 ? '+' : '' }}{{ row.pnl }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column prop="pnl_pct" label="盈亏率" width="100" align="right" sortable>
-            <template #default="{ row }">
-              <span :class="row.pnl >= 0 ? 'up' : 'down'">{{ row.pnl_pct }}%</span>
-            </template>
-          </el-table-column>
-          <el-table-column prop="sell_time" label="平仓时间" width="170">
-            <template #default="{ row }">{{ formatTime(row.sell_time) }}</template>
-          </el-table-column>
-          <el-table-column label="操作" width="120">
-            <template #default="{ row }">
-              <el-button size="small" type="primary" plain @click="openAddNote(row)">记录复盘</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
+        <div class="table-card">
+          <div class="table-card-hd">
+            <span class="table-card-sub">{{ tradeRows.length }} 条记录（含 {{ holdingRows.length }} 持仓中）</span>
+          </div>
+          <el-table :data="tradeRows" v-loading="loading" size="small" stripe empty-text="暂无交易记录" class="app-table app-table--trades">
+            <el-table-column label="股票" min-width="130">
+              <template #default="{ row }">
+                <div class="stk">
+                  <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stk-name">{{ row.name || row.code }}</router-link>
+                  <span class="stk-code">{{ row.code }}</span>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="状态" width="88">
+              <template #default="{ row }">
+                <el-tag size="small" :type="statusTagType(row)" effect="plain">
+                  {{ row.status === 'closed' ? '已平仓' : '持仓中' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="策略" width="96">
+              <template #default="{ row }">
+                <el-tag size="small" v-if="row.strategy">{{ strategyLabel(row.strategy) }}</el-tag>
+                <span v-else>-</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="建仓价" width="92" align="right" sortable>
+              <template #default="{ row }"><span class="money">{{ row.status === 'closed' ? row.buy_price : row.avg_cost }}</span></template>
+            </el-table-column>
+            <el-table-column label="平仓价/现价" width="104" align="right" sortable>
+              <template #default="{ row }">
+                <span class="money">{{ row.status === 'closed' ? row.sell_price : row.last_price }}</span>
+                <span v-if="row.status === 'open'" class="tag-live">现</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="建仓时间" width="152">
+              <template #default="{ row }">{{ row.status === 'closed' ? formatTime(row.buy_time) : formatTime(row.buy_time) }}</template>
+            </el-table-column>
+            <el-table-column label="平仓时间" width="152">
+              <template #default="{ row }">
+                <span v-if="row.status === 'closed'">{{ formatTime(row.sell_time) }}</span>
+                <span v-else class="muted">持仓中</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="数量" width="80" align="right" sortable>
+              <template #default="{ row }">{{ row.quantity }}</template>
+            </el-table-column>
+            <el-table-column label="盈亏" width="110" align="right" sortable>
+              <template #default="{ row }">
+                <span class="pct" :class="tradePnl(row) >= 0 ? 'up' : 'down'">{{ fmtSigned(tradePnl(row)) }}</span>
+                <span v-if="row.status === 'open'" class="muted small">(浮)</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="盈亏率" width="86" align="right" sortable>
+              <template #default="{ row }">
+                <span class="pct" :class="tradePnlPct(row) >= 0 ? 'up' : 'down'">{{ fmtPct(tradePnlPct(row)) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="132">
+              <template #default="{ row }">
+                <el-button size="small" type="primary" link @click="openAddNote(row)">记录复盘</el-button>
+                <el-button v-if="row.status === 'open'" size="small" type="danger" link @click="sellHolding(row)">卖出</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
       </el-tab-pane>
 
       <!-- 策略收益率分析 -->
       <el-tab-pane label="策略收益率" name="strategy">
         <div class="strategy-returns" v-if="strategyReturns.length > 0">
-          <el-row :gutter="16">
-            <el-col :span="8" v-for="s in strategyReturns" :key="s.strategy" style="margin-bottom: 16px;">
-              <el-card shadow="hover" class="strategy-card">
-                <template #header>
-                  <div class="strategy-card-header">
-                    <span class="strategy-name">{{ s.label }}</span>
-                    <el-tag size="small" :type="getStrategyTagType(s.strategy)">{{ s.strategy || '默认' }}</el-tag>
-                  </div>
-                </template>
-                <div class="strategy-card-body">
-                  <div class="return-hero">
-                    <div class="return-hero-label">累计收益率</div>
-                    <div class="return-hero-value" :class="s.total_return >= 0 ? 'up' : 'down'">
-                      {{ fmtPct(s.total_return) }}
-                    </div>
-                  </div>
-                  <div class="return-stats">
-                    <div class="return-stat">
-                      <span class="rs-label">交易次数</span>
-                      <span class="rs-value">{{ s.count }}</span>
-                    </div>
-                    <div class="return-stat">
-                      <span class="rs-label">胜率</span>
-                      <span class="rs-value" :class="s.win_rate >= 50 ? 'up' : 'down'">{{ fmtPct(s.win_rate, 1) }}</span>
-                    </div>
-                    <div class="return-stat">
-                      <span class="rs-label">累计盈亏</span>
-                      <span class="rs-value" :class="s.total_pnl >= 0 ? 'up' : 'down'">
-                        {{ fmtSigned(s.total_pnl) }}
-                      </span>
-                    </div>
-                    <div class="return-stat">
-                      <span class="rs-label">平均收益</span>
-                      <span class="rs-value" :class="s.avg_return >= 0 ? 'up' : 'down'">
-                        {{ fmtPct(s.avg_return) }}
-                      </span>
-                    </div>
-                    <div class="return-stat">
-                      <span class="rs-label">最大盈利</span>
-                      <span class="rs-value up">{{ fmtPct(s.max_win) }}</span>
-                    </div>
-                    <div class="return-stat">
-                      <span class="rs-label">最大亏损</span>
-                      <span class="rs-value down">{{ fmtPct(s.max_loss) }}</span>
-                    </div>
-                  </div>
-                  <div class="return-bar" v-if="s.count > 0">
-                    <div class="bar-track">
-                      <div class="bar-fill up" :style="{ width: Math.min(s.win_rate, 100) + '%' }"></div>
-                    </div>
-                    <div class="bar-label">盈亏分布</div>
-                  </div>
+          <div class="strategy-grid">
+            <div class="strategy-card" v-for="s in strategyReturns" :key="s.strategy">
+              <div class="strategy-card-header">
+                <span class="strategy-name">{{ s.label }}</span>
+                <el-tag size="small" :type="getStrategyTagType(s.strategy)">{{ s.strategy || '默认' }}</el-tag>
+              </div>
+              <div class="return-hero">
+                <div class="return-hero-label">累计收益率</div>
+                <div class="return-hero-value" :class="s.total_return >= 0 ? 'up' : 'down'">{{ fmtPct(s.total_return) }}</div>
+              </div>
+              <div class="return-stats">
+                <div class="return-stat"><span class="rs-label">交易次数</span><span class="rs-value">{{ s.count }}</span></div>
+                <div class="return-stat"><span class="rs-label">胜率</span><span class="rs-value" :class="s.win_rate >= 50 ? 'up' : 'down'">{{ fmtPct(s.win_rate, 1) }}</span></div>
+                <div class="return-stat"><span class="rs-label">累计盈亏</span><span class="rs-value" :class="s.total_pnl >= 0 ? 'up' : 'down'">{{ fmtSigned(s.total_pnl) }}</span></div>
+                <div class="return-stat"><span class="rs-label">平均收益</span><span class="rs-value" :class="s.avg_return >= 0 ? 'up' : 'down'">{{ fmtPct(s.avg_return) }}</span></div>
+                <div class="return-stat"><span class="rs-label">最大盈利</span><span class="rs-value up">{{ fmtPct(s.max_win) }}</span></div>
+                <div class="return-stat"><span class="rs-label">最大亏损</span><span class="rs-value down">{{ fmtPct(s.max_loss) }}</span></div>
+              </div>
+              <div class="return-bar" v-if="s.count > 0">
+                <div class="bar-track">
+                  <div class="bar-fill up" :style="{ width: Math.min(s.win_rate, 100) + '%' }"></div>
                 </div>
-              </el-card>
-            </el-col>
-          </el-row>
+                <div class="bar-label">胜率分布</div>
+              </div>
+            </div>
+          </div>
         </div>
         <el-empty v-else description="暂无策略收益数据" />
       </el-tab-pane>
@@ -161,32 +152,30 @@
       <!-- 复盘笔记面板 -->
       <el-tab-pane label="复盘笔记" name="notes">
         <div class="notes-toolbar">
-          <el-button type="primary" size="small" @click="openAddNote()">+ 新增复盘</el-button>
+          <el-button type="primary" size="small" :icon="Plus" @click="openAddNote()">新增复盘</el-button>
         </div>
         <el-empty v-if="!loading && notes.length === 0" description="暂无复盘笔记" />
-        <el-card v-for="n in notes" :key="n.id" shadow="never" class="note-card">
-          <div class="note-head">
-            <div class="note-title">
-              <el-tag size="small" type="warning" v-if="n.result">{{ resultLabel(n.result) }}</el-tag>
-              <span class="note-subject">{{ n.code ? (n.name || n.code) : '自由记录' }}</span>
-              <el-tag size="small" v-if="n.strategy">{{ strategyLabel(n.strategy) }}</el-tag>
+        <div v-else class="notes-list">
+          <div v-for="n in notes" :key="n.id" class="note-card">
+            <div class="note-head">
+              <div class="note-title">
+                <el-tag size="small" type="warning" v-if="n.result">{{ resultLabel(n.result) }}</el-tag>
+                <span class="note-subject">{{ n.code ? (n.name || n.code) : '自由记录' }}</span>
+                <el-tag size="small" v-if="n.strategy">{{ strategyLabel(n.strategy) }}</el-tag>
+              </div>
+              <div class="note-actions">
+                <el-button size="small" text @click="openEditNote(n)">编辑</el-button>
+                <el-button size="small" text type="danger" @click="removeNote(n)">删除</el-button>
+              </div>
             </div>
-            <div class="note-actions">
-              <el-button size="small" text @click="openEditNote(n)">编辑</el-button>
-              <el-button size="small" text type="danger" @click="removeNote(n)">删除</el-button>
+            <div class="note-body" v-if="n.lesson"><div class="note-field"><span class="field-label">教训</span>{{ n.lesson }}</div></div>
+            <div class="note-body" v-if="n.improvement"><div class="note-field"><span class="field-label">改进</span>{{ n.improvement }}</div></div>
+            <div class="note-tags" v-if="n.tags && n.tags.length">
+              <el-tag v-for="t in n.tags" :key="t" size="small" type="info">{{ t }}</el-tag>
             </div>
+            <div class="note-time">{{ formatTime(n.updated_at) }}</div>
           </div>
-          <div class="note-body" v-if="n.lesson">
-            <div class="note-field"><span class="field-label">教训</span>{{ n.lesson }}</div>
-          </div>
-          <div class="note-body" v-if="n.improvement">
-            <div class="note-field"><span class="field-label">改进</span>{{ n.improvement }}</div>
-          </div>
-          <div class="note-tags" v-if="n.tags && n.tags.length">
-            <el-tag v-for="t in n.tags" :key="t" size="small" type="info">{{ t }}</el-tag>
-          </div>
-          <div class="note-time">{{ formatTime(n.updated_at) }}</div>
-        </el-card>
+        </div>
       </el-tab-pane>
     </el-tabs>
 
@@ -198,12 +187,7 @@
         </el-form-item>
         <el-form-item label="交易结果">
           <el-select v-model="noteForm.result" placeholder="选择交易结果归因" clearable style="width:100%">
-            <el-option
-              v-for="opt in resultOptions"
-              :key="opt"
-              :label="resultLabel(opt)"
-              :value="opt"
-            />
+            <el-option v-for="opt in resultOptions" :key="opt" :label="resultLabel(opt)" :value="opt" />
           </el-select>
         </el-form-item>
         <el-form-item label="经验教训">
@@ -213,8 +197,7 @@
           <el-input v-model="noteForm.improvement" type="textarea" :rows="3" placeholder="下次如何改进…" />
         </el-form-item>
         <el-form-item label="标签">
-          <el-select v-model="noteForm.tags" multiple filterable allow-create default-first-option
-            placeholder="纪律/心态/仓位/择时" style="width:100%">
+          <el-select v-model="noteForm.tags" multiple filterable allow-create default-first-option placeholder="纪律/心态/仓位/择时" style="width:100%">
             <el-option v-for="t in ['纪律', '心态', '仓位', '择时']" :key="t" :label="t" :value="t" />
           </el-select>
         </el-form-item>
@@ -229,20 +212,104 @@
 
 <script setup lang="ts">
 import { onMounted, reactive, ref, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { reviewApi, type ReviewCycleItem, type ReviewNoteItem, type ReviewStats } from '@/api/paper'
+import { DataAnalysis, Refresh, Plus } from '@element-plus/icons-vue'
+import { paperApi, reviewApi, type ReviewCycleItem, type ReviewNoteItem, type ReviewStats } from '@/api/paper'
+import { stocksApi } from '@/api/stocks'
 import { getStrategyNameMap, strategyNameSync } from '@/utils/strategyName'
 import { fmtPct, fmtPctFromFraction, fmtNum, fmtSigned } from '@/utils/format'
 
 defineOptions({ name: 'PaperReview' })
 
+const router = useRouter()
+
 const activeTab = ref('trades')
 const loading = ref(false)
 const saving = ref(false)
 const cycles = ref<ReviewCycleItem[]>([])
+const holdings = ref<any[]>([])
 const notes = ref<ReviewNoteItem[]>([])
 const stats = ref<ReviewStats | null>(null)
 const resultOptions = ref<string[]>([])
+
+// ── 交易记录融合视图：已平仓（买卖一行） + 持仓中 ──
+interface TradeRow {
+  code: string
+  name?: string
+  strategy?: string
+  reason?: string
+  status: 'closed' | 'open'
+  buy_price?: number
+  sell_price?: number
+  avg_cost?: number
+  last_price?: number
+  quantity: number
+  pnl?: number
+  pnl_pct?: number
+  buy_time?: string
+  sell_time?: string
+}
+
+const holdingRows = computed<TradeRow[]>(() => {
+  return (holdings.value || []).map(p => ({
+    code: p.code,
+    name: p.name,
+    strategy: p.strategy,
+    status: 'open' as const,
+    avg_cost: Number(p.avg_cost ?? 0),
+    last_price: p.last_price != null ? Number(p.last_price) : undefined,
+    quantity: Number(p.quantity ?? 0),
+    buy_time: undefined,
+  }))
+})
+
+const closedRows = computed<TradeRow[]>(() => {
+  return (cycles.value || []).map(c => ({
+    code: c.code,
+    name: c.name,
+    strategy: c.strategy,
+    reason: c.reason,
+    status: 'closed' as const,
+    buy_price: Number(c.buy_price ?? 0),
+    sell_price: Number(c.sell_price ?? 0),
+    quantity: Number(c.quantity ?? 0),
+    pnl: Number(c.pnl ?? 0),
+    pnl_pct: Number(c.pnl_pct ?? 0),
+    buy_time: c.buy_time,
+    sell_time: c.sell_time,
+  }))
+})
+
+/** 交易记录 = 持仓中（进行中，置顶） + 已平仓（按平仓时间倒序） */
+const tradeRows = computed<TradeRow[]>(() => [
+  ...holdingRows.value,
+  ...closedRows.value.sort((a, b) => (b.sell_time || '').localeCompare(a.sell_time || '')),
+])
+
+/** el-tag 状态类型（已平仓=success / 持仓中=warning） */
+function statusTagType(row: TradeRow): 'success' | 'warning' {
+  return row.status === 'closed' ? 'success' : 'warning'
+}
+
+function tradePnl(row: TradeRow): number {
+  if (row.status === 'closed') return row.pnl ?? 0
+  const last = row.last_price != null ? row.last_price : row.avg_cost ?? 0
+  return (last - (row.avg_cost ?? 0)) * row.quantity
+}
+
+function tradePnlPct(row: TradeRow): number {
+  if (row.status === 'closed') return row.pnl_pct ?? 0
+  const avg = row.avg_cost ?? 0
+  const last = row.last_price != null ? row.last_price : avg
+  if (!avg) return 0
+  return (last / avg - 1) * 100
+}
+
+// 跳转模拟交易卖出（带代码预填，减少操作）
+function sellHolding(row: TradeRow) {
+  router.push({ path: '/paper', query: { code: row.code, side: 'sell', quantity: row.quantity } })
+}
 
 const noteDialogVisible = ref(false)
 const editingId = ref<string | null>(null)
@@ -278,6 +345,38 @@ function formatTime(t?: string) {
   return t.replace('T', ' ').slice(0, 19)
 }
 
+// ── 持仓：批量补全股票名称 ──
+async function fetchStockNames(items: any[]) {
+  if (!items || items.length === 0) return
+  const codes = [...new Set(items.map(item => item.code).filter(Boolean))]
+  await Promise.all(
+    codes.map(async (code) => {
+      try {
+        const res = await stocksApi.getQuote(code)
+        if (res.success && res.data && res.data.name) {
+          items.forEach(item => {
+            if (item.code === code) item.name = res.data.name
+          })
+        }
+      } catch (e) {
+        console.warn(`获取股票 ${code} 名称失败:`, e)
+      }
+    })
+  )
+}
+
+async function loadHoldings() {
+  try {
+    const res = await paperApi.getPositions()
+    if (res.success) {
+      holdings.value = res.data.items || []
+      await fetchStockNames(holdings.value)
+    }
+  } catch (e) {
+    console.warn('[Review] 持仓加载失败', e)
+  }
+}
+
 async function loadAll() {
   loading.value = true
   try {
@@ -294,6 +393,7 @@ async function loadAll() {
     getStrategyNameMap().then((m) => {
       strategyNames.value = m
     })
+    await loadHoldings()
   } catch (e) {
     ElMessage.error('加载交易复盘数据失败')
   } finally {
@@ -301,7 +401,7 @@ async function loadAll() {
   }
 }
 
-function openAddNote(row?: ReviewCycleItem) {
+function openAddNote(row?: TradeRow) {
   editingId.value = null
   noteForm.code = row?.code || ''
   noteForm.result = ''
@@ -356,8 +456,6 @@ async function removeNote(n: ReviewNoteItem) {
     /* 取消则不处理 */
   }
 }
-
-onMounted(loadAll)
 
 interface StrategyReturnStat {
   strategy: string
@@ -415,49 +513,173 @@ const strategyReturns = computed<StrategyReturnStat[]>(() => {
   return results.sort((a, b) => b.total_return - a.total_return)
 })
 
-function getStrategyTagType(s: string) {
-  const map: Record<string, string> = {
+function getStrategyTagType(s: string): 'primary' | 'success' | 'warning' | 'info' | 'danger' {
+  const map: Record<string, 'primary' | 'success' | 'warning' | 'info' | 'danger'> = {
     extreme_reversal: 'danger',
     turnaround: 'warning',
     small_cap_value: 'success',
     convertible_arbitrage: 'info',
     ma_golden_cross: 'success',
     tbs: 'success',
-    default: '',
+    default: 'primary',
   }
-  return map[s] || ''
+  return map[s] || 'primary'
 }
+
+onMounted(() => {
+  loadAll()
+})
 </script>
 
 <style scoped>
 .review-page {
   padding: 24px;
-  max-width: 1280px;
-  margin: 0 auto;
 }
-.stats-row {
-  margin-bottom: 16px;
+.page-hero {
+  margin-bottom: 4px;
 }
-.stat-card {
-  text-align: center;
+
+/* ═══════════ 复盘统计条 ═══════════ */
+.stats-strip {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+  margin: 20px 0 8px;
 }
-.stat-label {
-  font-size: 13px;
+.stats-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  border-radius: var(--app-radius);
+  background: var(--el-fill-color-lighter);
+  border: 1px solid var(--el-border-color-lighter);
+  transition: background .2s ease, transform .2s ease;
+}
+.stats-item:hover {
+  background: var(--el-fill-color);
+  transform: translateY(-1px);
+}
+.stats-label {
+  font-size: 12px;
   color: var(--el-text-color-secondary);
 }
-.stat-value {
+.stats-value {
   font-size: 24px;
-  font-weight: 600;
-  margin-top: 4px;
+  font-weight: 700;
+  font-family: var(--app-font-mono);
+  color: var(--el-text-color-primary);
+  letter-spacing: .3px;
+}
+.stats-sub {
+  font-size: 11px;
+  color: var(--el-text-color-placeholder);
 }
 .up { color: var(--app-up); }
 .down { color: var(--app-down); }
+
+/* ═══════════ 分区 Tab ═══════════ */
+.review-tabs {
+  margin-top: 10px;
+}
+.review-tabs :deep(.el-tabs__nav-wrap::after) {
+  height: 1px;
+  background: var(--el-border-color-lighter);
+}
+.review-tabs :deep(.el-tabs__item) {
+  font-weight: 600;
+}
+
+/* 表格卡片 */
+.table-card {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--app-radius);
+  background: var(--el-fill-color-blank);
+  padding: 14px;
+}
+.table-card-hd {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-start;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.table-card-sub {
+  font-size: 11.5px;
+  color: var(--el-text-color-placeholder);
+  font-family: var(--app-font-mono);
+}
+
+/* 交易记录单元格 */
+.stk {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+}
+.stk-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  text-decoration: none;
+}
+.stk-name:hover { color: var(--el-color-primary); }
+.stk-code {
+  font-size: 11px;
+  color: var(--el-text-color-placeholder);
+}
+.money {
+  font-family: var(--app-font-mono);
+  font-size: 12px;
+  color: var(--el-text-color-regular);
+}
+.pct {
+  font-family: var(--app-font-mono);
+  font-size: 12px;
+  font-weight: 600;
+}
+.pct.up { color: var(--app-up); }
+.pct.down { color: var(--app-down); }
+.muted { color: var(--el-text-color-placeholder); }
+.small { font-size: 10.5px; margin-left: 2px; }
+.tag-live {
+  margin-left: 5px;
+  font-size: 10px;
+  color: var(--el-color-warning);
+  border: 1px solid rgba(230, 162, 60, .4);
+  border-radius: 4px;
+  padding: 0 3px;
+  vertical-align: 1px;
+}
+
+/* 订单方向 */
+.side-tag {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 700;
+}
+.side-buy { color: var(--app-up); }
+.side-sell { color: var(--app-down); }
+
+/* 复盘笔记 */
 .notes-toolbar {
   margin-bottom: 12px;
   text-align: right;
 }
+.notes-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 12px;
+}
 .note-card {
-  margin-bottom: 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--app-radius);
+  background: var(--el-fill-color-blank);
+  padding: 14px 16px;
+  transition: box-shadow .2s ease, transform .2s ease;
+}
+.note-card:hover {
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .06);
+  transform: translateY(-1px);
 }
 .note-head {
   display: flex;
@@ -495,120 +717,112 @@ function getStrategyTagType(s: string) {
   color: var(--el-text-color-secondary);
 }
 
-.strategy-returns {
-  .strategy-card {
-    height: 100%;
-    transition: transform 0.15s ease, box-shadow 0.15s ease;
-    &:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
-    }
-  }
-
-  .strategy-card-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .strategy-name {
-    font-weight: 600;
-    font-size: 14px;
-  }
-
-  .strategy-card-body {
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-  }
-
-  .return-hero {
-    text-align: center;
-    padding: 14px 10px;
-    border-radius: 10px;
-    background: linear-gradient(135deg, rgba(43, 108, 176, 0.08) 0%, rgba(43, 108, 176, 0.02) 100%);
-    border: 1px solid var(--el-border-color-lighter);
-
-    .return-hero-label {
-      font-size: 12px;
-      color: var(--el-text-color-secondary);
-      margin-bottom: 4px;
-    }
-
-    .return-hero-value {
-      font-size: 32px;
-      font-weight: 700;
-      font-family: 'Menlo', 'Monaco', 'Consolas', monospace;
-      letter-spacing: -0.5px;
-
-      &.up { color: var(--app-up); }
-      &.down { color: var(--app-down); }
-    }
-  }
-
-  .return-stats {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 8px;
-
-    .return-stat {
-      display: flex;
-      flex-direction: column;
-      padding: 8px;
-      background: var(--el-fill-color-lighter);
-      border-radius: 6px;
-
-      .rs-label {
-        font-size: 11px;
-        color: var(--el-text-color-secondary);
-        margin-bottom: 2px;
-      }
-
-      .rs-value {
-        font-size: 14px;
-        font-weight: 600;
-        font-family: 'Menlo', 'Monaco', monospace;
-
-        &.up { color: var(--app-up); }
-        &.down { color: var(--app-down); }
-      }
-    }
-  }
-
-  .return-bar {
-    .bar-track {
-      height: 6px;
-      background: var(--el-fill-color-lighter);
-      border-radius: 3px;
-      overflow: hidden;
-
-      .bar-fill {
-        height: 100%;
-        border-radius: 3px;
-        transition: width 0.4s ease;
-
-        &.up { background: var(--app-up); }
-        &.down { background: var(--app-down); }
-      }
-    }
-
-    .bar-label {
-      font-size: 11px;
-      color: var(--el-text-color-secondary);
-      margin-top: 4px;
-    }
-  }
+/* ═══════════ 策略收益率 ═══════════ */
+.strategy-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 16px;
+}
+.strategy-card {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--app-radius);
+  background: var(--el-fill-color-blank);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+.strategy-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .08);
+}
+.strategy-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.strategy-name {
+  font-weight: 600;
+  font-size: 14px;
+}
+.return-hero {
+  text-align: center;
+  padding: 14px 10px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(43, 108, 176, 0.08) 0%, rgba(43, 108, 176, 0.02) 100%);
+  border: 1px solid var(--el-border-color-lighter);
+}
+.return-hero-label {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin-bottom: 4px;
+}
+.return-hero-value {
+  font-size: 32px;
+  font-weight: 700;
+  font-family: var(--app-font-mono);
+  letter-spacing: -0.5px;
+}
+.return-hero-value.up { color: var(--app-up); }
+.return-hero-value.down { color: var(--app-down); }
+.return-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.return-stat {
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  background: var(--el-fill-color-lighter);
+  border-radius: 6px;
+}
+.rs-label {
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  margin-bottom: 2px;
+}
+.rs-value {
+  font-size: 14px;
+  font-weight: 600;
+  font-family: var(--app-font-mono);
+}
+.rs-value.up { color: var(--app-up); }
+.rs-value.down { color: var(--app-down); }
+.return-bar .bar-track {
+  height: 6px;
+  background: var(--el-fill-color-lighter);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.return-bar .bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+.return-bar .bar-fill.up { background: var(--app-up); }
+.return-bar .bar-fill.down { background: var(--app-down); }
+.bar-label {
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  margin-top: 4px;
 }
 
-@media (max-width: 768px) {
-  .strategy-returns {
-    .return-stats {
-      grid-template-columns: repeat(2, 1fr);
-    }
+.dash { color: #909399; }
 
-    .return-hero .return-hero-value {
-      font-size: 26px;
-    }
-  }
+/* ═══════════ 响应式 ═══════════ */
+@media (max-width: 1400px) {
+  .stats-strip { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 900px) {
+  .stats-strip { grid-template-columns: repeat(2, 1fr); }
+  .notes-list { grid-template-columns: 1fr; }
+  .strategy-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 768px) {
+  .review-page { padding: 12px; }
+  .stats-strip { grid-template-columns: repeat(2, 1fr); }
+  .return-stats { grid-template-columns: repeat(2, 1fr); }
 }
 </style>

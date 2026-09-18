@@ -19,7 +19,6 @@ import math
 import re
 from datetime import datetime, timedelta, timezone
 
-from app.core.database import get_mongo_db_sync
 from app.services.cache_layer import cached
 
 logger = logging.getLogger("webapi")
@@ -32,8 +31,6 @@ _THS_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36"
 )
-# 领涨股数量上限（并发解析名称，控制成本）
-_MAX_LEAD = 40
 
 
 def _num(v) -> float:
@@ -111,25 +108,6 @@ def _fetch_concept_board() -> list[dict]:
     return out
 
 
-def _load_code_name_map() -> dict[str, str]:
-    """从 market_quotes 集合构建 code -> name 映射（用于领涨股名称解析）。"""
-    try:
-        db = get_mongo_db_sync()
-        coll = db["market_quotes"]
-        m = {}
-        for doc in coll.find(
-            {"code": {"$exists": True}, "name": {"$exists": True}},
-            {"code": 1, "name": 1, "_id": 0},
-        ):
-            code = str(doc.get("code") or "").strip()
-            name = str(doc.get("name") or "").strip()
-            if code and name:
-                m[code] = name
-        return m
-    except Exception:
-        return {}
-
-
 def _market_prefix(code: str) -> str:
     """根据代码推断市场前缀（SH/SZ/BJ），用于补齐名称为空时的展示。"""
     if code.startswith(("6", "90")):
@@ -140,28 +118,15 @@ def _market_prefix(code: str) -> str:
 
 
 def _resolve_lead_names(concepts: list[dict]) -> list[dict]:
-    """为概念补充领涨股名称（优先 market_quotes，缺失时用统一行情兜底）。"""
-    if not concepts:
-        return concepts
-    code_map = _load_code_name_map()
-    # 仅对有限数量的领涨股做网络解析，避免大并发
-    need = [c["lead_code"] for c in concepts if c["lead_code"] and c["lead_code"] not in code_map]
-    if need:
-        try:
-            from app.services.unified_quotes import get_unified_quotes
+    """为概念标注「板块代码」标签（同花顺概念代码 + 市场前缀）。
 
-            quotes = get_unified_quotes(need[:_MAX_LEAD])
-            for code, q in quotes.items():
-                code_map[code] = q.get("name") or code_map.get(code, "")
-        except Exception as e:
-            logger.warning(f"领涨股名称解析失败: {e}")
-
+    注意：同花顺 gnSection 的 cid 字段是**概念板块代码**（如 308725），并非 A 股股票代码，
+    不能用 market_quotes/股票行情去解析成股票名——否则会撞上同号的退市股（如 300309
+    →「吉艾退」）等脏数据。统一显示为 `{code}({市场})`，前端外链到同花顺概念详情页。
+    """
     for c in concepts:
-        lc = c["lead_code"]
-        if lc:
-            c["lead_name"] = code_map.get(lc) or f"{lc}({_market_prefix(lc)})"
-        else:
-            c["lead_name"] = ""
+        lc = str(c.get("lead_code") or "").strip()
+        c["lead_name"] = f"{lc}({_market_prefix(lc)})" if lc else ""
     return concepts
 
 
@@ -176,8 +141,9 @@ def _build() -> dict:
     gainers = valid[:10]
     losers = valid[-10:][::-1] if len(valid) >= 10 else valid[::-1]
 
-    # 资金流榜（资金净流入前10）
-    money_rank = sorted(valid, key=lambda c: c["money_flow"], reverse=True)[:10]
+    # 资金流入榜（资金净流入前10） / 资金流出榜（资金净流出前10）
+    money_leaders = sorted(valid, key=lambda c: c["money_flow"], reverse=True)[:10]
+    money_followers = sorted(valid, key=lambda c: c["money_flow"], reverse=False)[:10]
 
     avg_pct = sum(c["pct_chg"] for c in valid) / len(valid) if valid else 0
     up_count = sum(1 for c in valid if c["pct_chg"] > 0)
@@ -194,7 +160,8 @@ def _build() -> dict:
         "concepts": concepts,
         "gainers": gainers,
         "losers": losers,
-        "money_leaders": money_rank,
+        "money_leaders": money_leaders,
+        "money_followers": money_followers,
     }
 
 

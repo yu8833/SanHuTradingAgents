@@ -32,7 +32,10 @@ _SYSTEM_PROMPT = (
     "你是一名资深 A 股交易员与机构策略师。基于给定的市场数据，输出一份当日市场综合研判。\n"
     "只输出一个 JSON 对象，不要输出任何解释文字、不要使用 markdown 代码块：\n"
     '{"direction":"偏多|偏空|中性","confidence":<0-100整数>,"conclusion":"2-3句话总研判",'
-    '"strategy":"一句话操作策略，含仓位建议、主攻风格与攻防侧重","risk_tips":["1-3条风险提示"]}\n'
+    '"strategy":"一句话操作策略，含仓位建议、主攻风格与攻防侧重",'
+    '"points":["2-4条具体操作要点：基于数据指出该重仓/该回避的方向，明确买点立场（如：沿5日线低吸科技主线；回避高位连板股）"],'
+    '"watch":["1-3条今日需盯的观察信号，如指数关键点位、量能变化、板块轮动确认信号"]，'
+    '"risk_tips":["1-3条风险提示"]}\n'
     "数据可能有缺失：缺失时依据已有信息判断并在结论里点明不确定性，不要臆造数据。"
 )
 
@@ -234,6 +237,8 @@ def _fallback_verdict(regime: dict) -> dict:
         "confidence": 50,
         "conclusion": f"市场环境为{env}；依据环境规则给出方向（未启用 LLM 深度研判）。",
         "strategy": advice,
+        "points": ["规则兜底：按当前市场环境匹配的攻防方向执行，控制仓位等待信号确认"],
+        "watch": ["市场环境趋势是否延续（关注后续成交量与宽度变化）"],
         "risk_tips": ["本结论为规则兜底（AI 研判暂不可用）", "数据来自公开市场级信息，仅供参考，不构成投资建议"],
     }
 
@@ -336,6 +341,8 @@ async def build_market_synthesis(user_id: str) -> dict:
                     "confidence": int(res.get("confidence") or 0),
                     "conclusion": res.get("conclusion") or "",
                     "strategy": res.get("strategy") or "",
+                    "points": res.get("points") or [],
+                    "watch": res.get("watch") or [],
                     "risk_tips": res.get("risk_tips") or [],
                 }
                 llm_available = True

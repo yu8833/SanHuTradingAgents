@@ -8,7 +8,7 @@
         </div>
         <div class="page-hero-text">
           <h2 class="page-hero-title">{{ today }} · 综合研判</h2>
-          <p class="page-hero-sub">汇聚大盘 / 情绪 / 概念 / 资讯四维数据，AI 综合研判市场方向（个股买卖清单已移至模拟交易页）</p>
+          <p class="page-hero-sub">汇聚大盘 / 情绪 / 概念 / 资讯四维数据，AI 综合研判市场方向</p>
         </div>
       </div>
       <div class="page-hero-meta">
@@ -29,41 +29,62 @@
 
     <!-- 数据渲染 -->
     <template v-else>
-      <!-- ├─ ① 研判结论横幅 -->
-      <section v-if="verdict" class="sect sect-in vs-1">
-        <div class="verdict-banner" :class="'vdir-' + verdict.dirClass">
-          <div class="vb-main">
-            <div class="vb-direction">
-              <span class="vb-dir-text">{{ verdict.direction }}</span>
-              <span class="vb-dir-zh">{{ verdict.directionZh }}方向</span>
-            </div>
-            <div class="vb-conf">
-              <div class="vb-conf-ring" :style="confRingStyle">
-                <span class="vb-conf-num">{{ verdict.confidence != null ? verdict.confidence : '—' }}</span>
-                <span class="vb-conf-unit">%</span>
-              </div>
-              <span class="vb-conf-label">信心度</span>
-            </div>
-            <div class="vb-body">
-              <div class="vb-meta">
-                <el-tag v-if="syn?.llm_available" size="small" type="danger" effect="light">AI 研判</el-tag>
-                <el-tag v-else size="small" type="warning" effect="light">规则兜底</el-tag>
-                <span class="vb-asof">更新于 {{ syn?.as_of ? fmtClock(syn.as_of) : '—' }}</span>
-              </div>
-              <div class="vb-conclusion">{{ verdict.conclusion }}</div>
-              <div v-if="verdict.strategy" class="vb-strategy">
-                <el-icon><Opportunity /></el-icon>
-                <span>{{ verdict.strategy }}</span>
-              </div>
-            </div>
-          </div>
+      <section v-if="verdict" class="syn-hero" :class="'syn-hero--' + verdict.dirClass">
+        <div class="syn-hero-glow"></div>
 
-          <div v-if="verdict.risk_tips && verdict.risk_tips.length" class="vb-risk">
-            <span class="vb-risk-title"><el-icon><WarnTriangleFilled /></el-icon> 风险提示</span>
-            <ul class="vb-risk-list">
-              <li v-for="(tip, i) in verdict.risk_tips" :key="i">{{ tip }}</li>
-            </ul>
+        <!-- 顶部：方向 + 信心度 + 标签 -->
+        <div class="syn-hero-top">
+          <div class="syn-direc-wrap">
+            <span class="syn-direc-zh">{{ verdict.directionZh }}方向</span>
+            <span class="syn-direc-main">{{ verdict.direction }}</span>
           </div>
+          <div class="syn-conf-wrap" v-if="verdict.confidence != null">
+            <div class="syn-conf-ring" :style="confRingStyle">
+              <span class="syn-conf-num">{{ verdict.confidence }}</span>
+              <span class="syn-conf-unit">%</span>
+            </div>
+            <span class="syn-conf-label">信心度</span>
+          </div>
+          <div class="syn-tags">
+            <el-tag v-if="syn?.llm_available" size="small" type="danger" effect="dark">AI 研判</el-tag>
+            <el-tag v-else size="small" type="warning" effect="plain">规则兜底</el-tag>
+            <span class="syn-asof">更新于 {{ syn?.as_of ? fmtClock(syn.as_of) : '—' }}</span>
+          </div>
+        </div>
+
+        <!-- 总研判结论 -->
+        <div class="syn-hero-concl">
+          <div class="syn-concl-text">{{ verdict.conclusion }}</div>
+        </div>
+
+        <!-- 操作要点（买点立场/攻防方向） -->
+        <div class="syn-panel" v-if="verdict.points.length">
+          <div class="syn-panel-title bull"><el-icon><Opportunity /></el-icon> 操作要点</div>
+          <ul class="syn-panel-list">
+            <li v-for="(p, i) in verdict.points" :key="'p' + i">▸ {{ p }}</li>
+          </ul>
+        </div>
+
+        <!-- 今日观察信号 -->
+        <div class="syn-panel" v-if="verdict.watch.length">
+          <div class="syn-panel-title watch"><el-icon><View /></el-icon> 今日观察</div>
+          <ul class="syn-panel-list">
+            <li v-for="(w, i) in verdict.watch" :key="'w' + i">◎ {{ w }}</li>
+          </ul>
+        </div>
+
+        <!-- 操作策略 -->
+        <div class="syn-panel" v-if="verdict.strategy">
+          <div class="syn-panel-title strat"><el-icon><Guide /></el-icon> 操作策略</div>
+          <div class="syn-strat-text">{{ verdict.strategy }}</div>
+        </div>
+
+        <!-- 风险提示 -->
+        <div class="syn-risk" v-if="verdict.risk_tips.length">
+          <span class="syn-risk-title"><el-icon><WarnTriangleFilled /></el-icon> 风险提示</span>
+          <ul class="syn-risk-list">
+            <li v-for="(tip, i) in verdict.risk_tips" :key="i">{{ tip }}</li>
+          </ul>
         </div>
       </section>
 
@@ -79,7 +100,9 @@ import {
   vibeApi,
   type MarketSynthesis,
 } from '@/api/vibe'
-import { Refresh, Loading, Aim, Opportunity, WarnTriangleFilled } from '@element-plus/icons-vue'
+import {
+  Refresh, Loading, Aim, Opportunity, WarnTriangleFilled, View, Guide,
+} from '@element-plus/icons-vue'
 
 defineOptions({ name: 'VibeSynthesis' })
 
@@ -107,6 +130,8 @@ const verdict = computed(() => {
     confidence: conf,
     conclusion: v.conclusion || '',
     strategy: v.strategy || '',
+    points: Array.isArray(v.points) ? v.points : [],
+    watch: Array.isArray(v.watch) ? v.watch : [],
     risk_tips: Array.isArray(v.risk_tips) ? v.risk_tips : [],
   }
 })
@@ -175,152 +200,164 @@ onActivated(() => {
   color: var(--el-text-color-secondary);
 }
 
-/* ── 区块（错峰浮现） ── */
-.sect {
-  margin-bottom: 28px;
-}
-.sect-in {
-  animation: sectIn .5s ease both;
-}
-.vs-1 { animation-delay: .04s; }
-@keyframes sectIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: none; }
-}
-
 /* ── ① 研判结论横幅 ── */
-.verdict-banner {
+.syn-hero {
+  position: relative;
+  overflow: hidden;
   border-radius: var(--app-radius-lg);
   background: var(--el-fill-color-blank);
   border: 1px solid var(--el-border-color-light);
-  overflow: hidden;
   box-shadow: var(--app-shadow);
-}
-.vb-main {
+  padding: 20px 22px 16px;
   display: flex;
-  gap: 24px;
-  padding: 20px 22px;
+  flex-direction: column;
+  gap: 14px;
+}
+.syn-hero-glow {
+  position: absolute;
+  top: -60px; right: -40px;
+  width: 240px; height: 240px;
+  border-radius: 50%;
+  filter: blur(60px);
+  opacity: .28;
+  pointer-events: none;
+}
+.syn-hero--bull .syn-hero-glow { background: var(--app-up); }
+.syn-hero--bear .syn-hero-glow { background: var(--app-down); }
+.syn-hero--neutral .syn-hero-glow { background: var(--el-color-primary); }
+
+.syn-hero-top {
+  display: flex;
+  align-items: center;
+  gap: 20px;
   position: relative;
 }
-.vb-main::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 4px;
-}
-.vdir-bull .vb-main::before { background: var(--app-up); }
-.vdir-bear .vb-main::before { background: var(--app-down); }
-.vdir-neutral .vb-main::before { background: var(--el-color-primary); }
-.vb-direction {
-  flex-shrink: 0;
+.syn-direc-wrap {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 4px;
-  min-width: 100px;
+  gap: 2px;
+  min-width: 92px;
 }
-.vb-dir-text {
-  font-size: 30px;
+.syn-direc-zh { font-size: 12px; color: var(--el-text-color-placeholder); }
+.syn-direc-main {
+  font-size: 32px;
   font-weight: 800;
-  letter-spacing: 2px;
-  line-height: 1.1;
+  letter-spacing: 3px;
+  line-height: 1.05;
 }
-.vdir-bull .vb-dir-text { color: var(--app-up); }
-.vdir-bear .vb-dir-text { color: var(--app-down); }
-.vdir-neutral .vb-dir-text { color: var(--el-color-primary); }
-.vb-dir-zh { font-size: 12px; color: var(--el-text-color-placeholder); }
-.vb-conf {
-  flex-shrink: 0;
+.syn-hero--bull .syn-direc-main { color: var(--app-up); }
+.syn-hero--bear .syn-direc-main { color: var(--app-down); }
+.syn-hero--neutral .syn-direc-main { color: var(--el-color-primary); }
+
+.syn-conf-wrap {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding-right: 22px;
+  gap: 4px;
+  padding: 0 18px;
   border-right: 1px dashed var(--el-border-color-lighter);
+  border-left: 1px dashed var(--el-border-color-lighter);
 }
-.vb-conf-ring {
+.syn-conf-ring {
   --pct: 0%;
   --ring-color: #2b6cb0;
-  width: 64px;
-  height: 64px;
+  width: 60px; height: 60px;
   border-radius: 50%;
   background: conic-gradient(var(--ring-color) var(--pct), var(--el-fill-color-extra-light) 0);
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   position: relative;
 }
-.vb-conf-ring::before {
+.syn-conf-ring::before {
   content: '';
   position: absolute;
   inset: 6px;
   border-radius: 50%;
   background: #fff;
 }
-.vb-conf-num {
+.syn-conf-num {
   position: relative;
   z-index: 1;
   font-family: var(--app-font-mono);
-  font-size: 20px;
+  font-size: 17px;
   font-weight: 700;
   color: var(--el-text-color-primary);
   line-height: 1;
 }
-.vb-conf-unit {
+.syn-conf-unit {
   position: relative;
   z-index: 1;
-  font-size: 10px;
+  font-size: 9px;
   color: var(--el-text-color-placeholder);
   margin-top: 1px;
 }
-.vb-conf-label { font-size: 11px; color: var(--el-text-color-placeholder); }
-.vb-body {
-  flex: 1;
-  min-width: 0;
+.syn-conf-label { font-size: 11px; color: var(--el-text-color-placeholder); }
+
+.syn-tags {
   display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 8px;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
 }
-.vb-meta { display: flex; align-items: center; gap: 8px; }
-.vb-asof {
+.syn-asof {
   font-size: 11px;
   color: var(--el-text-color-placeholder);
   font-family: var(--app-font-mono);
 }
-.vb-conclusion {
-  font-size: 14px;
-  line-height: 1.75;
+
+.syn-hero-concl .syn-concl-text {
+  font-size: 15px;
+  line-height: 1.85;
   color: var(--el-text-color-primary);
 }
-.vb-strategy {
+
+/* ── AI 内容面板（操作要点/观察/策略） ── */
+.syn-panel {
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: var(--el-fill-color-lighter);
+}
+.syn-panel-title {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 6px;
   font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.syn-panel-title.bull { color: var(--app-up); }
+.syn-panel-title.watch { color: var(--el-color-primary); }
+.syn-panel-title.strat { color: var(--el-color-warning); }
+.syn-panel-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.syn-panel-list li {
+  font-size: 13.5px;
+  line-height: 1.7;
   color: var(--el-text-color-regular);
-  background: var(--el-fill-color-lighter);
-  border-radius: 8px;
-  padding: 8px 12px;
-  align-self: flex-start;
-  max-width: 100%;
 }
-.vb-strategy .el-icon {
-  color: var(--el-color-warning);
-  margin-top: 2px;
-  flex-shrink: 0;
+.syn-strat-text {
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: var(--el-text-color-regular);
 }
-.vb-risk {
-  margin: 0 22px 18px;
+
+/* 风险提示 */
+.syn-risk {
   padding: 10px 14px;
   border-radius: 10px;
   background: rgba(230, 162, 60, .08);
   border: 1px solid rgba(230, 162, 60, .22);
 }
-.vb-risk-title {
+.syn-risk-title {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -329,8 +366,8 @@ onActivated(() => {
   color: #b7791f;
   margin-bottom: 4px;
 }
-.vb-risk-list { margin: 0; padding-left: 18px; }
-.vb-risk-list li {
+.syn-risk-list { margin: 0; padding-left: 18px; }
+.syn-risk-list li {
   font-size: 12.5px;
   line-height: 1.6;
   color: var(--el-text-color-regular);
@@ -344,26 +381,10 @@ onActivated(() => {
 }
 
 @media (max-width: 768px) {
-  /* ── 结论横幅 · 手机适配 ── */
-  .vb-main { flex-direction: column; gap: 14px; padding: 16px; }
-  .vb-direction {
-    flex-direction: row;
-    gap: 10px;
-    min-width: 0;
-    justify-content: flex-start;
-  }
-  .vb-dir-text { font-size: 26px; }
-  .vb-conf {
-    flex-direction: row;
-    gap: 10px;
-    padding-right: 0;
-    padding-bottom: 12px;
-    border-right: none;
-    border-bottom: 1px dashed var(--el-border-color-lighter);
-    justify-content: flex-start;
-  }
-  .vb-conf-ring { width: 56px; height: 56px; }
-  .vb-conf-ring::before { inset: 5px; }
-  .vb-risk { margin: 0 16px 14px; }
+  .syn-hero { padding: 16px; }
+  .syn-hero-top { flex-wrap: wrap; gap: 12px; }
+  .syn-tags { margin-left: 0; }
+  .syn-direc-main { font-size: 26px; }
+  .syn-conf-wrap { padding: 0 12px; }
 }
 </style>

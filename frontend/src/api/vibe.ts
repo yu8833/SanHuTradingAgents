@@ -249,6 +249,7 @@ export interface ConceptAnalysis {
   gainers: ConceptItem[]
   losers: ConceptItem[]
   money_leaders: ConceptItem[]
+  money_followers: ConceptItem[]
 }
 
 export interface StockQuote {
@@ -365,7 +366,15 @@ export interface SynthesisVerdict {
   confidence: number | null // 置信度 0-100
   conclusion: string      // 综合研判结论
   strategy: string        // 当下建议策略
+  points?: string[]       // 具体操作要点（买点立场/攻防方向）
+  watch?: string[]        // 今日需盯的观察信号
   risk_tips: string[]     // 风险提示
+}
+
+export interface SynthesisSourceRef {
+  type?: string
+  ref?: string
+  label?: string
 }
 
 export interface SynthesisBuyItem {
@@ -375,22 +384,31 @@ export interface SynthesisBuyItem {
   last_price?: number | null
   distance_pct?: number | null
   triggered?: boolean
+  confirmed?: boolean
   signal_label?: string
+  source?: SynthesisSourceRef | null
+  plan_id?: string | null
   advice?: string
+  buy_reason?: string
+  reasons?: { kind: string; text: string }[]
 }
 
 export interface SynthesisSellItem {
   code: string
   name?: string
   quantity?: number
+  avg_cost?: number
   last_price?: number | null
   profit_loss_rate?: number | null
   stop_loss_price?: number | null
   take_profit_price?: number | null
   advice?: string
   advice_label?: string
+  advice_text?: string
   sell_pct?: number
   reason?: string | null
+  holding?: boolean
+  reasons?: { kind: string; text: string }[]
 }
 
 export interface SynthesisSources {

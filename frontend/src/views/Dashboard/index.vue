@@ -23,12 +23,12 @@
       </el-col>
 
       <el-col :xs="24" :md="8">
-        <!-- 模拟交易账户（精简） -->
+        <!-- 持仓追踪（精简） -->
         <el-card class="paper-trading-card" shadow="hover">
           <template #header>
             <div class="card-header">
-              <span>模拟交易账户</span>
-              <el-button type="text" size="small" @click="goToPaperTrading">
+              <span>持仓追踪</span>
+              <el-button type="text" size="small" @click="goToPortfolio">
                 查看详情 <el-icon><ArrowRight /></el-icon>
               </el-button>
             </div>
@@ -54,9 +54,9 @@
 
           <div v-else class="empty-state">
             <el-icon class="empty-icon"><InfoFilled /></el-icon>
-            <p>暂无账户信息</p>
-            <el-button type="primary" size="small" @click="goToPaperTrading">
-              查看模拟交易
+            <p>暂无持仓信息</p>
+            <el-button type="primary" size="small" @click="goToPortfolio">
+              查看持仓追踪
             </el-button>
           </div>
         </el-card>
@@ -643,8 +643,8 @@ const goToFavorites = () => {
   router.push('/favorites')
 }
 
-const goToPaperTrading = () => {
-  router.push('/paper')
+const goToPortfolio = () => {
+  router.push('/portfolio')
 }
 
 const viewStockDetail = (stock: any) => {

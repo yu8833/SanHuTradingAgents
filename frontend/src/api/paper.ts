@@ -24,6 +24,7 @@ export interface PaperPositionItem {
 }
 
 export interface PaperOrderItem {
+  id?: string
   user_id?: string
   code: string
   side: 'buy' | 'sell'
@@ -65,6 +66,9 @@ export const paperApi = {
   },
   async getOrders(limit = 50) {
     return ApiClient.get<{ items: PaperOrderItem[] }>(`/api/paper/orders`, { limit })
+  },
+  async deleteOrder(orderId: string) {
+    return ApiClient.delete<any>(`/api/paper/orders/${orderId}`)
   },
   async resetAccount() {
     // 后端要求 confirm=true

@@ -904,6 +904,20 @@ def build_operational_checklist(reports: dict, extracted: dict | None = None) ->
         out["目标2"] = _grab(trader, ("第二目标", "目标2"), require_price=True)
     if out["目标2"] is None:
         out["目标2"] = extracted.get("二次买入")
+
+    # 减持/卖出评级：目标1/目标2 本质是下行退出位（而非上行目标），
+    # 未抽中时从最终决策的「跌破XX元减仓/清仓」句中提取，并对语义无歧义性校验
+    op_dir = str(out.get("操作方向") or "")
+    if ("减持" in op_dir or "卖出" in op_dir) and final:
+        if out["目标1"] is None:
+            m1 = re.search(r"跌破\s*([0-9.]+)\s*元[^。]*?(?:减仓|回落[^。]*?减仓)", final)
+            if m1:
+                out["目标1"] = f"{m1.group(1)} 元"
+        if out["目标2"] is None:
+            m2 = re.search(r"跌破\s*([0-9.]+)\s*元[^。]*?(?:清仓|离场|无条件)", final)
+            if m2:
+                out["目标2"] = f"{m2.group(1)} 元"
+
     out["风险回报比"] = _grab(trader, ("风险/回报比", "风险回报比", "盈亏比"))
     out["建议仓位"] = _grab(trader, ("建议仓位", "仓位建议", "仓位"))
     out["持有周期"] = _grab(trader, ("预计持有周期", "持有周期", "周期"))

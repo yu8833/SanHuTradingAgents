@@ -235,7 +235,8 @@ class ReportExporter:
                 content_parts.append(f"- **操作建议**: {action}")
             target_price = decision.get("target_price")
             if target_price:
-                content_parts.append(f"- **🎯 目标价**: {target_price}")
+                target_label = "退出参考价" if (action in ("减持", "卖出")) else "目标价"
+                content_parts.append(f"- **🎯 {target_label}**: {target_price}")
             stop_loss = decision.get("stop_loss")
             if stop_loss:
                 content_parts.append(f"- **🛑 止损价**: {stop_loss}")

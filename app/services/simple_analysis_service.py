@@ -1839,6 +1839,19 @@ class SimpleAnalysisService:
                         except (ValueError, TypeError):
                             target_price = None
 
+                # 解析止损价格（中英文标签行；与目标价分离，避免减持场景下把止损误当目标价）
+                stop_loss = None
+                if final_decision_markdown:
+                    sl_match = (
+                        re.search(r'\*\*Stop Loss\*\*:\s*([0-9.]+)', final_decision_markdown, re.IGNORECASE)
+                        or re.search(r'止损价[格位线]?[：:]\s*([0-9.]+)', final_decision_markdown)
+                    )
+                    if sl_match:
+                        try:
+                            stop_loss = float(sl_match.group(1))
+                        except (ValueError, TypeError):
+                            stop_loss = None
+
                 # 解析评级 (Rating) - 支持中英文两种格式
                 action = '持有'
                 if final_decision_markdown:
@@ -1920,6 +1933,7 @@ class SimpleAnalysisService:
                     'confidence': confidence,
                     'risk_score': 0.3,  # 默认风险评分
                     'target_price': target_price,
+                    'stop_loss': stop_loss,
                     'reasoning': reasoning
                 }
 
@@ -1931,6 +1945,7 @@ class SimpleAnalysisService:
                     'confidence': 0.5,
                     'risk_score': 0.3,
                     'target_price': None,
+                    'stop_loss': None,
                     'reasoning': '暂无分析推理'
                 }
 
@@ -1959,10 +1974,11 @@ class SimpleAnalysisService:
                 target_price = formatted_decision.get('target_price')
                 reasoning = formatted_decision.get('reasoning', '')
 
-                # 生成投资建议
+                # 生成投资建议（减持/卖出评级下 price_target 实为下行退出/止损参考，避免误称"目标价格"）
                 recommendation = f"投资建议：{action}。"
                 if target_price:
-                    recommendation += f"目标价格：{target_price}元。"
+                    price_label = "退出参考价（止损/清仓参考）" if action in ("减持", "卖出") else "目标价格"
+                    recommendation += f"{price_label}：{target_price}元。"
                 if reasoning:
                     recommendation += f"决策依据：{reasoning}"
                 logger.info(f"💡 [RECOMMENDATION] 生成投资建议: {len(recommendation)}字符")

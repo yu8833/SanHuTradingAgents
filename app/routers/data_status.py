@@ -98,7 +98,12 @@ async def _check_historical_data_status() -> dict:
                 is_today_trading_day = is_trading_day(now)
                 if is_today_trading_day and now.hour < 16:
                     # 盘中：日K更新到上一个交易日即为最新（今天日K尚未发布）
-                    last_trade_day = get_latest_trade_day(now)
+                    # ⚠️ 15:00-16:00 已过收盘线，get_latest_trade_day(now) 会把"今天"
+                    # 当作最近交易日，导致上一交易日的数据被误报"过期1天"。必须与
+                    # /api/screening/data-freshness 一致：按当日 00:00 求最近已完成
+                    # 交易日（=上一交易日），保证两处口径统一。
+                    from datetime import datetime as _dt
+                    last_trade_day = get_latest_trade_day(_dt.combine(now.date(), _dt.min.time()))
                     is_fresh = latest_date_str.replace("-", "") >= last_trade_day.strftime("%Y%m%d")
                 else:
                     # 收盘后/非交易日：落后 0 个交易日才算最新

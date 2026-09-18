@@ -227,15 +227,15 @@ class TraderProposal(BaseModel):
     )
     target_price: Optional[float] = Field(
         default=None,
-        description="目标价格，第一目标位，以股票报价货币计价。",
+        description="第一目标位（买入/增持/持有评级为上方目标位；减持/卖出评级为下行退出/清仓参考位），以股票报价货币计价。",
     )
     second_target_price: Optional[float] = Field(
         default=None,
-        description="第二目标价格（可选），更高的目标位，以股票报价货币计价。",
+        description="第二目标位（可选，买入/持有为更高的上方目标位；减持/卖出评级可不填，或填更低一档下行退出位），以股票报价货币计价。",
     )
     stop_loss: Optional[float] = Field(
         default=None,
-        description="止损价格，以股票报价货币计价。",
+        description="止损价格（买入/持有：入场价下方；减持/卖出：反向失效位需位于上方，方向必须与评级一致），以股票报价货币计价。",
     )
     position_sizing: Optional[str] = Field(
         default=None,
@@ -554,11 +554,11 @@ class PortfolioDecision(BaseModel):
     )
     price_target: Optional[float] = Field(
         default=None,
-        description="目标价格，以股票报价货币计价。",
+        description="目标价格（买入/增持/持有：上方目标位；减持/卖出：下行退出/清仓参考位，勿与止损价混淆），以股票报价货币计价。",
     )
     stop_loss_price: Optional[float] = Field(
         default=None,
-        description="止损价格，以股票报价货币计价。",
+        description="止损价格（买入/持有：入场价下方；减持/卖出：失效位方向与评级一致，勿把上方阻力位当止损），以股票报价货币计价。",
     )
     recommended_position: Optional[str] = Field(
         default=None,

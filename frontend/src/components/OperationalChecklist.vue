@@ -45,9 +45,12 @@ const cl = computed(() => (props.checklist && typeof props.checklist === 'object
 
 const hasData = computed(() => Object.keys(cl.value).length > 0)
 
-/** 点位格：kind 控制颜色 —— 买点/目标=红(看涨)，止损=绿(风险)，其余中性 */
+/** 点位格：kind 控制颜色 —— 买点/目标=红(看涨)，止损=绿(风险)，其余中性。
+ *  减持/卖出 评级的"目标"实为下行退出位、"止损"实为上方失效位，按评级纠正标签与颜色。 */
 const pointCells = computed(() => {
   const cells: Array<{ label: string; value: string; kind: 'up' | 'down' | 'flat' | 'warn' }> = []
+  const action = String(cl.value['操作方向'] || cl.value['方向'] || '')
+  const isSell = /减持|卖出/.test(action)
   const push = (label: string, key: string, kind: 'up' | 'down' | 'flat' | 'warn' = 'flat', required = false) => {
     const v = cl.value[key]
     // required：关键点位格始终占位，缺失显示 "—" 保持网格完整；非 required 缺失时隐藏
@@ -57,10 +60,12 @@ const pointCells = computed(() => {
     }
     cells.push({ label, value: String(v), kind })
   }
-  push('入场', '入场', 'up', true)
-  push('目标1', '目标1', 'up', true)
-  push('目标2', '目标2', 'up', true)
-  push('止损', '止损', 'down', true)
+  push('操作方向', '操作方向', 'flat', true)
+  push('入场', '入场', isSell ? 'warn' : 'up', true)
+  // 减持/卖出：目标1/目标2 为下行退出位（绿），止损为上方失效位（红）
+  push(isSell ? '退出位1' : '目标1', '目标1', isSell ? 'down' : 'up', true)
+  push(isSell ? '退出位2' : '目标2', '目标2', isSell ? 'down' : 'up', true)
+  push(isSell ? '上方失效位' : '止损', '止损', isSell ? 'up' : 'down', true)
   push('风险/回报比', '风险回报比', 'warn', true)
   push('建议仓位', '建议仓位')
   push('持有周期', '持有周期')

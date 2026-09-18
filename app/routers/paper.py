@@ -396,9 +396,29 @@ async def list_orders(limit: int = Query(50, ge=1, le=200), current_user: dict =
     db = get_mongo_db()
     cursor = db["paper_orders"].find({"user_id": current_user["id"]}).sort("created_at", -1).limit(limit)
     items = await cursor.to_list(None)
-    # 去除 _id
-    cleaned = [{k: v for k, v in it.items() if k != "_id"} for it in items]
+    # 去除 _id，用字符串 id 字段替代（供前端删除等操作定位）
+    from bson import ObjectId
+    cleaned = []
+    for it in items:
+        oid = it.pop("_id", None)
+        it["id"] = str(oid) if isinstance(oid, ObjectId) else str(oid)
+        cleaned.append(it)
     return ok({"items": cleaned})
+
+
+@router.delete("/orders/{order_id}", response_model=dict)
+async def delete_order(order_id: str, current_user: dict = Depends(get_current_user)):
+    """删除单条订单流水（仅 paper_orders 记录本身，不影响持仓/账户/成交复盘 trade）。"""
+    from bson import ObjectId
+    db = get_mongo_db()
+    try:
+        oid = ObjectId(order_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="无效的订单 ID")
+    result = await db["paper_orders"].delete_one({"_id": oid, "user_id": current_user["id"]})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    return ok({"message": "订单流水已删除", "deleted": 1})
 
 
 @router.post("/reset", response_model=dict)
