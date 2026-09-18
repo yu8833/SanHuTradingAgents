@@ -74,6 +74,7 @@
       <div class="concept-chart">
         <VChart
           v-if="mapReady"
+          ref="chartRef"
           :option="mapOption"
           autoresize
           class="concept-chart-inner map-chart"
@@ -187,15 +188,42 @@ const mapReady = computed(() => !!(data.value?.concepts?.length))
 // ── 概念查找：匹配的概念圆点高亮 + 闪烁放大 ──
 const searchKw = ref('')
 const matchNames = ref<string[]>([])
-const blinkOn = ref(false)
+// 图表实例引用：闪烁通过 dispatchAction 完成，避免每次重建 option 打断 tooltip
+const chartRef = ref<{ getInstance?: () => any } | null>(null)
 let blinkTimer: ReturnType<typeof setInterval> | null = null
+let blinkOn = false
 
+// 匹配概念在散点图中的位置（seriesIndex/dataIndex，与 mapOption 分组顺序一致）
+const matchPoints = computed(() => {
+  const set = new Set(matchNames.value)
+  if (!set.size) return [] as { seriesIndex: number; dataIndex: number }[]
+  const list = data.value?.concepts || []
+  const groups: object[][] = [[], []]
+  for (const c of list) {
+    groups[(Number(c.pct_chg) || 0) >= 0 ? 0 : 1].push(c)
+  }
+  const pts: { seriesIndex: number; dataIndex: number }[] = []
+  groups.forEach((arr, seriesIndex) => {
+    arr.forEach((c: any, dataIndex) => {
+      if (set.has(c.name)) pts.push({ seriesIndex, dataIndex })
+    })
+  })
+  return pts
+})
+
+function applyBlink() {
+  blinkOn = !blinkOn
+  const inst = chartRef.value?.getInstance?.()
+  if (!inst) return
+  for (const p of matchPoints.value) {
+    inst.dispatchAction({ type: blinkOn ? 'highlight' : 'downplay', seriesIndex: p.seriesIndex, dataIndex: p.dataIndex })
+  }
+}
 function startBlink() {
   stopBlink()
-  blinkOn.value = true
-  blinkTimer = setInterval(() => {
-    blinkOn.value = !blinkOn.value
-  }, 550)
+  blinkOn = true
+  applyBlink()
+  blinkTimer = setInterval(applyBlink, 550)
 }
 function stopBlink() {
   if (blinkTimer) {
@@ -203,9 +231,16 @@ function stopBlink() {
     blinkTimer = null
   }
 }
+function downplayAll() {
+  const inst = chartRef.value?.getInstance?.()
+  if (!inst) return
+  for (const p of matchPoints.value) {
+    inst.dispatchAction({ type: 'downplay', seriesIndex: p.seriesIndex, dataIndex: p.dataIndex })
+  }
+}
 function clearMatch() {
   stopBlink()
-  blinkOn.value = false
+  downplayAll()
   matchNames.value = []
 }
 function doSearch() {
@@ -228,6 +263,7 @@ function doSearch() {
 }
 onBeforeUnmount(() => {
   stopBlink()
+  downplayAll()
 })
 
 // ── 概念地图：涨跌幅(Y) × 资金净流入(X) 四象限散点图，293 全量 ──
@@ -241,7 +277,6 @@ const mapOption = computed<EChartsOption>(() => {
   const padY = (yMax - yMin) * 0.12 || 0.2
 
   const matched = new Set(matchNames.value)
-  const blink = blinkOn.value
   const upData: object[] = []
   const downData: object[] = []
   for (const c of list) {
@@ -254,21 +289,21 @@ const mapOption = computed<EChartsOption>(() => {
     }
     if (isMatch) {
       const pct = Number(c.pct_chg) || 0
-      // 被查找的概念：放大 + 醒目色 + 光晕闪烁 + 数值标签
-      item.symbolSize = blink ? 22 : 16
+      // 被查找的概念：显著放大 + 宝蓝高亮（与红涨/绿跌对比最强）+ 光晕 + 数值标签（闪烁由 dispatchAction 驱动）
+      item.symbolSize = 22
       item.itemStyle = {
-        color: '#f04438',
+        color: '#2563eb',
         borderColor: '#fff',
-        borderWidth: 2,
-        shadowBlur: blink ? 30 : 12,
-        shadowColor: 'rgba(240,68,56,.9)',
+        borderWidth: 2.5,
+        shadowBlur: 18,
+        shadowColor: 'rgba(37,99,235,.95)',
       }
       item.label = {
         show: true,
         position: 'right',
         distance: 6,
-        color: '#f04438',
-        fontSize: 12,
+        color: '#1d4ed8',
+        fontSize: 13,
         fontWeight: 700,
         formatter: `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`,
       }
@@ -339,7 +374,10 @@ const mapOption = computed<EChartsOption>(() => {
       type: 'scatter',
       symbolSize: 9,
       itemStyle: { color: 'rgba(245,108,108,.72)' },
-      emphasis: { scale: 2.2, itemStyle: { borderColor: '#2d3748', borderWidth: 1 } },
+      emphasis: {
+        scale: 2.6,
+        itemStyle: { borderColor: '#2d3748', borderWidth: 1, shadowBlur: 28, shadowColor: 'rgba(37,99,235,.9)' },
+      },
       markLine: {
         silent: true,
         symbol: 'none',
@@ -375,7 +413,10 @@ const mapOption = computed<EChartsOption>(() => {
       type: 'scatter',
       symbolSize: 9,
       itemStyle: { color: 'rgba(103,194,58,.72)' },
-      emphasis: { scale: 2.2, itemStyle: { borderColor: '#2d3748', borderWidth: 1 } },
+      emphasis: {
+        scale: 2.6,
+        itemStyle: { borderColor: '#2d3748', borderWidth: 1, shadowBlur: 28, shadowColor: 'rgba(37,99,235,.9)' },
+      },
       data: downData,
     }],
   }
