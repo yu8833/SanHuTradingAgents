@@ -1,13 +1,12 @@
-"""概念分析数据层 —— 借鉴 tickflow-stock-panel 的「概念分析 → 概念轮动」思路。
+"""概念分析数据层 —— 借鉴 tickflow-stock-panel 的「概念分析」思路。
 
 在原有市场看板基础上，新增概念板块聚合：
   概念实时行情（涨跌幅 / 领涨股 / 资金流 / 换手率）、
   概念领涨/领跌榜、
-  概念轮动 RPS 矩阵（多窗口累计涨幅）。
+  资金流榜。
 
 数据来源（全部为公开板块级数据，不涉及个股推荐）：
   - 同花顺概念板块实时行情页 q.10jqka.com.cn/gn/（内嵌 gnSection JSON，含 294 个概念）
-  - 同花顺概念指数历史 stock_board_concept_index_ths（用于多窗口涨幅）
   - market_quotes 集合（领涨股名称解析）
 
 全部为「大盘/板块级公开数据」，不涉及个股推荐。Redis 分级 TTL 缓存，全站共享一份。
@@ -205,90 +204,4 @@ async def get_concept_analysis() -> dict:
         "vibe:concept_analysis", _build,
         category="market",
         valid=lambda v: bool(v.get("concepts")),
-    )
-
-
-# ---------------------------------------------------------------------------
-# 概念轮动 RPS 矩阵（多窗口累计涨幅）
-# ---------------------------------------------------------------------------
-
-# 多窗口累计涨幅（交易日）
-_PCT_WINDOWS = [5, 10, 20, 60]
-
-
-def _concept_index_returns(name: str) -> dict[str, float] | None:
-    """获取单概念的多窗口累计涨幅（基于同花顺概念指数历史收盘价）。
-
-    返回 {window: 累计涨幅百分数}，失败返回 None。仅取最近 ~90 个自然日。
-    """
-    import akshare as ak
-
-    try:
-        end = datetime.now(BEIJING).strftime("%Y%m%d")
-        start = (datetime.now(BEIJING) - timedelta(days=120)).strftime("%Y%m%d")
-        df = ak.stock_board_concept_index_ths(symbol=name, start_date=start, end_date=end)
-        if df is None or df.empty:
-            return None
-        closes = df["收盘价"].astype(float).tolist()
-        if len(closes) < 2:
-            return None
-        out = {}
-        for w in _PCT_WINDOWS:
-            if len(closes) > w:
-                base = closes[-1 - w]
-                out[w] = round((closes[-1] / base - 1) * 100, 2) if base else 0.0
-            else:
-                out[w] = None
-        return out
-    except Exception as e:
-        logger.warning(f"获取概念 {name} 指数历史失败: {e}")
-        return None
-
-
-def _build_rotation(top_n: int = 40) -> dict:
-    """构建概念轮动 RPS 矩阵：取当日涨幅前 top_n 的概念，计算多窗口累计涨幅。
-
-    说明：多窗口累计涨幅需逐个拉取概念指数历史，成本较高，故仅对「当日热门概念」
-    子集计算，并用线程池并发拉取以加速。结果按类别缓存。
-    """
-    import concurrent.futures
-
-    concepts = _fetch_concept_board()
-    valid = [c for c in concepts if c["pct_chg"] is not None]
-    valid.sort(key=lambda c: c["pct_chg"], reverse=True)
-    hot = valid[:top_n]
-
-    rows = []
-    # 并发拉取各概念指数历史（akshare 为同步阻塞，放入线程池）
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
-        future_map = {ex.submit(_concept_index_returns, c["name"]): c for c in hot}
-        for fut in concurrent.futures.as_completed(future_map):
-            c = future_map[fut]
-            try:
-                rets = fut.result()
-            except Exception:
-                rets = None
-            if rets is None:
-                continue
-            rows.append({
-                "code": c["code"],
-                "name": c["name"],
-                "pct_chg": c["pct_chg"],
-                "returns": rets,
-            })
-
-    return {
-        "windows": _PCT_WINDOWS,
-        "as_of": datetime.now(BEIJING).strftime("%Y-%m-%d %H:%M"),
-        "rows": rows,
-    }
-
-
-async def get_concept_rotation(top_n: int = 40) -> dict:
-    """概念轮动 RPS 矩阵（Redis 缓存，financial 级 TTL，命中热概念子集）。"""
-    return await cached(
-        f"vibe:concept_rotation:{top_n}",
-        lambda: _build_rotation(top_n),
-        category="financial",
-        valid=lambda v: bool(v.get("rows")),
     )

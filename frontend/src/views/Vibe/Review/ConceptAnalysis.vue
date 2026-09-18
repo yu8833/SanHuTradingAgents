@@ -8,11 +8,11 @@
         </div>
         <div class="page-hero-text">
           <h2 class="page-hero-title">{{ today }} · 概念分析</h2>
-          <p class="page-hero-sub">概念实时行情 / 轮动 RPS / 领涨领跌一屏看全</p>
+          <p class="page-hero-sub">概念热度 / 资金流向一屏看全</p>
         </div>
       </div>
       <div class="page-hero-meta">
-        <el-button type="primary" plain :icon="Refresh" :loading="loading" @click="loadAll">
+        <el-button type="primary" plain :icon="Refresh" :loading="loading" @click="loadAnalysis">
           刷新
         </el-button>
       </div>
@@ -56,34 +56,6 @@
       </div>
       <div class="rank-grid">
         <el-card shadow="never" class="rank-card">
-          <div class="rank-title up">🔥 领涨概念</div>
-          <div v-for="(c, i) in data?.gainers || []" :key="c.code" class="rank-row">
-            <span class="rank-idx">{{ i + 1 }}</span>
-            <span class="rank-name">{{ c.name }}</span>
-            <span class="rank-lead">
-              <router-link v-if="c.lead_code" target="_blank" rel="noopener" :to="`/stocks/${c.lead_code}`" class="stock-name">{{ c.lead_name }}</router-link>
-              <template v-else>{{ c.lead_name }}</template>
-            </span>
-            <span class="rank-pct up">{{ fmtPct(c.pct_chg) }}</span>
-          </div>
-          <el-empty v-if="!data?.gainers?.length" :image-size="48" description="暂无数据" />
-        </el-card>
-
-        <el-card shadow="never" class="rank-card">
-          <div class="rank-title down">🌀 领跌概念</div>
-          <div v-for="(c, i) in data?.losers || []" :key="c.code" class="rank-row">
-            <span class="rank-idx">{{ i + 1 }}</span>
-            <span class="rank-name">{{ c.name }}</span>
-            <span class="rank-lead">
-              <router-link v-if="c.lead_code" target="_blank" rel="noopener" :to="`/stocks/${c.lead_code}`" class="stock-name">{{ c.lead_name }}</router-link>
-              <template v-else>{{ c.lead_name }}</template>
-            </span>
-            <span class="rank-pct down">{{ fmtPct(c.pct_chg) }}</span>
-          </div>
-          <el-empty v-if="!data?.losers?.length" :image-size="48" description="暂无数据" />
-        </el-card>
-
-        <el-card shadow="never" class="rank-card">
           <div class="rank-title accent">💰 资金流榜</div>
           <div v-for="(c, i) in data?.money_leaders || []" :key="c.code" class="rank-row">
             <span class="rank-idx">{{ i + 1 }}</span>
@@ -98,115 +70,12 @@
         </el-card>
       </div>
     </section>
-
-    <!-- 概念实时行情表 -->
-    <section class="block">
-      <div class="block-head">
-        <span class="block-title"><el-icon><Grid /></el-icon> 概念实时行情</span>
-        <el-input
-          v-model="keyword"
-          placeholder="搜索概念 / 领涨股"
-          clearable
-          style="width: 220px"
-          size="small"
-        />
-      </div>
-      <el-table
-        v-loading="loading"
-        :data="filteredConcepts"
-        stripe
-        size="small"
-        class="app-table app-table--compact"
-        :max-height="560"
-      >
-        <el-table-column label="概念" min-width="160">
-          <template #default="{ row }">
-            <span class="col-name">{{ row.name }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="涨跌幅" width="110" align="right" sortable :sort-method="sortPct">
-          <template #default="{ row }">
-            <span :class="clsByVal(row.pct_chg, '')">{{ fmtPct(row.pct_chg) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="领涨股" min-width="120">
-          <template #default="{ row }">
-            <router-link v-if="row.lead_code" target="_blank" rel="noopener" :to="`/stocks/${row.lead_code}`" class="col-lead stock-name">{{ row.lead_name || '—' }}</router-link>
-            <span v-else class="col-lead">{{ row.lead_name || '—' }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="资金净流入" width="130" align="right" sortable :sort-method="sortMoney">
-          <template #default="{ row }">
-            <span :class="clsByVal(row.money_flow, '')">{{ fmtSigned(row.money_flow) }}亿</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="换手" width="90" align="right" sortable>
-          <template #default="{ row }">{{ row.turnover }}%</template>
-        </el-table-column>
-      </el-table>
-      <el-empty v-if="!filteredConcepts.length && !loading" description="暂无概念数据" />
-    </section>
-
-    <!-- 概念轮动 RPS 矩阵 -->
-    <section class="block">
-      <div class="block-head">
-        <span class="block-title"><el-icon><Histogram /></el-icon> 概念轮动 RPS（热门概念多窗口涨幅）</span>
-        <div class="head-actions">
-          <el-button
-            size="small"
-            :type="rotationLoading ? 'info' : 'primary'"
-            plain
-            :icon="DataAnalysis"
-            :loading="rotationLoading"
-            @click="loadRotation"
-          >
-            {{ rotation?.rows?.length ? '刷新轮动' : '加载轮动' }}
-          </el-button>
-        </div>
-      </div>
-      <p v-if="!rotation?.rows?.length && !rotationLoading" class="rotation-hint">
-        点击「加载轮动」计算当日热门概念在 5 / 10 / 20 / 60 日窗口的累计涨幅，识别主力资金脉络。
-      </p>
-      <el-table
-        v-loading="rotationLoading"
-        :data="rotation?.rows || []"
-        stripe
-        size="small"
-        class="app-table app-table--compact"
-        :max-height="460"
-      >
-        <el-table-column label="概念" min-width="150">
-          <template #default="{ row }">
-            <span class="col-name">{{ row.name }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="今日" width="90" align="right" sortable>
-          <template #default="{ row }">
-            <span :class="clsByVal(row.pct_chg, '')">{{ fmtPct(row.pct_chg) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column
-          v-for="w in rotation?.windows || []"
-          :key="w"
-          :label="w + '日'"
-          width="90"
-          align="right"
-          sortable
-        >
-          <template #default="{ row }">
-            <span v-if="row.returns?.[w] != null" :class="clsByVal(row.returns[w], '')">{{ fmtPct(row.returns[w]) }}</span>
-            <span v-else class="muted">—</span>
-          </template>
-        </el-table-column>
-      </el-table>
-      <el-empty v-if="rotation?.rows?.length === 0 && !rotationLoading" description="暂无轮动数据" />
-    </section>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { Refresh, DataAnalysis, TrendCharts, Odometer, Grid, Histogram } from '@element-plus/icons-vue'
+import { Refresh, DataAnalysis, TrendCharts, Odometer } from '@element-plus/icons-vue'
 import { use as echartsUse } from 'echarts/core'
 import { BarChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent } from 'echarts/components'
@@ -214,7 +83,7 @@ import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
 import type { EChartsOption } from 'echarts'
 import { vibeApi } from '@/api/vibe'
-import type { ConceptAnalysis, ConceptRotation } from '@/api/vibe'
+import type { ConceptAnalysis } from '@/api/vibe'
 import { fmtPct, fmtSigned, clsByVal } from '@/utils/format'
 
 echartsUse([CanvasRenderer, BarChart, GridComponent, TooltipComponent])
@@ -223,26 +92,7 @@ const MONO = "'SFMono-Regular', ui-monospace, Menlo, monospace"
 
 const today = new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' })
 const loading = ref(false)
-const rotationLoading = ref(false)
 const data = ref<ConceptAnalysis | null>(null)
-const rotation = ref<ConceptRotation | null>(null)
-const keyword = ref('')
-
-function sortPct(a: any, b: any): number {
-  return (a.pct_chg ?? 0) - (b.pct_chg ?? 0)
-}
-
-function sortMoney(a: any, b: any): number {
-  return (a.money_flow ?? 0) - (b.money_flow ?? 0)
-}
-
-const filteredConcepts = computed(() => {
-  const kw = keyword.value.trim().toLowerCase()
-  if (!kw) return data.value?.concepts || []
-  return (data.value?.concepts || []).filter(
-    (c) => c.name.toLowerCase().includes(kw) || (c.lead_name || '').toLowerCase().includes(kw)
-  )
-})
 
 // ── 领涨 / 领跌 双向条形图 ──
 const chartData = computed(() => {
@@ -251,8 +101,8 @@ const chartData = computed(() => {
 })
 
 const conceptChartOption = computed<EChartsOption>(() => {
-  const g = (data.value?.gainers || []).slice(0, 5)
-  const l = (data.value?.losers || []).slice(0, 5)
+  const g = (data.value?.gainers || []).slice(0, 10)
+  const l = (data.value?.losers || []).slice(0, 10)
   const cats = [...g.map(x => x.name), ...l.map(x => x.name)]
   const vals = [...g.map(x => Number(x.pct_chg)), ...l.map(x => -Math.abs(Number(x.pct_chg)))]
   return {
@@ -310,26 +160,9 @@ async function loadAnalysis() {
   }
 }
 
-async function loadRotation() {
-  rotationLoading.value = true
-  try {
-    const res = await vibeApi.getConceptRotation(40)
-    rotation.value = (res as any)?.data ?? null
-  } catch (e) {
-    console.error('加载概念轮动失败', e)
-  } finally {
-    rotationLoading.value = false
-  }
-}
-
-async function loadAll() {
-  await Promise.all([loadAnalysis(), loadRotation()])
-}
-
 onMounted(() => {
-  // 首次进入自动加载概念行情 + 轮动 RPS，避免"暂无数据、手动点加载"
+  // 首次进入自动加载概念热度数据，避免"暂无数据、手动点加载"
   loadAnalysis()
-  loadRotation()
 })
 </script>
 
@@ -360,17 +193,6 @@ onMounted(() => {
         font-size: 12px;
         color: var(--el-text-color-secondary);
       }
-
-      .head-actions {
-        display: flex;
-        gap: 8px;
-      }
-    }
-
-    .rotation-hint {
-      margin: 4px 0 12px;
-      color: var(--el-text-color-secondary);
-      font-size: 13px;
     }
   }
 
@@ -413,16 +235,18 @@ onMounted(() => {
 
     .concept-chart-inner {
       width: 100%;
-      height: 300px;
+      height: 420px;
     }
   }
 
   .rank-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: 1fr;
     gap: 12px;
 
     .rank-card {
+      max-width: 520px;
+
       .rank-title {
         font-weight: 600;
         margin-bottom: 10px;
@@ -467,19 +291,6 @@ onMounted(() => {
     }
   }
 
-  .col-name {
-    font-weight: 500;
-  }
-
-  .col-lead {
-    color: var(--el-text-color-secondary);
-    font-size: 12px;
-  }
-
-  .muted {
-    color: var(--el-text-color-placeholder);
-  }
-
   .accent {
     color: var(--el-color-warning);
   }
@@ -487,10 +298,12 @@ onMounted(() => {
 
 @media (max-width: 1100px) {
   .rank-grid {
-    grid-template-columns: 1fr;
+    .rank-card {
+      max-width: none;
+    }
   }
   .concept-chart-inner {
-    height: 260px;
+    height: 320px;
   }
 }
 </style>

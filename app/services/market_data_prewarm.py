@@ -57,7 +57,7 @@ async def prewarm_market_data() -> None:
             get_short_term_emotion,
             get_turnover_top,
         )
-        from app.services.concept_analysis import get_concept_analysis, get_concept_rotation
+        from app.services.concept_analysis import get_concept_analysis
 
         async def _safe(desc: str, coro):
             try:
@@ -72,7 +72,6 @@ async def prewarm_market_data() -> None:
             _safe("市场总览", get_overview()),
             _safe("短线情绪", get_short_term_emotion()),
             _safe("概念分析", get_concept_analysis()),
-            _safe("概念轮动", get_concept_rotation(40)),
             _safe("成交额Top20", get_turnover_top()),
         )
         el = asyncio.get_event_loop().time() - start

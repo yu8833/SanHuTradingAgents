@@ -251,19 +251,6 @@ export interface ConceptAnalysis {
   money_leaders: ConceptItem[]
 }
 
-export interface ConceptRotationRow {
-  code: string
-  name: string
-  pct_chg: number
-  returns: Record<string, number | null>
-}
-
-export interface ConceptRotation {
-  windows: number[]
-  as_of: string
-  rows: ConceptRotationRow[]
-}
-
 export interface StockQuote {
   code: string
   name: string
@@ -410,7 +397,6 @@ export interface SynthesisSources {
   dashboard?: MarketDashboard | null
   emotion?: ShortTermEmotion | null
   concept?: ConceptAnalysis | null
-  rotation?: ConceptRotation | null
   regime?: any | null
   radar?: RadarData | null
 }
@@ -472,10 +458,6 @@ export const vibeApi = {
 
   async getConceptAnalysis() {
     return cachedGet<ConceptAnalysis>('/api/vibe/market/concept-analysis', undefined, 180000, { timeout: 20000 })
-  },
-
-  async getConceptRotation(topN: number = 40) {
-    return cachedGet<ConceptRotation>('/api/vibe/market/concept-rotation', { top_n: topN }, 3600000, { timeout: 120000 })
   },
 
   // 资讯模块

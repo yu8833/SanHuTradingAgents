@@ -11,7 +11,7 @@
 复用项：
 - LLM 配置与容错解析：macro_service._get_llm_cfg / _parse_llm_json（稳定且已被宏观解读使用）。
 - 数据源：market_dashboard.get_dashboard / market_overview.get_short_term_emotion /
-  concept_analysis.get_concept_analysis/.get_concept_rotation /
+  concept_analysis.get_concept_analysis /
   newsradar.get_radar_cached / retail.retail_strategy_service（市场环境）。
 """
 
@@ -144,18 +144,6 @@ def _prompt_concept(c: dict) -> str:
     return "\n".join(lines)
 
 
-def _prompt_rotation(r: dict) -> str:
-    rows = (r.get("rows") or [])[:8]
-    if not rows:
-        return "- （无数据）"
-    wins = r.get("windows") or []
-    lines = [f"- 当日热门概念多窗口涨幅(w={'/'.join(map(str, wins))}):"]
-    for x in rows:
-        rr = " ".join(f"{w}d:{v}" for w, v in sorted((x.get("returns") or {}).items()) if v is not None)
-        lines.append(f"  • {x.get('name')}（今日{x.get('pct_chg')}%）：{rr}")
-    return "\n".join(lines)
-
-
 def _prompt_radar(rd: dict, limit: int = 12) -> str:
     """资讯：扁平化为最近若干条标题（带来源），控制 prompt 长度。"""
     items: list[dict] = []
@@ -219,12 +207,11 @@ def _prompt_guide(guide: dict) -> str:
     return "\n".join(lines)
 
 
-def _build_prompt(dashboard, emotion, concept, rotation, radar, regime, guide) -> str:
+def _build_prompt(dashboard, emotion, concept, radar, regime, guide) -> str:
     return (
         "【大盘看板】\n" + _prompt_dashboard(dashboard)
         + "\n\n【短线情绪】\n" + _prompt_emotion(emotion)
         + "\n\n【概念分析】\n" + _prompt_concept(concept)
-        + "\n\n【概念轮动】\n" + _prompt_rotation(rotation)
         + "\n\n【资讯要闻】\n" + _prompt_radar(radar)
         + "\n\n【市场环境】\n" + _prompt_regime(regime)
         + "\n\n【现有买卖信号】\n" + _prompt_guide(guide)
@@ -316,15 +303,14 @@ async def build_market_synthesis(user_id: str) -> dict:
 
     from app.services.market_dashboard import get_dashboard
     from app.services.market_overview import get_short_term_emotion
-    from app.services.concept_analysis import get_concept_analysis, get_concept_rotation
+    from app.services.concept_analysis import get_concept_analysis
     from app.services.newsradar import get_radar_cached
     from app.services.intraday_guide_service import build_intraday_guide
 
-    dashboard, emotion, concept, rotation, radar, regime_res, guide = await asyncio.gather(
+    dashboard, emotion, concept, radar, regime_res, guide = await asyncio.gather(
         _guard(get_dashboard(), {}),
         _guard(get_short_term_emotion(), {}),
         _guard(get_concept_analysis(), {}),
-        _guard(get_concept_rotation(40), {}),
         _guard(get_radar_cached(), {}),
         _guard(_detect_regime(), {}),
         _guard(build_intraday_guide(user_id), {"buys": [], "sells": []}),
@@ -341,7 +327,7 @@ async def build_market_synthesis(user_id: str) -> dict:
         base = " ".join(x for x in (emotion.get("date"), dashboard.get("updated")) if x)
         for attempt in (1, 2):
             try:
-                prompt = _build_prompt(dashboard, emotion, concept, rotation, radar, regime, guide)
+                prompt = _build_prompt(dashboard, emotion, concept, radar, regime, guide)
                 if attempt == 2:
                     prompt += "\n\n" + _RETRY_TAIL
                 res = await asyncio.to_thread(_call_llm, cfg, prompt)
