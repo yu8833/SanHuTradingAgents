@@ -46,7 +46,9 @@ const ALLOWED_ATTR = [
 ]
 
 // 净化配置
-const SANITIZE_CONFIG: DOMPurify.Config = {
+// 不显式标注 DOMPurify.Config（部分版本类型未导出命名空间），
+// 由 sanitize 调用处做结构兼容校验；运行时配置不变。
+const SANITIZE_CONFIG = {
   ALLOWED_TAGS,
   ALLOWED_ATTR,
   // 禁止所有 data: URI（防止 data:text/html 等攻击）

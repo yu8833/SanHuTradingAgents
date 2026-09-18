@@ -91,7 +91,7 @@
           <div class="tbs-monitor-desc">{{ tbsMonitorOn ? '已开启：盯全部持仓 S1/S2/S3 卖出信号，命中生成待确认卖出指令' : '已关闭：需手动去「监控规则」开启后生效' }}</div>
         </div>
         <el-switch :model-value="tbsMonitorOn" size="small" :loading="tbsMonitorToggling"
-          @change="(v) => toggleTbsMonitor(v)" />
+          @change="(v: string | number | boolean) => toggleTbsMonitor(v as boolean)" />
       </div>
 
       <!-- 常用策略：仅显示已开启监控的策略；关闭的不展示，去「常用策略」页开启 -->
@@ -110,7 +110,7 @@
             <div class="chip-desc">{{ (strategyHitCount[sm.strategy_id] ?? 0) + ' 只命中待跟踪' }}</div>
           </div>
           <el-switch :model-value="true" size="small" :loading="strategyToggling === sm.strategy_id"
-            @change="(v) => toggleStrategyMonitor(sm, v)" />
+            @change="(v: string | number | boolean) => toggleStrategyMonitor(sm, v as boolean)" />
         </div>
       </div>
     </div>
@@ -535,7 +535,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Lightning, Refresh, Bell, List, Plus, Delete, EditPen, InfoFilled,

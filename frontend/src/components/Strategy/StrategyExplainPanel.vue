@@ -95,8 +95,8 @@ const applyInitialDims = (d: Record<string, string>, force = false) => {
 watch(
   () => props.initialDims,
   (d) => {
-    if (props.autoSync) applyInitialDims(d, true)
-    else applyInitialDims(d)
+    if (props.autoSync) applyInitialDims(d ?? {}, true)
+    else applyInitialDims(d ?? {})
   },
   { deep: true }
 )

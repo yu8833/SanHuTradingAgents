@@ -172,7 +172,7 @@ import {
   Histogram,
 } from '@element-plus/icons-vue'
 import { vibeApi, type ShortTermEmotion } from '@/api/vibe'
-import { fmtPrice, fmtYi, fmtPctFromFraction, fmtAbsPct, fmtPct } from '@/utils/format'
+import { fmtPrice, fmtYi, fmtPctFromFraction, fmtPct } from '@/utils/format'
 
 const loading = ref(false)
 const emotion = ref<ShortTermEmotion | null>(null)
@@ -191,7 +191,7 @@ const load = async () => {
   loading.value = true
   try {
     const res = await vibeApi.getEmotion()
-    emotion.value = res.data || null
+    emotion.value = (res as any).data || null
     if (!emotion.value) {
       ElMessage.warning('暂无短线情绪数据')
     }

@@ -125,13 +125,13 @@ function onMarkAllRead() {
   notifStore.markAllRead()
 }
 
-function typeLabel(t: string) {
+function typeLabel(_t: string) {
   // 通知中心只保留"分析"类通知
   return '分析'
 }
 
-function tagType(t: string) {
-  return 'success'
+function tagType(_t: string) {
+  return 'success' as const
 }
 
 function toLocal(iso: string) {

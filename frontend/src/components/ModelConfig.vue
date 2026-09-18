@@ -129,7 +129,7 @@ interface Props {
   quickAnalysisModel: string
   deepAnalysisModel: string
   availableModels: any[]
-  analysisDepth: string | number  // 支持字符串（如"标准"）或数字（如3）
+  analysisDepth?: string | number  // 支持字符串（如"标准"）或数字（如3），不传按"标准"推荐
 }
 
 const props = defineProps<Props>()
@@ -227,7 +227,7 @@ const checkModelSuitability = async () => {
     }
     depthName = depthNames[props.analysisDepth] || '标准'
   } else {
-    depthName = props.analysisDepth
+    depthName = props.analysisDepth || '标准'
   }
 
   try {

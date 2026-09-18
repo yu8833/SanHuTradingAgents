@@ -553,7 +553,7 @@ const loadSectors = async () => {
   sectorsLoading.value = true
   try {
     const res = await vibeApi.getSectors()
-    sectors.value = res?.data?.sectors || []
+    sectors.value = (res as any)?.data?.sectors || []
   } catch (e: any) {
     console.error('加载板块数据失败:', e)
   } finally {
@@ -566,7 +566,7 @@ const loadRadar = async () => {
   loadingError.value = false
   try {
     const res = await vibeApi.getRadar()
-    radarData.value = res.data
+    radarData.value = (res as any).data
     if (!currentKey.value && industries.value.length > 0) {
       currentKey.value = industries.value[0].key
     }

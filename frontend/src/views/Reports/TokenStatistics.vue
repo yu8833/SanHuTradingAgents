@@ -422,14 +422,6 @@ const loadStatistics = async () => {
 
 const loadRecords = async () => {
   try {
-    const daysMap: Record<string, number> = {
-      'today': 1,
-      'week': 7,
-      'month': 30,
-      'quarter': 90,
-      'all': 365
-    }
-    
     const res = await getUsageRecords({
       limit: pageSize.value,
       offset: (currentPage.value - 1) * pageSize.value,
@@ -464,7 +456,7 @@ const filterRecords = () => {
     const keyword = searchKeyword.value.toLowerCase()
     filteredRecords.value = records.value.filter(record =>
       record.stock_symbol.toLowerCase().includes(keyword) ||
-      record.model.toLowerCase().includes(keyword)
+      record.model_name.toLowerCase().includes(keyword)
     )
   }
 }

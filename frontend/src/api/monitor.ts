@@ -28,6 +28,7 @@ export interface MonitorRule {
 }
 
 export interface MonitorAlert {
+  id: string
   ts: number
   rule_id: string
   rule_name: string

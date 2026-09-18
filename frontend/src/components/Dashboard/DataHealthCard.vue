@@ -141,8 +141,8 @@ const syncStatus = ref<SyncStatus | null>(null)
 // 🔥 新增：系统健康状态
 const systemStatus = ref<any | null>(null)
 
-const systemStatusSubsystems = computed(() => {
-  if (!systemStatus.value) return {}
+const systemStatusSubsystems = computed<Record<string, { label: string; status: string; message: string }>>(() => {
+  if (!systemStatus.value) return {} as Record<string, { label: string; status: string; message: string }>
   const s = systemStatus.value
   return {
     realtime: {

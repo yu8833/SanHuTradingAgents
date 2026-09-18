@@ -7,8 +7,8 @@
           <el-icon :size="26"><TrendCharts /></el-icon>
         </div>
         <div class="page-hero-text">
-          <h2 class="page-hero-title">三买三卖</h2>
-          <p class="page-hero-sub">资金为王 · 行业资金流排序 → 个股资金流 → 择时进出</p>
+          <h2 class="page-hero-title">股票筛选</h2>
+          <p class="page-hero-sub">资金为王 · 行业资金流排序 → 个股质量筛选 + 三买三卖择时</p>
         </div>
       </div>
       <div class="page-hero-meta">
@@ -269,13 +269,6 @@ function rankClass(i: number) {
   return 'rank-normal'
 }
 
-function scoreColor(v: number | null | undefined) {
-  const s = Number(v || 0)
-  if (s >= 70) return '#f56c6c'
-  if (s >= 50) return '#e6a23c'
-  return '#2b6cb0'
-}
-
 function dgTagType(q: string) {
   if (q.includes('双击')) return 'success'
   if (q.includes('反转')) return 'info'
@@ -288,21 +281,6 @@ function signalTagType(s: string) {
   if (s.startsWith('B')) return 'danger'
   if (s.startsWith('S')) return 'success'
   return 'info'
-}
-
-function auxColor(v: number | null | undefined) {
-  const s = Number(v || 0)
-  if (s >= 70) return '#67c23a'
-  if (s >= 55) return '#2b6cb0'
-  return '#909399'
-}
-
-function auxTooltip(row: CandidateStock) {
-  const aux = row.auxiliary || {}
-  const parts = Object.values(aux)
-    .filter((s: any) => s && s.label)
-    .map((s: any) => `${s.label}：${s.detail || ''}`)
-  return parts.length ? parts.join('\n') : '暂无辅助信号'
 }
 
 /** 行业筛选：读取行业 ETF 主力净流入排名（refresh=true 强制实时采集） */

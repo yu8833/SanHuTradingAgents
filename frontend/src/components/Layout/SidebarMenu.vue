@@ -33,7 +33,7 @@
         <el-icon><Search /></el-icon>
         <span>策略</span>
       </template>
-      <el-menu-item index="/candidate">三买三卖</el-menu-item>
+      <el-menu-item index="/candidate">股票筛选</el-menu-item>
       <el-menu-item index="/screening/common">常用策略</el-menu-item>
       <el-menu-item index="/screening/backtest">策略回测</el-menu-item>
       <!-- 高级变体（折叠，保留但不并列展示） -->
@@ -117,7 +117,6 @@ import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import {
   Odometer,
-  Aim,
   Reading,
   TrendCharts,
   Search,
@@ -126,10 +125,7 @@ import {
   Setting,
   InfoFilled,
   CreditCard,
-  DataAnalysis,
-  Wallet,
-  Bell,
-  ChatDotRound
+  DataAnalysis
 } from '@element-plus/icons-vue'
 
 const route = useRoute()

@@ -649,25 +649,13 @@ import {
   User,
   Download,
   Back,
-  InfoFilled,
-  TrendCharts,
-  Files,
   ShoppingCart,
   WarningFilled,
-  DataAnalysis,
   Warning,
-  StarFilled,
-  List,
-  Check,
   Cpu,
-  QuestionFilled,
   ArrowDown,
   ArrowUp,
-  CircleCheckFilled,
-  CaretBottom,
-  CaretTop,
-  Reading,
-  MoreFilled
+  CircleCheckFilled
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { marked } from 'marked'
@@ -695,11 +683,16 @@ type ReportDetailData = {
   status: string
   created_at: string
   analysis_date?: string
+  execution_time?: number
   analysts: string[]
   model_info?: string
   recommendation?: string
   risk_level?: string
   confidence_score?: number
+  action?: string
+  operational_checklist?: any
+  '仓位建议'?: any
+  '决策建议'?: string
   置信度?: number
   置信度详情?: ConfidenceDetailItem[]
   key_points?: string[]
@@ -720,8 +713,6 @@ const loading = ref(true)
 const report = ref<ReportDetailData | null>(null)
 const activeModule = ref('')
 const llmConfigs = ref<LLMConfig[]>([]) // 存储所有模型配置
-const reportModuleKeys = computed<string[]>(() => report.value ? Object.keys(report.value.reports || {}) : [])
-
 // 风险扫描数据
 const riskScanData = ref<any>(null)
 const riskScanLoading = ref(false)
@@ -906,13 +897,6 @@ const beforeDialogClose = () => {
   return false
 }
 
-const closeReportDialog = () => {
-  if (isClosingFromPopState) {
-    return
-  }
-  history.back()
-}
-
 const hasReport = (key: string): boolean => {
   return !!getReportContentByKey(key)
 }
@@ -965,17 +949,6 @@ const getFinalAction = (): string => {
   return action || ''
 }
 
-// 7位分析师的报告key映射
-const analystReportMap = {
-  '技术分析师': 'market_report',
-  '市场情绪分析师': 'sentiment_report',  // 修正：与卡片显示名称一致
-  '游资追踪师': 'hot_money_report',
-  '解禁追踪师': 'lockup_report',
-  '基本面分析师': 'fundamentals_report',
-  '新闻分析师': 'news_report',
-  '政策分析师': 'policy_report'
-}
-
 // 多空辩论与风控的报告key映射
 const debateReportMap = {
   '看涨研究员': 'bull_researcher',
@@ -989,10 +962,6 @@ const debateReportMap = {
   '风险经理': 'risk_management_decision',
   '决策建议': 'final_trade_decision'
 }
-
-const hasAnyAnalystReport = computed(() => {
-  return Object.values(analystReportMap).some(key => hasReport(key))
-})
 
 const hasAnyDebateOrRiskReport = computed(() => {
   return Object.values(debateReportMap).some(key => hasReport(key))
@@ -1174,12 +1143,6 @@ const hasConfidenceDetail = computed(() => {
 const getConfidenceItemPercent = (item: ConfidenceDetailItem): number => {
   if (!item.max_score || item.max_score <= 0) return 0
   return Math.min(100, Math.max(0, (item.score / item.max_score) * 100))
-}
-
-const formatConfidenceScore = (score: number | null): string => {
-  if (score === null) return '暂无'
-  if (Number.isInteger(score)) return score.toString()
-  return score.toFixed(1)
 }
 
 const getConfidenceTotalPercent = (): number => {
@@ -1732,49 +1695,6 @@ const getModelDescription = (modelInfo: string) => {
   return `${modelInfo} - AI 大语言模型`
 }
 
-const getModuleDisplayName = (moduleName: string) => {
-  // 统一与单股分析的中文标签映射
-  const nameMap: Record<string, string> = {
-    // 分析师团队 (7个)
-    market_report: '📈 市场技术分析',
-    sentiment_report: '💭 市场情绪分析',
-    news_report: '📰 新闻事件分析',
-    fundamentals_report: '💰 基本面分析',
-    policy_report: '🏛️ 政策分析',
-    hot_money_report: '💹 游资追踪分析',
-    lockup_report: '🔒 限售解禁分析',
-
-    // 研究团队 (3个)
-    bull_researcher: '🐂 看涨研究员',
-    bear_researcher: '🐻 看跌研究员',
-    research_team_decision: '👔 研究经理决策',
-
-    // 交易团队 (1个)
-    trader_investment_plan: '💼 交易员投资计划',
-
-    // 风险管理团队 (5个)
-    risky_analyst: '🔥 激进风险分析',
-    safe_analyst: '🛡️ 保守风险分析',
-    neutral_analyst: '⚖️ 中性风险分析',
-    risk_control_decision: '📋 风控约束决策',
-    risk_management_decision: '👔 风险经理决策',
-
-    // 最终决策 (1个)
-    final_trade_decision: '🎯 决策建议',
-
-    // 数据质量
-    data_quality_summary: '📊 数据质量评估',
-    quality_gate: '🚦 数据质量门控',
-
-    // 兼容旧字段
-    investment_plan: '📋 投资建议',
-    investment_debate_state: '🔬 研究团队（旧）',
-    risk_debate_state: '⚖️ 风险管理（旧）',
-    detailed_analysis: '📄 详细分析'
-  }
-  return nameMap[moduleName] || moduleName
-}
-
 const renderMarkdown = (content: string) => {
   if (!content) return ''
   try {
@@ -1782,277 +1702,6 @@ const renderMarkdown = (content: string) => {
   } catch (e) {
     return sanitizeHtml(`<pre style="white-space: pre-wrap; font-family: inherit;">${content}</pre>`)
   }
-}
-
-// 专门用于 insight 卡片的内容渲染
-// —— 把 AI 生成的中文段落转成清晰易读的 HTML（清洗 Markdown 杂项、分段、加粗）
-const renderInsight = (text: string) => {
-  if (!text) return '<span class="insight-empty">暂无数据</span>'
-
-  let html = String(text)
-
-  // 预处理 1：跳过分隔线行 (--, ===, --- 等整行)
-  html = html.replace(/(^|\n)[\-=_]{2,}(\n|$)/g, '\n')
-
-  // 预处理 2：移除表格行 (Markdown 表格语法: |...|)
-  //           连续的表格行整段删除
-  html = html.split('\n').map(line => {
-    const trimmed = line.trim()
-    if (trimmed.startsWith('|') || trimmed.startsWith('｜')) return ''
-    // 表格的分隔线行: | --- | --- |
-    if (/^\s*\|?\s*:?-+:?\s*\|/.test(line)) return ''
-    return line
-  }).join('\n')
-
-  // 预处理 3：跳过纯图片/纯链接行
-  html = html.split('\n').map(line => {
-    const trimmed = line.trim()
-    if (trimmed.startsWith('![') && trimmed.includes(']')) return ''
-    if (/^https?:\/\/\S+$/.test(trimmed)) return ''
-    return line
-  }).join('\n')
-
-  // 预处理 4：跳过开头的套话段落
-  html = html.replace(/^[\s\S]{0,200}(好的|数据已获取|下面我将|开始分析|尊敬的)[^\n]*\n/, '')
-
-  // 1. 转义 HTML（要在内容清洗之后做，避免破坏标签）
-  html = html
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-
-  // 2. 处理 **加粗**
-  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-  // 3. 处理行内 `代码`
-  html = html.replace(/`([^`]+)`/g, '<code>$1</code>')
-
-  // 4. 把 Markdown 标题 (### ## #) 转为加粗的段落小标题
-  html = html.split('\n').map(line => {
-    const m = line.match(/^#{1,6}\s+(.+)$/)
-    if (m) {
-      let title = m[1].trim()
-      // 清理：去掉 "一、二、" "1. 2." 前缀
-      title = title.replace(/^[一二三四五六七八九十][、\.]\s*/, '')
-      title = title.replace(/^\d+[\.、]\s*/, '')
-      // 清理 emoji 前缀
-      title = title.replace(/^[\u{1F000}-\u{1FFFF}]\s*/u, '')
-      return `\n\n<strong class="insight-subtitle">${title}</strong>\n\n`
-    }
-    return line
-  }).join('\n')
-
-  // 5. 如果文本没有换行，按中文句号分段
-  if (!html.includes('\n')) {
-    const sentences = html.split(/([。！？]+)/)
-    const paragraphs: string[] = []
-    let currentParagraph = ''
-
-    for (let i = 0; i < sentences.length; i += 2) {
-      const sentence = sentences[i] + (sentences[i + 1] || '')
-      if (sentence.trim()) {
-        currentParagraph += sentence
-        if (currentParagraph.length > 100) {
-          paragraphs.push(currentParagraph.trim())
-          currentParagraph = ''
-        }
-      }
-    }
-    if (currentParagraph.trim()) {
-      paragraphs.push(currentParagraph.trim())
-    }
-    html = paragraphs.join('\n\n')
-  }
-
-  // 6. 按行处理：智能识别段落 / 列表 / 小标题
-  const lines = html.split(/\r?\n/)
-  const result: string[] = []
-  let inList = false
-  let currentParagraph = ''
-
-  for (let raw of lines) {
-    const line = raw.trim()
-
-    if (!line) {
-      // 空行 - 段落分隔
-      if (currentParagraph) {
-        result.push(`<p class="insight-paragraph">${currentParagraph}</p>`)
-        currentParagraph = ''
-      }
-      if (inList) {
-        result.push('</ul>')
-        inList = false
-      }
-      continue
-    }
-
-    // 识别小标题行（以 strong/strong 标签开头的）
-    const strongMatch = line.match(/^<strong[^>]*>(.+?)<\/strong>/)
-    if (strongMatch && line.length <= 80) {
-      if (currentParagraph) {
-        result.push(`<p class="insight-paragraph">${currentParagraph}</p>`)
-        currentParagraph = ''
-      }
-      if (inList) {
-        result.push('</ul>')
-        inList = false
-      }
-      result.push(`<div class="insight-heading">${line}</div>`)
-      continue
-    }
-
-    // 列表项：1. / 2. / • / - / —
-    const listMatch = line.match(/^(\d+[\.、]\s*|[•\-—·]\s*)(.+)/)
-    if (listMatch) {
-      if (currentParagraph) {
-        result.push(`<p class="insight-paragraph">${currentParagraph}</p>`)
-        currentParagraph = ''
-      }
-      if (!inList) {
-        result.push('<ul class="insight-list">')
-        inList = true
-      }
-      result.push(`<li>${listMatch[2]}</li>`)
-      continue
-    }
-
-    // 普通文本 - 累积到当前段落
-    if (inList) {
-      result.push('</ul>')
-      inList = false
-    }
-    currentParagraph += (currentParagraph ? ' ' : '') + line
-  }
-
-  // 处理最后的剩余内容
-  if (currentParagraph) {
-    result.push(`<p class="insight-paragraph">${currentParagraph}</p>`)
-  }
-  if (inList) {
-    result.push('</ul>')
-  }
-
-  return result.join('\n')
-}
-
-// 渲染完整洞察内容（用于 popover 显示）
-const renderInsightFull = (text: string) => {
-  if (!text) return '<span class="insight-empty">暂无数据</span>'
-  
-  // 使用 renderInsight 的逻辑，但不截断
-  let html = String(text)
-  
-  // 预处理：跳过分隔线行
-  html = html.replace(/(^|\n)[\-=_]{2,}(\n|$)/g, '\n')
-  
-  // 移除表格行
-  html = html.split('\n').map(line => {
-    const trimmed = line.trim()
-    if (trimmed.startsWith('|') || trimmed.startsWith('｜')) return ''
-    if (/^\s*\|?\s*:?-+:?\s*\|/.test(line)) return ''
-    return line
-  }).join('\n')
-  
-  // 跳过纯图片/纯链接行
-  html = html.split('\n').map(line => {
-    const trimmed = line.trim()
-    if (trimmed.startsWith('![') && trimmed.includes(']')) return ''
-    if (/^https?:\/\/\S+$/.test(trimmed)) return ''
-    return line
-  }).join('\n')
-  
-  // 跳过开头的套话段落
-  html = html.replace(/^[\s\S]{0,200}(好的|数据已获取|下面我将|开始分析|尊敬的)[^\n]*\n/, '')
-  
-  // 转义 HTML
-  html = html
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-  
-  // 处理 Markdown 加粗
-  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-  html = html.replace(/__([^_]+)__/g, '<strong>$1</strong>')
-  
-  // 处理行内代码
-  html = html.replace(/`([^`]+)`/g, '<code>$1</code>')
-  
-  // 把 Markdown 标题转为加粗的段落小标题
-  html = html.split('\n').map(line => {
-    const m = line.match(/^#{1,6}\s+(.+)$/)
-    if (m) {
-      let title = m[1].trim()
-      title = title.replace(/^[一二三四五六七八九十][、\.]\s*/, '')
-      title = title.replace(/^\d+[\.、]\s*/, '')
-      title = title.replace(/^[\u{1F000}-\u{1FFFF}]\s*/u, '')
-      return `\n\n<div class="insight-heading-full">${title}</div>\n`
-    }
-    return line
-  }).join('\n')
-  
-  // 按行处理：智能识别段落 / 列表
-  const lines = html.split(/\r?\n/)
-  const result: string[] = []
-  let inList = false
-  let currentParagraph = ''
-  
-  for (let raw of lines) {
-    const line = raw.trim()
-    
-    if (!line) {
-      if (currentParagraph) {
-        result.push(`<p class="insight-paragraph-full">${currentParagraph}</p>`)
-        currentParagraph = ''
-      }
-      if (inList) {
-        result.push('</ul>')
-        inList = false
-      }
-      continue
-    }
-    
-    // 检查是否是列表项
-    const listMatch = line.match(/^([\-\*\•]|\d+[\.、])\s+(.+)$/)
-    if (listMatch) {
-      if (currentParagraph) {
-        result.push(`<p class="insight-paragraph-full">${currentParagraph}</p>`)
-        currentParagraph = ''
-      }
-      if (!inList) {
-        result.push('<ul class="insight-list-full">')
-        inList = true
-      }
-      result.push(`<li>${listMatch[2]}</li>`)
-      continue
-    }
-    
-    // 普通文本 - 累积到当前段落
-    if (inList) {
-      result.push('</ul>')
-      inList = false
-    }
-    currentParagraph += (currentParagraph ? ' ' : '') + line
-  }
-  
-  // 处理最后的剩余内容
-  if (currentParagraph) {
-    result.push(`<p class="insight-paragraph-full">${currentParagraph}</p>`)
-  }
-  if (inList) {
-    result.push('</ul>')
-  }
-  
-  return result.join('\n')
-}
-
-// 置信度评分相关函数
-// 将后端返回的 0-1 小数转换为 0-100 的百分制
-const normalizeConfidenceScore = (score: number) => {
-  // 如果已经是 0-100 的范围，直接返回
-  if (score > 1) {
-    return Math.round(score)
-  }
-  // 如果是 0-1 的小数，转换为百分制
-  return Math.round(score * 100)
 }
 
 const getConfidenceColor = (score: number) => {
@@ -2075,268 +1724,6 @@ const getConfidenceGradient = (score: number): string => {
   if (score >= 40) return 'linear-gradient(90deg, #fa8c16, #E6A23C)'
   return 'linear-gradient(90deg, #ff4d4f, #F56C6C)'
 }
-
-// 风险等级相关函数
-const getRiskStars = (riskLevel: string) => {
-  const riskMap: Record<string, number> = {
-    '低': 1,
-    '中低': 2,
-    '中等': 3,
-    '中高': 4,
-    '高': 5
-  }
-  return riskMap[riskLevel] || 3
-}
-
-const getRiskColor = (riskLevel: string) => {
-  const colorMap: Record<string, string> = {
-    '低': '#67C23A',      // 绿色
-    '中低': '#95D475',    // 浅绿色
-    '中等': '#E6A23C',    // 橙色
-    '中高': '#F56C6C',    // 红色
-    '高': '#F56C6C'       // 深红色
-  }
-  return colorMap[riskLevel] || '#E6A23C'
-}
-
-// 工具函数：从 report 或其 decision / reports 子对象中取值
-// —— 优先取 report 顶层（后端 extract_structured_fields 已经处理好了）
-// —— 取不到时，直接从对应模块的文本中截取
-const pickField = (report: any, candidates: string[], maxChars: number = 1200): any => {
-  if (!report) return null
-
-  // 1) 先在顶层 / decision / reports 中找精确字段名
-  const directSources = [report, report.decision || {}, report.reports || {}]
-  for (const src of directSources) {
-    if (!src || typeof src !== 'object') continue
-    for (const key of candidates) {
-      const v = src[key]
-      if (v !== null && v !== undefined && v !== '' && v !== 'None') {
-        return v
-      }
-    }
-  }
-
-  // 2) 在 reports 所有文本型模块中搜索"章节标题"匹配
-  const moduleMap = report.reports || {}
-  const moduleTexts = Object.values(moduleMap).filter(v => typeof v === 'string')
-  for (const moduleText of moduleTexts) {
-    for (const key of candidates) {
-      try {
-        const re = new RegExp(
-          '(?:^|\\n)[#*_]*\\s*(?:\\d+[.、]\\s*)?' + key.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&') +
-          '[*_]*\\s*[:：]?\\s*(?:\\n|[:：])?\\s*([\\s\\S]{0,' + maxChars + '}?)(?=\\n\\s*#+|\\n\\s*\\n|$)',
-        )
-        const m = moduleText.match(re)
-        if (m && m[1] && m[1].trim()) {
-          return m[1].trim().substring(0, maxChars)
-        }
-      } catch (e) {
-        continue
-      }
-    }
-  }
-
-  // 3) 终极回退：从对应模块直接截取内容（最保险）
-  // 注意：每个字段使用不同的优先模块，避免重复
-  const fallbackMap: { [key: string]: string[] } = {
-    '核心洞察': ['final_trade_decision', 'research_team_decision'],
-    '投资逻辑': ['investment_plan', 'trader_investment_plan', 'bull_researcher', 'bear_researcher'],
-    '趋势预测': ['market_report', 'trader_investment_plan'],
-    '策略点位': ['trader_investment_plan', 'investment_plan'],
-    '情绪分析': ['sentiment_report', 'news_report', 'hot_money_report'],
-    '市场情绪': ['sentiment_report', 'news_report', 'hot_money_report'],
-    '舆情分析': ['sentiment_report', 'news_report'],
-    '情绪面分析': ['sentiment_report', 'news_report'],
-    '风险提示': ['risk_management_decision', 'risky_analyst', 'safe_analyst', 'neutral_analyst'],
-  }
-
-  const smartTruncate = (text: string, limit: number): string => {
-    if (!text) return ''
-    // 第一步：逐行清洗
-    const skipList = ['数据已获取', '下面我将', '分析报告', '分析时段', '参考日期', '报告', '总结如下']
-    const rawLines = text.trim().split('\n')
-    const cleanedLines: string[] = []
-    for (const ln of rawLines) {
-      const stripped = ln.trim()
-      if (!stripped) continue
-      // 跳过分隔线
-      if (/^[-=_]{2,}$/.test(stripped)) continue
-      // 跳过表格行
-      if (stripped.startsWith('|') || stripped.startsWith('｜')) continue
-      // 跳过 markdown 标题
-      if (/^#{1,6}\s+/.test(stripped)) continue
-      // 跳过套话行
-      let skipLine = false
-      for (const pat of skipList) {
-        if (stripped.includes(pat) && stripped.length < 120) {
-          skipLine = true
-          break
-        }
-      }
-      if (skipLine) continue
-      // 移除 **/emoji/列表标记
-      let cleaned = stripped
-        .replace(/\*+/g, '')
-        .replace(/^[\u{1F000}-\u{1FFFF}]\s*/u, '')
-        .replace(/^(\d+[\.、]\s*|[•\-—·]\s*)/, '')
-        .trim()
-      if (cleaned.length < 8 && !/[。！？：]/.test(cleaned)) continue
-      cleanedLines.push(cleaned)
-    }
-
-    // 第二步：合并成段落
-    const paragraph = cleanedLines.join(' ')
-      .replace(/\s{2,}/g, ' ').trim()
-
-    if (paragraph.length <= limit) return paragraph
-
-    // 第三步：句子级挑选（短限制 = 更激进）
-    if (limit <= 350) {
-      // 拆分成句子
-      const parts = paragraph.split(/([。！？；])/)
-      const sentences: string[] = []
-      for (let i = 0; i < parts.length - 1; i += 2) {
-        const sent = (parts[i] + parts[i + 1]).trim()
-        if (sent.length >= 10) sentences.push(sent)
-      }
-      // 处理最后一句（无标点）
-      if (parts.length % 2 === 1 && parts[parts.length - 1].trim().length >= 10) {
-        sentences.push(parts[parts.length - 1].trim())
-      }
-      if (sentences.length === 0) {
-        // 没有句号，按字符截断
-        return paragraph.substring(0, limit)
-      }
-      // 评分 + 挑选
-      const highValueKws = ['结论', '核心', '总结', '主要', '建议', '看好', '买入', '卖出',
-        '评级', '预测', '趋势', '风险', '关键', '显著', '拐点', '确立', '利好', '利空',
-        '正面', '负面', '机会', '信号', '逻辑', '重点']
-      const scored = sentences.map((s, idx) => {
-        let score = 0
-        for (const kw of highValueKws) if (s.includes(kw)) score += 10
-        score += Math.max(0, 10 - idx) // 靠前加分
-        if (s.length < 12) score -= 5
-        return { score, sent: s, idx }
-      })
-      // 按评分挑选句子，保持原顺序
-      scored.sort((a, b) => b.score - a.score)
-      const selected: number[] = []
-      let total = 0
-      for (const item of scored) {
-        if (total + item.sent.length <= limit) {
-          selected.push(item.idx)
-          total += item.sent.length
-          if (total >= limit - 20) break
-        }
-      }
-      if (selected.length < 2) {
-        // 不足2句，按顺序补充
-        for (let i = 0; i < sentences.length; i++) {
-          if (selected.includes(i)) continue
-          if (total + sentences[i].length <= limit) {
-            selected.push(i)
-            total += sentences[i].length
-            if (selected.length >= 3) break
-          }
-        }
-      }
-      selected.sort((a, b) => a - b)
-      const resultText = selected.map(i => sentences[i]).join('')
-      if (resultText.length > limit) {
-        const pos = resultText.lastIndexOf('。', limit)
-        if (pos > limit / 2) return resultText.substring(0, pos + 1)
-        return resultText.substring(0, limit)
-      }
-      return resultText
-    }
-
-    // 长限制：保留段落，在句号处截断
-    const pos = paragraph.lastIndexOf('。', limit)
-    if (pos > limit / 2) return paragraph.substring(0, pos + 1)
-    return paragraph.substring(0, limit)
-  }
-
-  for (const key of candidates) {
-    const moduleKeys = fallbackMap[key]
-    if (!moduleKeys) continue
-    for (const mk of moduleKeys) {
-      const text = moduleMap[mk]
-      if (typeof text === 'string' && text.trim()) {
-        return smartTruncate(text, maxChars)
-      }
-    }
-  }
-
-  // 4) 最后兜底：从所有模块中找第一个有内容的
-  for (const v of Object.values(moduleMap)) {
-    if (typeof v === 'string' && v.trim() && v.trim().length > 20) {
-      return smartTruncate(v, Math.min(maxChars, 500))
-    }
-  }
-
-  return null
-}
-
-const formatPriceValue = (report: any, candidates: string[]): string => {
-  const val = pickField(report, candidates)
-  if (val === null || val === undefined || val === '') return '--'
-  
-  let num: number | null = null
-  
-  if (typeof val === 'number') {
-    num = val
-  } else if (typeof val === 'string') {
-    const cleaned = val.replace(/[¥$￥,，]/g, '').trim()
-    const match = cleaned.match(/^\s*(\d+(\.\d+)?)\s*$/)
-    if (match) {
-      num = parseFloat(match[1])
-    } else {
-      const found = cleaned.match(/(\d+(\.\d+)?)/)
-      if (found) {
-        num = parseFloat(found[1])
-      }
-    }
-  }
-  
-  if (num !== null && !isNaN(num)) {
-    return fmtNum(num, 2)
-  }
-  return '--'
-}
-
-const formatPct = (val: any): string => {
-  if (val === null || val === undefined || val === '') return '0'
-  const num = Number(val)
-  if (isNaN(num)) return String(val)
-  if (num <= 1) return Math.round(num * 100).toString()
-  return Math.round(num).toString()
-}
-
-// 判断当前操作建议是否为卖出类（卖出/减仓），此时策略点位无意义
-const isSellAction = computed(() => {
-  const action = pickField(report.value, ['评级', 'action', '操作建议'])
-  if (!action) return false
-  return action.includes('卖出') || action.includes('减仓')
-})
-
-// 根据评级/操作建议决定标签颜色
-const getDecisionActionTagType = (action: string): 'primary' | 'success' | 'warning' | 'info' | 'danger' => {
-  if (!action) return 'info'
-  const map: Record<string, 'primary' | 'success' | 'warning' | 'info' | 'danger'> = {
-    '强烈买入': 'success',
-    '买入': 'success',
-    '持有': 'warning',
-    '观望': 'info',
-    '减仓': 'danger',
-    '卖出': 'danger',
-  }
-  for (const k of Object.keys(map)) {
-    if (action.includes(k)) return map[k]
-  }
-  return 'info'
-}
-
 watch(
   () => route.params.id,
   async () => {

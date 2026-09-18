@@ -411,19 +411,6 @@ const formatTime = (time: string) => {
   return formatDateTime(time)
 }
 
-const formatDuration = (seconds: number) => {
-  if (!seconds || seconds <= 0) return '-'
-  if (seconds < 60) return `${Math.round(seconds)}秒`
-  if (seconds < 3600) {
-    const mins = Math.floor(seconds / 60)
-    const secs = Math.round(seconds % 60)
-    return secs > 0 ? `${mins}分${secs}秒` : `${mins}分钟`
-  }
-  const hours = Math.floor(seconds / 3600)
-  const mins = Math.round((seconds % 3600) / 60)
-  return mins > 0 ? `${hours}小时${mins}分` : `${hours}小时`
-}
-
 const handleSizeChange = (size: number) => {
   pageSize.value = size
   currentPage.value = 1
@@ -436,8 +423,8 @@ const handleCurrentChange = (page: number) => {
 }
 
 // 🔥 决策建议标签颜色
-const getActionType = (action: string): string => {
-  const typeMap: Record<string, string> = {
+const getActionType = (action: string): 'success' | 'danger' | 'warning' | 'info' => {
+  const typeMap: Record<string, 'success' | 'danger' | 'warning' | 'info'> = {
     '买入': 'success',
     '强烈买入': 'success',
     '卖出': 'danger',

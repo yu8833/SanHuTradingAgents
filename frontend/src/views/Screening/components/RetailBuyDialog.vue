@@ -116,6 +116,7 @@ const form = reactive({
   stop_loss_price: null as number | null,
   take_profit_price: null as number | null,
   thesis: '',
+  strategy: '',
 })
 
 const advice = ref<PositionAdvice | null>(null)

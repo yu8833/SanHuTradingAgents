@@ -28,6 +28,7 @@ export interface User {
 export interface UserPreferences {
   // 分析偏好
   default_market: 'A股' | '美股' | '港股'
+  default_depth?: string  // 默认分析深度（后端可能返回，前端设置页未编辑）
   default_analysts?: string[]  // 默认分析师列表：技术分析师、基本面分析师、新闻分析师、市场情绪分析师、政策分析师、游资追踪师、解禁追踪师
   auto_refresh?: boolean
   refresh_interval?: number

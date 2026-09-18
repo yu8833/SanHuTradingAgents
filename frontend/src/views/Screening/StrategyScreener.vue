@@ -25,7 +25,7 @@
         </el-select>
         <div class="realtime-switch" :title="realtimeNote">
           <span class="rt-label">盘中预警</span>
-          <el-switch :model-value="realtimeScan" size="default" @change="toggleRealtime" />
+          <el-switch :model-value="realtimeScan" size="default" @change="(v: string | number | boolean) => toggleRealtime(v as boolean)" />
         </div>
         <el-button type="primary" size="default" :loading="runningAll" @click="runAll(true)">
           <el-icon><Refresh /></el-icon>
@@ -132,7 +132,7 @@
                 size="small"
                 :loading="monitorSaving === s.id"
                 data-monitor
-                @change="(v) => toggleMonitor(s, v)"
+                @change="(v: string | number | boolean) => toggleMonitor(s, v as boolean)"
                 @click.stop
               />
               <span class="monitor-label" :class="{ on: monitorOn(s.id) }">监控</span>
@@ -285,7 +285,7 @@ const runningAll = ref(false)
 const hitCounts = ref<Record<string, number>>({})
 const activeStrategy = ref<string | null>(null)
 const activeStrategyName = ref('')
-const result = ref<{ items: StrategyRunItem[]; as_of: string; strategy_id: string; strategy_name: string } | null>(null)
+const result = ref<{ items: StrategyRunItem[]; as_of: string; strategy_id: string; strategy_name: string; total?: number } | null>(null)
 const showAllResult = ref<StrategyRunAllItem[] | null>(null)
 const showAll = ref(false)
 const asOf = ref('')
@@ -370,12 +370,6 @@ const realtimeScan = ref(false)        // 是否开启盘中预警（实时扫�
 const isRealtimeResult = ref(false)    // 最近一次结果是否为实时合成面板
 const realtimeNote = ref('')           // 实时扫描说明/失效提示
 const decisionWindow = ref(false)      // 是否处于 15:00-15:30 收盘定格可成交窗口
-
-// 实时扫描中，结果即时来自『历史日K + 当日实时合成K』，不展示旧的 computed_at
-const dataFreshnessText = computed(() => {
-  if (isRealtimeResult.value) return '盘中实时'
-  return computedAt.value ? `数据更新于 ${computedAt.value}` : ''
-})
 
 // 收盘定格窗口（15:00-15:30 可成交）只对「今日/实时」有意义：
 // 后端 decision_window 是当前时刻的全局判定，与查询日期无关；历史交易日查询时强制不显示该窗口

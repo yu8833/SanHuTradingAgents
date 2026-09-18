@@ -1122,7 +1122,7 @@ import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useWindowSize } from '@vueuse/core'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { TrendCharts, Star, Refresh, Link, Document, Clock, Reading, CreditCard, Delete, Warning, WarningFilled, CircleCheckFilled, CaretBottom, CaretTop, QuestionFilled, InfoFilled } from '@element-plus/icons-vue'
+import { TrendCharts, Star, Refresh, Link, Document, Clock, CreditCard, Delete, Warning, CircleCheckFilled, QuestionFilled, InfoFilled } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 import { sanitizeHtml } from '@/utils/sanitize'
 import { stocksApi } from '@/api/stocks'
@@ -1606,7 +1606,7 @@ onMounted(async () => {
   // 每30秒刷新一次报价（兜底机制）
   timer = setInterval(fetchQuote, 30000)
   // 订阅实时行情 SSE 信号（后端入库后立即推送，延迟约 0-2 秒）
-  sseUnsubscribe = subscribeQuotesUpdate((signal) => {
+  sseUnsubscribe = subscribeQuotesUpdate((_signal) => {
     // 收到行情更新信号，立即拉取最新报价（SSE 优先，轮询兜底）
     fetchQuote(false)
     // 🔥 盘中即时：行情更新时同步刷新量价分析与三买三卖（后端有交易30s/非交易5min结果缓存，不会高频打库）
@@ -1906,7 +1906,7 @@ function tbsSignalClass(type: string): string {
 function tbsTrendLabel(t: string): string {
   return t === 'up' ? '↑偏多' : t === 'down' ? '↓偏空' : '→震荡'
 }
-function tbsTrendTone(t: string): string {
+function tbsTrendTone(t: string): 'danger' | 'success' | 'info' {
   return t === 'up' ? 'danger' : t === 'down' ? 'success' : 'info'
 }
 
@@ -1922,7 +1922,7 @@ const CHECKPOINT_TITLES: Record<string, string> = {
 function checkpointTitle(key: string): string {
   return CHECKPOINT_TITLES[key] || key
 }
-function checkpointLevelType(level: string): string {
+function checkpointLevelType(level: string): 'danger' | 'warning' | 'info' {
   return level === 'confirm' ? 'danger' : level === 'warn' ? 'warning' : 'info'
 }
 function checkpointLevelLabel(level: string): string {
@@ -1976,7 +1976,7 @@ function buildVpOption() {
     ],
     yAxis: [
       { scale: true, type: 'value', axisLabel: { fontSize: 10 } },
-      { gridIndex: 1, scale: true, type: 'value', axisLabel: { fontSize: 10, formatter: (v: number) => v >= 1e8 ? (v / 1e8).toFixed(1) + '亿' : v >= 1e4 ? (v / 1e4).toFixed(0) + '万' : v } }
+      { gridIndex: 1, scale: true, type: 'value', axisLabel: { fontSize: 10, formatter: (v: number) => v >= 1e8 ? (v / 1e8).toFixed(1) + '亿' : v >= 1e4 ? (v / 1e4).toFixed(0) + '万' : String(v) } }
     ],
     dataZoom: [
       { type: 'inside', xAxisIndex: [0, 1], start: 65, end: 100 },
@@ -2000,7 +2000,7 @@ function vpBiasClass(bias?: string): string {
   if (bias === '偏空') return 'bear'
   return 'flat'
 }
-function vpBiasTagType(bias?: string): string {
+function vpBiasTagType(bias?: string): 'danger' | 'success' | 'info' {
   if (bias === '偏多') return 'danger'
   if (bias === '偏空') return 'success'
   return 'info'
@@ -2014,19 +2014,19 @@ function vpBiasTip(overall: any): string {
   return '中性表示当前多空信号相互抵消、未形成明确方向，短期多半震荡整理，需等待放量突破或跌破关键位后才能确认方向。'
 }
 
-function vpQuadrantTagType(q: string): string {
+function vpQuadrantTagType(q: string): 'danger' | 'warning' | 'success' | 'info' {
   if (q === '价涨量增') return 'danger'
   if (q === '价跌量增') return 'warning'
   if (q === '价跌量缩') return 'success'
   return 'info'
 }
-function vpLevelTagType(level: string): string {
+function vpLevelTagType(level: string): 'danger' | 'warning' | 'success' | 'info' {
   if (level === '显著放量') return 'danger'
   if (level === '温和放量') return 'warning'
   if (level === '缩量') return 'info'
   return 'success'
 }
-function vpPositionTagType(pos: string): string {
+function vpPositionTagType(pos: string): 'danger' | 'success' | 'info' {
   if (pos === '高位') return 'danger'
   if (pos === '低位') return 'success'
   return 'info'
@@ -2196,7 +2196,7 @@ function getRiskScoreColor(score: number): string {
 }
 
 // 风险等级标签类型
-function getRiskLevelTagType(score: number): string {
+function getRiskLevelTagType(score: number): 'success' | 'warning' | 'danger' {
   if (score >= 80) return 'success'
   if (score >= 60) return 'warning'
   return 'danger'
@@ -2348,12 +2348,6 @@ const reportKeys = computed<string[]>(() => {
   const reports = lastAnalysis.value?.reports
   return reports ? Object.keys(reports) : []
 })
-
-// 打开指定报告
-function openReport(reportKey: string) {
-  showReportsDialog.value = true
-  activeReportTab.value = reportKey
-}
 
 // 导出报告
 function exportReport() {

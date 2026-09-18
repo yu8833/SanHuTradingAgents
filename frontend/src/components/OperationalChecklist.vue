@@ -73,7 +73,7 @@ const pointCells = computed(() => {
 })
 
 const listBlocks = computed(() => {
-  const blocks: Array<{ label: string; type: 'info' | 'warning' | 'error'; items: any }> = []
+  const blocks: Array<{ label: string; type: 'info' | 'warning' | 'error' | 'success'; items: any }> = []
   if (cl.value['入场策略']) blocks.push({ label: '入场策略', type: 'info', items: cl.value['入场策略'] })
   if (cl.value['关键触发']) blocks.push({ label: '关键触发条件', type: 'info', items: cl.value['关键触发'] })
   if (cl.value['风险警报']) blocks.push({ label: '风险警报', type: 'warning', items: cl.value['风险警报'] })

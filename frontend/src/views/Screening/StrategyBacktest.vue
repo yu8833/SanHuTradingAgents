@@ -1107,8 +1107,8 @@ const loadStrategies = async () => {
 }
 
 const runStrategyBacktest = async () => {
-  if (!btForm.value.strategy_id) return ElMessage.warning('请选择策略')
-  if (!btRange.value?.[0]) return ElMessage.warning('请选择回测区间')
+  if (!btForm.value.strategy_id) return void ElMessage.warning('请选择策略')
+  if (!btRange.value?.[0]) return void ElMessage.warning('请选择回测区间')
   try {
     const res = await strategyApi.startBacktest({
       strategy_id: btForm.value.strategy_id,
@@ -1129,7 +1129,7 @@ const runStrategyBacktest = async () => {
       holding_days: 5,
     })
     const data = (res as any)?.data ?? res
-    if (!data?.task_id) return ElMessage.error('提交回测任务失败')
+    if (!data?.task_id) return void ElMessage.error('提交回测任务失败')
     startTask('strategy', data.task_id)
   } catch (e) {
     ElMessage.error('提交策略回测失败')
@@ -1137,7 +1137,7 @@ const runStrategyBacktest = async () => {
 }
 
 const runFactorBacktest = async () => {
-  if (!factorRange.value?.[0]) return ElMessage.warning('请选择回测区间')
+  if (!factorRange.value?.[0]) return void ElMessage.warning('请选择回测区间')
   try {
     const res = await strategyApi.startFactorBacktest({
       factor_name: factorForm.value.factor_name,
@@ -1147,7 +1147,7 @@ const runFactorBacktest = async () => {
       rebalance: 'monthly',
     })
     const data = (res as any)?.data ?? res
-    if (!data?.task_id) return ElMessage.error('提交因子回测任务失败')
+    if (!data?.task_id) return void ElMessage.error('提交因子回测任务失败')
     startTask('factor', data.task_id)
   } catch (e) {
     ElMessage.error('提交因子回测失败')
@@ -1155,8 +1155,8 @@ const runFactorBacktest = async () => {
 }
 
 const runOptimizer = async () => {
-  if (!optForm.value.strategy_id) return ElMessage.warning('请选择策略')
-  if (!optRange.value?.[0]) return ElMessage.warning('请选择回测区间')
+  if (!optForm.value.strategy_id) return void ElMessage.warning('请选择策略')
+  if (!optRange.value?.[0]) return void ElMessage.warning('请选择回测区间')
   let paramGrid: Record<string, any>
   try { paramGrid = parseParamGrid(optForm.value.paramGridText) } catch { return }
   try {
@@ -1175,7 +1175,7 @@ const runOptimizer = async () => {
       position_sizing: 'equal',
     })
     const data = (res as any)?.data ?? res
-    if (!data?.task_id) return ElMessage.error('提交参数优化任务失败')
+    if (!data?.task_id) return void ElMessage.error('提交参数优化任务失败')
     startTask('optimizer', data.task_id)
   } catch (e) {
     ElMessage.error('提交参数优化失败')
@@ -1183,8 +1183,8 @@ const runOptimizer = async () => {
 }
 
 const runWalkForward = async () => {
-  if (!wfForm.value.strategy_id) return ElMessage.warning('请选择策略')
-  if (!wfRange.value?.[0]) return ElMessage.warning('请选择回测区间')
+  if (!wfForm.value.strategy_id) return void ElMessage.warning('请选择策略')
+  if (!wfRange.value?.[0]) return void ElMessage.warning('请选择回测区间')
   let paramGrid: Record<string, any>
   try { paramGrid = parseParamGrid(wfForm.value.paramGridText) } catch { return }
   try {
@@ -1204,7 +1204,7 @@ const runWalkForward = async () => {
       position_sizing: 'equal',
     })
     const data = (res as any)?.data ?? res
-    if (!data?.task_id) return ElMessage.error('提交步进优化任务失败')
+    if (!data?.task_id) return void ElMessage.error('提交步进优化任务失败')
     startTask('walkforward', data.task_id)
   } catch (e) {
     ElMessage.error('提交步进优化失败')
@@ -1212,7 +1212,7 @@ const runWalkForward = async () => {
 }
 
 const runPipelineBacktest = async () => {
-  if (!pipelineRange.value?.[0]) return ElMessage.warning('请选择回测区间')
+  if (!pipelineRange.value?.[0]) return void ElMessage.warning('请选择回测区间')
   try {
     const res = await strategyApi.startPipelineBacktest({
       start: pipelineRange.value[0],
@@ -1225,7 +1225,7 @@ const runPipelineBacktest = async () => {
       tbts_overrides: { ...tbtsOverrides.value },
     })
     const data = (res as any)?.data ?? res
-    if (!data?.task_id) return ElMessage.error('提交三买三卖回测任务失败')
+    if (!data?.task_id) return void ElMessage.error('提交三买三卖回测任务失败')
     startTask('pipeline', data.task_id)
   } catch (e) {
     ElMessage.error('提交三买三卖回测失败')
@@ -1291,10 +1291,6 @@ const formatMoney = (v: number | null | undefined) =>
 
 const positionSizingLabel = (v: string | null | undefined) =>
   v === 'score_weight' ? '评分加权' : v === 'equal' ? '等权' : v || '-'
-
-// 交易明细金额列（保留 2 位小数）
-const toMoney = (v: number | null | undefined) =>
-  v != null ? Number(v).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-'
 
 // 卖出原因展示：英文标识 → 中文 + 标签颜色
 const exitReasonType = (r: string | undefined) => {

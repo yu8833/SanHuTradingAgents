@@ -25,7 +25,7 @@ export interface SingleAnalysisRequest {
   parameters?: {
     market_type?: string
     analysis_date?: string
-    mode?: 'quick' | 'deep'  // 分析模式: quick=速览分析, deep=深度分析
+    mode?: 'light' | 'full'  // 分析模式: light=快评(精简链), full=尽调(完整链)；兼容旧值 quick/deep
     selected_analysts?: string[]
     custom_prompt?: string
     include_sentiment?: boolean

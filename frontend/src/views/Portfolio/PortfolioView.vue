@@ -625,20 +625,6 @@ onUnmounted(() => {
 })
 
 // ============ 交易复盘 ============
-const closedLoading = ref(false)
-const closedTrades = ref<ClosedTrade[]>([])
-
-const loadClosedTrades = async () => {
-  closedLoading.value = true
-  try {
-    closedTrades.value = await portfolioApi.getClosedTrades()
-  } catch (e: any) {
-    ElMessage.error('加载已平仓交易失败：' + (e?.message || e))
-  } finally {
-    closedLoading.value = false
-  }
-}
-
 // 切换到复盘tab时懒加载（已移除交易复盘tab，保留结构兼容）
 
 // 复盘对话框
@@ -646,27 +632,6 @@ const reviewDialogVisible = ref(false)
 const reviewTarget = ref<ClosedTrade | null>(null)
 const reviewContent = ref('')
 const reviewSaving = ref(false)
-
-const openReviewDialog = (row: ClosedTrade) => {
-  reviewTarget.value = row
-  // 预填复盘模板
-  const pnl = row.realized_pnl != null ? `¥${fmtNum(row.realized_pnl)}` : '未知'
-  const pnlSign = (row.realized_pnl || 0) >= 0 ? '盈利' : '亏损'
-  reviewContent.value = [
-    '## 买入逻辑回顾',
-    row.thesis ? `原投资逻辑：${row.thesis}` : '（未记录买入逻辑）',
-    '',
-    '## 实际走势',
-    `买入价 ${fmtNum(row.avg_cost)}，平仓价 ${row.exit_price != null ? fmtNum(row.exit_price) : '-'}，${pnlSign} ${pnl}`,
-    '',
-    '## 失误总结',
-    '（哪些判断错了？哪些信号被忽略了？）',
-    '',
-    '## 经验提炼',
-    '（下次遇到类似情况应该怎么做？）',
-  ].join('\n')
-  reviewDialogVisible.value = true
-}
 
 const saveReview = async () => {
   if (!reviewTarget.value || !reviewContent.value.trim()) {
@@ -706,18 +671,6 @@ const exitReasonLabel = (r?: string | null) => {
     manual: '手动',
   }
   return map[r || ''] || r || '-'
-}
-
-const getExitReasonTagType = (r?: string | null) => {
-  const map: Record<string, string> = {
-    stop_loss: 'danger',
-    take_profit: 'success',
-    time_stop: 'warning',
-    thesis_invalid: 'danger',
-    sell_order: 'info',
-    manual: 'info',
-  }
-  return map[r || ''] || 'info'
 }
 </script>
 

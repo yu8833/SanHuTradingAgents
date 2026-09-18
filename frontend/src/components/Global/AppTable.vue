@@ -1,6 +1,6 @@
 <template>
   <div class="app-table-wrapper">
-    <div v-if="toolbar || showToolbar" class="app-table-toolbar">
+    <div v-if="$slots.toolbar || showToolbar" class="app-table-toolbar">
       <div class="toolbar-left">
         <slot name="toolbar-left">
           <span v-if="count !== null" class="toolbar-count">
@@ -30,13 +30,13 @@
       stripe
       :border="false"
       :max-height="maxHeight"
-      :row-key="rowKey"
+      :row-key="(rowKey as any)"
       :default-sort="defaultSort"
       :empty-text="emptyText"
       :class="tableClass"
       class="app-table"
       show-summary
-      :summary-method="summaryMethod"
+      :summary-method="(summaryMethod as any)"
       @sort-change="(sort: any) => $emit('sort-change', sort)"
       @row-click="(row: any) => $emit('row-click', row)"
     >

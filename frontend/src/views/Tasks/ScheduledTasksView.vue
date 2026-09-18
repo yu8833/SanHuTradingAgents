@@ -28,7 +28,7 @@
         </div>
       </template>
 
-      <el-table :data="jobs" v-loading="jobsLoading" class="app-table app-table--compact" :default-sort="{ prop: 'category' }">
+      <el-table :data="jobs" v-loading="jobsLoading" class="app-table app-table--compact" :default-sort="{ prop: 'category', order: 'ascending' }">
         <el-table-column label="任务名称" min-width="200">
           <template #default="{ row }">
             <div class="job-name-cell">

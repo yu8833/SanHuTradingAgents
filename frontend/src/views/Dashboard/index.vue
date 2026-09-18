@@ -351,7 +351,7 @@ const checkJobCompleted = async (jobId: string, sinceTs: number): Promise<{ done
 }
 
 // 跳转到下一个需要同步的阶段，跳过已最新的阶段
-const advanceToNextPhase = async (syncStartTime: number) => {
+const advanceToNextPhase = async (_syncStartTime: number) => {
   // 先重新加载新鲜度（静默模式，避免 UI 闪烁）
   await loadFreshness(true)
 
@@ -359,7 +359,6 @@ const advanceToNextPhase = async (syncStartTime: number) => {
     if (isPhaseFresh(nextPhase)) {
       // 该数据类型已最新，跳过
       skippedPhases.value.add(nextPhase)
-      const phase = syncPhases.find(p => p.id === nextPhase)
       const nextRange = syncPhases.find(p => p.id === nextPhase + 1)?.range?.[0] ?? 100
       syncProgress.value = nextRange
       continue
@@ -587,7 +586,7 @@ const doSync = async () => {
   }
 }
 
-const loadFreshness = async (silent = false) => {
+const loadFreshness = async (_silent = false) => {
   try {
     const res = await screeningApi.checkDataFreshness()
     const data = (res as any)?.data?.data || (res as any)?.data || {}

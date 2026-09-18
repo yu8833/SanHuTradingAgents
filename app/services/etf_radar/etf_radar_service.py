@@ -196,19 +196,44 @@ class EtfRadarService:
 
     @staticmethod
     def _attach_industry_flows(items: list[dict], flows: list[dict]) -> None:
-        """把行业资金流交叉校验到代表ETF（行业名做模糊匹配，未匹配则为空）。"""
+        """把行业资金流交叉校验到代表ETF。
+
+        匹配优先走 INDUSTRY_THS_ALIASES 候选行业名精确匹配（本地大行业 ↔ 同花顺细分行业），
+        命中的候选可多个，净流入累加（涨跌幅取净流入绝对值最大者）；
+        未在映射表中建名的行业回退到原「行业名子串」模糊匹配，未匹配则保持空。
+        """
+        from .industry_map import INDUSTRY_THS_ALIASES
+
         if not flows:
             return
+        flow_by_name: dict[str, dict] = {}
+        for f in flows:
+            name = f.get("industry", "")
+            if name:
+                flow_by_name.setdefault(name, f)
+
         for it in items:
             ind = it.get("industry", "")
-            matched = None
-            for f in flows:
-                if f.get("industry") == ind or (ind and ind in f.get("industry", "")):
-                    matched = f
-                    break
+            matched: list[dict] = []
+            # 1) 候选行业名映射（精确匹配同花顺行业名）
+            for cand in INDUSTRY_THS_ALIASES.get(ind, []):
+                f = flow_by_name.get(cand)
+                if f is not None:
+                    matched.append(f)
+            # 2) 回退：行业名子串模糊匹配（兼容未建名的行业）
+            if not matched:
+                for name, f in flow_by_name.items():
+                    if name == ind or (ind and ind in name):
+                        matched.append(f)
+                        break
             if matched:
-                it["sector_net_inflow"] = matched.get("net_inflow")
-                it["sector_pct_chg"] = matched.get("pct_chg")
+                total = 0.0
+                for f in matched:
+                    v = f.get("net_inflow")
+                    total += v if v is not None else 0.0
+                main = max(matched, key=lambda f: abs(f.get("net_inflow") or 0.0))
+                it["sector_net_inflow"] = round(total, 2) if matched else None
+                it["sector_pct_chg"] = main.get("pct_chg")
 
     # ---------- 入库 ----------
     async def collect_and_save(self) -> dict:

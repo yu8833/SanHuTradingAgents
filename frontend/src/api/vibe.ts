@@ -44,7 +44,7 @@ async function cachedGet<T>(
     apiCache.delete(oldestKey)
   }
   
-  return result
+  return result as unknown as T
 }
 
 function clearCache(pattern?: string) {
@@ -128,8 +128,8 @@ export interface RadarDim {
 export interface MarketRankItem {
   name: string
   pct: number
-  count: number
   net: number
+  etf_name?: string
 }
 
 export interface MarketTopRow {
@@ -663,7 +663,7 @@ export const vibeApi = {
         related_strategy: meta?.related_strategy,
         related_trade_id: meta?.related_trade_id,
       })
-      return note || null
+      return (note as unknown as Note) || null
     } catch (e) {
       console.error('[saveNote] 后端保存失败，回退到本地缓存:', e)
       // 回退到 localStorage

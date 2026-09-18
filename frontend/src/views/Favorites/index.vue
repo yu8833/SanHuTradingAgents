@@ -1070,13 +1070,6 @@ const deleteFavoritesBatch = async () => {
   }
 }
 
-// 查看股票详情（新标签页打开）
-const viewStockDetail = (row: any) => {
-  const code = String(row.stock_code || '').toUpperCase()
-  if (!code) return
-  window.open(router.resolve({ name: 'StockDetail', params: { code } }).href, '_blank', 'noopener')
-}
-
 // 处理表格选择变化
 const handleSelectionChange = (selection: FavoriteItem[]) => {
   selectedStocks.value = selection

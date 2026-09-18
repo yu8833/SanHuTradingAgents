@@ -16,8 +16,12 @@
  * - 无偏移字符串：打警告，按 UTC 解释（后端契约 naive=UTC）
  * 解析失败返回 null。
  */
-function parseToInstant(dateStr: string | number | null | undefined): Date | null {
+function parseToInstant(dateStr: string | number | Date | null | undefined): Date | null {
   if (dateStr == null || dateStr === '') return null
+
+  if (dateStr instanceof Date) {
+    return isNaN(dateStr.getTime()) ? null : dateStr
+  }
 
   let timeStr: string
 
@@ -206,7 +210,7 @@ export function formatRelativeTime(dateStr: string | number | null | undefined):
  * 解析失败返回空字符串 ''。
  */
 export function toDateStr(
-  dateStr: string | number | null | undefined,
+  dateStr: string | number | Date | null | undefined,
   timeZone: string = 'Asia/Shanghai'
 ): string {
   const date = parseToInstant(dateStr)

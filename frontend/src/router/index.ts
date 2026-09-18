@@ -112,7 +112,7 @@ const routes: RouteRecordRaw[] = [
     name: 'Candidate',
     component: () => import('@/layouts/BasicLayout.vue'),
     meta: {
-      title: '候选',
+      title: '股票筛选',
       icon: 'Aim',
       requiresAuth: true,
       transition: 'slide-up'
@@ -123,7 +123,7 @@ const routes: RouteRecordRaw[] = [
         name: 'CandidateHome',
         component: () => import('@/views/Candidate/index.vue'),
         meta: {
-          title: '候选池',
+          title: '股票筛选',
           requiresAuth: true
         }
       }

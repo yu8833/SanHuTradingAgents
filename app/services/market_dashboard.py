@@ -24,7 +24,7 @@ from datetime import datetime, timedelta, timezone
 from app.core.database import get_mongo_db_sync
 from app.services import vibe_astock as astock
 from app.services.cache_layer import cached
-from app.services.market_overview import _emotion, _sectors, _sentiment
+from app.services.market_overview import _emotion, _sentiment
 
 logger = logging.getLogger("webapi")
 
@@ -167,25 +167,39 @@ def _top_rows(rows: list[dict], key: str, descending: bool, limit: int = 8) -> l
     ]
 
 
-def _industry_rank(rows: list[dict], sectors: list[dict] | None = None) -> dict:
-    """行业热度：按行业资金流 pct 领涨/领跌（复用 _sectors 的即时资金流）。"""
-    if sectors is None:
-        sectors = _sectors()
-    if not sectors:
+def _etf_industry_rank(top_n: int = 5) -> dict:
+    """行业热度（与大屏三买三卖/候选池同源）：ETF 主题行业资金流。
+
+    与「三买三卖·行业筛选」共用同一数据源（etf_radar_snapshot，按主题 ETF
+    主力/基金净流入聚合的行业资金流），确保全站行业口径一致。按行业涨跌幅
+    （sector_pct_chg）领涨/领跌排序，附行业净流入（亿）。
+    """
+    try:
+        from app.core.database import get_mongo_db_sync
+        db = get_mongo_db_sync()
+        latest = db["etf_radar_snapshot"].find_one(sort=[("updated_at", -1)])
+        if not latest:
+            return {"leading": [], "lagging": []}
+        items = latest.get("items") or []
+        rows = []
+        for s in items:
+            name = s.get("industry")
+            pct = s.get("sector_pct_chg")
+            # 缺涨跌幅数据（None）的行业不参与热度排序，避免以 0 混入领跌榜误导
+            if not name or pct is None:
+                continue
+            rows.append({
+                "name": name,
+                "pct": round(_num(pct), 2),
+                "net": round(_num(s.get("sector_net_inflow")), 2),  # 亿
+                "etf_name": s.get("etf_name") or "",
+            })
+        leading = sorted(rows, key=lambda x: x["pct"], reverse=True)[:top_n]
+        lagging = sorted(rows, key=lambda x: x["pct"])[:top_n]
+        return {"leading": leading, "lagging": lagging}
+    except Exception as e:
+        logger.warning(f"ETF 行业热度构建失败（降级为空）: {e}")
         return {"leading": [], "lagging": []}
-    items = [
-        {
-            "name": s.get("name", ""),
-            "pct": round(_num(s.get("pct")), 2),
-            "count": int(_num(s.get("firms"))),
-            "net": round(_num(s.get("net")) / 1e8, 2),  # 元 -> 亿
-        }
-        for s in sectors
-        if s.get("name")
-    ]
-    leading = sorted(items, key=lambda x: x["pct"], reverse=True)[:5]
-    lagging = sorted(items, key=lambda x: x["pct"])[:5]
-    return {"leading": leading, "lagging": lagging}
 
 
 def _market_regime() -> dict | None:
@@ -215,7 +229,7 @@ def _market_regime() -> dict | None:
 async def _build() -> dict:
     """异步并行构建看板数据（market_quotes + 情绪/板块/短线情绪 + 指数）。
 
-    外部数据步（gtimg 指数 / AKShare 涨跌家数 / 东财涨停四池 / 行业资金流 /
+    外部数据步（gtimg 指数 / AKShare 涨跌家数 / 东财涨停四池 /
     市场状态）并行拉取且各自带硬超时，超时降级为空值——任何一步挂起都不会
     拖垮整块看板（复刻 macro_service 的 _bounded_fetch 降级策略）。
     """
@@ -225,7 +239,6 @@ async def _build() -> dict:
         "indices": 15,   # 腾讯 gtimg 指数
         "sentiment": 15, # AKShare 涨跌家数
         "emotion": 25,   # 东财涨停四池（含最多回溯 8 天）
-        "sectors": 15,   # AKShare 行业资金流
         "regime": 15,    # 市场状态（复用进程级缓存时秒回）
     }
 
@@ -242,12 +255,11 @@ async def _build() -> dict:
             return default
 
     rows_task = asyncio.create_task(asyncio.to_thread(_load_market_rows))
-    indices, sentiment, emotion, regime, sectors = await asyncio.gather(
+    indices, sentiment, emotion, regime = await asyncio.gather(
         _bounded("indices", astock.index_quote, []),
         _bounded("sentiment", _sentiment, {}),
         _bounded("emotion", _emotion, {}),
         _bounded("regime", _market_regime, None),
-        _bounded("sectors", _sectors, []),
     )
     rows = await rows_task
 
@@ -291,8 +303,8 @@ async def _build() -> dict:
     strong_diff_pct = (strong_up - strong_down) / total * 100 if total else 0
     strong_down_pct = strong_down / total * 100 if total else 0
 
-    # 主线 = 行业热度领涨（平均涨幅 + 覆盖度）
-    ind_rank = _industry_rank(rows, sectors)
+    # 主线 = 行业热度领涨（ETF 主题行业，与三买三卖口径一致）
+    ind_rank = _etf_industry_rank()
     mainline_items = ind_rank["leading"]
     mainline_avg = max([float(i.get("pct") or 0) for i in mainline_items], default=0)
     mainline_score = round(_score(mainline_avg, -0.5, 3.0)) if mainline_items else 50

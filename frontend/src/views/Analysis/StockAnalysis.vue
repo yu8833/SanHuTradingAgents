@@ -252,10 +252,11 @@ const getBaseUrl = (): string => {
 }
 
 // ⌘/Ctrl + Enter 快速提交（复用主按钮的校验与逻辑，省一次点击）
-const onCodeKeydown = (e: KeyboardEvent) => {
-  if (e.key !== 'Enter') return
-  if (!(e.ctrlKey || e.metaKey)) return
-  e.preventDefault()
+const onCodeKeydown = (e: Event | KeyboardEvent) => {
+  const k = e as KeyboardEvent
+  if (k.key !== 'Enter') return
+  if (!(k.ctrlKey || k.metaKey)) return
+  k.preventDefault()
   if (submitting.value || hasActiveTask.value) return
   submitAnalysis()
 }

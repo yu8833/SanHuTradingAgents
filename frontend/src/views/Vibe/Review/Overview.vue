@@ -172,7 +172,7 @@
             <span class="rank-no">{{ idx + 1 }}</span>
             <div class="rank-main">
               <div class="rank-name" :title="item.name">{{ item.name }}</div>
-              <div class="rank-sub">{{ item.count }}只 · 净流入{{ item.net }}亿</div>
+              <div class="rank-sub">{{ item.etf_name || '行业' }} · 净流入{{ item.net }}亿</div>
             </div>
             <span class="rank-pct up">{{ fmtPct(item.pct) }}</span>
           </div>
@@ -183,7 +183,7 @@
             <span class="rank-no">{{ idx + 1 }}</span>
             <div class="rank-main">
               <div class="rank-name" :title="item.name">{{ item.name }}</div>
-              <div class="rank-sub">{{ item.count }}只 · 净流出{{ Math.abs(item.net) }}亿</div>
+              <div class="rank-sub">{{ item.etf_name || '行业' }} · 净流出{{ Math.abs(item.net) }}亿</div>
             </div>
             <span class="rank-pct down">{{ fmtPct(item.pct) }}</span>
           </div>
@@ -403,12 +403,6 @@ const RADAR_CX = 120
 const RADAR_CY = 120
 const RADAR_MAX_R = 78
 
-// 雷达极端值兜底：当所有维度均为 0 时，多边形会塌陷为圆心一个点，
-// 视觉上无意义。此时视为"今日无有效情绪数据"，展示空态而非退化图形。
-const radarHasData = computed(() =>
-  (dashboard.value?.radar || []).some(r => Number(r.value) > 0)
-)
-
 // 各维度说明（悬停提示）
 const RADAR_DESC: Record<string, string> = {
   index: '主要指数当日平均涨跌幅所反映的大盘整体强度',
@@ -524,10 +518,10 @@ const loadAll = async () => {
     // 逐个处理结果，失败不影响其他数据显示
     const [idxRes, dashRes] = results
     if (idxRes.status === 'fulfilled') {
-      indices.value = idxRes.value.data || []
+      indices.value = (idxRes.value as any).data || []
     }
     if (dashRes.status === 'fulfilled') {
-      dashboard.value = dashRes.value.data || null
+      dashboard.value = (dashRes.value as any).data || null
     }
 
     // 统计失败数量，给出提示
