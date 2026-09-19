@@ -93,11 +93,11 @@
             </el-empty>
           </div>
 
-          <!-- 自选股涨跌幅横条图（红涨绿跌，行情缺失的股票自动跳过） -->
+          <!-- 自选股涨跌幅横条图（红涨绿跌，行情缺失的股票自动跳过），弹性填满卡片高度 -->
           <div v-else-if="favoritesBarData.length > 0" class="favorites-chart">
             <v-chart class="chart" :option="favoritesBarOption" autoresize />
-            <div class="favorites-footer" v-if="favoriteStocks.length > favoritesBarData.length">
-              <span class="favorites-chart-more">其余 {{ favoriteStocks.length - favoritesBarData.length }} 只暂无行情或未展示</span>
+            <div class="favorites-footer">
+              <span v-if="noQuoteCount > 0" class="favorites-chart-more">{{ noQuoteCount }} 只暂无行情</span>
               <el-button type="text" size="small" @click="goToFavorites">
                 查看全部 {{ favoriteStocks.length }} 只自选股
               </el-button>
@@ -106,7 +106,7 @@
 
           <div v-else class="favorites-list">
             <div
-              v-for="stock in favoriteStocks.slice(0, 5)"
+              v-for="stock in favoriteStocks.slice(0, 8)"
               :key="stock.stock_code"
               class="favorite-item"
               @click="viewStockDetail(stock)"
@@ -125,12 +125,11 @@
                 </div>
               </div>
             </div>
-          </div>
-
-          <div v-if="favoriteStocks.length > 5" class="favorites-footer">
-            <el-button type="text" size="small" @click="goToFavorites">
-              查看全部 {{ favoriteStocks.length }} 只自选股
-            </el-button>
+            <div v-if="favoriteStocks.length > 8" class="favorites-footer">
+              <el-button type="text" size="small" @click="goToFavorites">
+                查看全部 {{ favoriteStocks.length }} 只自选股
+              </el-button>
+            </div>
           </div>
         </el-card>
       </el-col>
@@ -241,12 +240,16 @@ const router = useRouter()
 // 自选股数据
 const favoriteStocks = ref<any[]>([])
 
-// 自选股涨跌幅横条图（红涨绿跌）
+// 自选股涨跌幅横条图（红涨绿跌，行情缺失的股票自动跳过）
+const FAVORITES_BAR_MAX = 18
 const favoritesBarData = computed(() => {
   return (favoriteStocks.value || [])
     .filter((s: any) => s?.change_percent != null)
-    .slice(0, 8)
+    .slice(0, FAVORITES_BAR_MAX)
 })
+
+// 暂无行情的自选股数量（供页脚提示，避免留白误导）
+const noQuoteCount = computed(() => (favoriteStocks.value || []).filter((s: any) => s?.change_percent == null).length)
 
 const favoritesBarOption = computed(() => {
   const data = favoritesBarData.value
@@ -261,7 +264,7 @@ const favoritesBarOption = computed(() => {
         return `${s.stock_name || s.stock_code}（${s.stock_code}）<br/>涨跌幅：${fmtPct(s.change_percent)}`
       },
     },
-    grid: { left: 66, right: 30, top: 6, bottom: 4 },
+    grid: { left: 66, right: 30, top: 4, bottom: 4 },
     xAxis: {
       type: 'value',
       axisLabel: { formatter: '{value}%', fontSize: 10 },
@@ -827,6 +830,15 @@ onActivated(() => {
   // 自选股
   .favorites-card {
     height: 100%;
+    display: flex;
+    flex-direction: column;
+
+    :deep(.el-card__body) {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
 
     .card-header {
       display: flex;
@@ -844,9 +856,14 @@ onActivated(() => {
     }
 
     .favorites-chart {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+
       .chart {
-        height: 200px;
-        min-height: 120px;
+        flex: 1;
+        min-height: 160px;
+        width: 100%;
       }
 
       .favorites-chart-more {

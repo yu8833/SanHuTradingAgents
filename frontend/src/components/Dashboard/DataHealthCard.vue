@@ -68,10 +68,6 @@
 
       <!-- 总览状态 -->
       <div class="overall-row">
-        <!-- 数据新鲜度环图（最新/过期 占比） -->
-        <div v-if="freshnessTotal > 0" class="freshness-donut">
-          <v-chart class="donut" :option="freshnessRingOption" autoresize />
-        </div>
         <div :class="['health-badge', overallIsFresh ? 'fresh' : 'stale']">
           <el-icon v-if="overallIsFresh"><CircleCheck /></el-icon>
           <el-icon v-else><WarningFilled /></el-icon>
@@ -132,13 +128,6 @@ import { screeningApi } from '@/api/screening'
 import { getDataSourcesStatus, getSyncStatus, type DataSourceStatus, type SyncStatus } from '@/api/sync'
 import { subscribeQuotesUpdate } from '@/utils/quotesSSE'
 import { formatDateTime, toTimestamp } from '@/utils/datetime'
-import { use as echartsUse } from 'echarts/core'
-import { PieChart } from 'echarts/charts'
-import { TooltipComponent, TitleComponent } from 'echarts/components'
-import { CanvasRenderer } from 'echarts/renderers'
-import VChart from 'vue-echarts'
-
-echartsUse([PieChart, TooltipComponent, TitleComponent, CanvasRenderer])
 
 defineOptions({ name: 'DataHealthCard' })
 defineEmits<{ (e: 'open-sync'): void }>()
@@ -190,39 +179,6 @@ const freshness = ref<{
 const overallIsFresh = computed(() => freshness.value.overall_is_fresh ?? false)
 const freshnessItems = computed(() => freshness.value.items || [])
 const freshCount = computed(() => freshnessItems.value.filter((i) => i.is_fresh).length)
-const freshnessTotal = computed(() => freshnessItems.value.length)
-
-// 新鲜度环图：最新/过期 占比
-const freshnessRingOption = computed(() => {
-  const fresh = freshCount.value
-  const total = freshnessTotal.value
-  const stale = Math.max(total - fresh, 0)
-  return {
-    tooltip: {
-      trigger: 'item',
-      formatter: '{b}：{c} 项（{d}%）',
-    },
-    title: {
-      text: `${fresh}/${total}`,
-      subtext: '最新',
-      left: 'center',
-      top: '34%',
-      textStyle: { fontSize: 13, fontWeight: 700, color: '#303133' },
-      subtextStyle: { fontSize: 9, color: '#909399' },
-    },
-    series: [{
-      type: 'pie',
-      radius: ['64%', '88%'],
-      center: ['50%', '50%'],
-      label: { show: false },
-      emphasis: { scale: false },
-      data: [
-        { name: '最新', value: fresh, itemStyle: { color: '#67c23a' } },
-        { name: '过期', value: stale, itemStyle: { color: '#e6a23c' } },
-      ],
-    }],
-  }
-})
 
 const syncType = computed(() => {
   const map: Record<string, 'info' | 'warning' | 'success' | 'danger'> = {
@@ -489,17 +445,6 @@ onBeforeUnmount(() => {
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
-
-    .freshness-donut {
-      width: 52px;
-      height: 52px;
-      flex-shrink: 0;
-
-      .donut {
-        width: 100%;
-        height: 100%;
-      }
-    }
 
     .health-badge {
       display: inline-flex;
