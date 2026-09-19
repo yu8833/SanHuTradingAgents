@@ -36,7 +36,6 @@ _SYSTEM_PROMPT = (
     '"reasons":["引起现状的原因，2-4条：基于盘面、资讯、外围与资金面给出原因，不要泛泛而谈"],'
     '"operation_points":{"main_direction":"主攻方向：明确该进攻/重仓的板块、风格及买点立场（如：沿5日线低吸科技主线）",'
     '"avoid_direction":"回避方向：明确该回避的板块、风格与个股类型（如：回避高位连板股）",'
-    '"position_analysis":["现有持仓买卖分析：逐只持仓给出持有/加仓/减仓/卖出判断及依据；无持仓则写「当前无持仓」"],'
     '"position_discipline":"仓位纪律：当前建议总仓位区间、加减仓触发条件与纪律规则"},'
     '"external_observation":"外围观察：美股、大宗商品等外围变量对今日A股情绪的传导路径，点明传导逻辑（如：隔夜美股大跌→外资风险偏好下降→北向流出压制成长）",'
     '"strategy":"操作策略：含仓位建议、主攻风格与攻防侧重、当日执行节奏",'
@@ -270,7 +269,6 @@ def _fallback_verdict(regime: dict) -> dict:
         "operation_points": {
             "main_direction": "按当前市场环境匹配的攻防方向执行，等待信号确认",
             "avoid_direction": "环境未明前不追高、不重仓单方向",
-            "position_analysis": ["规则兜底模式：请以买卖清单中逐股建议为准"],
             "position_discipline": "控制仓位，等待市场环境趋势延续确认后再行加减",
         },
         "external_observation": "外围数据未参与规则兜底研判，请参考宏观快扫外围指数。",
@@ -393,7 +391,6 @@ async def build_market_synthesis(user_id: str) -> dict:
                     "operation_points": {
                         "main_direction": op.get("main_direction") or "",
                         "avoid_direction": op.get("avoid_direction") or "",
-                        "position_analysis": op.get("position_analysis") or [],
                         "position_discipline": op.get("position_discipline") or "",
                     },
                     "external_observation": res.get("external_observation") or "",

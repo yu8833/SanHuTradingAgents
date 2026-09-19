@@ -370,7 +370,6 @@ export interface SynthesisVerdict {
   operation_points?: {    // 操作要点（必填结构）
     main_direction?: string        // 主攻方向
     avoid_direction?: string       // 回避方向
-    position_analysis?: string[]   // 现有持仓买卖分析
     position_discipline?: string   // 仓位纪律
   }
   external_observation?: string  // 外围（美股/大宗商品）对A股情绪的传导路径

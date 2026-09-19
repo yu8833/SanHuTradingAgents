@@ -83,12 +83,6 @@
               <div class="syn-op-card-label avoid">回避方向</div>
               <div class="syn-op-card-text">{{ verdict.operation_points.avoid_direction }}</div>
             </div>
-            <div class="syn-op-card" v-if="verdict.operation_points.position_analysis.length">
-              <div class="syn-op-card-label pos">现有持仓买卖分析</div>
-              <ul class="syn-panel-list">
-                <li v-for="(p, i) in verdict.operation_points.position_analysis" :key="'pa' + i">◆ {{ p }}</li>
-              </ul>
-            </div>
             <div class="syn-op-card" v-if="verdict.operation_points.position_discipline">
               <div class="syn-op-card-label disc">仓位纪律</div>
               <div class="syn-op-card-text">{{ verdict.operation_points.position_discipline }}</div>
@@ -179,7 +173,6 @@ const verdict = computed(() => {
     operation_points: {
       main_direction: op.main_direction || '',
       avoid_direction: op.avoid_direction || '',
-      position_analysis: Array.isArray(op.position_analysis) ? op.position_analysis : [],
       position_discipline: op.position_discipline || '',
     },
     external_observation: v.external_observation || '',
@@ -194,7 +187,7 @@ const verdict = computed(() => {
 const hasOperationPoints = computed(() => {
   const op = verdict.value?.operation_points
   if (!op) return false
-  return !!(op.main_direction || op.avoid_direction || op.position_discipline || op.position_analysis.length)
+  return !!(op.main_direction || op.avoid_direction || op.position_discipline)
 })
 
 /** 结论横幅信心度环：--pct 与 --ring-color 由方向色驱动 */
@@ -438,7 +431,6 @@ onActivated(() => {
 }
 .syn-op-card-label.main { color: var(--app-up); }
 .syn-op-card-label.avoid { color: var(--app-down); }
-.syn-op-card-label.pos { color: #2b6cb0; }
 .syn-op-card-label.disc { color: var(--el-color-warning); }
 .syn-op-card-text {
   font-size: 13.5px;
