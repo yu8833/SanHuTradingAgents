@@ -155,14 +155,20 @@ async def set_cache(key: str, value: Any, ttl: int | None = None, category: str 
 
 
 async def clear_cache(key: str):
-    """清除指定 key 的缓存（Redis + 内存双清）。"""
+    """清除指定 key 的缓存（Redis + 内存双清）。
+
+    同时清除 SWR 备用旧值（key:stale）：只清正式 key 会让刷新后仍回退到
+    旧的 stale 数据（如外围指数新增商品后 refresh 仍返回旧列表）。
+    """
+    keys = [key, f"{key}:stale"]
     if await _ensure_redis_available():
         try:
             from app.core.database import redis_client
-            await redis_client.delete(key)
+            await redis_client.delete(*keys)
         except Exception as e:
             logger.warning(f"Redis清除缓存失败: {e}")
-    _memory_cache.pop(key, None)
+    for k in keys:
+        _memory_cache.pop(k, None)
 
 
 # ---------------------------------------------------------------------------

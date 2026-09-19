@@ -38,13 +38,17 @@ _INDICES = (
     {"key": "kospi", "name": "韩国KOSPI", "secid": "100.KS11", "region": "亚太"},
 )
 
-# 富时中国 A50 期货：AKShare 东财全球期货行情中的「当月连续」/ 最近月合约。
+# 富时中国 A50 期货 + 大宗商品：AKShare 东财全球期货行情中的「当月连续」/ 最近月合约。
 # 东财 CME 期货 secid（ES/NQ/YM/CN00）容器实测不可达 → 按设计文档降级路径走 AKShare。
+# 商品连续合约代码（GC/CL/HG/SI/NG 00Y）均已实测存在于 futures_global_spot_em()。
 _FUTURES_TARGETS = (
     {"prefix": "ES00Y", "key": "spxfut", "name": "标普500期货", "region": "美股"},
     {"prefix": "NQ00Y", "key": "ndxfut", "name": "纳斯达克期货", "region": "美股"},
     {"prefix": "YM00Y", "key": "djifut", "name": "道指期货", "region": "美股"},
     {"prefix": "CN", "key": "a50fut", "name": "富时A50期货", "region": "新加坡"},
+    {"prefix": "GC00Y", "key": "gold", "name": "COMEX黄金", "region": "商品"},
+    {"prefix": "CL00Y", "key": "wti", "name": "NYMEX原油", "region": "商品"},
+    {"prefix": "HG00Y", "key": "copper", "name": "COMEX铜", "region": "商品"},
 )
 
 # 期货合约月份字母 → 数字（F=1月 ... Z=12月，跳过 I 避免与数字混淆）

@@ -365,10 +365,19 @@ export interface SynthesisVerdict {
   direction: string       // 大盘方向结论
   confidence: number | null // 置信度 0-100
   conclusion: string      // 综合研判结论
+  status?: string         // 现状：今日市场整体表现
+  reasons?: string[]      // 引起现状的原因
+  operation_points?: {    // 操作要点（必填结构）
+    main_direction?: string        // 主攻方向
+    avoid_direction?: string       // 回避方向
+    position_analysis?: string[]   // 现有持仓买卖分析
+    position_discipline?: string   // 仓位纪律
+  }
+  external_observation?: string  // 外围（美股/大宗商品）对A股情绪的传导路径
   strategy: string        // 当下建议策略
-  points?: string[]       // 具体操作要点（买点立场/攻防方向）
   watch?: string[]        // 今日需盯的观察信号
   risk_tips: string[]     // 风险提示
+  extra?: string[]        // AI 自主补充的其他重要内容
 }
 
 export interface SynthesisSourceRef {

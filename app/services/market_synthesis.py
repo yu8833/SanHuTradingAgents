@@ -32,10 +32,20 @@ _SYSTEM_PROMPT = (
     "你是一名资深 A 股交易员与机构策略师。基于给定的市场数据，输出一份当日市场综合研判。\n"
     "只输出一个 JSON 对象，不要输出任何解释文字、不要使用 markdown 代码块：\n"
     '{"direction":"偏多|偏空|中性","confidence":<0-100整数>,"conclusion":"2-3句话总研判",'
-    '"strategy":"一句话操作策略，含仓位建议、主攻风格与攻防侧重",'
-    '"points":["2-4条具体操作要点：基于数据指出该重仓/该回避的方向，明确买点立场（如：沿5日线低吸科技主线；回避高位连板股）"],'
-    '"watch":["1-3条今日需盯的观察信号，如指数关键点位、量能变化、板块轮动确认信号"]，'
-    '"risk_tips":["1-3条风险提示"]}\n'
+    '"status":"现状：1-3句话概括今日市场整体表现（指数涨跌、量能、涨跌家数、情绪状态）",'
+    '"reasons":["引起现状的原因，2-4条：基于盘面、资讯、外围与资金面给出原因，不要泛泛而谈"],'
+    '"operation_points":{"main_direction":"主攻方向：明确该进攻/重仓的板块、风格及买点立场（如：沿5日线低吸科技主线）",'
+    '"avoid_direction":"回避方向：明确该回避的板块、风格与个股类型（如：回避高位连板股）",'
+    '"position_analysis":["现有持仓买卖分析：逐只持仓给出持有/加仓/减仓/卖出判断及依据；无持仓则写「当前无持仓」"],'
+    '"position_discipline":"仓位纪律：当前建议总仓位区间、加减仓触发条件与纪律规则"},'
+    '"external_observation":"外围观察：美股、大宗商品等外围变量对今日A股情绪的传导路径，点明传导逻辑（如：隔夜美股大跌→外资风险偏好下降→北向流出压制成长）",'
+    '"strategy":"操作策略：含仓位建议、主攻风格与攻防侧重、当日执行节奏",'
+    '"watch":["1-3条今日需盯的观察信号，如指数关键点位、量能变化、板块轮动确认信号"],'
+    '"risk_tips":["1-3条风险提示"],'
+    '"extra":["AI自主补充的其他重要内容：重大事件对股市的影响、数据缺失说明等；没有则给空数组"]}\n'
+    "字段要求：status/reasons/operation_points/external_observation/strategy/risk_tips 为必填；"
+    "extra 可空但键必须存在。\n"
+    "篇幅控制：全文控制在 1400 字以内，每个字符串字段精炼 1-2 句，列条目每条一句话，避免长篇大论。\n"
     "数据可能有缺失：缺失时依据已有信息判断并在结论里点明不确定性，不要臆造数据。"
 )
 
@@ -61,7 +71,8 @@ def _call_llm(cfg: dict, prompt: str) -> dict:
                 {"role": "user", "content": prompt},
             ],
             "temperature": cfg.get("temperature", 0.3),
-            "max_tokens": cfg.get("max_tokens", 1200),
+            # 研判结构字段较多，1200 易截断导致 JSON 不完整 → 默认 3000
+            "max_tokens": cfg.get("max_tokens", 3000),
             "stream": False,
         },
         headers={"Authorization": f"Bearer {cfg['api_key']}",
@@ -70,7 +81,14 @@ def _call_llm(cfg: dict, prompt: str) -> dict:
     )
     resp.raise_for_status()
     content = resp.json()["choices"][0]["message"]["content"]
-    return _parse_llm_json(content)
+    res = _parse_llm_json(content)
+    if not isinstance(res, dict):
+        # 模型偶发把整个对象包成数组（[{...}]）：取首个元素；仍非 dict 视为失败
+        if isinstance(res, list) and res and isinstance(res[0], dict):
+            res = res[0]
+        else:
+            raise ValueError("LLM 输出不是 JSON 对象")
+    return res
 
 
 # ── prompt 构建：把四页数据做成精简、分节、可解释的文本 ──
@@ -210,12 +228,23 @@ def _prompt_guide(guide: dict) -> str:
     return "\n".join(lines)
 
 
-def _build_prompt(dashboard, emotion, concept, radar, regime, guide) -> str:
+def _prompt_external(items: list[dict]) -> str:
+    """外围市场（美股/港股/亚太/VIX/股指期货/A50/大宗商品）：仅供 A 股隔夜情绪传导参考。"""
+    if not items:
+        return "- （无数据）"
+    return "\n".join(
+        f"- {x.get('name')}: {x.get('price')}（{_fmt_pct(x.get('change_pct'))}）"
+        for x in items
+    )
+
+
+def _build_prompt(dashboard, emotion, concept, radar, regime, guide, external) -> str:
     return (
         "【大盘看板】\n" + _prompt_dashboard(dashboard)
         + "\n\n【短线情绪】\n" + _prompt_emotion(emotion)
         + "\n\n【概念分析】\n" + _prompt_concept(concept)
         + "\n\n【资讯要闻】\n" + _prompt_radar(radar)
+        + "\n\n【外围市场】\n" + _prompt_external(external)
         + "\n\n【市场环境】\n" + _prompt_regime(regime)
         + "\n\n【现有买卖信号】\n" + _prompt_guide(guide)
         + "\n\n请综合以上信息，输出当日市场综合研判 JSON。"
@@ -236,10 +265,19 @@ def _fallback_verdict(regime: dict) -> dict:
         "direction": direction,
         "confidence": 50,
         "conclusion": f"市场环境为{env}；依据环境规则给出方向（未启用 LLM 深度研判）。",
+        "status": f"市场环境为{env}，规则引擎未启用 LLM 深度研判。",
+        "reasons": ["规则兜底：未获取 LLM 研判，仅依据市场环境四维检测给出方向"],
+        "operation_points": {
+            "main_direction": "按当前市场环境匹配的攻防方向执行，等待信号确认",
+            "avoid_direction": "环境未明前不追高、不重仓单方向",
+            "position_analysis": ["规则兜底模式：请以买卖清单中逐股建议为准"],
+            "position_discipline": "控制仓位，等待市场环境趋势延续确认后再行加减",
+        },
+        "external_observation": "外围数据未参与规则兜底研判，请参考宏观快扫外围指数。",
         "strategy": advice,
-        "points": ["规则兜底：按当前市场环境匹配的攻防方向执行，控制仓位等待信号确认"],
         "watch": ["市场环境趋势是否延续（关注后续成交量与宽度变化）"],
         "risk_tips": ["本结论为规则兜底（AI 研判暂不可用）", "数据来自公开市场级信息，仅供参考，不构成投资建议"],
+        "extra": [],
     }
 
 
@@ -311,14 +349,22 @@ async def build_market_synthesis(user_id: str) -> dict:
     from app.services.concept_analysis import get_concept_analysis
     from app.services.newsradar import get_radar_cached
     from app.services.intraday_guide_service import build_intraday_guide
+    from app.services import vibe_gstock
 
-    dashboard, emotion, concept, radar, regime_res, guide = await asyncio.gather(
+    async def _external():
+        # 外围（美股/港股/亚太/VIX/期货/A50/大宗商品），整体硬超时 30s 降级为空
+        return await asyncio.wait_for(
+            asyncio.to_thread(vibe_gstock.macro_indices), timeout=30
+        )
+
+    dashboard, emotion, concept, radar, regime_res, guide, external = await asyncio.gather(
         _guard(get_dashboard(), {}),
         _guard(get_short_term_emotion(), {}),
         _guard(get_concept_analysis(), {}),
         _guard(get_radar_cached(), {}),
         _guard(_detect_regime(), {}),
         _guard(build_intraday_guide(user_id), {"buys": [], "sells": []}),
+        _guard(_external(), []),
     )
     regime = regime_res if isinstance(regime_res, dict) else {}
     buys = guide.get("buys") or []
@@ -331,18 +377,30 @@ async def build_market_synthesis(user_id: str) -> dict:
     if cfg:
         for attempt in (1, 2):
             try:
-                prompt = _build_prompt(dashboard, emotion, concept, radar, regime, guide)
+                prompt = _build_prompt(dashboard, emotion, concept, radar, regime, guide, external)
                 if attempt == 2:
                     prompt += "\n\n" + _RETRY_TAIL
                 res = await asyncio.to_thread(_call_llm, cfg, prompt)
+                op = res.get("operation_points") or {}
+                if not isinstance(op, dict):
+                    op = {}
                 verdict = {
                     "direction": res.get("direction") or "中性",
                     "confidence": int(res.get("confidence") or 0),
                     "conclusion": res.get("conclusion") or "",
+                    "status": res.get("status") or "",
+                    "reasons": res.get("reasons") or [],
+                    "operation_points": {
+                        "main_direction": op.get("main_direction") or "",
+                        "avoid_direction": op.get("avoid_direction") or "",
+                        "position_analysis": op.get("position_analysis") or [],
+                        "position_discipline": op.get("position_discipline") or "",
+                    },
+                    "external_observation": res.get("external_observation") or "",
                     "strategy": res.get("strategy") or "",
-                    "points": res.get("points") or [],
                     "watch": res.get("watch") or [],
                     "risk_tips": res.get("risk_tips") or [],
+                    "extra": res.get("extra") or [],
                 }
                 llm_available = True
                 break

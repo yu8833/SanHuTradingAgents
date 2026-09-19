@@ -201,51 +201,59 @@
     </section>
       </el-tab-pane>
 
-      <!-- 外围市场（原作战室「参考」tab 外围快照迁入：指数 / 美股 / 港股；财经日历与重要快讯仍在作战室） -->
+      <!-- 外围市场（分类快照：美股 / 港股 / 亚太 / VIX / 股指期货 / A50 / 商品 + 美股港股个股） -->
       <el-tab-pane label="外围市场" name="overseas">
         <template v-if="overseas">
           <section class="block">
             <div class="block-head">
               <span class="block-title"><el-icon><Position /></el-icon> 外围市场快照</span>
               <div class="block-actions">
-                <span class="block-hint">指数 / 美股 / 港股 · 更新于 {{ fmtClock(overseas.generated_at) }}</span>
+                <span class="block-hint">美股 · 港股 · 亚太 · VIX · 期货 · A50 · 商品 · 更新于 {{ fmtClock(overseas.generated_at) }}</span>
                 <el-button size="small" :icon="Refresh" :loading="overseasRefreshing || foreignLoading" @click="refreshOverseas">刷新</el-button>
               </div>
             </div>
 
-            <div class="sub-block">
-              <div class="sub-title"><el-icon><DataLine /></el-icon> 指数</div>
-              <div class="grid grid-4">
-                <el-card v-for="idx in overseas.indices || []" :key="idx.key" shadow="never" class="idx-card">
-                  <div class="idx-name">{{ idx.name }}<span class="region">{{ idx.region }}</span></div>
-                  <div class="idx-price">{{ idx.price != null ? idx.price.toFixed(2) : '—' }}</div>
-                  <div class="idx-pct" :class="clsByVal(idx.change_pct, '')">{{ fmtPct(idx.change_pct) }}</div>
-                </el-card>
-                <el-empty v-if="!overseas.indices?.length" :image-size="48" description="暂无指数数据" />
+            <!-- ① 分类快照 -->
+            <div class="ovs-grid">
+              <div v-for="g in overseasGroups" :key="g.key" class="ovs-group">
+                <div class="ovs-group-head">
+                  <el-icon :size="13"><component :is="g.icon" /></el-icon>
+                  <span class="ovs-group-name">{{ g.label }}</span>
+                  <span v-if="g.hint" class="ovs-group-hint">{{ g.hint }}</span>
+                </div>
+                <div class="ovs-rows">
+                  <div v-for="idx in g.items" :key="idx.key" class="ovs-row">
+                    <span class="ovs-name" :title="idx.name">{{ idx.name }}</span>
+                    <span class="ovs-price">{{ idx.price != null ? idx.price.toFixed(2) : '—' }}</span>
+                    <span class="ovs-pct" :class="clsByVal(idx.change_pct, 'flat')">{{ fmtPct(idx.change_pct) }}</span>
+                  </div>
+                </div>
               </div>
             </div>
+            <el-empty v-if="!overseasGroups.length" :image-size="48" description="暂无外围数据" />
 
-            <div class="sub-block">
-              <div class="sub-title"><el-icon><DataLine /></el-icon> 美股</div>
-              <div class="grid grid-4">
-                <el-card v-for="s in foreignUsStocks" :key="s.secid" shadow="never" class="idx-card">
-                  <div class="idx-name">{{ s.name }}<span class="region">美股</span></div>
-                  <div class="idx-price">{{ s.price != null ? s.price.toFixed(2) : '—' }}</div>
-                  <div class="idx-pct" :class="clsByVal(s.change_pct, '')">{{ fmtPct(s.change_pct) }}</div>
-                </el-card>
-                <el-empty v-if="!foreignUsStocks.length" :image-size="48" description="暂无美股数据" />
-              </div>
-            </div>
-
-            <div class="sub-block">
-              <div class="sub-title"><el-icon><DataLine /></el-icon> 港股</div>
-              <div class="grid grid-4">
-                <el-card v-for="s in foreignHkStocks" :key="s.secid" shadow="never" class="idx-card">
-                  <div class="idx-name">{{ s.name }}<span class="region">港股</span></div>
-                  <div class="idx-price">{{ s.price != null ? s.price.toFixed(2) : '—' }}</div>
-                  <div class="idx-pct" :class="clsByVal(s.change_pct, '')">{{ fmtPct(s.change_pct) }}</div>
-                </el-card>
-                <el-empty v-if="!foreignHkStocks.length" :image-size="48" description="暂无港股数据" />
+            <!-- ② 美股 / 港股个股行情 -->
+            <div class="sub-block ovs-stocks-block">
+              <div class="sub-title"><el-icon><DataLine /></el-icon> 美股 / 港股个股行情</div>
+              <div class="ovs-stocks">
+                <div class="ovs-stock-col">
+                  <div class="ovs-stock-title">美股</div>
+                  <div v-for="s in foreignUsStocks" :key="s.secid" class="ovs-row">
+                    <span class="ovs-name" :title="s.name">{{ s.name }}</span>
+                    <span class="ovs-price">{{ s.price != null ? s.price.toFixed(2) : '—' }}</span>
+                    <span class="ovs-pct" :class="clsByVal(s.change_pct, 'flat')">{{ fmtPct(s.change_pct) }}</span>
+                  </div>
+                  <div v-if="!foreignUsStocks.length" class="ovs-empty">暂无美股数据</div>
+                </div>
+                <div class="ovs-stock-col">
+                  <div class="ovs-stock-title">港股</div>
+                  <div v-for="s in foreignHkStocks" :key="s.secid" class="ovs-row">
+                    <span class="ovs-name" :title="s.name">{{ s.name }}</span>
+                    <span class="ovs-price">{{ s.price != null ? s.price.toFixed(2) : '—' }}</span>
+                    <span class="ovs-pct" :class="clsByVal(s.change_pct, 'flat')">{{ fmtPct(s.change_pct) }}</span>
+                  </div>
+                  <div v-if="!foreignHkStocks.length" class="ovs-empty">暂无港股数据</div>
+                </div>
               </div>
             </div>
           </section>
@@ -271,6 +279,10 @@ import {
   Loading,
   Odometer,
   Position,
+  Coin,
+  TrendCharts,
+  Warning,
+  Goods,
 } from '@element-plus/icons-vue'
 import { use as echartsUse } from 'echarts/core'
 import { TreemapChart } from 'echarts/charts'
@@ -304,7 +316,7 @@ const today = computed(() => {
   return `${y}-${m}-${day}`
 })
 
-// ── 外围市场 tab（指数/美股/港股，原作战室「参考」tab 外围快照迁入）──
+// ── 外围市场 tab（分类快照：美股/港股/亚太/VIX/股指期货/A50/商品 + 个股行情）──
 const overseasLoading = ref(false)
 const overseasRefreshing = ref(false)
 const foreignLoading = ref(false)
@@ -312,6 +324,25 @@ const overseas = ref<Record<string, any> | null>(null)
 const foreignStocks = ref<any[]>([])
 const foreignUsStocks = computed(() => foreignStocks.value.filter(s => s.region === '美股'))
 const foreignHkStocks = computed(() => foreignStocks.value.filter(s => s.region === '港股'))
+
+// 外围快照分类定义（key 对应 macro_indices 返回项的 key）
+const OVERSEAS_GROUP_DEFS: { key: string; label: string; icon: any; hint?: string; keys: string[] }[] = [
+  { key: 'us', label: '美股指数', icon: TrendCharts, keys: ['dji', 'spx', 'ndx'] },
+  { key: 'hk', label: '港股', icon: Coin, keys: ['hsi', 'hstech'] },
+  { key: 'ap', label: '亚太', icon: DataLine, keys: ['n225', 'kospi'] },
+  { key: 'vix', label: 'VIX 恐慌指数', icon: Warning, hint: '↑ 避险情绪升温', keys: ['vix'] },
+  { key: 'fut', label: '美股股指期货', icon: Odometer, keys: ['spxfut', 'ndxfut', 'djifut'] },
+  { key: 'a50', label: '富时A50 期货', icon: Position, keys: ['a50fut'] },
+  { key: 'com', label: '大宗商品', icon: Goods, keys: ['gold', 'wti', 'copper'] },
+]
+
+/** 按分类把 indices 分组；空组自动隐藏 */
+const overseasGroups = computed(() => {
+  const list: any[] = (overseas.value?.indices) || []
+  return OVERSEAS_GROUP_DEFS
+    .map(g => ({ ...g, items: g.keys.map(k => list.find(i => i.key === k)).filter(Boolean) }))
+    .filter(g => g.items.length)
+})
 
 const loadOverseas = async () => {
   overseasLoading.value = true
@@ -831,6 +862,108 @@ onActivated(() => {
   margin: 0;
 }
 
+/* ── 外围市场：分类快照 ── */
+.ovs-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.ovs-group {
+  background: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  padding: 12px 14px;
+  min-width: 0;
+}
+.ovs-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  color: var(--el-color-primary);
+}
+.ovs-group-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+.ovs-group-hint {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--el-color-warning);
+  white-space: nowrap;
+}
+.ovs-rows {
+  display: flex;
+  flex-direction: column;
+}
+.ovs-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px dashed var(--el-border-color-lighter);
+}
+.ovs-row:last-child {
+  border-bottom: none;
+}
+.ovs-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ovs-price {
+  font-family: var(--app-font-mono);
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+}
+.ovs-pct {
+  min-width: 62px;
+  text-align: center;
+  font-size: 12.5px;
+  font-weight: 600;
+  font-family: var(--app-font-mono);
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+.ovs-pct.up { background: rgba(244, 60, 60, .1); }
+.ovs-pct.down { background: rgba(38, 179, 117, .12); }
+.ovs-pct.flat { color: var(--el-text-color-secondary); background: var(--el-fill-color); }
+
+/* 美股 / 港股个股行情 */
+.ovs-stocks {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.ovs-stock-col {
+  background: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  padding: 12px 14px;
+  min-width: 0;
+}
+.ovs-stock-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  margin-bottom: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+.ovs-empty {
+  font-size: 12px;
+  color: var(--el-text-color-placeholder);
+  padding: 8px 0;
+}
+
 .disclaimer {
   margin-top: 8px;
   font-size: 12px;
@@ -838,8 +971,14 @@ onActivated(() => {
   text-align: center;
 }
 
+@media (max-width: 1200px) {
+  .ovs-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
 @media (max-width: 768px) {
   .grid-4 { grid-template-columns: repeat(2, 1fr); }
+  .ovs-grid { grid-template-columns: 1fr; }
+  .ovs-stocks { grid-template-columns: 1fr; }
 }
 
 /* ===== 市场看板（借鉴 tickflow Dashboard）===== */

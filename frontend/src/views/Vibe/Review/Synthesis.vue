@@ -57,26 +57,69 @@
           <div class="syn-concl-text">{{ verdict.conclusion }}</div>
         </div>
 
-        <!-- 操作要点（买点立场/攻防方向） -->
-        <div class="syn-panel" v-if="verdict.points.length">
-          <div class="syn-panel-title bull"><el-icon><Opportunity /></el-icon> 操作要点</div>
+        <!-- ① 现状 -->
+        <div class="syn-panel" v-if="verdict.status">
+          <div class="syn-panel-title status"><el-icon><DataLine /></el-icon> 现状</div>
+          <div class="syn-plain-text">{{ verdict.status }}</div>
+        </div>
+
+        <!-- ② 引起现状的原因 -->
+        <div class="syn-panel" v-if="verdict.reasons.length">
+          <div class="syn-panel-title reasons"><el-icon><InfoFilled /></el-icon> 引起现状的原因</div>
           <ul class="syn-panel-list">
-            <li v-for="(p, i) in verdict.points" :key="'p' + i">▸ {{ p }}</li>
+            <li v-for="(r, i) in verdict.reasons" :key="'r' + i">▸ {{ r }}</li>
           </ul>
         </div>
 
-        <!-- 今日观察信号 -->
-        <div class="syn-panel" v-if="verdict.watch.length">
+        <!-- ③ 操作要点：主攻 / 回避 / 持仓分析 / 仓位纪律 -->
+        <div class="syn-panel" v-if="hasOperationPoints">
+          <div class="syn-panel-title bull"><el-icon><Opportunity /></el-icon> 操作要点</div>
+          <div class="syn-op-grid">
+            <div class="syn-op-card" v-if="verdict.operation_points.main_direction">
+              <div class="syn-op-card-label main">主攻方向</div>
+              <div class="syn-op-card-text">{{ verdict.operation_points.main_direction }}</div>
+            </div>
+            <div class="syn-op-card" v-if="verdict.operation_points.avoid_direction">
+              <div class="syn-op-card-label avoid">回避方向</div>
+              <div class="syn-op-card-text">{{ verdict.operation_points.avoid_direction }}</div>
+            </div>
+            <div class="syn-op-card" v-if="verdict.operation_points.position_analysis.length">
+              <div class="syn-op-card-label pos">现有持仓买卖分析</div>
+              <ul class="syn-panel-list">
+                <li v-for="(p, i) in verdict.operation_points.position_analysis" :key="'pa' + i">◆ {{ p }}</li>
+              </ul>
+            </div>
+            <div class="syn-op-card" v-if="verdict.operation_points.position_discipline">
+              <div class="syn-op-card-label disc">仓位纪律</div>
+              <div class="syn-op-card-text">{{ verdict.operation_points.position_discipline }}</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ④ 今日观察：外围传导 + 观察信号 -->
+        <div class="syn-panel" v-if="verdict.external_observation || verdict.watch.length">
           <div class="syn-panel-title watch"><el-icon><View /></el-icon> 今日观察</div>
-          <ul class="syn-panel-list">
+          <div class="syn-ext" v-if="verdict.external_observation">
+            <div class="syn-ext-label">外围传导 · 美股 / 大宗商品 → A股情绪</div>
+            <div class="syn-ext-text">{{ verdict.external_observation }}</div>
+          </div>
+          <ul class="syn-panel-list" v-if="verdict.watch.length">
             <li v-for="(w, i) in verdict.watch" :key="'w' + i">◎ {{ w }}</li>
           </ul>
         </div>
 
-        <!-- 操作策略 -->
+        <!-- ⑤ 操作策略 -->
         <div class="syn-panel" v-if="verdict.strategy">
           <div class="syn-panel-title strat"><el-icon><Guide /></el-icon> 操作策略</div>
           <div class="syn-strat-text">{{ verdict.strategy }}</div>
+        </div>
+
+        <!-- AI 自主补充（重大事件影响等） -->
+        <div class="syn-panel" v-if="verdict.extra.length">
+          <div class="syn-panel-title extra"><el-icon><StarFilled /></el-icon> 重点补充</div>
+          <ul class="syn-panel-list">
+            <li v-for="(e, i) in verdict.extra" :key="'e' + i">★ {{ e }}</li>
+          </ul>
         </div>
 
         <!-- 风险提示 -->
@@ -102,6 +145,7 @@ import {
 } from '@/api/vibe'
 import {
   Refresh, Loading, Aim, Opportunity, WarnTriangleFilled, View, Guide,
+  DataLine, InfoFilled, StarFilled,
 } from '@element-plus/icons-vue'
 
 defineOptions({ name: 'VibeSynthesis' })
@@ -123,17 +167,34 @@ const verdict = computed(() => {
   if (dir.includes('多') && !dir.includes('中性')) dirClass = 'bull'
   else if (dir.includes('空')) dirClass = 'bear'
   const conf = v.confidence != null ? Math.max(0, Math.min(100, Number(v.confidence))) : null
+  const op = v.operation_points || {}
   return {
     direction: dir,
     directionZh: dirClass === 'bull' ? '偏多' : dirClass === 'bear' ? '偏空' : '中性',
     dirClass,
     confidence: conf,
     conclusion: v.conclusion || '',
+    status: v.status || '',
+    reasons: Array.isArray(v.reasons) ? v.reasons : [],
+    operation_points: {
+      main_direction: op.main_direction || '',
+      avoid_direction: op.avoid_direction || '',
+      position_analysis: Array.isArray(op.position_analysis) ? op.position_analysis : [],
+      position_discipline: op.position_discipline || '',
+    },
+    external_observation: v.external_observation || '',
     strategy: v.strategy || '',
-    points: Array.isArray(v.points) ? v.points : [],
     watch: Array.isArray(v.watch) ? v.watch : [],
     risk_tips: Array.isArray(v.risk_tips) ? v.risk_tips : [],
+    extra: Array.isArray(v.extra) ? v.extra : [],
   }
+})
+
+/** 操作要点是否有内容可展示 */
+const hasOperationPoints = computed(() => {
+  const op = verdict.value?.operation_points
+  if (!op) return false
+  return !!(op.main_direction || op.avoid_direction || op.position_discipline || op.position_analysis.length)
 })
 
 /** 结论横幅信心度环：--pct 与 --ring-color 由方向色驱动 */
@@ -314,7 +375,7 @@ onActivated(() => {
   color: var(--el-text-color-primary);
 }
 
-/* ── AI 内容面板（操作要点/观察/策略） ── */
+/* ── AI 内容面板 ── */
 .syn-panel {
   padding: 12px 16px;
   border-radius: 10px;
@@ -331,6 +392,9 @@ onActivated(() => {
 .syn-panel-title.bull { color: var(--app-up); }
 .syn-panel-title.watch { color: var(--el-color-primary); }
 .syn-panel-title.strat { color: var(--el-color-warning); }
+.syn-panel-title.status { color: #2b6cb0; }
+.syn-panel-title.reasons { color: var(--el-color-info); }
+.syn-panel-title.extra { color: #805ad5; }
 .syn-panel-list {
   margin: 0;
   padding: 0;
@@ -344,7 +408,59 @@ onActivated(() => {
   line-height: 1.7;
   color: var(--el-text-color-regular);
 }
+.syn-plain-text {
+  font-size: 13.5px;
+  line-height: 1.75;
+  color: var(--el-text-color-regular);
+}
 .syn-strat-text {
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: var(--el-text-color-regular);
+}
+
+/* 操作要点卡片 */
+.syn-op-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.syn-op-card {
+  background: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.syn-op-card-label {
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 5px;
+}
+.syn-op-card-label.main { color: var(--app-up); }
+.syn-op-card-label.avoid { color: var(--app-down); }
+.syn-op-card-label.pos { color: #2b6cb0; }
+.syn-op-card-label.disc { color: var(--el-color-warning); }
+.syn-op-card-text {
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: var(--el-text-color-regular);
+}
+
+/* 今日观察 · 外围传导 */
+.syn-ext {
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(43, 108, 176, .06);
+  border: 1px solid rgba(43, 108, 176, .18);
+}
+.syn-ext-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #2b6cb0;
+  margin-bottom: 4px;
+}
+.syn-ext-text {
   font-size: 13.5px;
   line-height: 1.7;
   color: var(--el-text-color-regular);
