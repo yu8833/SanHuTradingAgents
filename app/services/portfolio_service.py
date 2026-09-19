@@ -22,7 +22,7 @@ from typing import Any
 from app.utils.timezone import now_tz, to_config_tz, to_display_iso
 
 from bson import ObjectId
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.database import get_mongo_db
 
@@ -49,8 +49,8 @@ class Position(BaseModel):
     exit_price: float | None = None
     exit_date: str | None = None
     exit_reason: str | None = None
-    created_at: datetime
-    updated_at: datetime
+    created_at: datetime = Field(default_factory=now_tz)
+    updated_at: datetime = Field(default_factory=now_tz)
 
     class Config:
         from_attributes = True
