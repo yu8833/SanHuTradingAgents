@@ -105,6 +105,28 @@
       <el-empty v-else description="暂无模拟账户数据" :image-size="56" />
     </section>
 
+    <!-- 持仓分析图表（策略市值构成 + 盈亏贡献排行） -->
+    <section v-if="positions.length > 0" class="analytics-shell">
+      <div class="analytics-hd">
+        <h3 class="section-title">持仓分析</h3>
+        <span class="analytics-sub">按策略聚合市值 · 按浮动盈亏排序</span>
+      </div>
+      <el-row :gutter="16">
+        <el-col :xs="24" :md="10">
+          <div class="chart-panel">
+            <div class="chart-panel-title">策略市值构成</div>
+            <v-chart class="chart chart--pie" :option="marketPieOption" autoresize />
+          </div>
+        </el-col>
+        <el-col :xs="24" :md="14">
+          <div class="chart-panel">
+            <div class="chart-panel-title">盈亏贡献排行（按浮动盈亏）</div>
+            <v-chart class="chart chart--bar" :option="pnlRankOption" autoresize />
+          </div>
+        </el-col>
+      </el-row>
+    </section>
+
     <!-- 持仓列表 -->
     <div class="app-table-card">
       <div class="app-table-toolbar">
@@ -354,6 +376,13 @@ import { subscribeQuotesUpdate } from '@/utils/quotesSSE'
 import { getStrategyNameMap, strategyNameSync } from '@/utils/strategyName'
 import { fmtNum, fmtPct, fmtAmount } from '@/utils/format'
 import { formatDateTime, todayDateInBeijing } from '@/utils/datetime'
+import { use as echartsUse } from 'echarts/core'
+import { PieChart, BarChart } from 'echarts/charts'
+import { TooltipComponent, LegendComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+import VChart from 'vue-echarts'
+
+echartsUse([PieChart, BarChart, TooltipComponent, LegendComponent, CanvasRenderer])
 
 let quotesUnsub: (() => void) | null = null
 
@@ -376,6 +405,74 @@ const loadPositions = async () => {
     loading.value = false
   }
 }
+
+// ---------- 持仓分析图表 ----------
+const PIE_COLORS = ['#2b6cb0', '#fa541c', '#52c41a', '#faad14', '#722ed1', '#eb2f96', '#13c2c2', '#f5222d']
+
+// 按策略聚合持仓市值（饼图）
+const marketPieOption = computed(() => {
+  const agg = new Map<string, number>()
+  for (const p of positions.value) {
+    const v = Number(p.market_value)
+    if (!v) continue
+    const key = strategyLabel(p.strategy || 'default')
+    agg.set(key, (agg.get(key) || 0) + v)
+  }
+  const total = [...agg.values()].reduce((a, b) => a + b, 0)
+  const data = [...agg.entries()]
+    .map(([name, value], i) => ({ name, value, itemStyle: { color: PIE_COLORS[i % PIE_COLORS.length] } }))
+    .sort((a, b) => b.value - a.value)
+  return {
+    tooltip: { trigger: 'item', formatter: '{b}：¥{c}（{d}%）' },
+    legend: { bottom: 0, icon: 'circle', itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 11 } },
+    series: [{
+      type: 'pie',
+      radius: ['48%', '72%'],
+      center: ['50%', '48%'],
+      label: total > 0 ? { formatter: '{b}\n{d}%', fontSize: 11 } : { show: false },
+      emphasis: { scaleSize: 4 },
+      data,
+    }],
+  }
+})
+
+// 各持仓浮动盈亏贡献排行（横向条，红盈绿亏；最大值置顶）
+const pnlRankOption = computed(() => {
+  const chartItems = positions.value
+    .filter(p => p.profit_loss != null)
+    .map(p => ({
+      name: p.stock_name || p.symbol,
+      value: Number(p.profit_loss),
+    }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 10)
+    .reverse()
+  return {
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: (params: any) => {
+      const p = params[0]
+      if (!p) return ''
+      const v = p.value
+      return `${p.name}<br/>浮动盈亏：${v >= 0 ? '+' : ''}¥${fmtNum(v)}`
+    } },
+    grid: { left: 8, right: 70, top: 6, bottom: 6, containLabel: true },
+    xAxis: { type: 'value', axisLabel: { formatter: (v: number) => fmtNum(v) }, splitLine: { lineStyle: { type: 'dashed', color: '#ebeef5' } } },
+    yAxis: {
+      type: 'category',
+      inverse: true,
+      axisLabel: { fontSize: 11 },
+      data: chartItems.map(i => i.name),
+    },
+    series: [{
+      type: 'bar',
+      barWidth: 12,
+      data: chartItems.map(i => ({
+        value: i.value,
+        itemStyle: { color: i.value >= 0 ? '#f56c6c' : '#67c23a', borderRadius: 3 },
+      })),
+      label: { show: true, position: 'right', fontSize: 10, formatter: (p: any) => `${p.value >= 0 ? '+' : ''}${fmtNum(p.value)}` },
+    }],
+  }
+})
 
 // 模拟账户概览（自模拟交易迁移）
 const paperAccount = ref<any | null>(null)
@@ -679,6 +776,50 @@ const exitReasonLabel = (r?: string | null) => {
   padding: 24px;
   max-width: 1600px;
   margin: 0 auto;
+}
+
+// ============ 持仓分析图表 ============
+.analytics-shell {
+  margin-bottom: 20px;
+  padding: 18px 20px;
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 14px;
+}
+.analytics-hd {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+.analytics-sub {
+  font-size: 12px;
+  color: var(--el-text-color-placeholder);
+}
+.section-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+}
+.chart-panel {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 12px;
+  padding: 14px;
+  background: var(--el-fill-color-lighter);
+}
+.chart-panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  margin-bottom: 10px;
+}
+.chart--pie {
+  height: 260px;
+}
+.chart--bar {
+  height: 260px;
 }
 
 // ============ 汇总卡片 ============

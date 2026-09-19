@@ -48,6 +48,17 @@
     <el-tabs v-model="activeTab" class="review-tabs">
       <!-- 交易记录（融合：已平仓 + 持仓中，买卖一行） -->
       <el-tab-pane label="交易记录" name="trades">
+        <!-- 盈亏可视化：累计曲线 + 单笔分布 -->
+        <div v-if="closedRows.length > 0" class="trades-charts">
+          <div class="chart-card">
+            <div class="chart-card-title">累计盈亏曲线（已平仓）</div>
+            <v-chart class="chart chart--line" :option="cumPnlOption" autoresize />
+          </div>
+          <div class="chart-card">
+            <div class="chart-card-title">单笔盈亏分布（最近 30 笔已平仓）</div>
+            <v-chart class="chart chart--bar" :option="tradePnlOption" autoresize />
+          </div>
+        </div>
         <div class="table-card">
           <div class="table-card-hd">
             <span class="table-card-sub">{{ tradeRows.length }} 条记录（含 {{ holdingRows.length }} 持仓中）</span>
@@ -119,6 +130,10 @@
       <!-- 策略收益率分析 -->
       <el-tab-pane label="策略收益率" name="strategy">
         <div class="strategy-returns" v-if="strategyReturns.length > 0">
+          <div class="chart-card strategy-return-chart">
+            <div class="chart-card-title">策略累计收益率排行</div>
+            <v-chart class="chart chart--strategy" :option="strategyReturnOption" autoresize />
+          </div>
           <div class="strategy-grid">
             <div class="strategy-card" v-for="s in strategyReturns" :key="s.strategy">
               <div class="strategy-card-header">
@@ -219,6 +234,13 @@ import { paperApi, reviewApi, type ReviewCycleItem, type ReviewNoteItem, type Re
 import { stocksApi } from '@/api/stocks'
 import { getStrategyNameMap, strategyNameSync } from '@/utils/strategyName'
 import { fmtPct, fmtPctFromFraction, fmtNum, fmtSigned } from '@/utils/format'
+import { use as echartsUse } from 'echarts/core'
+import { LineChart, BarChart } from 'echarts/charts'
+import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+import VChart from 'vue-echarts'
+
+echartsUse([LineChart, BarChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer])
 
 defineOptions({ name: 'PaperReview' })
 
@@ -513,6 +535,92 @@ const strategyReturns = computed<StrategyReturnStat[]>(() => {
   return results.sort((a, b) => b.total_return - a.total_return)
 })
 
+// ---------- 复盘图表 ----------
+// 累计盈亏曲线：按平仓时间升序累加（仅已平仓）
+const cumPnlOption = computed(() => {
+  const closed = closedRows.value
+    .filter(t => t.sell_time)
+    .map(t => ({ time: t.sell_time!, pnl: Number(t.pnl ?? 0) }))
+    .sort((a, b) => a.time.localeCompare(b.time))
+  let acc = 0
+  const data = closed.map(p => {
+    acc += p.pnl
+    return [p.time.slice(0, 10), Math.round(acc * 100) / 100]
+  })
+  return {
+    tooltip: { trigger: 'axis', valueFormatter: (v: number) => fmtSigned(v) },
+    grid: { left: 70, right: 20, top: 20, bottom: 40 },
+    xAxis: { type: 'category', data: data.map(d => d[0]), axisLabel: { fontSize: 10, interval: Math.max(0, Math.floor(data.length / 8) - 1) } },
+    yAxis: { type: 'value', splitLine: { lineStyle: { type: 'dashed', color: '#ebeef5' } } },
+    series: [{
+      name: '累计盈亏',
+      type: 'line',
+      showSymbol: false,
+      smooth: true,
+      lineStyle: { width: 2 },
+      areaStyle: { opacity: 0.08 },
+      data,
+    }],
+  }
+})
+
+// 单笔盈亏分布（最近 30 笔，红盈绿亏）
+const tradePnlOption = computed(() => {
+  const closed = closedRows.value
+    .filter(t => t.sell_time)
+    .sort((a, b) => (b.sell_time || '').localeCompare(a.sell_time || ''))
+    .slice(0, 30)
+    .reverse()
+  return {
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: (params: any) => {
+      const p = params[0]
+      if (!p) return ''
+      const t = closed[p.dataIndex]
+      if (!t) return ''
+      return `${t.name || t.code}<br/>盈亏：${fmtSigned(t.pnl ?? 0)}（${fmtPct(t.pnl_pct ?? 0)}）`
+    } },
+    grid: { left: 70, right: 20, top: 20, bottom: 40 },
+    xAxis: {
+      type: 'category',
+      axisLabel: { fontSize: 9, interval: Math.max(0, Math.floor(closed.length / 12) - 1), rotate: 30 },
+      data: closed.map((t, i) => `${t.code || i + 1}`),
+    },
+    yAxis: { type: 'value', splitLine: { lineStyle: { type: 'dashed', color: '#ebeef5' } } },
+    series: [{
+      type: 'bar',
+      barMaxWidth: 16,
+      data: closed.map(t => ({
+        value: Math.round(Number(t.pnl ?? 0) * 100) / 100,
+        itemStyle: { color: (t.pnl ?? 0) >= 0 ? '#f56c6c' : '#67c23a', borderRadius: 2 },
+      })),
+    }],
+  }
+})
+
+// 策略累计收益率排行（横向条，红盈绿亏）
+const strategyReturnOption = computed(() => {
+  const items = strategyReturns.value
+  return {
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: (params: any) => {
+      const p = params[0]
+      if (!p) return ''
+      return `${p.name}<br/>累计收益率：${fmtPct(p.value)}`
+    } },
+    grid: { left: 8, right: 60, top: 8, bottom: 4, containLabel: true },
+    xAxis: { type: 'value', axisLabel: { formatter: '{value}%' }, splitLine: { lineStyle: { type: 'dashed', color: '#ebeef5' } } },
+    yAxis: { type: 'category', inverse: true, axisLabel: { fontSize: 11 }, data: items.map(i => i.label) },
+    series: [{
+      type: 'bar',
+      barWidth: 14,
+      data: items.map(i => ({
+        value: Math.round(i.total_return * 100) / 100,
+        itemStyle: { color: i.total_return >= 0 ? '#f56c6c' : '#67c23a', borderRadius: 3 },
+      })),
+      label: { show: true, position: 'right', fontSize: 10, formatter: (p: any) => `${p.value}%` },
+    }],
+  }
+})
+
 function getStrategyTagType(s: string): 'primary' | 'success' | 'warning' | 'info' | 'danger' {
   const map: Record<string, 'primary' | 'success' | 'warning' | 'info' | 'danger'> = {
     extreme_reversal: 'danger',
@@ -588,6 +696,38 @@ onMounted(() => {
 }
 .review-tabs :deep(.el-tabs__item) {
   font-weight: 600;
+}
+
+/* 盈亏可视化图表 */
+.trades-charts {
+  display: grid;
+  grid-template-columns: 2fr 3fr;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.chart-card {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--app-radius);
+  background: var(--el-fill-color-blank);
+  padding: 12px 14px;
+}
+.chart-card-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  margin-bottom: 8px;
+}
+.chart--line {
+  height: 200px;
+}
+.chart--bar {
+  height: 200px;
+}
+.strategy-return-chart {
+  margin-bottom: 14px;
+}
+.chart--strategy {
+  height: 200px;
 }
 
 /* 表格卡片 */
@@ -824,5 +964,6 @@ onMounted(() => {
   .review-page { padding: 12px; }
   .stats-strip { grid-template-columns: repeat(2, 1fr); }
   .return-stats { grid-template-columns: repeat(2, 1fr); }
+  .trades-charts { grid-template-columns: 1fr; }
 }
 </style>

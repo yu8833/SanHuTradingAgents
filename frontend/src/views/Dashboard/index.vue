@@ -93,6 +93,17 @@
             </el-empty>
           </div>
 
+          <!-- 自选股涨跌幅横条图（红涨绿跌，行情缺失的股票自动跳过） -->
+          <div v-else-if="favoritesBarData.length > 0" class="favorites-chart">
+            <v-chart class="chart" :option="favoritesBarOption" autoresize />
+            <div class="favorites-footer" v-if="favoriteStocks.length > favoritesBarData.length">
+              <span class="favorites-chart-more">其余 {{ favoriteStocks.length - favoritesBarData.length }} 只暂无行情或未展示</span>
+              <el-button type="text" size="small" @click="goToFavorites">
+                查看全部 {{ favoriteStocks.length }} 只自选股
+              </el-button>
+            </div>
+          </div>
+
           <div v-else class="favorites-list">
             <div
               v-for="stock in favoriteStocks.slice(0, 5)"
@@ -217,11 +228,64 @@ import { screeningApi } from '@/api/screening'
 import { subscribeQuotesUpdate } from '@/utils/quotesSSE'
 import { fmtPct, fmtMoney } from '@/utils/format'
 import { toTimestamp } from '@/utils/datetime'
+import { use as echartsUse } from 'echarts/core'
+import { BarChart } from 'echarts/charts'
+import { GridComponent, TooltipComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+import VChart from 'vue-echarts'
+
+echartsUse([BarChart, GridComponent, TooltipComponent, CanvasRenderer])
 
 const router = useRouter()
 
 // 自选股数据
 const favoriteStocks = ref<any[]>([])
+
+// 自选股涨跌幅横条图（红涨绿跌）
+const favoritesBarData = computed(() => {
+  return (favoriteStocks.value || [])
+    .filter((s: any) => s?.change_percent != null)
+    .slice(0, 8)
+})
+
+const favoritesBarOption = computed(() => {
+  const data = favoritesBarData.value
+  return {
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: (params: any) => {
+        const p = params[0]
+        const s = data[p?.dataIndex]
+        if (!p || !s) return ''
+        return `${s.stock_name || s.stock_code}（${s.stock_code}）<br/>涨跌幅：${fmtPct(s.change_percent)}`
+      },
+    },
+    grid: { left: 66, right: 30, top: 6, bottom: 4 },
+    xAxis: {
+      type: 'value',
+      axisLabel: { formatter: '{value}%', fontSize: 10 },
+      splitLine: { lineStyle: { type: 'dashed', color: '#ebeef5' } },
+    },
+    yAxis: {
+      type: 'category',
+      data: data.map((s: any) => (s.stock_name || s.stock_code).slice(0, 6)),
+      axisLabel: { fontSize: 11 },
+    },
+    series: [{
+      type: 'bar',
+      barWidth: 10,
+      itemStyle: { borderRadius: 3 },
+      data: data.map((s: any) => {
+        const v = Number(s.change_percent)
+        return {
+          value: v,
+          itemStyle: { color: v >= 0 ? '#f56c6c' : '#67c23a' },
+        }
+      }),
+    }],
+  }
+})
 
 // P5-12：SSE 实时行情信号是否进入降级态（断连后依赖定时刷新兜底）
 const quotesStale = ref(false)
@@ -777,6 +841,27 @@ onActivated(() => {
 
     .quotes-stale-alert {
       margin-bottom: 12px;
+    }
+
+    .favorites-chart {
+      .chart {
+        height: 200px;
+        min-height: 120px;
+      }
+
+      .favorites-chart-more {
+        font-size: 12px;
+        color: var(--el-text-color-placeholder);
+      }
+
+      .favorites-footer {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding-top: 8px;
+        border-top: none;
+        margin-top: 4px;
+      }
     }
 
     .favorites-list {
