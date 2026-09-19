@@ -38,6 +38,12 @@
 
         <el-empty v-if="!screenRankings.length && !screenLoading && !screenRefreshing" description="暂无行业资金流数据（点击「实时采集」获取，或等待盘中任务入库）" />
 
+        <!-- 行业主力净流入柱状图（红流入绿流出，点击进入个股筛选） -->
+        <div v-if="industryFlowData.length > 0" class="chart-card industry-flow-chart">
+          <div class="chart-card-title">行业主力资金净流入 TOP10（亿元，点击进入个股筛选）</div>
+          <v-chart class="chart chart--industry" :option="industryFlowOption" autoresize @click="onIndustryChartClick" />
+        </div>
+
         <!-- 全排名表 -->
         <div class="section-title">行业资金流排名（{{ screenRankings.length }}）</div>
         <div class="table-scroll">
@@ -92,6 +98,12 @@
 
       <!-- Tab2 个股筛选（行业成分股多因子打分 + ΔG 象限 + 择时预览） -->
       <el-tab-pane label="个股筛选" name="stock-screening">
+        <!-- 动量-ROE 散点（气泡=市值，颜色=当日涨跌） -->
+        <div v-if="scatterData.length > 1" class="chart-card momentum-chart">
+          <div class="chart-card-title">动量-ROE 分布（气泡大小 = 市值，颜色 = 当日涨跌）</div>
+          <v-chart class="chart chart--scatter" :option="scatterOption" autoresize />
+        </div>
+
         <div class="stocks-toolbar">
           <el-select
             v-model="selectedIndustry"
@@ -223,9 +235,17 @@ import {
 import {
   fmtNum,
   fmtYi,
+  fmtYiSigned,
   fmtPctFromFraction as fmtPct,
   fmtSigned as fmtSign
 } from '@/utils/format'
+import { use as echartsUse } from 'echarts/core'
+import { BarChart, ScatterChart } from 'echarts/charts'
+import { GridComponent, TooltipComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+import VChart from 'vue-echarts'
+
+echartsUse([BarChart, ScatterChart, GridComponent, TooltipComponent, CanvasRenderer])
 
 // 外层 Tab：行业筛选 / 个股筛选
 const activeTab = ref('screening')
@@ -260,6 +280,115 @@ const signalStats = computed(() => {
     if (r.signal_type && s[r.signal_type] !== undefined) s[r.signal_type]++
   }
   return s
+})
+
+// ---------- Tab1 行业资金净流入柱状图 ----------
+const industryFlowData = computed(() =>
+  screenRankings.value
+    .filter((r) => r.fund_net_inflow != null)
+    .sort((a, b) => (b.fund_net_inflow || 0) - (a.fund_net_inflow || 0))
+    .slice(0, 10)
+)
+
+const industryFlowOption = computed(() => {
+  const items = industryFlowData.value
+  return {
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: (params: any) => {
+        const p = params[0]
+        const r = items[p?.dataIndex]
+        if (!p || !r) return ''
+        const v = Number(r.fund_net_inflow || 0)
+        return `${r.industry}<br/>主力净流入：${fmtYi(v)}亿<br/>净占比：${fmtSign(r.fund_net_inflow_pct)}%`
+      },
+    },
+    grid: { left: 8, right: 70, top: 8, bottom: 6, containLabel: true },
+    xAxis: { type: 'value', axisLabel: { formatter: (v: number) => fmtYiSigned(v) }, splitLine: { lineStyle: { type: 'dashed', color: '#ebeef5' } } },
+    yAxis: {
+      type: 'category',
+      inverse: true,
+      axisLabel: { fontSize: 11 },
+      data: items.map(r => r.industry),
+    },
+    series: [{
+      name: '主力净流入(亿)',
+      type: 'bar',
+      barWidth: 12,
+      data: items.map(r => ({
+        value: Math.round(Number(r.fund_net_inflow || 0) * 100) / 100,
+        itemStyle: { color: (r.fund_net_inflow || 0) >= 0 ? '#f56c6c' : '#67c23a', borderRadius: 3 },
+      })),
+      label: { show: true, position: 'right', fontSize: 10, formatter: (p: any) => `${fmtYiSigned(p.value)}亿` },
+    }],
+  }
+})
+
+function onIndustryChartClick(params: any) {
+  const item = industryFlowData.value[params?.dataIndex]
+  if (item) goToStockScreening(item)
+}
+
+// ---------- Tab2 动量-ROE 散点图 ----------
+const scatterData = computed(() =>
+  filteredCandidates.value
+    .filter((r) => r.momentum_20d != null && r.roe != null)
+    .map((r) => ({
+      name: r.name || r.code,
+      code: r.code,
+      momentum: Number(r.momentum_20d),
+      roe: Number(r.roe),
+      mv: Number(r.total_mv || 0),
+      pct: Number(r.pct_chg || 0),
+    }))
+)
+
+const scatterOption = computed(() => {
+  const pts = scatterData.value
+  return {
+    tooltip: {
+      trigger: 'item',
+      formatter: (p: any) => {
+        const d = p?.data
+        if (!d) return ''
+        const v = d.value || []
+        return `${d.name}（${d.code}）<br/>动量：${fmtPct(v[0])}<br/>ROE：${fmtNum(v[1])}%<br/>市值：${fmtNum(v[2])}亿<br/>涨跌幅：${fmtPct(v[3])}`
+      },
+    },
+    grid: { left: 56, right: 24, top: 24, bottom: 40 },
+    xAxis: {
+      type: 'value',
+      name: '20日动量(%)',
+      nameLocation: 'middle',
+      nameGap: 24,
+      axisLabel: { formatter: (v: number) => fmtPct(v), fontSize: 10 },
+      splitLine: { lineStyle: { type: 'dashed', color: '#ebeef5' } },
+    },
+    yAxis: {
+      type: 'value',
+      name: 'ROE(%)',
+      axisLabel: { fontSize: 10 },
+      splitLine: { lineStyle: { type: 'dashed', color: '#ebeef5' } },
+    },
+    series: [{
+      type: 'scatter',
+      symbolSize: (d: any) => Math.max(8, Math.min(42, Math.sqrt(d[2] || 1) * 1.2)),
+      itemStyle: { opacity: 0.75 },
+      data: pts.map(p => ({
+        name: p.name,
+        code: p.code,
+        value: [p.momentum, p.roe, p.mv, p.pct],
+        itemStyle: { color: p.pct >= 0 ? '#f56c6c' : '#67c23a' },
+      })),
+      markLine: {
+        symbol: 'none',
+        lineStyle: { type: 'dashed', color: '#909399' },
+        label: { show: false },
+        data: [{ xAxis: 0 }],
+      },
+    }],
+  }
 })
 
 function rankClass(i: number) {
@@ -400,6 +529,27 @@ onMounted(() => {
 .screening-hint {
   color: var(--el-text-color-secondary);
   font-size: 12px;
+}
+
+/* 图表卡片 */
+.chart-card {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 12px;
+  background: var(--el-fill-color-blank);
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+.chart-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  margin-bottom: 8px;
+}
+.chart--industry {
+  height: 260px;
+}
+.chart--scatter {
+  height: 300px;
 }
 .section-title {
   font-size: 14px;

@@ -171,6 +171,11 @@
               <p class="section-subtitle">7位分析师从不同维度综合评估股票，覆盖短线博弈到长线价值</p>
             </div>
 
+            <!-- 评分雷达图（短线 vs 长线同坐标系） -->
+            <div v-if="scoreRadarData.length >= 3" class="score-radar">
+              <v-chart class="chart" :option="scoreRadarOption" autoresize />
+            </div>
+
             <!-- 短线博弈组 -->
             <div class="dimension-group">
               <div class="dimension-group-title">⚡ 短线博弈</div>
@@ -665,6 +670,13 @@ import type { CurrencyAmount } from '@/api/paper'
 import { fmtNum, fmtPctFromFraction } from '@/utils/format'
 import { formatDateTime as appFormatDateTime } from '@/utils/datetime'
 import OperationalChecklist from '@/components/OperationalChecklist.vue'
+import { use as echartsUse } from 'echarts/core'
+import { RadarChart } from 'echarts/charts'
+import { RadarComponent, TooltipComponent, LegendComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+import VChart from 'vue-echarts'
+
+echartsUse([RadarChart, RadarComponent, TooltipComponent, LegendComponent, CanvasRenderer])
 
 type ReportModuleContent = string | Record<string, unknown>
 
@@ -1052,6 +1064,39 @@ const shortTermScores = computed((): DimensionScoreItem[] => {
 
 const longTermScores = computed((): DimensionScoreItem[] => {
   return dimensionScoreList.value.filter(item => longTermFields.includes(item.field))
+})
+
+// ---------- 多维度评分雷达图 ----------
+const scoreRadarData = computed(() => [...shortTermScores.value, ...longTermScores.value])
+
+const scoreRadarOption = computed(() => {
+  const short = shortTermScores.value
+  const long = longTermScores.value
+  const all = scoreRadarData.value
+  if (all.length < 3) return {}
+  const indicator = all.map(i => ({ name: i.name, max: i.max_score || 100 }))
+  const toValues = (group: DimensionScoreItem[]) => all.map(ind => group.find(i => i.field === ind.field)?.score ?? null)
+  return {
+    tooltip: { trigger: 'item' },
+    legend: { bottom: 0, data: ['短线博弈', '长线价值'], icon: 'circle', itemWidth: 8, itemHeight: 8 },
+    radar: {
+      indicator,
+      radius: '62%',
+      splitNumber: 4,
+      axisName: { fontSize: 11, color: '#606266' },
+      splitArea: { areaStyle: { color: ['rgba(43,108,176,0.03)', 'rgba(43,108,176,0.07)'] } },
+      splitLine: { lineStyle: { color: '#e4e7ed' } },
+      axisLine: { lineStyle: { color: '#dcdfe6' } },
+    },
+    series: [{
+      type: 'radar',
+      symbolSize: 4,
+      data: [
+        { name: '短线博弈', value: toValues(short), itemStyle: { color: '#f56c6c' }, areaStyle: { opacity: 0.12 }, lineStyle: { width: 2 } },
+        { name: '长线价值', value: toValues(long), itemStyle: { color: '#2b6cb0' }, areaStyle: { opacity: 0.12 }, lineStyle: { width: 2 } },
+      ],
+    }],
+  }
 })
 
 const openDimensionReport = (item: DimensionScoreItem) => {
@@ -2426,6 +2471,15 @@ onBeforeUnmount(() => {
         color: #64748b;
         margin: 0;
         line-height: 1.6;
+      }
+    }
+
+    .score-radar {
+      max-width: 640px;
+      margin: 0 auto 24px;
+
+      .chart {
+        height: 340px;
       }
     }
 

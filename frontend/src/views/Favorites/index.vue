@@ -99,6 +99,24 @@
       </el-row>
     </el-card>
 
+    <!-- 自选股表现图表（涨跌幅分布 + 加入后收益率排行） -->
+    <el-card v-if="favChangeHistData.length >= 3 || favReturnRankData.length > 0" class="fav-charts-card" shadow="never">
+      <el-row :gutter="16">
+        <el-col :xs="24" :md="10">
+          <div class="chart-card">
+            <div class="chart-card-title">今日涨跌幅分布</div>
+            <v-chart class="chart chart--hist" :option="favChangeHistOption" autoresize />
+          </div>
+        </el-col>
+        <el-col :xs="24" :md="14">
+          <div class="chart-card">
+            <div class="chart-card-title">加入后收益率排行（前15）</div>
+            <v-chart class="chart chart--rank" :option="favReturnRankOption" autoresize />
+          </div>
+        </el-col>
+      </el-row>
+    </el-card>
+
     <!-- 自选股列表 -->
     <el-card class="favorites-list-card" shadow="never">
       <!-- 首次加载骨架 -->
@@ -524,6 +542,13 @@ import { normalizeMarketForAnalysis } from '@/utils/market'
 import { ApiClient } from '@/api/request'
 import { fmtPrice, fmtPct } from '@/utils/format'
 import { formatDateTime } from '@/utils/datetime'
+import { use as echartsUse } from 'echarts/core'
+import { BarChart } from 'echarts/charts'
+import { GridComponent, TooltipComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+import VChart from 'vue-echarts'
+
+echartsUse([BarChart, GridComponent, TooltipComponent, CanvasRenderer])
 
 import type { FavoriteItem } from '@/api/favorites'
 import { useAuthStore } from '@/stores/auth'
@@ -675,6 +700,86 @@ const filteredFavorites = computed<FavoriteItem[]>(() => {
   }
 
   return result
+})
+
+// ---------- 自选股表现图表 ----------
+// 加入后收益率排行（红盈绿亏，前15）
+const favReturnRankData = computed(() =>
+  filteredFavorites.value
+    .filter((r) => r.return_pct !== null && r.return_pct !== undefined && Number.isFinite(r.return_pct))
+    .map((r) => ({
+      name: r.stock_name || r.stock_code,
+      code: r.stock_code,
+      value: Number(r.return_pct),
+    }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 15)
+    .reverse()
+)
+
+const favReturnRankOption = computed(() => {
+  const items = favReturnRankData.value
+  return {
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: (params: any) => {
+      const p = params[0]
+      if (!p) return ''
+      return `${p.name}<br/>加入后收益率：${fmtPct(p.value)}`
+    } },
+    grid: { left: 8, right: 60, top: 8, bottom: 4, containLabel: true },
+    xAxis: { type: 'value', axisLabel: { formatter: '{value}%' }, splitLine: { lineStyle: { type: 'dashed', color: '#ebeef5' } } },
+    yAxis: { type: 'category', inverse: true, axisLabel: { fontSize: 11 }, data: items.map(i => i.name) },
+    series: [{
+      type: 'bar',
+      barWidth: 12,
+      data: items.map(i => ({
+        value: Math.round(i.value * 100) / 100,
+        itemStyle: { color: i.value >= 0 ? '#f56c6c' : '#67c23a', borderRadius: 3 },
+      })),
+      label: { show: true, position: 'right', fontSize: 10, formatter: (p: any) => `${p.value}%` },
+    }],
+  }
+})
+
+// 今日涨跌幅分布直方图（2% 一档，覆盖 -10% ~ +10%）
+const favChangeHistData = computed(() => {
+  const rows = filteredFavorites.value.filter(
+    (r) => r.change_percent !== null && r.change_percent !== undefined && Number.isFinite(r.change_percent)
+  )
+  if (rows.length === 0) return []
+  const edges: number[] = []
+  for (let v = -10; v < 10; v += 2) edges.push(v)
+  const labels = edges.map((e) => (e < 0 ? `${e}%~` : e === 0 ? '0%~' : `${e}%~`))
+  const counts = edges.map(() => 0)
+  for (const r of rows) {
+    const pct = Number(r.change_percent)
+    if (pct <= -10) { counts[0]++; continue }
+    if (pct >= 10) { counts[counts.length - 1]++; continue }
+    const idx = Math.min(counts.length - 1, Math.floor((pct + 10) / 2))
+    counts[idx]++
+  }
+  return counts.map((count, i) => ({ label: labels[i], count }))
+})
+
+const favChangeHistOption = computed(() => {
+  const data = favChangeHistData.value
+  return {
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: (params: any) => {
+      const p = params[0]
+      if (!p) return ''
+      return `${p.name}：${p.value} 只`
+    } },
+    grid: { left: 40, right: 16, top: 16, bottom: 28 },
+    xAxis: { type: 'category', data: data.map(d => d.label), axisLabel: { fontSize: 9, rotate: 30 }, name: '涨跌幅区间' },
+    yAxis: { type: 'value', name: '数量', minInterval: 1, splitLine: { lineStyle: { type: 'dashed', color: '#ebeef5' } } },
+    series: [{
+      type: 'bar',
+      barMaxWidth: 22,
+      data: data.map(d => ({
+        value: d.count,
+        itemStyle: { color: '#2b6cb0', borderRadius: 2 },
+      })),
+    }],
+  }
 })
 
 // 判断是否为 A 股（兼顾 market 字段和股票代码）
@@ -1290,6 +1395,30 @@ onActivated(() => {
     border-radius: 2px;
     margin-left: 6px;
     vertical-align: middle;
+  }
+
+  /* 自选股表现图表 */
+  .fav-charts-card {
+    margin-bottom: 16px;
+
+    .chart-card {
+      border: 1px solid var(--el-border-color-lighter);
+      border-radius: 12px;
+      background: var(--el-fill-color-lighter);
+      padding: 12px 14px;
+    }
+    .chart-card-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--el-text-color-primary);
+      margin-bottom: 8px;
+    }
+    .chart--hist {
+      height: 240px;
+    }
+    .chart--rank {
+      height: 240px;
+    }
   }
 
   .favorites-list-card {

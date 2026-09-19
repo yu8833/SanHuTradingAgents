@@ -819,9 +819,14 @@
                 </span>
               </el-descriptions-item>
             </el-descriptions>
+            <!-- 实时订单结构图（超大/大/中/小单净流入） -->
+            <div v-if="moneyFlowOrderChartItems.length > 0" class="mf-chart-block">
+              <v-chart class="mf-chart" :option="moneyFlowOrderOption" autoresize />
+            </div>
             <!-- 近期资金流向趋势 -->
             <div v-if="moneyFlowData.history && moneyFlowData.history.length > 0">
               <div style="font-size: 12px; color: var(--el-text-color-secondary); margin-bottom: 8px;">近{{ moneyFlowData.days }}日资金流向</div>
+              <v-chart v-if="moneyFlowHistoryOption && Object.keys(moneyFlowHistoryOption).length" class="mf-chart mf-chart--history" :option="moneyFlowHistoryOption" autoresize />
               <el-table :data="moneyFlowData.history" size="small" border style="width: 100%">
                 <el-table-column label="日期" prop="date" min-width="140"></el-table-column>
                 <el-table-column label="主力净占比" min-width="140" align="right">
@@ -1832,6 +1837,67 @@ async function fetchMoneyFlow() {
   }
 }
 
+// 实时订单结构图（超大/大/中/小单净流入，红正绿负）
+const moneyFlowOrderChartItems = computed(() => {
+  const r = moneyFlowData.value?.realtime
+  if (!r) return []
+  const items = [
+    { label: '超大单', value: r.super_large_net },
+    { label: '大单', value: r.large_net },
+    { label: '中单', value: r.medium_net },
+    { label: '小单', value: r.small_net },
+  ]
+  return items.filter(i => i.value != null && Number.isFinite(i.value))
+})
+
+const moneyFlowOrderOption = computed(() => {
+  const items = moneyFlowOrderChartItems.value
+  return {
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: (params: any) => {
+      const p = params[0]
+      if (!p) return ''
+      return `${p.name}净流入：${p.value >= 0 ? '+' : ''}${fmtAmount(p.value)}`
+    } },
+    grid: { left: 8, right: 90, top: 8, bottom: 4, containLabel: true },
+    xAxis: { type: 'value', axisLabel: { formatter: (v: number) => fmtAmountSigned(v) }, splitLine: { lineStyle: { type: 'dashed', color: '#ebeef5' } } },
+    yAxis: { type: 'category', inverse: true, axisLabel: { fontSize: 11 }, data: items.map(i => i.label) },
+    series: [{
+      type: 'bar',
+      barWidth: 14,
+      data: items.map(i => ({
+        value: Math.round(i.value),
+        itemStyle: { color: i.value >= 0 ? '#f56c6c' : '#67c23a', borderRadius: 3 },
+      })),
+      label: { show: true, position: 'right', fontSize: 10, formatter: (p: any) => fmtAmountSigned(p.value) },
+    }],
+  }
+})
+
+// 近N日主力净流入柱状图（红正绿负）
+const moneyFlowHistoryOption = computed(() => {
+  const history = moneyFlowData.value?.history
+  if (!history || !history.length) return {}
+  const items = history.slice().reverse()
+  return {
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: (params: any) => {
+      const p = params[0]
+      if (!p) return ''
+      return `${p.name}<br/>主力净流入：${p.value >= 0 ? '+' : ''}${fmtAmount(p.value)}`
+    } },
+    grid: { left: 8, right: 20, top: 8, bottom: 4, containLabel: true },
+    xAxis: { type: 'category', data: items.map(h => String(h.date).slice(5)), axisLabel: { fontSize: 10 } },
+    yAxis: { type: 'value', axisLabel: { formatter: (v: number) => fmtAmountSigned(v) }, splitLine: { lineStyle: { type: 'dashed', color: '#ebeef5' } } },
+    series: [{
+      type: 'bar',
+      barMaxWidth: 24,
+      data: items.map(h => ({
+        value: Math.round(Number(h.main_net_inflow) || 0),
+        itemStyle: { color: Number(h.main_net_inflow) >= 0 ? '#f56c6c' : '#67c23a', borderRadius: 2 },
+      })),
+    }],
+  }
+})
+
 // 🔥 通达信风险分析数据
 const riskAnalysisData = ref<any>(null)
 const riskAnalysisLoading = ref(false)
@@ -2264,7 +2330,7 @@ function fmtConf(v: any) {
 }
 
 import { formatDateTimeWithRelative, formatDateTime } from '@/utils/datetime'
-import { fmtNum, fmtVol, fmtPrice, fmtPct as fmtPercent, fmtVolume, fmtAmount } from '@/utils/format'
+import { fmtNum, fmtVol, fmtPrice, fmtPct as fmtPercent, fmtVolume, fmtAmount, fmtAmountSigned } from '@/utils/format'
 
 // 格式化分析时间（处理UTC时间转换为中国本地时间）
 function formatAnalysisTime(dateStr: any): string {
@@ -2738,6 +2804,16 @@ function exportReport() {
   border-radius: 16px;
   border: 1px solid var(--el-border-color-light);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+.mf-chart-block {
+  margin-bottom: 12px;
+}
+.mf-chart {
+  height: 150px;
+}
+.mf-chart--history {
+  height: 160px;
+  margin-bottom: 8px;
 }
 
 /* 风险扫描样式 */
