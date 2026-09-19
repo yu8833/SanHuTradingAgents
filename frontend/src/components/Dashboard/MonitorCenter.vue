@@ -293,6 +293,14 @@
           </div>
         </div>
 
+        <!-- 近7日触发趋势 -->
+        <el-card v-if="alertTrendData.length > 0" class="alert-trend-card" shadow="hover">
+          <template #header>
+            <div class="card-title"><span>近 7 日触发趋势</span></div>
+          </template>
+          <v-chart class="alert-trend-chart" :option="alertTrendOption" autoresize />
+        </el-card>
+
         <el-card class="monitor-card" shadow="hover">
           <template #header>
             <div class="card-header">
@@ -551,6 +559,16 @@ import { favoritesApi } from '@/api/favorites'
 import { strategyApi } from '@/api/strategy'
 import { fmtPct, fmtPrice } from '@/utils/format'
 import { todayStartEpoch, formatDateTime } from '@/utils/datetime'
+import dayjs from 'dayjs'
+import { use as echartsUse } from 'echarts/core'
+import { BarChart } from 'echarts/charts'
+import { GridComponent, TooltipComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+import VChart from 'vue-echarts'
+
+echartsUse([BarChart, GridComponent, TooltipComponent, CanvasRenderer])
+
+defineOptions({ name: 'MonitorCenter' })
 
 // 个股外部链接：新标签页打开本应用股票详情页（相对路径，跟随当前部署域名）
 function stockHref(code?: string): string {
@@ -782,6 +800,45 @@ const sourceCounts = computed(() => {
     if (s in counts) counts[s]++
   }
   return counts
+})
+
+// 近7日触发趋势（按北京时间自然日分桶）
+const alertTrendData = computed(() => {
+  const days: { label: string; key: string; count: number }[] = []
+  for (let i = 6; i >= 0; i--) {
+    const d = dayjs().subtract(i, 'day')
+    days.push({ label: d.format('MM-DD'), key: d.format('YYYY-MM-DD'), count: 0 })
+  }
+  for (const a of alerts.value) {
+    const ts = Number(a.ts)
+    if (!ts) continue
+    const key = dayjs(ts).format('YYYY-MM-DD')
+    const hit = days.find(x => x.key === key)
+    if (hit) hit.count++
+  }
+  return days.filter(d => d.count > 0)
+})
+
+const alertTrendOption = computed(() => {
+  const data = alertTrendData.value
+  return {
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: (params: any) => {
+      const p = params[0]
+      if (!p) return ''
+      return `${p.name}：${p.value} 次`
+    } },
+    grid: { left: 40, right: 16, top: 16, bottom: 28 },
+    xAxis: { type: 'category', data: data.map(d => d.label), axisLabel: { fontSize: 10 } },
+    yAxis: { type: 'value', name: '次数', minInterval: 1, splitLine: { lineStyle: { type: 'dashed', color: '#ebeef5' } } },
+    series: [{
+      type: 'bar',
+      barMaxWidth: 28,
+      data: data.map(d => ({
+        value: d.count,
+        itemStyle: { color: '#2b6cb0', borderRadius: [2, 2, 0, 0] },
+      })),
+    }],
+  }
 })
 
 // ── 加载数据 ───────────────────────────────────────────
@@ -1197,6 +1254,14 @@ onBeforeUnmount(() => { stopPolling() })
   }
 
   .empty-hint { font-size: 12px; color: var(--el-text-color-secondary); margin-top: 8px; }
+
+  .alert-trend-card {
+    margin-bottom: 16px;
+
+    .alert-trend-chart {
+      height: 180px;
+    }
+  }
 
   // ── 规则列表 ────────────────────────────────────
   .rules-list { display: flex; flex-direction: column; gap: 8px;

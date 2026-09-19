@@ -80,6 +80,13 @@
           <el-tag size="small" type="info" effect="plain" round v-else>点击卡片查看选股结果</el-tag>
         </div>
       </template>
+
+      <!-- 策略命中数排行（当存在命中数据时展示） -->
+      <div v-if="strategyHitChartData.length > 0" class="strategy-hit-chart">
+        <div class="hit-chart-title">策略命中排行（按命中只数）</div>
+        <v-chart class="hit-chart" :option="strategyHitOption" autoresize />
+      </div>
+
       <el-empty v-if="!loading && strategies.length === 0" description="暂无可用策略" :image-size="120" />
       <div v-else class="strategy-grid">
         <div
@@ -253,6 +260,13 @@ import { favoritesApi } from '@/api/favorites'
 import { monitorApi } from '@/api/monitor'
 import { fmtPrice, fmtPctFromFraction, fmtNum } from '@/utils/format'
 import { useAuthStore } from '@/stores/auth'
+import { use as echartsUse } from 'echarts/core'
+import { BarChart } from 'echarts/charts'
+import { GridComponent, TooltipComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+import VChart from 'vue-echarts'
+
+echartsUse([BarChart, GridComponent, TooltipComponent, CanvasRenderer])
 
 defineOptions({ name: 'StrategyScreener' })
 
@@ -289,6 +303,39 @@ const result = ref<{ items: StrategyRunItem[]; as_of: string; strategy_id: strin
 const showAllResult = ref<StrategyRunAllItem[] | null>(null)
 const showAll = ref(false)
 const asOf = ref('')
+
+// 策略命中数排行（横向条，命中越多的策略靠上）
+const strategyHitChartData = computed(() =>
+  strategies.value
+    .filter((s) => hitCounts.value[s.id] !== undefined)
+    .map((s) => ({ name: s.name, value: Number(hitCounts.value[s.id]) || 0 }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 12)
+    .reverse()
+)
+
+const strategyHitOption = computed(() => {
+  const items = strategyHitChartData.value
+  return {
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: (params: any) => {
+      const p = params[0]
+      if (!p) return ''
+      return `${p.name}<br/>命中：${p.value} 只`
+    } },
+    grid: { left: 8, right: 50, top: 6, bottom: 4, containLabel: true },
+    xAxis: { type: 'value', minInterval: 1, splitLine: { lineStyle: { type: 'dashed', color: '#ebeef5' } } },
+    yAxis: { type: 'category', inverse: true, axisLabel: { fontSize: 11 }, data: items.map(i => i.name) },
+    series: [{
+      type: 'bar',
+      barWidth: 12,
+      data: items.map((i, idx) => ({
+        value: i.value,
+        itemStyle: { color: palette[idx % palette.length], borderRadius: 3 },
+      })),
+      label: { show: true, position: 'right', fontSize: 10, formatter: (p: any) => p.value },
+    }],
+  }
+})
 const tradeDates = ref<string[]>([])
 const computedAt = ref('')
 const allStrategyRunning = ref(false)
@@ -873,6 +920,25 @@ let realtimeTimer: number | undefined
   /* ===== 策略卡片 ===== */
   .strategy-panel {
     margin-bottom: 22px;
+
+    .strategy-hit-chart {
+      margin-bottom: 16px;
+      border: 1px solid var(--el-border-color-lighter);
+      border-radius: 12px;
+      background: var(--el-bg-color);
+      padding: 12px 14px;
+
+      .hit-chart-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--el-text-color-primary);
+        margin-bottom: 8px;
+      }
+
+      .hit-chart {
+        height: 220px;
+      }
+    }
 
     .strategy-grid {
       display: grid;

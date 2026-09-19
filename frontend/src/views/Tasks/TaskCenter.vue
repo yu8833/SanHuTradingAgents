@@ -62,7 +62,13 @@
     <!-- 统计卡片 -->
     <el-row :gutter="16" style="margin-top: 12px">
       <el-col :span="6">
-        <el-card shadow="never"><div class="stat"><div class="value">{{ stats.total }}</div><div class="label">总任务</div></div></el-card>
+        <el-card shadow="never" class="stat-donut-card">
+          <template v-if="stats.total > 0">
+            <v-chart class="donut" :option="taskDonutOption" autoresize />
+            <div class="donut-caption">总任务 {{ stats.total }} · 股票 {{ stats.uniqueStocks }} 只</div>
+          </template>
+          <div v-else class="stat"><div class="value">{{ stats.total }}</div><div class="label">总任务</div></div>
+        </el-card>
       </el-col>
       <el-col :span="6">
         <el-card shadow="never"><div class="stat"><div class="value">{{ stats.completed }}</div><div class="label">已完成</div></div></el-card>
@@ -176,6 +182,13 @@ import { analysisApi } from '@/api/analysis'
 import TaskResultDialog from '@/components/Global/TaskResultDialog.vue'
 import TaskReportDialog from '@/components/Global/TaskReportDialog.vue'
 import ScheduledTasksView from './ScheduledTasksView.vue'
+import { use as echartsUse } from 'echarts/core'
+import { PieChart } from 'echarts/charts'
+import { TooltipComponent, TitleComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+import VChart from 'vue-echarts'
+
+echartsUse([PieChart, TooltipComponent, TitleComponent, CanvasRenderer])
 
 const router = useRouter()
 const route = useRoute()
@@ -194,6 +207,35 @@ const filters = ref<{ dateRange: string[]; market: string; status: string; stock
   dateRange: [], market: '', status: '', stock: ''
 })
 const stats = ref({ total: 0, completed: 0, failed: 0, uniqueStocks: 0 })
+
+// 任务状态环图（已完成/失败/进行中占比）
+const taskDonutOption = computed(() => {
+  const { total, completed, failed } = stats.value
+  const running = Math.max(total - completed - failed, 0)
+  return {
+    tooltip: { trigger: 'item', formatter: '{b}：{c} 个（{d}%）' },
+    title: {
+      text: String(total),
+      subtext: '任务总数',
+      left: 'center',
+      top: '32%',
+      textStyle: { fontSize: 14, fontWeight: 700, color: '#303133' },
+      subtextStyle: { fontSize: 9, color: '#909399' },
+    },
+    series: [{
+      type: 'pie',
+      radius: ['60%', '86%'],
+      center: ['50%', '50%'],
+      label: { show: false },
+      emphasis: { scale: false },
+      data: [
+        { name: '已完成', value: completed, itemStyle: { color: '#67c23a' } },
+        { name: '失败', value: failed, itemStyle: { color: '#f56c6c' } },
+        { name: '进行中', value: running, itemStyle: { color: '#909399' } },
+      ].filter(d => d.value > 0),
+    }],
+  }
+})
 
 
 // WebSocket 连接管理
@@ -594,6 +636,24 @@ const formatTime = (t:string) => t ? formatDateTime(t) : '-'
   .tabs-card { margin-bottom: 16px; }
   .list-header { display:flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap:8px; }
   .pagination-wrapper { display:flex; justify-content:center; margin-top: 16px; }
+
+  .stat-donut-card {
+    :deep(.el-card__body) {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      padding: 12px;
+    }
+    .donut {
+      width: 120px;
+      height: 120px;
+    }
+    .donut-caption {
+      font-size: 11px;
+      color: var(--el-text-color-secondary);
+    }
+  }
 }
 </style>
 
