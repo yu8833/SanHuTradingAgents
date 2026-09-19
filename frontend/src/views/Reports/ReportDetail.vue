@@ -173,7 +173,16 @@
 
             <!-- 评分雷达图（短线 vs 长线同坐标系） -->
             <div v-if="scoreRadarData.length >= 3" class="score-radar">
-              <v-chart class="chart" :option="scoreRadarOption" autoresize />
+              <div class="score-radar-card">
+                <div class="score-radar-hd">
+                  <span class="score-radar-title">📡 短线 vs 长线评分对比</span>
+                  <span class="score-radar-legend">
+                    <span class="lg lg--short">● 短线博弈</span>
+                    <span class="lg lg--long">● 长线价值</span>
+                  </span>
+                </div>
+                <v-chart class="chart" :option="scoreRadarOption" autoresize />
+              </div>
             </div>
 
             <!-- 短线博弈组 -->
@@ -672,11 +681,11 @@ import { formatDateTime as appFormatDateTime } from '@/utils/datetime'
 import OperationalChecklist from '@/components/OperationalChecklist.vue'
 import { use as echartsUse } from 'echarts/core'
 import { RadarChart } from 'echarts/charts'
-import { RadarComponent, TooltipComponent, LegendComponent } from 'echarts/components'
+import { RadarComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
 
-echartsUse([RadarChart, RadarComponent, TooltipComponent, LegendComponent, CanvasRenderer])
+echartsUse([RadarChart, RadarComponent, TooltipComponent, CanvasRenderer])
 
 type ReportModuleContent = string | Record<string, unknown>
 
@@ -1078,12 +1087,13 @@ const scoreRadarOption = computed(() => {
   const toValues = (group: DimensionScoreItem[]) => all.map(ind => group.find(i => i.field === ind.field)?.score ?? null)
   return {
     tooltip: { trigger: 'item' },
-    legend: { bottom: 0, data: ['短线博弈', '长线价值'], icon: 'circle', itemWidth: 8, itemHeight: 8 },
     radar: {
       indicator,
-      radius: '62%',
+      center: ['50%', '52%'],
+      radius: '74%',
       splitNumber: 4,
-      axisName: { fontSize: 11, color: '#606266' },
+      axisName: { fontSize: 12, color: '#64748b' },
+      axisNameGap: 8,
       splitArea: { areaStyle: { color: ['rgba(43,108,176,0.03)', 'rgba(43,108,176,0.07)'] } },
       splitLine: { lineStyle: { color: '#e4e7ed' } },
       axisLine: { lineStyle: { color: '#dcdfe6' } },
@@ -1092,8 +1102,8 @@ const scoreRadarOption = computed(() => {
       type: 'radar',
       symbolSize: 4,
       data: [
-        { name: '短线博弈', value: toValues(short), itemStyle: { color: '#f56c6c' }, areaStyle: { opacity: 0.12 }, lineStyle: { width: 2 } },
-        { name: '长线价值', value: toValues(long), itemStyle: { color: '#2b6cb0' }, areaStyle: { opacity: 0.12 }, lineStyle: { width: 2 } },
+        { name: '短线博弈', value: toValues(short), itemStyle: { color: '#f56c6c' }, areaStyle: { opacity: 0.14 }, lineStyle: { width: 2 } },
+        { name: '长线价值', value: toValues(long), itemStyle: { color: '#2b6cb0' }, areaStyle: { opacity: 0.14 }, lineStyle: { width: 2 } },
       ],
     }],
   }
@@ -2475,11 +2485,44 @@ onBeforeUnmount(() => {
     }
 
     .score-radar {
-      max-width: 640px;
-      margin: 0 auto 24px;
+      max-width: 520px;
+      margin: 0 auto 28px;
+
+      .score-radar-card {
+        padding: 18px 18px 10px;
+        border-radius: 16px;
+        border: 1px solid #e2e8f0;
+        background: var(--el-fill-color-light);
+        box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.04);
+      }
+
+      .score-radar-hd {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 0 4px 2px;
+
+        .score-radar-title {
+          font-size: 14px;
+          font-weight: 700;
+          color: #374151;
+        }
+
+        .score-radar-legend {
+          display: flex;
+          align-items: center;
+          gap: 14px;
+          font-size: 12px;
+          color: #64748b;
+
+          .lg--short { color: #f56c6c; }
+          .lg--long { color: #2b6cb0; }
+        }
+      }
 
       .chart {
-        height: 340px;
+        height: 380px;
       }
     }
 
@@ -4396,6 +4439,15 @@ html.dark {
       .dimension-group-title {
         color: #e2e8f0;
         border-left-color: #818cf8;
+      }
+    }
+    .score-radar {
+      .score-radar-card {
+        background: #1e293b;
+        border-color: #334155;
+      }
+      .score-radar-title {
+        color: #e2e8f0;
       }
     }
     .dimension-grid .dimension-card {

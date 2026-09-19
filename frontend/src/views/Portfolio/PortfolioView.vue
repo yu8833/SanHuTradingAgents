@@ -66,45 +66,6 @@
       </el-col>
     </el-row>
 
-    <!-- 模拟账户概览（自模拟交易迁移） -->
-    <section class="account-shell">
-      <div class="account-hd">
-        <div class="account-hd-left">
-          <h3 class="section-title">模拟账户概览</h3>
-          <span class="account-updated" v-if="paperAccount">更新于 {{ formatDateTime(paperAccount.updated_at) }}</span>
-        </div>
-        <el-radio-group v-model="activeMarketTab" size="small">
-          <el-radio-button value="CN">🇨🇳 A股</el-radio-button>
-          <el-radio-button value="HK">🇭🇰 港股</el-radio-button>
-          <el-radio-button value="US">🇺🇸 美股</el-radio-button>
-        </el-radio-group>
-      </div>
-      <div v-if="paperAccount" class="account-body">
-        <div class="acct-main">
-          <span class="acct-label">总资产</span>
-          <span class="acct-value">{{ activeCurrency }}{{ fmtAmount(acctVal('equity')) }}</span>
-          <span class="acct-sub">含持仓市值 + 可用资金</span>
-        </div>
-        <div class="acct-grid">
-          <div class="acct-item">
-            <span class="acct-label">可用资金</span>
-            <span class="acct-item-value">{{ activeCurrency }}{{ fmtAmount(acctVal('cash')) }}</span>
-          </div>
-          <div class="acct-item">
-            <span class="acct-label">持仓市值</span>
-            <span class="acct-item-value">{{ activeCurrency }}{{ fmtAmount(acctVal('positions_value')) }}</span>
-          </div>
-          <div class="acct-item">
-            <span class="acct-label">已实现盈亏</span>
-            <span class="acct-item-value" :class="acctVal('realized_pnl') >= 0 ? 'up' : 'down'">
-              {{ acctVal('realized_pnl') >= 0 ? '+' : '' }}{{ activeCurrency }}{{ fmtAmount(acctVal('realized_pnl')) }}
-            </span>
-          </div>
-        </div>
-      </div>
-      <el-empty v-else description="暂无模拟账户数据" :image-size="56" />
-    </section>
-
     <!-- 持仓分析图表（策略市值构成 + 盈亏贡献排行） -->
     <section v-if="positions.length > 0" class="analytics-shell">
       <div class="analytics-hd">
@@ -370,12 +331,11 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { UploadInstance, UploadFile, UploadFiles } from 'element-plus'
 import { Wallet, Money, TrendCharts, Odometer, Refresh, Plus, Upload } from '@element-plus/icons-vue'
 import { portfolioApi, type PositionItem, type PositionSummary, type AddPositionPayload, type UpdatePositionPayload, type ClosedTrade } from '@/api/portfolio'
-import { paperApi } from '@/api/paper'
 import { vibeApi } from '@/api/vibe'
 import { subscribeQuotesUpdate } from '@/utils/quotesSSE'
 import { getStrategyNameMap, strategyNameSync } from '@/utils/strategyName'
-import { fmtNum, fmtPct, fmtAmount } from '@/utils/format'
-import { formatDateTime, todayDateInBeijing } from '@/utils/datetime'
+import { fmtNum, fmtPct } from '@/utils/format'
+import { todayDateInBeijing } from '@/utils/datetime'
 import { use as echartsUse } from 'echarts/core'
 import { PieChart, BarChart } from 'echarts/charts'
 import { TooltipComponent, LegendComponent } from 'echarts/components'
@@ -473,41 +433,6 @@ const pnlRankOption = computed(() => {
     }],
   }
 })
-
-// 模拟账户概览（自模拟交易迁移）
-const paperAccount = ref<any | null>(null)
-const activeMarketTab = ref<string>('CN')
-const CURRENCY_KEY: Record<string, string> = { CN: 'CNY', HK: 'HKD', US: 'USD' }
-
-const activeCurrency = computed(() => {
-  const t = activeMarketTab.value
-  if (t === 'HK') return 'HK$'
-  if (t === 'US') return '$'
-  return '¥'
-})
-
-/** 读取模拟账户指标（多币种字典 {CNY,HKD,USD}），按当前市场标签页取对应币种 */
-const acctVal = (key: string): number => {
-  const a = paperAccount.value
-  if (!a) return 0
-  const v = a[key]
-  if (v && typeof v === 'object') {
-    const ck = CURRENCY_KEY[activeMarketTab.value]
-    return Number(v[ck] ?? 0)
-  }
-  return activeMarketTab.value === 'CN' ? Number(v ?? 0) : 0
-}
-
-const loadPaperAccount = async () => {
-  try {
-    const res = await paperApi.getAccount()
-    if (res.success) {
-      paperAccount.value = res.data.account
-    }
-  } catch (e: any) {
-    console.warn('加载模拟账户失败：' + (e?.message || e))
-  }
-}
 
 // 添加/编辑
 const editDialogVisible = ref(false)
@@ -708,7 +633,6 @@ const confirmImport = async () => {
 
 onMounted(() => {
   loadPositions()
-  loadPaperAccount()
   getStrategyNameMap().then((m) => {
     strategyNames.value = m
   })
@@ -825,113 +749,6 @@ const exitReasonLabel = (r?: string | null) => {
 // ============ 汇总卡片 ============
 .summary-row {
   margin-bottom: 20px;
-}
-
-// ============ 模拟账户概览 ============
-.account-shell {
-  margin-bottom: 20px;
-  padding: 18px 20px;
-  background: var(--el-bg-color);
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 14px;
-}
-.account-hd {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 14px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
-}
-.account-hd-left {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-}
-.account-updated {
-  font-size: 12px;
-  color: var(--el-text-color-placeholder);
-  font-family: var(--app-font-mono);
-}
-.account-body {
-  display: grid;
-  grid-template-columns: minmax(240px, 1.1fr) 2fr;
-  gap: 20px;
-  align-items: stretch;
-}
-.acct-main {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 6px;
-  padding: 14px 18px;
-  border-radius: 12px;
-  background:
-    radial-gradient(120% 160% at 0% 0%, rgba(43, 108, 176, .05), transparent 55%),
-    var(--el-fill-color-lighter);
-}
-.acct-label {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-}
-.acct-value {
-  font-size: 34px;
-  font-weight: 800;
-  line-height: 1.1;
-  font-family: var(--app-font-mono);
-  color: var(--el-text-color-primary);
-  letter-spacing: .5px;
-}
-.acct-sub {
-  font-size: 11.5px;
-  color: var(--el-text-color-placeholder);
-}
-.acct-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-}
-.acct-item {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 6px;
-  padding: 12px 16px;
-  border-radius: 12px;
-  background: var(--el-fill-color-lighter);
-  transition: background .2s ease, transform .2s ease;
-}
-.acct-item:hover {
-  background: var(--el-fill-color);
-  transform: translateY(-1px);
-}
-.acct-item-value {
-  font-size: 17px;
-  font-weight: 700;
-  font-family: var(--app-font-mono);
-  color: var(--el-text-color-primary);
-  line-height: 1.2;
-}
-.acct-item-value.up { color: var(--app-up); }
-.acct-item-value.down { color: var(--app-down); }
-
-// ============ 响应式（账户概览） ============
-@media (max-width: 1400px) {
-  .account-body {
-    grid-template-columns: 1fr;
-  }
-  .acct-grid {
-    grid-template-columns: repeat(3, 1fr);
-  }
-}
-@media (max-width: 900px) {
-  .acct-grid {
-    grid-template-columns: 1fr;
-  }
-  .acct-value {
-    font-size: 28px;
-  }
 }
 
 .summary-card {

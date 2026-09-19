@@ -549,8 +549,19 @@ const cumPnlOption = computed(() => {
   })
   return {
     tooltip: { trigger: 'axis', valueFormatter: (v: number) => fmtSigned(v) },
-    grid: { left: 70, right: 20, top: 20, bottom: 40 },
-    xAxis: { type: 'category', data: data.map(d => d[0]), axisLabel: { fontSize: 10, interval: Math.max(0, Math.floor(data.length / 8) - 1) } },
+    grid: { left: 70, right: 20, top: 20, bottom: 44 },
+    xAxis: {
+      type: 'category',
+      data: data.map(d => d[0]),
+      axisTick: { alignWithLabel: true },
+      axisLabel: {
+        fontSize: 10,
+        margin: 12,
+        hideOverlap: true,
+        // 平仓日期压缩为 MM-DD，缩短标签宽度，避免横轴重叠
+        formatter: (v: string) => (v || '').slice(5),
+      },
+    },
     yAxis: { type: 'value', splitLine: { lineStyle: { type: 'dashed', color: '#ebeef5' } } },
     series: [{
       name: '累计盈亏',
