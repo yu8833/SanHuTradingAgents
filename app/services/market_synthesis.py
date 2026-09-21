@@ -78,7 +78,7 @@ def _call_llm(cfg: dict, prompt: str) -> dict:
         },
         headers={"Authorization": f"Bearer {cfg['api_key']}",
                  "Content-Type": "application/json"},
-        timeout=60,
+        timeout=12,  # 研判生成上限 12s：超时/失败由调用方降级为规则结论，避免冷启动空等到 60s
     )
     resp.raise_for_status()
     content = resp.json()["choices"][0]["message"]["content"]
@@ -428,6 +428,7 @@ async def get_market_synthesis_cached() -> dict:
         category="market",
         valid=lambda v: bool(v.get("verdict")),
         swr=True,
+        stale_ttl=6 * 3600,  # 旧研判兜底 6h：缓存过期瞬间秒回旧结论 + 后台重建，避免用户等 30s+ 冷聚合
     )
 
 

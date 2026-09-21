@@ -1,0 +1,655 @@
+<template>
+  <div class="stock-quadrant-page">
+    <!-- 页面标题 -->
+    <div class="page-hero">
+      <div class="page-hero-main">
+        <div class="page-hero-icon">
+          <el-icon :size="26"><DataAnalysis /></el-icon>
+        </div>
+        <div class="page-hero-text">
+          <h2 class="page-hero-title">{{ today }} · 个股趋势</h2>
+          <p class="page-hero-sub">全市场个股六维四象限 · 30 日时间轴一屏看全</p>
+        </div>
+      </div>
+      <div class="page-hero-meta">
+        <el-button type="primary" plain :icon="Refresh" :loading="loading" @click="loadAll">
+          刷新
+        </el-button>
+      </div>
+    </div>
+
+    <!-- 概念宽度 KPI（随时间轴当前帧联动） -->
+    <section class="block">
+      <div class="block-head">
+        <span class="block-title"><el-icon><Odometer /></el-icon> 市场宽度 · {{ currentDate }}</span>
+        <span v-if="data?.as_of" class="block-hint">数据更新于 {{ data.as_of }} · 共 {{ dates.length }} 个交易日</span>
+      </div>
+      <div class="kpi-row">
+        <div class="kpi-cell">
+          <div class="kpi-label">个股总数</div>
+          <div class="kpi-value accent">{{ currentTotal ?? '—' }}</div>
+          <div class="kpi-sub">全市场 A 股（有成交额）</div>
+        </div>
+        <div class="kpi-cell">
+          <div class="kpi-label">上涨 / 下跌</div>
+          <div class="kpi-value">
+            <span class="up">{{ kpiUp ?? '—' }}</span><span class="kpi-sep">/</span><span class="down">{{ kpiDown ?? '—' }}</span>
+          </div>
+          <div class="kpi-sub">当前帧涨跌家数</div>
+        </div>
+        <div class="kpi-cell">
+          <div class="kpi-label">平均涨幅</div>
+          <div class="kpi-value accent" :class="clsByVal(kpiAvg, '')">{{ fmtPct(kpiAvg) }}</div>
+          <div class="kpi-sub">当前帧全市场均值</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 时间轴 + 搜索 -->
+    <section class="block control-panel">
+      <div class="control-main">
+        <div class="control-timeline">
+          <div class="timeline-title">
+            <span class="block-title"><el-icon><Clock /></el-icon> 时间轴 · 最近 30 交易日</span>
+            <span class="tl-date">{{ currentDate }}</span>
+          </div>
+          <div class="timeline-row">
+            <el-button
+              circle
+              size="small"
+              :type="playing ? 'warning' : 'primary'"
+              :icon="playing ? VideoPause : VideoPlay"
+              :disabled="dates.length < 2"
+              @click="togglePlay"
+            />
+            <el-slider
+              v-model="currentIndex"
+              :min="0"
+              :max="Math.max(0, dates.length - 1)"
+              :show-tooltip="true"
+              :format-tooltip="(v: number) => dates[v] || ''"
+              class="tl-slider"
+              :disabled="!dates.length"
+              @change="onSeek"
+            />
+            <el-select v-model="playSpeed" size="small" class="tl-speed" :disabled="dates.length < 2">
+              <el-option :value="1000" label="1x" />
+              <el-option :value="500" label="2x" />
+              <el-option :value="250" label="4x" />
+            </el-select>
+          </div>
+        </div>
+        <div class="control-search">
+          <div class="search-head">
+            <span class="block-title"><el-icon><Search /></el-icon> 查找股票（代码 / 名称）</span>
+            <span v-if="matchNames.length" class="block-hint">命中 {{ matchNames.length }} 只，六图同步高亮</span>
+          </div>
+          <div class="search-row">
+            <el-input
+              v-model="searchKw"
+              size="small"
+              clearable
+              placeholder="如：600519 或 贵州茅台"
+              class="search-input"
+              @keyup.enter="doSearch"
+              @clear="clearMatch"
+            />
+            <el-button size="small" type="primary" plain :icon="Search" :disabled="!searchKw.trim()" @click="doSearch">
+              查 找
+            </el-button>
+            <el-button v-if="matchNames.length" size="small" @click="clearMatch">清除高亮</el-button>
+          </div>
+        </div>
+      </div>
+      <div class="panel-hint">
+        拖动时间轴 6 图同步切换 · 默认停在当前交易日 · 点击圆点跳转个股详情 · 滚轮缩放
+        <span v-if="!mainAvailable" class="warn-hint">当前帧主力资金数据暂不可用（外部行情域受限），资金类图表以历史帧为准</span>
+      </div>
+    </section>
+
+    <!-- 六图四象限 -->
+    <div v-if="mapReady" class="chart-grid">
+      <section v-for="card in CARDS" :key="card.id" class="block chart-card">
+        <div class="block-head">
+          <span class="block-title"><el-icon><TrendCharts /></el-icon> {{ card.title }}</span>
+          <span class="block-hint">{{ card.subtitle }}</span>
+        </div>
+        <div class="concept-chart">
+          <VChart
+            v-if="chartPointCount[card.id] > 0"
+            :ref="(el: any) => setChartRef(card.id, el)"
+            :option="chartOptions[card.id]"
+            autoresize
+            class="concept-chart-inner map-chart"
+            @click="onChartClick"
+          />
+          <el-empty v-else :image-size="48" :description="isFrameLoading ? '历史帧加载中…' : (card.emptyHint || '暂无数据')" />
+        </div>
+        <div class="quadrant-tip">
+          <span v-for="(t, i) in card.tips" :key="i" class="qt-item">
+            <i class="qt-dot" :class="QT_DOT[i]" />{{ t }}
+          </span>
+        </div>
+      </section>
+    </div>
+    <el-empty v-else :image-size="64" :description="loading ? '数据聚合中… 首次加载约需 10-40 秒，请稍候' : '暂无数据，请刷新重试'" />
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ElMessage } from 'element-plus'
+import { Search, Refresh, DataAnalysis, TrendCharts, Odometer, Clock, VideoPlay, VideoPause } from '@element-plus/icons-vue'
+import { use as echartsUse } from 'echarts/core'
+import { ScatterChart } from 'echarts/charts'
+import { GridComponent, TooltipComponent, DataZoomComponent, MarkAreaComponent, MarkLineComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+import VChart from 'vue-echarts'
+import type { EChartsOption } from 'echarts'
+import { vibeApi, SQ } from '@/api/vibe'
+import type { StockQuadrantSlim } from '@/api/vibe'
+import { makeQuadrantOption, computeMatchPoints, type QuadrantCfg } from '@/utils/quadrant'
+import { fmtPct, clsByVal } from '@/utils/format'
+
+echartsUse([CanvasRenderer, ScatterChart, GridComponent, TooltipComponent, DataZoomComponent, MarkAreaComponent, MarkLineComponent])
+
+const QT_DOT = ['qt-red', 'qt-yellow', 'qt-blue', 'qt-green'] as const
+
+const today = new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' })
+const loading = ref(false)
+// 轻量首屏：dates + meta + 最新一帧（约 150KB gzip）；历史帧按需加载
+const data = ref<StockQuadrantSlim | null>(null)
+// 按需帧缓存：date → 帧（首屏仅最新帧，拖动/播放时从 /day 接口补齐）
+const frameCache = ref<Record<string, Record<string, number[]>>>({})
+const loadingFrames = ref<Set<string>>(new Set())
+
+// ── 六图配置：xKey/yKey 对齐帧 8 元组（utils/quadrant 里的 SQ 索引） ──
+const CARDS: (QuadrantCfg & { subtitle: string })[] = [
+  {
+    id: 'money_pct', title: '涨跌 × 主力资金', subtitle: '强弱共振定位',
+    xKey: SQ.MAIN, yKey: SQ.P, xName: '主力净流入', xUnit: '亿', yName: '涨跌幅', yUnit: '%',
+    quadrants: ['强势共振', '缩量上行', '低位承接', '弱势杀跌'],
+    tips: ['流入+上涨 · 强势共振', '流出+上涨 · 缩量上行', '流入+下跌 · 低位承接', '流出+下跌 · 弱势杀跌'],
+    emptyHint: '该帧主力资金暂不可用（外部行情域受限），请拖动时间轴到历史交易日查看',
+  },
+  {
+    id: 'pct_turn', title: '涨跌 × 换手率', subtitle: '量价关系',
+    xKey: SQ.P, yKey: SQ.TURN, xName: '涨跌幅', xUnit: '%', yName: '换手率', yUnit: '%',
+    quadrants: ['放量上攻', '放量下跌', '缩量回调', '缩量阴跌'],
+    tips: ['高换手+上涨 · 抢筹', '高换手+下跌 · 出货', '低换手+上涨 · 惜售/临板', '低换手+下跌 · 阴跌'],
+  },
+  {
+    id: 'pct_d5', title: '当日 × 5日涨跌', subtitle: '趋势确认',
+    xKey: SQ.P, yKey: SQ.D5, xName: '当日涨跌幅', xUnit: '%', yName: '5日涨跌幅', yUnit: '%',
+    quadrants: ['顺势加速', '高位回调', '超跌反弹', '破位加速'],
+    tips: ['双强 · 顺势加速', '5日强+今日回调 · 见顶预警', '5日弱+今日反弹 · 诱多', '双弱 · 破位加速'],
+  },
+  {
+    id: 'pct_pe', title: '涨跌 × 市盈率', subtitle: '估值动量（对数轴）',
+    xKey: SQ.P, yKey: SQ.PE, xName: '涨跌幅', xUnit: '%', yName: '市盈率', logY: true,
+    quadrants: ['低估上攻', '高估上攻', '高估杀跌', '低估杀跌'],
+    tips: ['低PE+上涨 · 机会区', '高PE+上涨 · 雷达泡', '高PE+下跌 · 戴维斯双杀', '低PE+下跌 · 价值陷阱'],
+  },
+  {
+    id: 'pct_mv', title: '涨跌 × 总市值', subtitle: '大小盘风格（对数轴）',
+    xKey: SQ.P, yKey: SQ.MV, xName: '涨跌幅', xUnit: '%', yName: '总市值', yUnit: '亿', logY: true,
+    quadrants: ['权重搭台', '题材活跃', '权重杀跌', '题材退潮'],
+    tips: ['大市值+上涨 · 权重搭台', '小市值+上涨 · 题材活跃', '大市值+下跌 · 权重杀跌', '小市值+下跌 · 题材退潮'],
+  },
+  {
+    id: 'board_money', title: '连板 × 主力资金', subtitle: '情绪周期（涨停梯队）',
+    xKey: SQ.MAIN, yKey: SQ.BOARD, xName: '主力净流入', xUnit: '亿', yName: '连板高度',
+    filter: (v) => (v[SQ.BOARD] || 0) >= 1,
+    quadrants: ['情绪加速', '分歧退潮', '首板启动', '炸板风险'],
+    tips: ['高标+流入 · 情绪加速', '高标+流出 · 分歧退潮', '首板+流入 · 启动', '首板+流出 · 炸板风险'],
+    emptyHint: '该帧主力资金暂不可用（外部行情域受限），请拖动时间轴到历史交易日查看',
+  },
+]
+
+// ── 时间轴 ──
+const currentIndex = ref(0)
+const playing = ref(false)
+const playSpeed = ref(1000)
+let playTimer: ReturnType<typeof setInterval> | null = null
+
+const dates = computed(() => data.value?.dates || [])
+const currentDate = computed(() => dates.value[currentIndex.value] || '')
+const currentFrame = computed(() => {
+  const d = currentDate.value
+  return d ? (frameCache.value[d] || {}) : {}
+})
+const isFrameLoading = computed(() => loadingFrames.value.has(currentDate.value))
+
+// 按需加载单日帧（去重并发；每帧约 60KB gzip）
+async function ensureFrame(date: string) {
+  if (!date || frameCache.value[date] || loadingFrames.value.has(date)) return
+  loadingFrames.value.add(date)
+  try {
+    const res = await vibeApi.getStockQuadrantDay(date)
+    const frame = (res as any)?.data?.frame ?? {}
+    if (frame && typeof frame === 'object') {
+      frameCache.value = { ...frameCache.value, [date]: frame }
+    }
+  } catch (e) {
+    console.warn(`个股趋势帧加载失败 ${date}`, e)
+  } finally {
+    loadingFrames.value.delete(date)
+  }
+}
+
+// 时间轴移动 → 确保当前帧 + 预取相邻帧（播放时衔接更顺）
+watch(currentIndex, (i) => {
+  const d = dates.value[i]
+  if (d) ensureFrame(d)
+  if (i + 1 < dates.value.length) ensureFrame(dates.value[i + 1])
+  if (i - 1 >= 0) ensureFrame(dates.value[i - 1])
+})
+
+function onSeek() {
+  playing.value = false
+}
+function togglePlay() {
+  if (playing.value) {
+    playing.value = false
+    return
+  }
+  if (currentIndex.value >= dates.value.length - 1) currentIndex.value = dates.value.length - 1
+  playing.value = true
+}
+watch(playing, (on) => {
+  stopPlayTimer()
+  if (on) {
+    playTimer = setInterval(() => {
+      if (currentIndex.value >= dates.value.length - 1) {
+        playing.value = false
+        return
+      }
+      currentIndex.value += 1
+    }, playSpeed.value)
+  }
+})
+watch(playSpeed, () => {
+  if (playing.value) {
+    stopPlayTimer()
+    playTimer = setInterval(() => {
+      if (currentIndex.value >= dates.value.length - 1) {
+        playing.value = false
+        return
+      }
+      currentIndex.value += 1
+    }, playSpeed.value)
+  }
+})
+function stopPlayTimer() {
+  if (playTimer) {
+    clearInterval(playTimer)
+    playTimer = null
+  }
+}
+
+// ── KPI（随当前帧） ──
+const currentTotal = computed(() => (currentFrame.value ? Object.keys(currentFrame.value).length : null))
+const kpiUp = computed(() => {
+  const f = currentFrame.value
+  if (!f) return null
+  return Object.values(f).filter((v) => (v[SQ.P] || 0) > 0).length
+})
+const kpiDown = computed(() => {
+  const f = currentFrame.value
+  if (!f) return null
+  return Object.values(f).filter((v) => (v[SQ.P] || 0) < 0).length
+})
+const kpiAvg = computed(() => {
+  const f = currentFrame.value
+  if (!f) return null
+  const arr = Object.values(f).map((v) => v[SQ.P]).filter((x) => x != null)
+  if (!arr.length) return null
+  return arr.reduce((a, b) => a + b, 0) / arr.length
+})
+
+// ── 六图 option（当前帧） ──
+const mainAvailable = computed(() => {
+  const f = currentFrame.value
+  if (!f) return false
+  let cnt = 0
+  const values = Object.values(f)
+  for (const v of values) {
+    if (v[SQ.MAIN] != null) cnt++
+  }
+  return values.length > 0 && cnt / values.length > 0.05
+})
+const mapReady = computed(() => (data.value?.dates?.length ?? 0) > 0)
+
+const chartOptions = computed<Record<string, EChartsOption>>(() => {
+  const meta = data.value?.meta || {}
+  const frame = currentFrame.value
+  const out: Record<string, EChartsOption> = {}
+  if (!frame || !Object.keys(frame).length) return out
+  for (const card of CARDS) {
+    out[card.id] = makeQuadrantOption(meta, frame, card, matchSet.value)
+  }
+  return out
+})
+
+// 各图当前帧有效点数（用于空数据时显示提示而非空轴网格）
+const chartPointCount = computed<Record<string, number>>(() => {
+  const out: Record<string, number> = {}
+  for (const card of CARDS) {
+    const opt: any = chartOptions.value[card.id]
+    const s0 = opt?.series?.[0]?.data?.length ?? 0
+    const s1 = opt?.series?.[1]?.data?.length ?? 0
+    out[card.id] = (s0 as number) + (s1 as number)
+  }
+  return out
+})
+
+// ── 多图实例与跨图闪烁 ──
+const charts: Record<string, any> = {}
+function setChartRef(id: string, el: any) {
+  charts[id] = el?.getInstance?.() ?? null
+}
+
+const searchKw = ref('')
+const matchNames = ref<string[]>([])
+const matchSet = computed(() => new Set(matchNames.value))
+let blinkTimer: ReturnType<typeof setInterval> | null = null
+let blinkOn = false
+
+const matchPoints = computed(() => {
+  if (!matchSet.value.size) return []
+  const frame = currentFrame.value
+  if (!frame) return []
+  const pts: { chartId: string; seriesIndex: number; dataIndex: number }[] = []
+  for (const card of CARDS) {
+    for (const p of computeMatchPoints(frame, card, matchSet.value)) {
+      pts.push({ chartId: card.id, seriesIndex: p.seriesIndex, dataIndex: p.dataIndex })
+    }
+  }
+  return pts
+})
+
+function applyBlink() {
+  blinkOn = !blinkOn
+  dispatchMatch(blinkOn ? 'highlight' : 'downplay')
+}
+function startBlink() {
+  stopBlink()
+  blinkOn = true
+  applyBlink()
+  blinkTimer = setInterval(applyBlink, 550)
+}
+function stopBlink() {
+  if (blinkTimer) {
+    clearInterval(blinkTimer)
+    blinkTimer = null
+  }
+}
+function clearMatch() {
+  stopBlink()
+  downplayAll()
+  matchNames.value = []
+}
+function downplayAll() {
+  dispatchMatch('downplay')
+}
+// 对所有命中点统一派发 highlight/downplay（命中点已在各图顶层系列，seriesIndex/dataIndex 由 computeMatchPoints 对齐）
+function dispatchMatch(type: 'highlight' | 'downplay') {
+  for (const p of matchPoints.value) {
+    const target = charts[p.chartId]
+    if (!target) continue
+    target.dispatchAction({ type, seriesIndex: p.seriesIndex, dataIndex: p.dataIndex })
+  }
+}
+function doSearch() {
+  const kw = searchKw.value.trim()
+  if (!kw) {
+    clearMatch()
+    return
+  }
+  const meta = data.value?.meta || {}
+  const isNum = /^\d+$/.test(kw) && kw.length >= 2
+  const hits: string[] = []
+  if (isNum) {
+    // 数字输入 → 代码前缀匹配（覆盖沪深京全部 6 位代码）
+    for (const code of Object.keys(meta)) {
+      if (code.startsWith(kw)) hits.push(code)
+    }
+  } else {
+    // 中文/其它 → 名称包含匹配
+    for (const [code, m] of Object.entries(meta)) {
+      if (m.name.includes(kw)) hits.push(code)
+    }
+  }
+  if (!hits.length) {
+    clearMatch()
+    ElMessage.warning(`未找到与「${kw}」匹配的股票`)
+    return
+  }
+  if (hits.length > 200) hits.length = 200
+  stopBlink()
+  matchNames.value = hits
+  startBlink()
+}
+
+// ── 点击跳转个股详情 / 数据加载 ──
+function onChartClick(e: any) {
+  if (e?.componentType !== 'series') return
+  const code = e?.data?.code ?? e?.data?.name
+  if (!code) return
+  window.open(`/stocks/${code}`, '_blank', 'noopener')
+}
+
+async function loadAll() {
+  loading.value = true
+  try {
+    // 首屏走轻量接口（约 150KB gzip，秒开）；历史帧拖动/播放时按需加载
+    const res = await vibeApi.getStockQuadrantSlim()
+    const slim = (res as any)?.data ?? null
+    data.value = slim
+    const datesArr = slim?.dates || []
+    const latest = datesArr[datesArr.length - 1] || ''
+    frameCache.value = latest && slim?.frame ? { [latest]: slim.frame } : {}
+    currentIndex.value = Math.max(0, datesArr.length - 1)
+    // 预取前一帧，便于立即回看
+    if (datesArr.length > 1) ensureFrame(datesArr[datesArr.length - 2])
+  } catch (e) {
+    console.error('加载个股趋势失败', e)
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(() => {
+  loadAll()
+})
+onBeforeUnmount(() => {
+  stopPlayTimer()
+  stopBlink()
+  downplayAll()
+})
+</script>
+
+<style scoped lang="scss">
+.stock-quadrant-page {
+  .block {
+    margin-bottom: 16px;
+    padding: 16px;
+    background: var(--el-bg-color);
+    border-radius: 10px;
+    border: 1px solid var(--el-border-color-lighter);
+
+    .block-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+
+      .block-title {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 15px;
+        font-weight: 600;
+      }
+
+      .block-hint {
+        font-size: 12px;
+        color: var(--el-text-color-secondary);
+      }
+    }
+  }
+
+  .kpi-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    .kpi-cell {
+      padding: 12px 16px;
+      border-radius: 8px;
+      background: var(--el-fill-color-blank);
+      border: 1px solid var(--el-border-color-lighter);
+
+      .kpi-label {
+        font-size: 12px;
+        color: var(--el-text-color-secondary);
+      }
+
+      .kpi-value {
+        margin: 6px 0;
+        font-size: 22px;
+        font-weight: 600;
+
+        .kpi-sep {
+          margin: 0 6px;
+          color: var(--el-text-color-placeholder);
+          font-weight: 400;
+        }
+      }
+
+      .kpi-sub {
+        font-size: 12px;
+        color: var(--el-text-color-secondary);
+      }
+    }
+  }
+
+  .control-panel {
+    .control-main {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+
+      .timeline-title,
+      .search-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 12px;
+
+        .tl-date {
+          font-size: 13px;
+          font-weight: 600;
+          color: var(--el-color-primary);
+        }
+      }
+
+      .timeline-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+
+        .tl-slider {
+          flex: 1;
+        }
+        .tl-speed {
+          width: 76px;
+        }
+        .search-input {
+          width: 220px;
+        }
+      }
+
+      .search-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+    }
+
+    .panel-hint {
+      margin-top: 12px;
+      font-size: 12px;
+      color: var(--el-text-color-secondary);
+
+      .warn-hint {
+        margin-left: 10px;
+        color: var(--el-color-warning);
+      }
+    }
+  }
+
+  .chart-grid {
+    display: grid;
+    // 宽屏两列/三列排布，配合时间轴一屏看全；窄屏由 media 查询折叠为单列
+    grid-template-columns: repeat(auto-fill, minmax(560px, 1fr));
+    gap: 16px;
+
+    .chart-card {
+      margin-bottom: 0;
+
+      .concept-chart {
+        .concept-chart-inner {
+          width: 100%;
+        }
+        .map-chart {
+          height: 440px;
+        }
+      }
+    }
+  }
+
+  .quadrant-tip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 18px;
+    padding: 10px 12px;
+    margin-top: 10px;
+    border-radius: 8px;
+    background: var(--el-fill-color-blank);
+    border: 1px solid var(--el-border-color-lighter);
+
+    .qt-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--el-text-color-secondary);
+      white-space: nowrap;
+    }
+
+    .qt-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 3px;
+      display: inline-block;
+    }
+    .qt-red { background: #fbe0e0; }
+    .qt-yellow { background: #fdf3d1; }
+    .qt-blue { background: #e3f0fd; }
+    .qt-green { background: #e8f7e2; }
+  }
+
+  .accent {
+    color: var(--el-color-warning);
+  }
+}
+
+@media (max-width: 1100px) {
+  .control-main {
+    grid-template-columns: 1fr !important;
+  }
+  .chart-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+</style>

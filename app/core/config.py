@@ -272,6 +272,9 @@ class Settings(BaseSettings):
     # daily_basic 已并入历史同步任务末尾串行执行（先K线后估值），此 cron 不再作为独立任务调度。
     TUSHARE_DAILY_BASIC_SYNC_CRON: str = Field(default="30 23 * * 1-5")
     TUSHARE_DAILY_BASIC_SYNC_DAYS_BACK: int = Field(default=730)  # 每次回溯天数（默认约2年，增量跳过已同步交易日）
+    TUSHARE_DAILY_MONEYFLOW_SYNC_ENABLED: bool = Field(default=True)
+    # 每日资金流（moneyflow）盘后同步，供「个股分析」历史资金帧使用；增量跳过已同步交易日。
+    TUSHARE_DAILY_MONEYFLOW_SYNC_CRON: str = Field(default="30 19 * * 1-5")
     TUSHARE_STATUS_CHECK_ENABLED: bool = Field(default=True)
     TUSHARE_STATUS_CHECK_CRON: str = Field(default="30 8 * * *")  # 每天8:30（原每小时，降频减少无意义轮询）
 

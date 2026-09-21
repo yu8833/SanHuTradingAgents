@@ -155,6 +155,89 @@ async def market_concept_analysis(current_user: dict = Depends(get_optional_curr
         return ok({"total": 0, "concepts": [], "gainers": [], "losers": [], "money_leaders": []})
 
 
+@router.get("/market/stock-quadrant")
+async def market_stock_quadrant(current_user: dict = Depends(get_optional_current_user)):
+    """个股趋势 · 六图四象限 + 30日时间轴：全市场个股多维帧数据（Redis分级TTL缓存）。
+
+    数据量大（约 10MB 明文）：直接输出预序列化 + gzip 的字节，避免 FastAPI 对大 dict
+    二次 jsonable_encoder 编码与明文传输拖慢响应（冷构建已 20s 级，不能再叠编码开销）。
+    """
+    from fastapi.responses import Response
+    import gzip
+    import json as _json
+
+    skeleton = {"total": 0, "breadth": {"up": 0, "down": 0, "avg_pct": 0},
+                "dates": [], "meta": {}, "frames": {}}
+    try:
+        from app.services.stock_quadrant_analysis import get_stock_quadrant
+        data = await get_stock_quadrant()
+        payload = {"success": True, "data": data}
+    except Exception as e:
+        logger.error(f"个股趋势异常: {e}")
+        payload = {"success": True, "data": skeleton}
+
+    blob = _json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    headers = {"Cache-Control": "no-transform"}
+    if len(blob) > 200 * 1024:
+        blob = gzip.compress(blob, mtime=0)
+        headers["Content-Encoding"] = "gzip"
+    return Response(content=blob, media_type="application/json", headers=headers)
+
+
+@router.get("/market/stock-quadrant/slim")
+async def market_stock_quadrant_slim(current_user: dict = Depends(get_optional_current_user)):
+    """个股趋势 · 轻量首屏：dates + meta + 最新一帧（约 150KB gzip）。
+
+    30 天全量帧约 2.9MB gzip，弱网下首屏易超时 → 首屏只回最新帧，
+    历史帧由 /market/stock-quadrant/day?date= 按需加载。
+    复用同一 Redis 缓存（get_stock_quadrant），命中时毫秒级返回。
+    """
+    from fastapi.responses import Response
+    import gzip
+    import json as _json
+
+    skeleton = {"total": 0, "breadth": {"up": 0, "down": 0, "avg_pct": 0},
+                "dates": [], "meta": {}, "frame": {}}
+    try:
+        from app.services.stock_quadrant_analysis import get_stock_quadrant
+        full = await get_stock_quadrant()
+        dates = full.get("dates") or []
+        latest = dates[-1] if dates else ""
+        payload = {"success": True, "data": {
+            "total": full.get("total", 0),
+            "breadth": full.get("breadth", {}),
+            "as_of": full.get("as_of", ""),
+            "dates": dates,
+            "meta": full.get("meta", {}),
+            "frame": (full.get("frames") or {}).get(latest, {}),
+        }}
+    except Exception as e:
+        logger.error(f"个股趋势轻量接口异常: {e}")
+        payload = {"success": True, "data": skeleton}
+
+    blob = _json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    headers = {"Cache-Control": "no-transform"}
+    if len(blob) > 200 * 1024:
+        blob = gzip.compress(blob, mtime=0)
+        headers["Content-Encoding"] = "gzip"
+    return Response(content=blob, media_type="application/json", headers=headers)
+
+
+@router.get("/market/stock-quadrant/day")
+async def market_stock_quadrant_day(date: str, current_user: dict = Depends(get_optional_current_user)):
+    """个股趋势 · 单日帧（时间轴拖动/播放时按需加载，约 60KB gzip）。"""
+    if not date:
+        return ok({"date": "", "frame": {}})
+    try:
+        from app.services.stock_quadrant_analysis import get_stock_quadrant
+        full = await get_stock_quadrant()
+        frames = full.get("frames") or {}
+        return ok({"date": date, "frame": frames.get(date, {})})
+    except Exception as e:
+        logger.error(f"个股趋势单日帧异常: {e}")
+        return ok({"date": date, "frame": {}})
+
+
 @router.get("/market/emotion")
 async def market_emotion(current_user: dict = Depends(get_optional_current_user)):
     """短线情绪（连板梯队/封板率/炸板率/晋级率），分级TTL缓存"""

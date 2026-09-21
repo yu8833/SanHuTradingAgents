@@ -23,6 +23,8 @@ class Collections:
     stock_basic_info = "stock_basic_info"
     stock_daily_quotes = "stock_daily_quotes"
     stock_daily_basic = "stock_daily_basic"
+    stock_daily_moneyflow = "stock_daily_moneyflow"
+    stock_daily_zt_pool = "stock_daily_zt_pool"
     stock_historical_data = "stock_historical_data"
     stock_news = "stock_news"
     stock_financial_data = "stock_financial_data"

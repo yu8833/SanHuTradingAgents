@@ -422,6 +422,10 @@ async def get_quote(
 
     # 🔥 回退：如果 MongoDB 无行情数据，从统一行情服务获取实时数据
     if not q:
+        # 无效代码（非 6 位纯数字，如未替换的 URL 占位符 '/api/stocks/:CODE/quote'）
+        # → 直接快速 404，绝不走外部兜底抓取（否则每个无效代码都白等 5-7s 多源探测）。
+        if not isinstance(code6, str) or not re.match(r'^\d{6}$', code6):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"无效的股票代码: {code}")
         try:
             from app.services.unified_quotes import get_single_quote
             uq = await asyncio.to_thread(get_single_quote, code6)

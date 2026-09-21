@@ -25,6 +25,7 @@
       <el-menu-item index="/vibe/review/overview">大盘看板</el-menu-item>
       <el-menu-item index="/vibe/review/emotion">短线情绪</el-menu-item>
       <el-menu-item index="/vibe/review/concept">概念分析</el-menu-item>
+      <el-menu-item index="/vibe/review/stock-quadrant">个股趋势</el-menu-item>
       <el-menu-item index="/vibe/intel/radar">资讯雷达</el-menu-item>
     </el-sub-menu>
 

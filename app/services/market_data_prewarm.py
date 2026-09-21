@@ -59,6 +59,7 @@ async def prewarm_market_data() -> None:
         )
         from app.services.concept_analysis import get_concept_analysis
         from app.services.market_synthesis import get_market_synthesis_cached
+        from app.services.stock_quadrant_analysis import get_stock_quadrant
 
         async def _safe(desc: str, coro):
             try:
@@ -77,6 +78,9 @@ async def prewarm_market_data() -> None:
             # 用户访问 /market/synthesis 直接命中缓存秒开，无需前台等 10-60s。
             _safe("综合研判", get_market_synthesis_cached()),
             _safe("成交额Top20", get_turnover_top()),
+            # 个股趋势（六图四象限 + 30日时间轴）：构建含全市场帧聚合，冷启动最重，
+            # 必须后台预热，避免用户首刷等 40s+。
+            _safe("个股趋势", get_stock_quadrant()),
         )
         el = asyncio.get_event_loop().time() - start
         _last_prewarm_ts = el
@@ -108,9 +112,9 @@ def register_prewarm_job(scheduler) -> None:
     )
     logger.info("📈 [prewarm] 市场数据预热任务已注册（交易时段每5分钟）")
 
-    # 启动后延迟 20s 立即预热一轮：服务重启后尽快填热缓存，避免首个请求冷启动
+    # 启动后延迟 3s 立即预热一轮：服务重启后尽快填热缓存，避免首个请求冷启动
     async def _run_prewarm_startup():
-        await asyncio.sleep(20)
+        await asyncio.sleep(3)
         await prewarm_market_data()
 
     try:

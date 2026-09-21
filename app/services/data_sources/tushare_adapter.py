@@ -153,6 +153,51 @@ class TushareAdapter(DataSourceAdapter):
             logger.error(f"Tushare: Failed to fetch daily data for {trade_date}: {e}")
         return None
 
+    def get_moneyflow(self, trade_date: str) -> pd.DataFrame | None:
+        """获取全市场单日资金流向（Tushare pro.moneyflow，日频批量）。
+
+        返回 DataFrame，列含 ts_code / main_net（主力净流入，元）：
+        主力净流入 = (大单买入 + 超大单买入) - (大单卖出 + 超大单卖出)，
+        原始字段单位为万元，此处统一换算为元（与项目金额口径一致）。
+        无权限/失败返回 None，调用方按「资金数据不可用」降级，不做估计。
+        """
+        if not self.is_available():
+            return None
+        try:
+            import tushare as ts
+            token = getattr(self._provider, 'token', None)
+            if not token:
+                import os
+                token = os.getenv('TUSHARE_TOKEN', '').strip().strip('"').strip("'")
+            if not token:
+                return None
+
+            ts.set_token(token)
+            pro = ts.pro_api()
+            fields = ("ts_code,trade_date,buy_sm_amount,sell_sm_amount,"
+                      "buy_md_amount,sell_md_amount,buy_lg_amount,sell_lg_amount,"
+                      "buy_elg_amount,sell_elg_amount,net_mf_amount")
+            df = pro.moneyflow(trade_date=trade_date, fields=fields)
+            if df is None or df.empty:
+                logger.info(f"Tushare: moneyflow empty for {trade_date}")
+                return None
+
+            out = df.copy()
+            for col in ("buy_lg_amount", "sell_lg_amount", "buy_elg_amount", "sell_elg_amount"):
+                out[col] = pd.to_numeric(out[col], errors="coerce")
+            # 万元 → 元
+            main_net = ((out["buy_lg_amount"].fillna(0).astype(float)
+                         + out["buy_elg_amount"].fillna(0).astype(float))
+                        - (out["sell_lg_amount"].fillna(0).astype(float)
+                           + out["sell_elg_amount"].fillna(0).astype(float))) * 10000.0
+            out["main_net"] = main_net.round(2)
+            out["ts_code"] = out["ts_code"].astype(str)
+            logger.info(f"Tushare: Successfully fetched moneyflow for {trade_date}, {len(out)} records")
+            return out
+        except Exception as e:
+            logger.error(f"Tushare: Failed to fetch moneyflow for {trade_date}: {e}")
+        return None
+
 
     def get_dividend_data(self, ts_code: str) -> pd.DataFrame | None:
         """获取个股分红送配数据（Tushare pro.dividend）。

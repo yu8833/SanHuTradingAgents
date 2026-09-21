@@ -1487,6 +1487,128 @@ class TushareSyncService:
                     f"记录={stats['total_records']}, 失败={stats['error_count']}")
         return stats
 
+    async def sync_daily_moneyflow_data(
+        self,
+        start_date: str = None,
+        end_date: str = None,
+        days_back: int = 45,
+        job_id: str = None,
+    ) -> dict[str, Any]:
+        """同步每日资金流向（Tushare moneyflow）到 stock_daily_moneyflow 集合。
+
+        按交易日逐日拉取全市场资金流，按 (code, trade_date) upsert 入库，
+        供「个股分析 · 六图四象限」时间轴的历史资金帧使用（越权降级为不可用，不做估计）。
+
+        - 默认同步最近 days_back 天（实际只请求交易日）；
+        - 已同步的交易日自动跳过（增量）；
+        - 单位约定：main_net 为元（adapter 内已由万元换算）。
+        """
+        stats = {
+            "total_processed": 0,
+            "success_count": 0,
+            "error_count": 0,
+            "skipped_count": 0,
+            "total_records": 0,
+            "start_time": now_tz(),
+            "errors": [],
+        }
+
+        end = _norm_date(end_date) or now_tz().strftime("%Y-%m-%d")
+        start = _norm_date(start_date) or (now_tz() - timedelta(days=days_back)).strftime("%Y-%m-%d")
+        if not start or not end or start > end:
+            logger.error(f"❌ 每日资金流同步日期区间非法: {start} ~ {end}")
+            return {"error": f"invalid date range: {start} ~ {end}"}
+
+        logger.info(f"🔄 开始同步每日资金流: {start} ~ {end}")
+
+        # 1) 获取交易日历
+        try:
+            trade_days = await asyncio.to_thread(self._get_trade_days_blocking, start, end)
+        except Exception as e:
+            logger.error(f"❌ 获取交易日历失败: {e}")
+            return {"error": str(e)}
+        if not trade_days:
+            logger.warning(f"⚠️ {start}~{end} 区间无交易日")
+            return stats
+        stats["total_processed"] = len(trade_days)
+
+        # 2) 已同步交易日（增量跳过）
+        synced: set[str] = set()
+        cursor = self.db.stock_daily_moneyflow.find(
+            {"trade_date": {"$gte": start, "$lte": end}}, {"trade_date": 1}
+        )
+        async for doc in cursor:
+            d = str(doc.get("trade_date") or "")
+            if d:
+                synced.add(d)
+
+        # 3) 逐日拉取并入库
+        adapter = TushareAdapter()
+        from pymongo import UpdateOne
+
+        for i, td in enumerate(trade_days):
+            if job_id and await self._should_stop(job_id):
+                logger.warning(f"⚠️ 任务 {job_id} 收到停止信号，正在退出...")
+                stats["stopped"] = True
+                break
+
+            if td in synced:
+                stats["skipped_count"] += 1
+                continue
+
+            await self.rate_limiter.acquire()
+            try:
+                df = await asyncio.to_thread(adapter.get_moneyflow, _compact_date(td))
+                if df is None or getattr(df, "empty", True):
+                    stats["error_count"] += 1
+                    continue
+            except Exception as e:
+                stats["error_count"] += 1
+                stats["errors"].append({"date": td, "error": str(e)})
+                logger.error(f"❌ {td} 拉取 moneyflow 失败: {e}")
+                continue
+
+            ops = []
+            for _, row in df.iterrows():
+                ts_code = str(row.get("ts_code") or "")
+                if "." not in ts_code:
+                    continue
+                code = ts_code.split(".")[0]
+                doc = {
+                    "symbol": code,
+                    "code": code,
+                    "ts_code": ts_code,
+                    "trade_date": td,
+                    "main_net": _to_float(row.get("main_net")),  # 元
+                    "data_source": "tushare",
+                    "updated_at": get_utc8_now(),
+                }
+                ops.append(UpdateOne(
+                    {"code": code, "trade_date": td},
+                    {"$set": doc},
+                    upsert=True,
+                ))
+
+            if ops:
+                # 分批写入（每批 500），避免大 bulk 在数据库瞬忙时超时（NetworkTimeout）
+                for i in range(0, len(ops), 500):
+                    await self.db.stock_daily_moneyflow.bulk_write(ops[i:i + 500], ordered=False)
+                stats["success_count"] += 1
+                stats["total_records"] += len(ops)
+
+            if job_id and ((i + 1) % 5 == 0 or (i + 1) == len(trade_days)):
+                await self._update_progress(
+                    job_id,
+                    int(((i + 1) / len(trade_days)) * 100),
+                    f"正在同步每日资金流 {td} ({i + 1}/{len(trade_days)})…",
+                )
+
+        stats["finished_at"] = now_tz()
+        logger.info(f"✅ 每日资金流同步完成: 交易日={stats['total_processed']}, "
+                    f"入库={stats['success_count']}, 跳过={stats['skipped_count']}, "
+                    f"记录={stats['total_records']}, 失败={stats['error_count']}")
+        return stats
+
     @staticmethod
     def _parse_financial_text(symbol: str, text: str) -> dict[str, Any]:
         """将 get_fundamentals 返回的格式化文本解析为结构化 dict。
@@ -2007,6 +2129,24 @@ async def run_tushare_daily_basic_sync(days_back: int = 730):
         return result
     except Exception as e:
         logger.error(f"❌ Tushare每日估值数据同步失败: {e}")
+        raise
+
+
+async def run_tushare_daily_moneyflow_sync(days_back: int = 45):
+    """APScheduler任务：同步每日资金流向（Tushare moneyflow）。
+
+    默认同步最近 days_back 天（增量，已同步交易日自动跳过），
+    供「个股分析」时间轴历史资金帧使用；无权限时返回空（不可用），不做估计。
+    """
+    try:
+        service = await get_tushare_sync_service()
+        result = await service.sync_daily_moneyflow_data(
+            days_back=days_back, job_id="tushare_daily_moneyflow_sync"
+        )
+        logger.info(f"✅ Tushare每日资金流同步完成: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"❌ Tushare每日资金流同步失败: {e}")
         raise
 
 

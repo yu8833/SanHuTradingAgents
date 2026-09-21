@@ -97,6 +97,7 @@ from app.worker.baostock_sync_service import (
 )
 from app.worker.tushare_sync_service import (
     run_tushare_daily_basic_sync,
+    run_tushare_daily_moneyflow_sync,
     run_tushare_historical_sync,
     run_tushare_status_check,
 )
@@ -534,6 +535,19 @@ async def lifespan(app: FastAPI):
                 logger.info(f"📈 Tushare每日估值数据同步已配置（独立任务，历史同步禁用兜底）: {settings.TUSHARE_DAILY_BASIC_SYNC_CRON}")
             elif settings.TUSHARE_DAILY_BASIC_SYNC_ENABLED:
                 logger.info("📈 Tushare每日估值数据同步已合并进历史同步任务（23:00串行）")
+
+            # 每日资金流同步（Tushare moneyflow，盘后 19:30；供「个股分析」时间轴历史资金帧）
+            if settings.TUSHARE_DAILY_MONEYFLOW_SYNC_ENABLED:
+                scheduler.add_job(
+                    run_tushare_daily_moneyflow_sync,
+                    cron_trigger(settings.TUSHARE_DAILY_MONEYFLOW_SYNC_CRON, timezone=get_tz()),
+                    id="tushare_daily_moneyflow_sync",
+                    name="每日资金流同步（Tushare）",
+                    kwargs={"days_back": 45},
+                )
+                logger.info(f"💰 Tushare每日资金流同步已配置: {settings.TUSHARE_DAILY_MONEYFLOW_SYNC_CRON}")
+            else:
+                logger.info("⏭️ Tushare每日资金流同步跳过（未启用）")
 
             # 数据源状态检查已合并进 basics_sync_service（每日基础信息同步尾部串行），
             # 不再单独注册 tushare_status_check，减少一个独立调度条目。

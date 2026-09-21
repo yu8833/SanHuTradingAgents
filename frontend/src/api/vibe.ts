@@ -252,6 +252,31 @@ export interface ConceptAnalysis {
   money_followers: ConceptItem[]
 }
 
+// ── 个股分析 · 六图四象限 + 30 日时间轴 ──
+// frames[date][code] → 8 元组：[pct 涨跌幅%, amt 成交额亿, turn 换手%, pe 市盈率,
+//                              mv 总市值亿, main 主力净流入亿, board 连板高度, d5 5日涨跌%]
+export const SQ = { P: 0, AMT: 1, TURN: 2, PE: 3, MV: 4, MAIN: 5, BOARD: 6, D5: 7 } as const
+export type SQKey = keyof typeof SQ
+
+export interface StockQuadrant {
+  total: number
+  as_of: string
+  breadth: { up: number; down: number; avg_pct: number }
+  dates: string[]
+  meta: Record<string, { name: string; industry: string }>
+  frames: Record<string, Record<string, number[]>>
+}
+
+// 轻量首屏：dates + meta + 最新一帧（历史帧按需加载）
+export interface StockQuadrantSlim {
+  total: number
+  as_of: string
+  breadth: { up: number; down: number; avg_pct: number }
+  dates: string[]
+  meta: Record<string, { name: string; industry: string }>
+  frame: Record<string, number[]>
+}
+
 export interface StockQuote {
   code: string
   name: string
@@ -484,6 +509,22 @@ export const vibeApi = {
 
   async getConceptAnalysis() {
     return cachedGet<ConceptAnalysis>('/api/vibe/market/concept-analysis', undefined, 180000, { timeout: 20000 })
+  },
+
+  async getStockQuadrant() {
+    // 冷启动构建含 30 帧全市场聚合，可能达 40s+；预热后命中缓存即秒级，超时给足兜底
+    return cachedGet<StockQuadrant>('/api/vibe/market/stock-quadrant', undefined, 120000, { timeout: 90000 })
+  },
+
+  async getStockQuadrantSlim() {
+    // 首屏轻量：仅最新帧 + meta + dates（约 150KB gzip），弱网秒开；历史帧走 day 接口按需
+    return cachedGet<StockQuadrantSlim>('/api/vibe/market/stock-quadrant/slim', undefined, 120000, { timeout: 20000 })
+  },
+
+  async getStockQuadrantDay(date: string) {
+    return ApiClient.get<{ date: string; frame: Record<string, number[]> }>(
+      '/api/vibe/market/stock-quadrant/day', { date }, { timeout: 20000 }
+    )
   },
 
   // 资讯模块

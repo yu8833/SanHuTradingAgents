@@ -204,6 +204,16 @@ const routes: RouteRecordRaw[] = [
         }
       },
       {
+        path: 'review/stock-quadrant',
+        name: 'ReviewStockQuadrant',
+        component: () => import('@/views/Vibe/Review/StockQuadrant.vue'),
+        meta: {
+          title: '个股趋势',
+          parentTitle: '市场',
+          requiresAuth: true
+        }
+      },
+      {
         path: 'intel/radar',
         name: 'IntelRadar',
         component: () => import('@/views/Vibe/Intel/Radar.vue'),
