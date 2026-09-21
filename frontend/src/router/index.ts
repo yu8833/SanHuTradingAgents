@@ -204,11 +204,11 @@ const routes: RouteRecordRaw[] = [
         }
       },
       {
-        path: 'review/stock-quadrant',
-        name: 'ReviewStockQuadrant',
-        component: () => import('@/views/Vibe/Review/StockQuadrant.vue'),
+        path: 'review/trend-analysis',
+        name: 'ReviewTrendAnalysis',
+        component: () => import('@/views/Vibe/Review/TrendAnalysis.vue'),
         meta: {
-          title: '个股趋势',
+          title: '趋势分析',
           parentTitle: '市场',
           requiresAuth: true
         }

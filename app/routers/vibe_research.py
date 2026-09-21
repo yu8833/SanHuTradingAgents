@@ -238,6 +238,27 @@ async def market_stock_quadrant_day(date: str, current_user: dict = Depends(get_
         return ok({"date": date, "frame": {}})
 
 
+@router.get("/market/board-quadrant")
+async def market_board_quadrant(scope: str = "concept", current_user: dict = Depends(get_optional_current_user)):
+    """趋势分析 · 概念/行业当前帧象限数据（仅当前快照，无 30 日时间轴）。
+
+    复用个股象限 8 元组帧结构（pct/amt/turn/pe/mv/main/board/d5），板块不可用维度置 null：
+    - scope=concept  概念换手/净流入 + 同花顺概念详情链接
+    - scope=industry 代表ETF换手/净流入/市值 + 东财ETF行情链接
+    """
+    if scope not in ("concept", "industry"):
+        scope = "concept"
+    skeleton = {"as_of": "", "total": 0,
+                "breadth": {"up": 0, "down": 0, "avg_pct": 0}, "meta": {}, "frame": {}}
+    try:
+        from app.services.board_quadrant_analysis import get_board_quadrant
+        data = await get_board_quadrant(scope)
+        return ok(data)
+    except Exception as e:
+        logger.error(f"板块象限({scope})异常: {e}")
+        return ok(skeleton)
+
+
 @router.get("/market/emotion")
 async def market_emotion(current_user: dict = Depends(get_optional_current_user)):
     """短线情绪（连板梯队/封板率/炸板率/晋级率），分级TTL缓存"""

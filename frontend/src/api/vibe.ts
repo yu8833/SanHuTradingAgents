@@ -277,6 +277,15 @@ export interface StockQuadrantSlim {
   frame: Record<string, number[]>
 }
 
+// 板块象限（趋势分析 · 概念/行业）：仅当前快照帧 + 跳转链接
+export interface BoardQuadrant {
+  total: number
+  as_of: string
+  breadth: { up: number; down: number; avg_pct: number }
+  meta: Record<string, { name: string; industry: string; link: string }>
+  frame: Record<string, number[]>
+}
+
 export interface StockQuote {
   code: string
   name: string
@@ -524,6 +533,13 @@ export const vibeApi = {
   async getStockQuadrantDay(date: string) {
     return ApiClient.get<{ date: string; frame: Record<string, number[]> }>(
       '/api/vibe/market/stock-quadrant/day', { date }, { timeout: 20000 }
+    )
+  },
+
+  // 板块象限（趋势分析）：概念/行业当前帧（仅最新快照，轻量，秒回）
+  async getBoardQuadrant(scope: 'concept' | 'industry') {
+    return cachedGet<BoardQuadrant>(
+      `/api/vibe/market/board-quadrant?scope=${scope}`, undefined, 180000, { timeout: 20000 }
     )
   },
 
