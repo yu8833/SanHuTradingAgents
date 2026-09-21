@@ -6,8 +6,8 @@
 """
 
 import logging
-from datetime import datetime
-from app.utils.timezone import now_tz
+
+from app.utils.timezone import now_tz, to_config_tz
 
 from app.services.retail.exit_rule_engine import (
     ExitRuleEngine,
@@ -119,8 +119,12 @@ class RetailStrategyService:
             except ValueError:
                 strategy = StrategyType.DEFAULT
             try:
-                buy_date = datetime.fromisoformat(h["buy_date"])
-            except (KeyError, ValueError, TypeError):
+                # 边界统一：把 buy_date 归一为带时区的 datetime（naive 按 UTC 解释再转北京时），
+                # 与 exit_rule_engine 中的 now_tz()（aware）同系，避免相减抛
+                # "can't subtract offset-naive and offset-aware datetimes"。
+                # 缺失（None）→ 兜底今天；非法字符串 → 走 except 兜底今天。
+                buy_date = to_config_tz(h.get("buy_date")) or now_tz()
+            except (ValueError, TypeError):
                 # 无效日期默认为今天
                 buy_date = now_tz()
             contexts.append(

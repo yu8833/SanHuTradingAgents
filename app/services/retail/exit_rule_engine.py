@@ -138,7 +138,8 @@ class ExitRuleEngine:
             ctx.strategy, EXIT_RULES[StrategyType.DEFAULT]
         )
         now = now_tz()
-        holding_days = (now - ctx.buy_date).days
+        # 钳制为非负：naive 时间戳按 UTC 解释可能使“当日买入”瞬时得出 -1 天
+        holding_days = max(0, (now - ctx.buy_date).days)
         pnl_pct = self._calc_pnl(ctx.buy_price, ctx.current_price)
 
         # 1. 投资逻辑证伪（最高优先级，立即全部退出）
