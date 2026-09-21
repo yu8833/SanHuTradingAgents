@@ -58,6 +58,7 @@ async def prewarm_market_data() -> None:
             get_turnover_top,
         )
         from app.services.concept_analysis import get_concept_analysis
+        from app.services.market_synthesis import get_market_synthesis_cached
 
         async def _safe(desc: str, coro):
             try:
@@ -72,6 +73,9 @@ async def prewarm_market_data() -> None:
             _safe("市场总览", get_overview()),
             _safe("短线情绪", get_short_term_emotion()),
             _safe("概念分析", get_concept_analysis()),
+            # 综合研判市场级快照（含 LLM 判决）：后台提前重算并回写缓存，
+            # 用户访问 /market/synthesis 直接命中缓存秒开，无需前台等 10-60s。
+            _safe("综合研判", get_market_synthesis_cached()),
             _safe("成交额Top20", get_turnover_top()),
         )
         el = asyncio.get_event_loop().time() - start

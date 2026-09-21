@@ -21,6 +21,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
+from app.services.cache_layer import cached, set_cache
 from app.services.macro.macro_service import _get_llm_cfg, _parse_llm_json
 
 logger = logging.getLogger(__name__)
@@ -70,8 +71,9 @@ def _call_llm(cfg: dict, prompt: str) -> dict:
                 {"role": "user", "content": prompt},
             ],
             "temperature": cfg.get("temperature", 0.3),
-            # 研判结构字段较多，1200 易截断导致 JSON 不完整 → 默认 3000
-            "max_tokens": cfg.get("max_tokens", 3000),
+            # 研判结构字段较多，1200 易截断导致 JSON 不完整 → 默认 1800
+            #（prompt 已限 1400 字，3000 上限偏大；下调可压缩模型生成耗时）
+            "max_tokens": cfg.get("max_tokens", 1800),
             "stream": False,
         },
         headers={"Authorization": f"Bearer {cfg['api_key']}",
@@ -332,21 +334,24 @@ def _slim_radar(rd: dict) -> dict:
     return out
 
 
-async def build_market_synthesis(user_id: str) -> dict:
-    """聚合四页数据 + 市场环境 + 买卖信号 → 纯 LLM 综合研判 + 买卖清单。"""
-    # ── 并行采集（每项独立降级，绝不外抛） ──
-    async def _guard(coro, default):
-        try:
-            return await coro
-        except Exception as e:
-            logger.warning(f"综合研判数据源失败（降级）: {e}")
-            return default
+async def _guard(coro, default):
+    """数据源调用统一降级：失败绝不外抛，返回 default。"""
+    try:
+        return await coro
+    except Exception as e:
+        logger.warning(f"综合研判数据源失败（降级）: {e}")
+        return default
 
+
+async def _build_market_part() -> dict:
+    """市场级综合研判快照（不含用户买卖清单）：四页数据 + 市场环境 + 外围 → LLM 判决。
+
+    供 get_market_synthesis_cached 缓存构建与用户强制刷新复用。各数据源独立降级。
+    """
     from app.services.market_dashboard import get_dashboard
     from app.services.market_overview import get_short_term_emotion
     from app.services.concept_analysis import get_concept_analysis
     from app.services.newsradar import get_radar_cached
-    from app.services.intraday_guide_service import build_intraday_guide
     from app.services import vibe_gstock
 
     async def _external():
@@ -355,27 +360,25 @@ async def build_market_synthesis(user_id: str) -> dict:
             asyncio.to_thread(vibe_gstock.macro_indices), timeout=30
         )
 
-    dashboard, emotion, concept, radar, regime_res, guide, external = await asyncio.gather(
+    dashboard, emotion, concept, radar, regime_res, external = await asyncio.gather(
         _guard(get_dashboard(), {}),
         _guard(get_short_term_emotion(), {}),
         _guard(get_concept_analysis(), {}),
         _guard(get_radar_cached(), {}),
         _guard(_detect_regime(), {}),
-        _guard(build_intraday_guide(user_id), {"buys": [], "sells": []}),
         _guard(_external(), []),
     )
     regime = regime_res if isinstance(regime_res, dict) else {}
-    buys = guide.get("buys") or []
-    sells = guide.get("sells") or []
 
     # ── 纯 LLM 研判（失败重试一次；仍失败用规则兜底） ──
+    # verdict 为市场级结论（不掺入用户买卖清单），使结果可跨用户共享并缓存。
     verdict: dict | None = None
     llm_available = False
     cfg = _get_llm_cfg()
     if cfg:
         for attempt in (1, 2):
             try:
-                prompt = _build_prompt(dashboard, emotion, concept, radar, regime, guide, external)
+                prompt = _build_prompt(dashboard, emotion, concept, radar, regime, {}, external)
                 if attempt == 2:
                     prompt += "\n\n" + _RETRY_TAIL
                 res = await asyncio.to_thread(_call_llm, cfg, prompt)
@@ -408,11 +411,61 @@ async def build_market_synthesis(user_id: str) -> dict:
 
     return {
         "verdict": verdict,
-        "buys": buys,
-        "sells": sells,
         "llm_available": llm_available,
         "as_of": datetime.now(BEIJING).strftime("%Y-%m-%d %H:%M:%S"),
         "sources": _slim_sources(dashboard, emotion, concept, radar, regime),
+    }
+
+
+async def get_market_synthesis_cached() -> dict:
+    """综合研判市场级快照（Redis 缓存 + SWR，market 级 TTL），供页面访问与预热复用。
+
+    命中缓存（含 SWR 备用旧值）即时返回；冷启动才前台构建。规则兜底结论同样缓存，
+    避免 LLM 临时不可用时每个请求都空转等超时。
+    """
+    return await cached(
+        "vibe:market_synthesis", _build_market_part,
+        category="market",
+        valid=lambda v: bool(v.get("verdict")),
+        swr=True,
+    )
+
+
+async def build_market_synthesis(user_id: str, refresh: bool = False) -> dict:
+    """聚合四页数据 + 市场环境 + 买卖信号 → 纯 LLM 综合研判 + 买卖清单。
+
+    - 市场级快照（verdict + sources）走 vibe:market_synthesis 缓存（market 级 TTL + SWR），
+      页面访问直接命中缓存，秒开；冷启动/过期后由 prewarm 后台重建，不再每次等 LLM。
+    - 买卖清单（buys/sells）按用户实时计算（build_intraday_guide），与市场级快照并行。
+    - refresh=True（前端「AI 重新研判」）绕过缓存强制重算，并把新结果回写主缓存与
+      SWR 备用键，保证后续访问与本次刷新保持一致。
+    """
+    from app.services.intraday_guide_service import build_intraday_guide
+
+    # 买卖清单与市场级快照并行构建，互不等待；
+    # 缓存命中时页面仅在 build_intraday_guide 的耗时内返回（毫秒级）。
+    guide_task = asyncio.create_task(
+        _guard(build_intraday_guide(user_id), {"buys": [], "sells": []})
+    )
+
+    if refresh:
+        market = await _build_market_part()
+        # 回写缓存（与 _build_and_cache 同构：主 key + SWR 备用 key）
+        await set_cache("vibe:market_synthesis", market, category="market")
+        await set_cache("vibe:market_synthesis:stale", market, ttl=3 * 3600)
+    else:
+        market = await get_market_synthesis_cached()
+
+    guide = await guide_task
+    buys = guide.get("buys") or []
+    sells = guide.get("sells") or []
+    return {
+        "verdict": market.get("verdict"),
+        "buys": buys,
+        "sells": sells,
+        "llm_available": market.get("llm_available", False),
+        "as_of": market.get("as_of") or "",
+        "sources": market.get("sources") or {},
     }
 
 

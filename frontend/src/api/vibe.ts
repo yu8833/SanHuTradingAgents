@@ -491,9 +491,10 @@ export const vibeApi = {
     return cachedGet<RadarData>('/api/vibe/radar', undefined, 3600000)
   },
 
-  // 市场综合研判（纯 LLM；不缓存，LLM 结果需每次刷新重算）
-  async getSynthesis() {
-    const res = await ApiClient.get<any>('/api/vibe/market/synthesis', undefined, { timeout: 180000 })
+  // 市场综合研判（verdict 市场级缓存秒开；refresh=true 强制重新研判）
+  async getSynthesis(refresh = false) {
+    const params = refresh ? { refresh: 1 } : undefined
+    const res = await ApiClient.get<any>('/api/vibe/market/synthesis', params, { timeout: 180000 })
     return res.data as MarketSynthesis
   },
 

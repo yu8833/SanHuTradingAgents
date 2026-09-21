@@ -24,7 +24,7 @@ from datetime import datetime, timedelta, timezone
 from app.core.database import get_mongo_db_sync
 from app.services import vibe_astock as astock
 from app.services.cache_layer import cached
-from app.services.market_overview import _emotion, _sentiment
+from app.services.market_overview import get_short_term_emotion, _sentiment
 
 logger = logging.getLogger("webapi")
 
@@ -254,11 +254,26 @@ async def _build() -> dict:
             logger.warning(f"看板数据步[{step_name}]失败，降级处理: {e}")
             return default
 
+    def _bounded_async(step_name: str, fn, default):
+        """异步函数版 _bounded：带硬超时，超时/失败降级为 default。"""
+        async def _run():
+            try:
+                return await asyncio.wait_for(fn(), timeout=STEP_TIMEOUTS[step_name])
+            except asyncio.TimeoutError:
+                logger.warning(f"看板数据步[{step_name}]超时（>{STEP_TIMEOUTS[step_name]}s），降级处理")
+                return default
+            except Exception as e:
+                logger.warning(f"看板数据步[{step_name}]失败，降级处理: {e}")
+                return default
+        return _run()
+
     rows_task = asyncio.create_task(asyncio.to_thread(_load_market_rows))
     indices, sentiment, emotion, regime = await asyncio.gather(
         _bounded("indices", astock.index_quote, []),
         _bounded("sentiment", _sentiment, {}),
-        _bounded("emotion", _emotion, {}),
+        # 短线情绪复用 get_short_term_emotion 的 Redis 缓存（vibe:short_term_emotion），
+        # 与「短线情绪」页读同一份快照，保证看板与情绪页「最高连板/梯队/封板率」一致。
+        _bounded_async("emotion", get_short_term_emotion, {}),
         _bounded("regime", _market_regime, None),
     )
     rows = await rows_task

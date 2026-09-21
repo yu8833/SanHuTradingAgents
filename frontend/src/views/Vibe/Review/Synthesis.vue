@@ -12,7 +12,7 @@
         </div>
       </div>
       <div class="page-hero-meta">
-        <el-button type="primary" plain :icon="Refresh" :loading="loading" @click="loadAll">
+        <el-button type="primary" plain :icon="Refresh" :loading="loading" @click="loadAll(true)">
           AI 重新研判
         </el-button>
       </div>
@@ -210,10 +210,11 @@ function fmtClock(s: string | null | undefined): string {
   }
 }
 
-const loadAll = async () => {
+const loadAll = async (refresh = false) => {
   loading.value = true
   try {
-    const res: any = await vibeApi.getSynthesis()
+    // 正常加载命中市场级缓存秒开；「AI 重新研判」传 refresh=true 强制重算
+    const res: any = await vibeApi.getSynthesis(refresh)
     if (res?.code === 401) {
       ElMessage.warning('登录已过期，请重新登录')
       return
@@ -227,7 +228,7 @@ const loadAll = async () => {
   }
 }
 
-onMounted(loadAll)
+onMounted(() => loadAll())
 
 // keep-alive 恢复时刷新（AI 研判随刷新重算）
 let inited = false
