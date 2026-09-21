@@ -1885,12 +1885,12 @@ const moneyFlowHistoryOption = computed(() => {
       return `${p.name}<br/>主力净流入：${p.value >= 0 ? '+' : ''}${fmtAmount(p.value)}`
     } },
     grid: { left: 8, right: 20, top: 8, bottom: 4, containLabel: true },
-    xAxis: { type: 'category', data: items.map(h => String(h.date).slice(5)), axisLabel: { fontSize: 10 } },
+    xAxis: { type: 'category', data: items.map((h: any) => String(h.date).slice(5)), axisLabel: { fontSize: 10 } },
     yAxis: { type: 'value', axisLabel: { formatter: (v: number) => fmtAmountSigned(v) }, splitLine: { lineStyle: { type: 'dashed', color: '#ebeef5' } } },
     series: [{
       type: 'bar',
       barMaxWidth: 24,
-      data: items.map(h => ({
+      data: items.map((h: any) => ({
         value: Math.round(Number(h.main_net_inflow) || 0),
         itemStyle: { color: Number(h.main_net_inflow) >= 0 ? '#f56c6c' : '#67c23a', borderRadius: 2 },
       })),
