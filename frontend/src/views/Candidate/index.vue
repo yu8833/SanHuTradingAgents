@@ -55,10 +55,165 @@
       </div>
     </section>
 
-    <!-- ② 赛道双确认：行业资金流排序 × 行业/概念趋势象限 -->
-    <section class="flow-block">
+    <!-- ② 标的精选：个股趋势帧确认 + 三买三卖时机（默认计算机行业） -->
+    <section ref="stockSection" class="flow-block">
       <div class="flow-head">
         <span class="flow-step">②</span>
+        <div class="flow-title">
+          标的精选
+          <span class="flow-sub">个股趋势列（主力净流入/5日/连板）附于候选 · 趋势数据日 {{ trendAsOf || '—' }}</span>
+        </div>
+        <div class="flow-actions">
+          <el-select
+            v-model="selectedIndustry"
+            filterable
+            clearable
+            placeholder="选择行业（来自赛道确认）"
+            class="industry-select"
+            @change="loadCandidates"
+          >
+            <el-option v-for="ind in industryOptions" :key="ind" :label="ind" :value="ind" />
+          </el-select>
+          <el-button :icon="Refresh" :loading="stockLoading" @click="loadCandidates">计算候选</el-button>
+          <el-radio-group v-model="signalFilter" class="signal-filter" size="small">
+            <el-radio-button value="all">全部 {{ signalStats.all }}</el-radio-button>
+            <el-radio-button value="B1">左侧买点 {{ signalStats.B1 }}</el-radio-button>
+            <el-radio-button value="B2">突破买点 {{ signalStats.B2 }}</el-radio-button>
+            <el-radio-button value="B3">回踩买点 {{ signalStats.B3 }}</el-radio-button>
+            <el-radio-button value="S1">加速卖点 {{ signalStats.S1 }}</el-radio-button>
+            <el-radio-button value="S2">跌破卖点 {{ signalStats.S2 }}</el-radio-button>
+            <el-radio-button value="S3">清仓卖出 {{ signalStats.S3 }}</el-radio-button>
+          </el-radio-group>
+        </div>
+      </div>
+
+      <div class="split-grid scatter-split">
+        <!-- 质量轴 -->
+        <div class="panel">
+          <div class="panel-title">动量 × ROE（质量轴 · 气泡大小=市值，颜色=当日涨跌）</div>
+          <div v-if="scatterData.length > 1">
+            <v-chart class="chart chart--scatter" :option="scatterOption" autoresize />
+          </div>
+          <el-empty v-else :image-size="48" description="暂无候选个股" />
+          <div class="panel-tip">右上角 = 高动量 + 高 ROE 的质量优等生</div>
+        </div>
+        <!-- 趋势确认轴 -->
+        <div class="panel">
+          <div class="panel-title">涨跌 × 主力净流入（趋势确认轴 · 点击圆点看个股详情）</div>
+          <div v-if="candidateTrendCount > 0">
+            <v-chart class="chart chart--scatter" :option="candidateTrendOption" autoresize @click="onTrendChartClick" />
+          </div>
+          <el-empty v-else :image-size="48" description="候选暂无趋势帧数据（外部行情域受限）" />
+          <div class="board-tips">
+            <span v-for="(t, i) in BOARD_TIPS" :key="'c' + i" class="bt-item">
+              <i class="bt-dot" :class="'dot-' + i" />{{ t }}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div class="stocks-hint">{{ stocksHint }} · 三买三卖信号 · 显示 {{ filteredCandidates.length }} 只</div>
+      <div class="table-scroll">
+        <el-table
+          :data="filteredCandidates"
+          v-loading="stockLoading"
+          stripe
+          empty-text="请选择行业后计算候选个股"
+          class="candidate-table app-table app-table--trades"
+        >
+          <el-table-column prop="code" label="代码" width="90">
+            <template #default="{ row }">
+              <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
+            </template>
+          </el-table-column>
+          <el-table-column prop="name" label="名称" min-width="100">
+            <template #default="{ row }">
+              <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-name">{{ row.name }}</router-link>
+            </template>
+          </el-table-column>
+          <el-table-column label="行业" min-width="90">
+            <template #default="{ row }">
+              <span class="muted">{{ row.industry || '-' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="涨跌幅" prop="pct_chg" width="90" align="right" sortable :sort-method="(a, b) => (a.pct_chg||0) - (b.pct_chg||0)">
+            <template #default="{ row }">
+              <span :class="(row.pct_chg || 0) >= 0 ? 'up' : 'down'">{{ fmtPctF(row.pct_chg) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="趋势象限" width="110">
+            <template #default="{ row }">
+              <span v-if="trendTagOf(row.code)" class="trend-tag" :class="trendTagOf(row.code)!.cls">
+                <i class="tt-dot" />{{ trendTagOf(row.code)!.label }}
+              </span>
+              <span v-else class="muted">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="主力净流入(亿)" width="120" align="right" sortable :sort-method="(a, b) => (mainFlowOf(a.code)||0) - (mainFlowOf(b.code)||0)">
+            <template #default="{ row }">
+              <span v-if="mainFlowOf(row.code) != null" :class="(mainFlowOf(row.code) || 0) >= 0 ? 'up' : 'down'">{{ fmtSign(mainFlowOf(row.code), 1) }}</span>
+              <span v-else class="muted">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="5日涨跌" width="95" align="right" sortable :sort-method="(a, b) => (d5Of(a.code)||0) - (d5Of(b.code)||0)">
+            <template #default="{ row }">
+              <span v-if="d5Of(row.code) != null" :class="(d5Of(row.code) || 0) >= 0 ? 'up' : 'down'">{{ fmtPct(d5Of(row.code), 1) }}</span>
+              <span v-else class="muted">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="连板" width="70" align="center">
+            <template #default="{ row }">
+              <span v-if="boardOf(row.code) != null" :class="boardOf(row.code)! > 0 ? 'up' : 'muted'">{{ boardOf(row.code)! > 0 ? boardOf(row.code) + ' 板' : '未涨停' }}</span>
+              <span v-else class="muted">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="ΔG 象限" width="110">
+            <template #default="{ row }">
+              <el-tag v-if="row.dg_quadrant" size="small" :type="dgTagType(row.dg_quadrant)">{{ row.dg_quadrant }}</el-tag>
+              <span v-else class="muted">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="择时信号" width="110">
+            <template #default="{ row }">
+              <el-tag v-if="row.signal_type" size="small" :type="signalTagType(row.signal_type)">{{ row.signal_label || row.signal_type }}</el-tag>
+              <span v-else class="muted">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="预警" min-width="130">
+            <template #default="{ row }">
+              <template v-if="row.aux_warnings && row.aux_warnings.length">
+                <el-tooltip :content="row.aux_warnings.join('；')" placement="top">
+                  <div class="warn-cell">
+                    <el-tag v-for="w in row.aux_warnings.slice(0, 1)" :key="w" size="small" type="warning" effect="light" class="warn-tag">{{ w }}</el-tag>
+                    <el-tag v-if="row.aux_warnings.length > 1" size="small" type="info" effect="plain" class="warn-tag">+{{ row.aux_warnings.length - 1 }}</el-tag>
+                  </div>
+                </el-tooltip>
+              </template>
+              <span v-else class="muted">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="20日动量" prop="momentum_20d" width="100" align="right" sortable :sort-method="(a, b) => (a.momentum_20d||0) - (b.momentum_20d||0)">
+            <template #default="{ row }">
+              <span :class="(row.momentum_20d || 0) >= 0 ? 'up' : 'down'">{{ fmtPctF(row.momentum_20d) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="ROE" prop="roe" width="80" align="right" sortable :sort-method="(a, b) => (a.roe||0) - (b.roe||0)">
+            <template #default="{ row }">{{ fmtNum(row.roe) }}%</template>
+          </el-table-column>
+          <el-table-column label="操作" width="170" fixed="right" align="center">
+            <template #default="{ row }">
+              <el-button size="small" type="success" plain @click="addFavorite(row)">+ 自选</el-button>
+              <el-button size="small" type="primary" plain :loading="aiRow?.code === row.code && aiLoading" :icon="Cpu" @click="doAiAnalyze(row)">AI 分析</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </section>
+
+    <!-- ③ 赛道双确认：行业资金流排序 × 行业/概念趋势象限 -->
+    <section class="flow-block">
+      <div class="flow-head">
+        <span class="flow-step">③</span>
         <div class="flow-title">
           赛道双确认
           <span class="flow-sub">资金流决定排序，趋势象限决定强弱 —— 双维交叉定进攻方向</span>
@@ -165,166 +320,11 @@
       </div>
     </section>
 
-    <!-- ③ 标的精选：个股趋势帧确认 + 三买三卖时机 -->
-    <section ref="stockSection" class="flow-block">
-      <div class="flow-head">
-        <span class="flow-step">③</span>
-        <div class="flow-title">
-          标的精选
-          <span class="flow-sub">个股趋势列（主力净流入/5日/连板）附于候选 · 趋势数据日 {{ trendAsOf || '—' }}</span>
-        </div>
-        <div class="flow-actions">
-          <el-select
-            v-model="selectedIndustry"
-            filterable
-            clearable
-            placeholder="选择行业（来自赛道确认）"
-            class="industry-select"
-            @change="loadCandidates"
-          >
-            <el-option v-for="ind in screenRankings" :key="ind.industry" :label="ind.industry" :value="ind.industry" />
-          </el-select>
-          <el-button :icon="Refresh" :loading="stockLoading" @click="loadCandidates">计算候选</el-button>
-          <el-radio-group v-model="signalFilter" class="signal-filter" size="small">
-            <el-radio-button value="all">全部 {{ signalStats.all }}</el-radio-button>
-            <el-radio-button value="B1">左侧买点 {{ signalStats.B1 }}</el-radio-button>
-            <el-radio-button value="B2">突破买点 {{ signalStats.B2 }}</el-radio-button>
-            <el-radio-button value="B3">回踩买点 {{ signalStats.B3 }}</el-radio-button>
-            <el-radio-button value="S1">加速卖点 {{ signalStats.S1 }}</el-radio-button>
-            <el-radio-button value="S2">跌破卖点 {{ signalStats.S2 }}</el-radio-button>
-            <el-radio-button value="S3">清仓卖出 {{ signalStats.S3 }}</el-radio-button>
-          </el-radio-group>
-        </div>
-      </div>
-
-      <div class="split-grid scatter-split">
-        <!-- 质量轴 -->
-        <div class="panel">
-          <div class="panel-title">动量 × ROE（质量轴 · 气泡大小=市值，颜色=当日涨跌）</div>
-          <div v-if="scatterData.length > 1">
-            <v-chart class="chart chart--scatter" :option="scatterOption" autoresize />
-          </div>
-          <el-empty v-else :image-size="48" description="暂无候选个股" />
-          <div class="panel-tip">右上角 = 高动量 + 高 ROE 的质量优等生</div>
-        </div>
-        <!-- 趋势确认轴 -->
-        <div class="panel">
-          <div class="panel-title">涨跌 × 主力净流入（趋势确认轴 · 点击圆点看个股详情）</div>
-          <div v-if="candidateTrendCount > 0">
-            <v-chart class="chart chart--scatter" :option="candidateTrendOption" autoresize @click="onTrendChartClick" />
-          </div>
-          <el-empty v-else :image-size="48" description="候选暂无趋势帧数据（外部行情域受限）" />
-          <div class="board-tips">
-            <span v-for="(t, i) in BOARD_TIPS" :key="'c' + i" class="bt-item">
-              <i class="bt-dot" :class="'dot-' + i" />{{ t }}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      <div class="stocks-hint">{{ selectedIndustry ? `行业 ${selectedIndustry} · top 30` : '资金流前 10 行业 · 每行业 top 3' }} · 三买三卖信号 · 显示 {{ filteredCandidates.length }} 只</div>
-      <div class="table-scroll">
-        <el-table
-          :data="filteredCandidates"
-          v-loading="stockLoading"
-          stripe
-          empty-text="请选择行业后计算候选个股"
-          class="candidate-table app-table app-table--trades"
-        >
-          <el-table-column prop="code" label="代码" width="90">
-            <template #default="{ row }">
-              <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
-            </template>
-          </el-table-column>
-          <el-table-column prop="name" label="名称" min-width="100">
-            <template #default="{ row }">
-              <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-name">{{ row.name }}</router-link>
-            </template>
-          </el-table-column>
-          <el-table-column label="行业" min-width="90">
-            <template #default="{ row }">
-              <span class="muted">{{ row.industry || '-' }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="涨跌幅" prop="pct_chg" width="90" align="right" sortable :sort-method="(a, b) => (a.pct_chg||0) - (b.pct_chg||0)">
-            <template #default="{ row }">
-              <span :class="(row.pct_chg || 0) >= 0 ? 'up' : 'down'">{{ fmtPctF(row.pct_chg) }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="趋势象限" width="110">
-            <template #default="{ row }">
-              <span v-if="trendTagOf(row.code)" class="trend-tag" :class="trendTagOf(row.code)!.cls">
-                <i class="tt-dot" />{{ trendTagOf(row.code)!.label }}
-              </span>
-              <span v-else class="muted">-</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="主力净流入(亿)" width="120" align="right" sortable :sort-method="(a, b) => (mainFlowOf(a.code)||0) - (mainFlowOf(b.code)||0)">
-            <template #default="{ row }">
-              <span v-if="mainFlowOf(row.code) != null" :class="(mainFlowOf(row.code) || 0) >= 0 ? 'up' : 'down'">{{ fmtSign(mainFlowOf(row.code), 1) }}</span>
-              <span v-else class="muted">-</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="5日涨跌" width="95" align="right" sortable :sort-method="(a, b) => (d5Of(a.code)||0) - (d5Of(b.code)||0)">
-            <template #default="{ row }">
-              <span v-if="d5Of(row.code) != null" :class="(d5Of(row.code) || 0) >= 0 ? 'up' : 'down'">{{ fmtPct(d5Of(row.code), 1) }}</span>
-              <span v-else class="muted">-</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="连板" width="70" align="center">
-            <template #default="{ row }">
-              <span v-if="boardOf(row.code) != null" :class="boardOf(row.code)! > 0 ? 'up' : 'muted'">{{ boardOf(row.code)! > 0 ? boardOf(row.code) + ' 板' : '未涨停' }}</span>
-              <span v-else class="muted">-</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="ΔG 象限" width="110">
-            <template #default="{ row }">
-              <el-tag v-if="row.dg_quadrant" size="small" :type="dgTagType(row.dg_quadrant)">{{ row.dg_quadrant }}</el-tag>
-              <span v-else class="muted">-</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="择时信号" width="110">
-            <template #default="{ row }">
-              <el-tag v-if="row.signal_type" size="small" :type="signalTagType(row.signal_type)">{{ row.signal_label || row.signal_type }}</el-tag>
-              <span v-else class="muted">-</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="预警" min-width="130">
-            <template #default="{ row }">
-              <template v-if="row.aux_warnings && row.aux_warnings.length">
-                <el-tooltip :content="row.aux_warnings.join('；')" placement="top">
-                  <div class="warn-cell">
-                    <el-tag v-for="w in row.aux_warnings.slice(0, 1)" :key="w" size="small" type="warning" effect="light" class="warn-tag">{{ w }}</el-tag>
-                    <el-tag v-if="row.aux_warnings.length > 1" size="small" type="info" effect="plain" class="warn-tag">+{{ row.aux_warnings.length - 1 }}</el-tag>
-                  </div>
-                </el-tooltip>
-              </template>
-              <span v-else class="muted">-</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="20日动量" prop="momentum_20d" width="100" align="right" sortable :sort-method="(a, b) => (a.momentum_20d||0) - (b.momentum_20d||0)">
-            <template #default="{ row }">
-              <span :class="(row.momentum_20d || 0) >= 0 ? 'up' : 'down'">{{ fmtPctF(row.momentum_20d) }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="ROE" prop="roe" width="80" align="right" sortable :sort-method="(a, b) => (a.roe||0) - (b.roe||0)">
-            <template #default="{ row }">{{ fmtNum(row.roe) }}%</template>
-          </el-table-column>
-          <el-table-column label="操作" width="170" fixed="right" align="center">
-            <template #default="{ row }">
-              <el-button size="small" type="success" plain @click="addFavorite(row)">+ 自选</el-button>
-              <el-button size="small" type="primary" plain :loading="aiRow?.code === row.code && aiLoading" :icon="Cpu" @click="doAiAnalyze(row)">AI 分析</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-      </div>
-    </section>
-
     <!-- AI 分析结果弹窗（复用个股趋势的单股 AI 操作结论） -->
     <el-dialog v-model="aiDialog" :title="aiDialogTitle" width="640px" class="ai-dialog" :close-on-click-modal="false">
       <div v-if="aiLoading" class="ai-body ai-loading">
         <el-icon class="is-loading"><Loading /></el-icon>
-        <span>正在基于个股趋势帧生成操作结论…</span>
+        <span>正在基于四维信号（趋势象限/择时/ΔG/预警）+ 个股趋势帧解读一致性…</span>
       </div>
       <el-alert v-else-if="aiError" :title="aiError" type="error" show-icon :closable="false" class="ai-body" />
       <el-empty v-else-if="aiResult && !aiResult.found" :description="aiResult.message || '未找到该股数据'" />
@@ -342,6 +342,35 @@
               <span class="ai-score-txt">综合评分 {{ aiResult.score }} 分</span>
             </div>
           </div>
+
+          <!-- 维度一致性（融合改造核心：四维共振/背离解读） -->
+          <div v-if="aiResult.consistency" class="ai-block consistency-block">
+            <div class="ai-block-title">
+              维度一致性
+              <span class="consistency-tag" :class="'cs-' + aiResult.consistency">{{ aiResult.consistency_label }}</span>
+              <span class="consistency-engine">{{ aiResult.engine === 'llm' ? 'LLM 解读' : '规则判定' }}</span>
+            </div>
+            <p v-if="aiResult.consistency_summary" class="ai-summary cs-summary">{{ aiResult.consistency_summary }}</p>
+            <div v-if="aiResult.dimensions?.length" class="cs-grid">
+              <div
+                v-for="(d, i) in aiResult.dimensions"
+                :key="i"
+                class="cs-cell"
+                :class="d.support > 0 ? 'cs-up' : (d.support < 0 ? 'cs-down' : 'cs-flat')"
+              >
+                <div class="cs-head">
+                  <span class="cs-name">{{ d.name }}</span>
+                  <span class="cs-flag">{{ d.support > 0 ? '偏多' : (d.support < 0 ? '偏空' : '中性') }}</span>
+                </div>
+                <div class="cs-value">{{ d.value || '—' }}</div>
+                <div class="cs-view">{{ d.view }}</div>
+              </div>
+            </div>
+            <div v-if="aiResult.conflicts?.length" class="cs-conflicts">
+              <div v-for="(c, i) in aiResult.conflicts" :key="'cf' + i" class="cs-conflict">{{ c }}</div>
+            </div>
+          </div>
+
           <p class="ai-summary">{{ aiResult.summary }}</p>
           <div v-if="aiResult.reasons?.length" class="ai-block">
             <div class="ai-block-title">判断要点</div>
@@ -513,12 +542,28 @@ const industryFlowOption = computed(() => {
 })
 
 /* ---------------- ③ 标的精选：候选 + 个股趋势帧 + 双散点 ---------------- */
-const selectedIndustry = ref('')
+// 默认选中「计算机」行业，页面打开即展示其候选股
+const DEFAULT_INDUSTRY = '计算机'
+const selectedIndustry = ref(DEFAULT_INDUSTRY)
 const candidates = ref<CandidateStock[]>([])
 const limit = 30
 const stockSection = ref<HTMLElement | null>(null)
 const signalFilter = ref<'all' | 'B1' | 'B2' | 'B3' | 'S1' | 'S2' | 'S3'>('all')
 const stockLoading = ref(false)
+
+// 行业下拉选项：资金流排名 + 兜底默认行业（若排名中不包含「计算机」）
+const industryOptions = computed(() => {
+  const names = screenRankings.value.map((r) => r.industry).filter(Boolean)
+  if (selectedIndustry.value && !names.includes(selectedIndustry.value)) {
+    return [...names, selectedIndustry.value]
+  }
+  return names
+})
+const stocksHint = computed(() =>
+  selectedIndustry.value
+    ? `行业 ${selectedIndustry.value} · top 30`
+    : '资金流前 10 行业 · 每行业 top 3'
+)
 
 const filteredCandidates = computed(() => {
   const f = signalFilter.value
@@ -704,7 +749,16 @@ async function doAiAnalyze(row: CandidateStock) {
   aiDialog.value = true
   aiLoading.value = true
   try {
-    const res = await vibeApi.getStockQuadrantAiAnalysis(row.code)
+    // 维度一致性分析：候选股四维信号（趋势象限/择时/ΔG/预警） + 个股趋势帧 → 共振/背离解读
+    const res = await vibeApi.getStockQuadrantAiConsistency({
+      code: row.code,
+      name: row.name,
+      industry: row.industry || '',
+      signal_type: row.signal_type || '',
+      signal_label: row.signal_label || '',
+      dg_quadrant: row.dg_quadrant || '',
+      aux_warnings: row.aux_warnings || [],
+    })
     aiResult.value = (res as any)?.data ?? null
   } catch (e) {
     console.error('AI 分析请求失败', e)
@@ -766,7 +820,8 @@ async function loadScreening(refresh = false) {
     const data = res.data
     screenRankings.value = data?.rankings || []
     screenAsOf.value = data?.as_of || ''
-    if (!selectedIndustry.value) loadCandidates()
+    // 始终按当前选中的行业（默认「计算机」）加载候选股
+    await loadCandidates()
   } catch (e) {
     ElMessage.error('加载行业资金流失败')
   } finally {
@@ -842,10 +897,14 @@ watch(boardScope, () => {
   loadBoard()
 })
 
-onMounted(() => {
-  loadScreening(false)
-  loadBoard()
-  loadTrendSlim()
+// 首次进入：并行加载，完成后平滑滚动到②标的精选（默认已选「计算机」，打开即见候选股）
+let initialScrollDone = false
+onMounted(async () => {
+  await Promise.allSettled([loadScreening(false), loadBoard(), loadTrendSlim()])
+  if (!initialScrollDone) {
+    initialScrollDone = true
+    nextTick(() => stockSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+  }
 })
 </script>
 
@@ -1143,6 +1202,80 @@ onMounted(() => {
       line-height: 1.9;
       color: var(--el-text-color-regular);
       &.ai-risk { color: #d4380d; }
+    }
+  }
+
+  // —— 维度一致性（融合改造核心）——
+  .consistency-block {
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: var(--el-fill-color-light);
+    border: 1px solid var(--el-border-color-lighter);
+
+    .ai-block-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .consistency-tag {
+      padding: 1px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      &.cs-align { background: rgba(103, 194, 58, .14); color: #2f855a; border: 1px solid rgba(103, 194, 58, .35); }
+      &.cs-partial { background: rgba(230, 162, 60, .14); color: #b7791f; border: 1px solid rgba(230, 162, 60, .35); }
+      &.cs-diverg { background: rgba(245, 108, 108, .14); color: #c0392b; border: 1px solid rgba(245, 108, 108, .35); }
+      &.cs-neutral { background: rgba(144, 147, 153, .14); color: #606266; border: 1px solid rgba(144, 147, 153, .35); }
+    }
+    .consistency-engine {
+      margin-left: auto;
+      font-size: 11px;
+      font-weight: 400;
+      color: var(--el-text-color-secondary);
+    }
+    .cs-summary {
+      margin-top: 10px;
+      margin-bottom: 10px;
+    }
+    .cs-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+    }
+    .cs-cell {
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: var(--el-fill-color-blank);
+      border-left: 3px solid var(--el-border-color);
+      .cs-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 4px;
+        .cs-name { font-size: 12px; font-weight: 600; color: var(--el-text-color-primary); }
+        .cs-flag { font-size: 11px; font-weight: 600; }
+      }
+      .cs-value { font-size: 13.5px; font-weight: 700; margin-bottom: 3px; }
+      .cs-view { font-size: 11.5px; line-height: 1.6; color: var(--el-text-color-secondary); }
+      &.cs-up { border-left-color: #f56c6c; .cs-flag { color: #f56c6c; } .cs-value { color: #c0392b; } }
+      &.cs-down { border-left-color: #67c23a; .cs-flag { color: #67c23a; } .cs-value { color: #2f855a; } }
+      &.cs-flat { border-left-color: #909399; .cs-flag { color: #909399; } }
+    }
+    .cs-conflicts {
+      margin-top: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      .cs-conflict {
+        font-size: 12.5px;
+        line-height: 1.7;
+        color: #b7791f;
+        background: rgba(230, 162, 60, .10);
+        border: 1px dashed rgba(230, 162, 60, .45);
+        border-radius: 8px;
+        padding: 6px 10px;
+        &::first-letter { font-weight: 700; }
+      }
     }
   }
   .ai-table {

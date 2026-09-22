@@ -977,3 +977,323 @@ async def analyze_stock_operation(code: str) -> dict[str, Any]:
         "reasons": pick["reasons"], "risks": pick["risks"], "summary": pick["summary"],
         "data": {"today": today_readable, "recent_trend": recent},
     }
+
+
+# ---------------------------------------------------------------------------
+# 5) 候选股维度一致性分析（股票筛选 · AI 分析强化版）
+# ---------------------------------------------------------------------------
+# 筛选页把「趋势象限 / 择时信号 / ΔG 象限 / 辅助预警」四个独立维度与个股趋势帧
+# 一并交给 LLM，判断各维度是“共振”还是“背离”，并解释冲突。LLM 失败时降级为
+# 确定性规则：按各维度支持度方向（>0 偏多 / <0 偏空）聚合出一致性结论。
+# 操作结论（action/score/reasons/risks）仍复用 _rule_conclusion（六维帧规则），
+# 保证与个股趋势页口径一致；LLM 只负责解释一致性。
+
+_DIM_TREND = "趋势象限"
+_DIM_SIGNAL = "择时信号"
+_DIM_DG = "ΔG 象限"
+_DIM_ALERT = "辅助预警"
+
+_TREND_QUAD_VIEW = {
+    "强势共振": "资金流入+股价上涨，短线多空强弱共振，方向最顺",
+    "缩量上行": "资金流出但股价上行，持续性存疑，需防冲高回落",
+    "低位承接": "资金流入但股价下跌，或有承接吸筹，属左侧观察",
+    "弱势杀跌": "资金流出+股价下跌，双弱格局，回避为主",
+}
+_TREND_QUAD_SUPPORT = {"强势共振": 1.0, "缩量上行": 0.3, "低位承接": 0.3, "弱势杀跌": -1.0}
+
+_SIGNAL_VIEW = {
+    "B1": "左侧买点：超跌/震荡低位触发，提前埋伏",
+    "B2": "突破买点：突破确认，右侧进场",
+    "B3": "回踩买点：强势回踩不破，加仓机会",
+    "S1": "加速卖点：冲高放量，兑现离场",
+    "S2": "跌破卖点：破位下行，防守减仓",
+    "S3": "清仓卖出：趋势破坏，清仓回避",
+}
+_SIGNAL_SUPPORT = {"B1": 1.0, "B2": 1.0, "B3": 0.6, "S1": -1.0, "S2": -1.0, "S3": -1.0}
+
+_DG_VIEW = {
+    "双击": "盈利增长向上+估值向上，景气兑现",
+    "反转": "盈利结构改善，困境反转",
+    "见顶": "景气见顶回落风险，需谨慎",
+    "双杀": "盈利与估值双杀，回避",
+}
+_DG_SUPPORT = {"双击": 1.0, "反转": 0.6, "见顶": -0.6, "双杀": -1.0}
+
+
+def _dg_lookup(dg: str) -> tuple[str, str, float]:
+    """ΔG 象限取值可能是「戴维斯双击」等全称，按关键词包含匹配兜底。"""
+    for key in ("双击", "反转", "见顶", "双杀"):
+        if key in dg:
+            return dg, _DG_VIEW[key], _DG_SUPPORT[key]
+    return dg, "财务报表量化出的景气/定价象限", 0.0
+
+_CONSISTENCY_TABLE = {
+    "align": "多维共振",
+    "partial": "存在分歧",
+    "diverg": "多空背离",
+    "neutral": "方向不明",
+}
+
+
+def _trend_quad_of(today_view: dict) -> str | None:
+    """由今日帧（pct/main）计算出趋势象限标签（与筛选页 trendTagOf 同口径）。"""
+    pct = today_view.get("pct")
+    main = today_view.get("main")
+    if pct is None or main is None:
+        return None
+    if main >= 0 and pct >= 0:
+        return "强势共振"
+    if main < 0 and pct >= 0:
+        return "缩量上行"
+    if main >= 0 and pct < 0:
+        return "低位承接"
+    return "弱势杀跌"
+
+
+def _candidate_dimensions(today_view: dict, signal_type: str, signal_label: str,
+                          dg_quadrant: str, aux_warnings: list[str]) -> list[dict]:
+    """组装四维信号（支撑度：>0 偏多，<0 偏空，0 中性）。"""
+    dims: list[dict] = []
+    quad = _trend_quad_of(today_view)
+    if quad:
+        dims.append({"name": _DIM_TREND, "value": quad,
+                     "view": _TREND_QUAD_VIEW.get(quad, ""),
+                     "support": _TREND_QUAD_SUPPORT.get(quad, 0.0)})
+    sig = (signal_label or signal_type or "").strip()
+    st = (signal_type or sig).strip()
+    if sig:
+        dims.append({"name": _DIM_SIGNAL, "value": sig,
+                     "view": _SIGNAL_VIEW.get(st, "择时系统给出的买卖点信号"),
+                     "support": _SIGNAL_SUPPORT.get(st, 0.0)})
+    dg = (dg_quadrant or "").strip()
+    if dg:
+        dg_value, dg_view, dg_support = _dg_lookup(dg)
+        dims.append({"name": _DIM_DG, "value": dg_value,
+                     "view": dg_view,
+                     "support": dg_support})
+    warns = [w for w in (aux_warnings or []) if str(w).strip()]
+    if warns:
+        dims.append({"name": _DIM_ALERT,
+                     "value": "；".join(str(w).strip() for w in warns[:2]) + ("…" if len(warns) > 2 else ""),
+                     "view": "辅助信号系统预警，提示量价/抱团/情绪过热等风险",
+                     "support": -0.7})
+    return dims
+
+
+def _rule_consistency(dims: list[dict]) -> tuple[str, str, list[str]]:
+    """规则兜底：按支撑度方向聚合出一致性结论与冲突解释。"""
+    if not dims:
+        return "neutral", _CONSISTENCY_TABLE["neutral"], []
+    positives = [d for d in dims if d["support"] > 0]
+    negatives = [d for d in dims if d["support"] < 0]
+    if positives and negatives:
+        consistency, label = "diverg", _CONSISTENCY_TABLE["diverg"]
+    elif positives:
+        consistency, label = "align", _CONSISTENCY_TABLE["align"] + "（偏多）"
+    elif negatives:
+        consistency, label = "align", _CONSISTENCY_TABLE["align"] + "（偏空）"
+    else:
+        consistency, label = "neutral", _CONSISTENCY_TABLE["neutral"]
+    conflicts: list[str] = []
+    for p in positives:
+        for n in negatives:
+            conflicts.append(
+                f"{p['name']}偏积极（{p['value']}），但{n['name']}偏谨慎（{n['value']}）"
+                f"——{n['value']}可能提示{p['value']}的持续性存疑")
+            if len(conflicts) >= 2:
+                break
+        if len(conflicts) >= 2:
+            break
+    return consistency, label, conflicts
+
+
+def _rule_consistency_summary(name: str, dims: list[dict], label: str, conflicts: list[str]) -> str:
+    parts = [f"{name}：{label}"]
+    if dims:
+        pos = [d["name"] for d in dims if d["support"] > 0]
+        neg = [d["name"] for d in dims if d["support"] < 0]
+        if pos:
+            parts.append("积极因素：" + "、".join(pos))
+        if neg:
+            parts.append("谨慎因素：" + "、".join(neg))
+    if conflicts:
+        parts.append(conflicts[0].strip())
+    return "。".join(x for x in parts if x) + "。"
+
+
+def _build_consistency_prompt(name: str, code: str, industry: str,
+                              today_view: dict, recent: list[dict], dims: list[dict],
+                              rule: dict) -> str:
+    """把个股趋势帧 + 四维信号打包成 LLM 的 user prompt（只解释一致性）。"""
+    board = today_view.get("board")
+    board_s = "无" if board is None else ("未涨停" if board == 0 else f"{board} 板")
+    trend_s = " → ".join(f"{r['date'][5:]}:{_r(r['pct'])}%" for r in recent) or "空"
+    dim_s = "\n".join(
+        f"- {d['name']}: {d['value']}（{d['view'] or '见名称'};支撑度 {d['support']:+.1f} 表示偏多/偏空）"
+        for d in dims
+    ) or "- 暂无可用维度"
+    return (
+        f"【股票】{name}（{code}） · 行业 {industry}\n"
+        "【今日个股趋势帧数据】\n"
+        f"- 涨跌幅: {_fmt_or(today_view.get('pct'))}%\n"
+        f"- 换手率: {_fmt_or(today_view.get('turn'))}%\n"
+        f"- 主力净流入: {_fmt_or(today_view.get('main'))} 亿\n"
+        f"- 连板高度: {board_s}\n"
+        f"- 5日涨跌: {_fmt_or(today_view.get('d5'))}%\n"
+        "【近期走势（近若干交易日收盘涨跌幅，旧→新）】\n"
+        f"  {trend_s}\n"
+        "【筛选页四维信号（股票筛选系统独立产出，可能相互一致或背离）】\n"
+        f"{dim_s}\n"
+        f"【规则引擎参考】趋势帧规则评分 {rule['score']} 分，方向：{rule['action_label']}（仅参考）\n"
+        "请判断这四维信号是否彼此共振/背离：若方向一致说明共振逻辑；若背离，指出具体冲突与可能的解释"
+        "（如短期强势但择时已触发卖点=高位兑现）。参考规则评分与近期走势辅助判断。"
+    )
+
+
+_CONSISTENCY_SYSTEM_PROMPT = (
+    "你是一名资深 A 股交易员与机构策略师，擅长把不同分析维度的信号对齐/冲突识别出来。\n"
+    "我会给你一只股票的四类独立信号（短期趋势象限、择时买卖点、ΔG 景气象限、辅助预警）"
+    "以及个股趋势帧数据与规则评分。这几类信号来自不同系统、回答不同问题，经常表面矛盾"
+    "（例如短期资金强势但同时触发卖出点），请识别并解释。\n"
+    "只输出一个 JSON 对象，不要输出解释文字、不要用 markdown 代码块：\n"
+    '{"consistency":"align|partial|diverg|neutral","consistency_label":"多维共振|存在分歧|多空背离|方向不明",'
+    '"summary":"1-2 句话的总评（说明整体是共振还是背离、站在哪一边）",'
+    '"dimensions":[{"name":"维度名","value":"该维度取值","view":"一句话解释该维度现在的含义","support":-1到1的浮点，>0偏多<0偏空}],'
+    '"conflicts":["冲突解释 0-3 条，每条一句话，明确列出相互矛盾的两维与可能的真相"]}\n'
+    "consistency 语义：align=各维度指向同一边（共振）；partial=部分维度同向、部分中性；"
+    "diverg=明确出现多空对立；neutral=信息不足方向不明。dimensions 请保留四个维度名与取值，不要增减。"
+    "篇幅：全文 220 字以内。"
+)
+
+
+def _normalize_consistency_result(res: dict, rule_dims: list[dict]) -> dict:
+    """LLM 输出归一化（consistency 枚举收敛；缺失字段用规则兜底）。"""
+    consistency_raw = str(res.get("consistency") or "").strip()
+    if consistency_raw not in _CONSISTENCY_TABLE:
+        consistency_raw = "neutral"
+    dims_out: list[dict] = []
+    for d in res.get("dimensions") or []:
+        if not isinstance(d, dict):
+            continue
+        n = str(d.get("name") or "").strip()
+        if not n:
+            continue
+        try:
+            support = float(d.get("support", 0))
+        except (TypeError, ValueError):
+            support = 0.0
+        dims_out.append({
+            "name": n,
+            "value": str(d.get("value") or "").strip(),
+            "view": str(d.get("view") or "").strip(),
+            "support": max(-1.0, min(1.0, support)),
+        })
+    if not dims_out:
+        dims_out = rule_dims
+    conflicts = [str(x).strip() for x in (res.get("conflicts") or []) if str(x).strip()][:3]
+    summary = str(res.get("summary") or "").strip()
+    return {
+        "consistency": consistency_raw,
+        "consistency_label": _CONSISTENCY_TABLE[consistency_raw],
+        "dimensions": dims_out,
+        "conflicts": conflicts,
+        "summary": summary,
+    }
+
+
+async def analyze_candidate_consistency(code: str, name: str = "", industry: str = "",
+                                        signal_type: str = "", signal_label: str = "",
+                                        dg_quadrant: str = "", aux_warnings: list[str] | None = None) -> dict:
+    """股票筛选 · 候选股维度一致性分析（LLM 优先，规则兜底）。
+
+    输入为筛选页候选股的四维信号（择时/ΔG/预警），叠加个股趋势帧，
+    输出：
+      found / code / name / industry / as_of / engine（llm|rule）
+      consistency / consistency_label / consistency_summary / dimensions / conflicts
+      action / action_label / score / reasons / risks / summary（趋势帧操作结论，口径同个股趋势页）
+      data.today / data.recent_trend
+    """
+    aux_warnings = [str(w) for w in (aux_warnings or [])]
+    full = await get_stock_quadrant()
+    frames = full.get("frames") or {}
+    dates = full.get("dates") or []
+    meta_all = full.get("meta") or {}
+    meta = meta_all.get(code) or {}
+    if not name:
+        name = meta.get("name") or code
+    if not industry:
+        industry = meta.get("industry") or ""
+
+    today: list | None = None
+    recent: list[dict] = []
+    for d in reversed(dates):
+        row = (frames.get(d) or {}).get(code)
+        if row is None or not row:
+            continue
+        if today is None:
+            today = row
+        recent.append({"date": d, "pct": _r(row[IDX_PCT])})
+        if len(recent) >= _AI_RECENT_N:
+            break
+    recent.reverse()
+
+    if today is None:
+        return {
+            "found": False, "code": code, "name": name, "industry": industry,
+            "message": f"未在「个股趋势」中找到 {name}（{code}）的帧数据（可能停牌或当日无成交）",
+        }
+
+    today_view = {
+        "pct": _r(_num(today[IDX_PCT])),
+        "amt": _r(_num(today[IDX_AMT]), 3),
+        "turn": _r(_num(today[IDX_TURN])),
+        "pe": _r(_num(today[IDX_PE])),
+        "mv": _r(_num(today[IDX_MV])),
+        "main": _r(_num(today[IDX_MAIN]), 3),
+        "board": None if today[IDX_BOARD] is None else int(today[IDX_BOARD]),
+        "d5": _r(_num(today[IDX_D5])),
+    }
+
+    # 规则层：操作结论（趋势帧口径）+ 一致性（四维信号聚合）
+    rule = _rule_conclusion(name, code, today, recent)
+    dims = _candidate_dimensions(today_view, signal_type, signal_label, dg_quadrant, aux_warnings)
+    consistency, consistency_label, rule_conflicts = _rule_consistency(dims)
+
+    # LLM 优先：仅解释一致性；失败/未配置 → 规则一致性
+    engine = "rule"
+    pick_consistency = {
+        "consistency": consistency,
+        "consistency_label": consistency_label,
+        "dimensions": dims,
+        "conflicts": rule_conflicts,
+        "summary": _rule_consistency_summary(name, dims, consistency_label, rule_conflicts),
+    }
+    cfg = _llm_cfg()
+    if cfg:
+        for attempt in (1, 2):
+            try:
+                user_p = _build_consistency_prompt(name, code, industry, today_view, recent, dims, rule)
+                if attempt == 2:
+                    user_p += _AI_RETRY_TAIL
+                res = await asyncio.to_thread(_llm_chat, cfg, _CONSISTENCY_SYSTEM_PROMPT, user_p)
+                pick_consistency = _normalize_consistency_result(res, dims)
+                engine = "llm"
+                break
+            except Exception as e:
+                logger.warning(f"维度一致性 LLM 第 {attempt}/2 次失败（降级规则）: {type(e).__name__}: {str(e)[:120]}")
+
+    return {
+        "found": True,
+        "code": code, "name": name, "industry": industry,
+        "as_of": full.get("as_of", ""),
+        "engine": engine,
+        "consistency": pick_consistency["consistency"],
+        "consistency_label": pick_consistency["consistency_label"],
+        "consistency_summary": pick_consistency["summary"],
+        "dimensions": pick_consistency["dimensions"],
+        "conflicts": pick_consistency["conflicts"],
+        "action": rule["action"], "action_label": rule["action_label"],
+        "score": rule["score"],
+        "reasons": rule["reasons"], "risks": rule["risks"], "summary": rule["summary"],
+        "data": {"today": today_view, "recent_trend": recent},
+    }

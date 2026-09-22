@@ -539,6 +539,21 @@ export const vibeApi = {
     )
   },
 
+  // 股票筛选 · 候选股维度一致性 AI 分析（趋势象限/择时/ΔG/预警 四维共振或背离解读）
+  async getStockQuadrantAiConsistency(payload: {
+    code: string
+    name?: string
+    industry?: string
+    signal_type?: string
+    signal_label?: string
+    dg_quadrant?: string
+    aux_warnings?: string[]
+  }) {
+    return ApiClient.post<any>(
+      '/api/vibe/market/stock-quadrant/ai-consistency', payload, { timeout: 60000 }
+    )
+  },
+
   // 板块象限（趋势分析）：概念/行业当前帧（仅最新快照，轻量，秒回）
   async getBoardQuadrant(scope: 'concept' | 'industry') {
     return cachedGet<BoardQuadrant>(

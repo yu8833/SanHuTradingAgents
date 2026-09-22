@@ -25,6 +25,7 @@
       <el-menu-item index="/vibe/review/overview">大盘看板</el-menu-item>
       <el-menu-item index="/vibe/review/emotion">短线情绪</el-menu-item>
       <el-menu-item index="/vibe/review/trend-analysis">趋势分析</el-menu-item>
+      <el-menu-item index="/candidate">股票筛选</el-menu-item>
       <el-menu-item index="/vibe/intel/radar">资讯雷达</el-menu-item>
     </el-sub-menu>
 
@@ -50,7 +51,6 @@
         <el-icon><CreditCard /></el-icon>
         <span>交易</span>
       </template>
-      <el-menu-item index="/candidate">股票筛选</el-menu-item>
       <el-menu-item index="/paper">模拟交易</el-menu-item>
       <el-menu-item index="/portfolio">持仓追踪</el-menu-item>
       <el-menu-item index="/stock-alerts">监控中心</el-menu-item>

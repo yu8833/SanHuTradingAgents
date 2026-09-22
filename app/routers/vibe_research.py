@@ -10,7 +10,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.response import ok
 from app.services import vibe_astock as astock
@@ -254,6 +254,41 @@ async def market_stock_quadrant_ai_analysis(code: str, current_user: dict = Depe
     except Exception as e:
         logger.error(f"个股趋势AI分析异常: {code} - {e}")
         return ok({"found": False, "code": str(code), "name": str(code),
+                   "message": "分析暂不可用，请稍后重试"})
+
+
+class AiConsistencyIn(BaseModel):
+    """股票筛选 · 候选股维度一致性分析入参（四维信号 + 个股身份）。"""
+    code: str
+    name: str = ""
+    industry: str = ""
+    signal_type: str = ""
+    signal_label: str = ""
+    dg_quadrant: str = ""
+    aux_warnings: list[str] = Field(default_factory=list)
+
+
+@router.post("/market/stock-quadrant/ai-consistency")
+async def market_stock_quadrant_ai_consistency(payload: AiConsistencyIn,
+                                               current_user: dict = Depends(get_optional_current_user)):
+    """股票筛选 · 候选股维度一致性分析（LLM 优先，规则兜底）。
+
+    合并「趋势象限 / 择时信号 / ΔG 象限 / 辅助预警」四维信号与个股趋势帧，
+    判断各维度是共振还是背离并解释冲突；同时返回趋势帧口径的操作结论。
+    """
+    if not payload.code:
+        return ok({"found": False, "code": "", "name": payload.name, "message": "缺少股票代码"})
+    try:
+        from app.services.stock_quadrant_analysis import analyze_candidate_consistency
+        return ok(await analyze_candidate_consistency(
+            code=str(payload.code).strip(),
+            name=payload.name, industry=payload.industry,
+            signal_type=payload.signal_type, signal_label=payload.signal_label,
+            dg_quadrant=payload.dg_quadrant, aux_warnings=payload.aux_warnings,
+        ))
+    except Exception as e:
+        logger.error(f"候选股维度一致性AI分析异常: {payload.code} - {e}")
+        return ok({"found": False, "code": str(payload.code), "name": payload.name,
                    "message": "分析暂不可用，请稍后重试"})
 
 
