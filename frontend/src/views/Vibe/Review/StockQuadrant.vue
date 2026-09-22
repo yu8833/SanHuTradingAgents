@@ -97,6 +97,17 @@
             <el-button size="small" type="primary" plain :icon="Search" :disabled="!searchKw.trim()" @click="doSearch">
               查 找
             </el-button>
+            <el-button
+              size="small"
+              type="warning"
+              plain
+              :icon="Cpu"
+              :loading="aiLoading"
+              :disabled="!searchKw.trim()"
+              @click="doAiAnalyze"
+            >
+              AI 分析
+            </el-button>
             <el-button v-if="matchNames.length" size="small" @click="clearMatch">清除高亮</el-button>
           </div>
         </div>
@@ -133,13 +144,72 @@
       </section>
     </div>
     <el-empty v-else :image-size="64" :description="loading ? '数据聚合中… 首次加载约需 10-40 秒，请稍候' : '暂无数据，请刷新重试'" />
+
+    <!-- AI 分析结果弹窗 -->
+    <el-dialog v-model="aiDialog" :title="aiDialogTitle" width="640px" class="ai-dialog" :close-on-click-modal="false">
+      <div v-if="aiLoading" class="ai-body ai-loading">
+        <el-icon class="is-loading"><Loading /></el-icon>
+        <span>正在基于该股在个股趋势中的数据生成操作结论…</span>
+      </div>
+      <el-alert v-else-if="aiError" :title="aiError" type="error" show-icon :closable="false" class="ai-body" />
+      <el-empty v-else-if="aiResult && !aiResult.found" :description="aiResult.message || '未找到该股数据'" />
+      <template v-else-if="aiResult">
+        <div class="ai-body">
+          <div class="ai-head">
+            <div class="ai-head-tags">
+              <el-tag :color="aiActionColor" effect="dark" size="large">{{ aiResult.action_label }}</el-tag>
+              <el-tag :type="aiResult.engine === 'llm' ? 'primary' : 'info'" size="small" effect="plain">
+                {{ aiResult.engine === 'llm' ? 'LLM 深度分析' : '规则引擎兜底' }}
+              </el-tag>
+            </div>
+            <div class="ai-score">
+              <el-progress :percentage="aiScorePct" :color="aiActionColor" :stroke-width="10" />
+              <span class="ai-score-txt">综合评分 {{ aiResult.score }} 分</span>
+            </div>
+          </div>
+          <p class="ai-summary">{{ aiResult.summary }}</p>
+          <div v-if="aiResult.reasons?.length" class="ai-block">
+            <div class="ai-block-title">判断要点</div>
+            <ul class="ai-list">
+              <li v-for="(r, i) in aiResult.reasons" :key="'r' + i">{{ r }}</li>
+            </ul>
+          </div>
+          <div v-if="aiResult.risks?.length" class="ai-block">
+            <div class="ai-block-title">风险提示</div>
+            <ul class="ai-list ai-risk">
+              <li v-for="(r, i) in aiResult.risks" :key="'k' + i">{{ r }}</li>
+            </ul>
+          </div>
+          <div class="ai-block">
+            <div class="ai-block-title">今日数据（个股趋势帧 · {{ aiResult.as_of }}）</div>
+            <div class="ai-table">
+              <div v-for="cell in aiTodayCells" :key="cell.label" class="ai-cell">
+                <span class="ai-cell-label">{{ cell.label }}</span>
+                <b :class="cell.cls">{{ cell.text }}</b>
+              </div>
+            </div>
+          </div>
+          <div v-if="aiResult.data?.recent_trend?.length" class="ai-block">
+            <div class="ai-block-title">近期走势（最近 {{ aiResult.data.recent_trend.length }} 个交易日）</div>
+            <div class="ai-trend">
+              <span
+                v-for="t in aiResult.data.recent_trend"
+                :key="t.date"
+                class="ai-trend-item"
+                :class="(t.pct ?? 0) >= 0 ? 'up' : 'down'"
+              >{{ t.date.slice(5) }} {{ fmtPct(t.pct) }}</span>
+            </div>
+          </div>
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Search, Refresh, DataAnalysis, TrendCharts, Odometer, Clock, VideoPlay, VideoPause } from '@element-plus/icons-vue'
+import { Search, Refresh, DataAnalysis, TrendCharts, Odometer, Clock, VideoPlay, VideoPause, Cpu, Loading } from '@element-plus/icons-vue'
 import { use as echartsUse } from 'echarts/core'
 import { ScatterChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, DataZoomComponent, MarkAreaComponent, MarkLineComponent } from 'echarts/components'
@@ -448,7 +518,108 @@ function doSearch() {
   if (hits.length > 200) hits.length = 200
   stopBlink()
   matchNames.value = hits
+  // 命中但当前帧无成交数据（停牌/尚未开盘/当日帧缺失）→ 提示；
+  // matchNames 已记录，blink 保持运行，拖动时间轴到含该股的交易日时自动高亮
+  if (!hits.some((c) => c in currentFrame.value)) {
+    ElMessage.warning(`命中「${kw}」在当前交易日帧无成交数据（可能停牌/尚未开盘），可拖动时间轴到其他交易日查看高亮`)
+  }
   startBlink()
+}
+
+// ── AI 分析：基于个股趋势帧数据的操作结论 ──
+const aiDialog = ref(false)
+const aiLoading = ref(false)
+const aiError = ref('')
+const aiResult = ref<any>(null)
+
+// 操作建议 → 展示色（买入红/关注橙/持有蓝/观望灰/减仓绿/回避青）
+const AI_ACTION_COLOR: Record<string, string> = {
+  strong_buy: '#f56c6c',
+  buy: '#e6a23c',
+  hold: '#409eff',
+  wait: '#909399',
+  reduce: '#67c23a',
+  avoid: '#13a8a8',
+}
+const aiActionColor = computed(() => AI_ACTION_COLOR[aiResult.value?.action as string] || '#909399')
+const aiDialogTitle = computed(() => {
+  const r = aiResult.value
+  return r ? `AI 分析 · ${r.name}（${r.code}）` : 'AI 分析'
+})
+// 评分 -100~100 → 0~100 进度展示
+const aiScorePct = computed(() => {
+  const s = Number(aiResult.value?.score ?? 0)
+  return Math.max(0, Math.min(100, Math.round((s + 100) / 2)))
+})
+
+function fmtN(v: any, unit = '', sign = false): string {
+  if (v == null || v === '') return '—'
+  const n = Number(v)
+  if (Number.isNaN(n)) return '—'
+  const s = sign && n > 0 ? '+' : ''
+  const num = Number.isInteger(n) ? String(n) : n.toFixed(2)
+  return `${s}${num}${unit}`
+}
+
+const AI_TODAY_DEF = [
+  { key: 'pct', label: '涨跌幅', unit: '%', sign: true },
+  { key: 'amt', label: '成交额', unit: '亿' },
+  { key: 'turn', label: '换手率', unit: '%' },
+  { key: 'pe', label: '市盈率' },
+  { key: 'mv', label: '总市值', unit: '亿' },
+  { key: 'main', label: '主力净流入', unit: '亿', sign: true },
+  { key: 'board', label: '连板', render: (v: any) => (v == null ? '—' : v === 0 ? '未涨停' : `${v} 板`) },
+  { key: 'd5', label: '5日涨跌', unit: '%', sign: true },
+]
+const aiTodayCells = computed(() => {
+  const today = aiResult.value?.data?.today ?? {}
+  return AI_TODAY_DEF.map((d) => {
+    const raw = today[d.key]
+    let text: string
+    let cls = ''
+    if (d.render) {
+      text = d.render(raw)
+      cls = (raw != null && raw > 0) ? 'up' : (raw != null && raw < 0 ? 'down' : '')
+    } else {
+      text = fmtN(raw, d.unit || '', !!d.sign)
+      cls = (raw != null && raw > 0) ? 'up' : (raw != null && raw < 0 ? 'down' : '')
+    }
+    return { label: d.label, text, cls }
+  })
+})
+
+async function doAiAnalyze() {
+  const kw = searchKw.value.trim()
+  if (!kw) return
+  const meta = data.value?.meta || {}
+  const isNum = /^\d+$/.test(kw) && kw.length >= 2
+  const hits: string[] = isNum
+    ? Object.keys(meta).filter((c) => c.startsWith(kw))
+    : (Object.entries(meta) as [string, { name: string }][])
+        .filter(([, m]) => m.name.includes(kw))
+        .map(([c]) => c)
+  if (!hits.length) {
+    ElMessage.warning(`未找到与「${kw}」匹配的股票`)
+    return
+  }
+  if (hits.length > 1) {
+    ElMessage.warning(`「${kw}」匹配到 ${hits.length} 只股票，请输入完整代码或名称后再分析`)
+    return
+  }
+  const code = hits[0]
+  aiError.value = ''
+  aiResult.value = null
+  aiDialog.value = true
+  aiLoading.value = true
+  try {
+    const res = await vibeApi.getStockQuadrantAiAnalysis(code)
+    aiResult.value = (res as any)?.data ?? null
+  } catch (e) {
+    console.error('AI 分析请求失败', e)
+    aiError.value = 'AI 分析请求失败，请稍后重试'
+  } finally {
+    aiLoading.value = false
+  }
 }
 
 // ── 点击跳转个股详情 / 数据加载 ──
@@ -661,6 +832,111 @@ onBeforeUnmount(() => {
 
   .accent {
     color: var(--el-color-warning);
+  }
+}
+
+// AI 分析弹窗
+.ai-dialog {
+  .ai-body {
+    padding: 4px 2px;
+  }
+  .ai-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 120px;
+    color: var(--el-text-color-secondary);
+    font-size: 13px;
+  }
+  .ai-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 12px;
+    .ai-head-tags {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .ai-score {
+      flex: 1;
+      .el-progress {
+        margin-bottom: 4px;
+      }
+      .ai-score-txt {
+        font-size: 12px;
+        color: var(--el-text-color-secondary);
+      }
+    }
+  }
+  .ai-summary {
+    margin: 0 0 12px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: var(--el-fill-color-light);
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--el-text-color-primary);
+  }
+  .ai-block {
+    margin-top: 12px;
+    .ai-block-title {
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .ai-list {
+      margin: 0;
+      padding-left: 18px;
+      font-size: 12.5px;
+      line-height: 1.9;
+      color: var(--el-text-color-regular);
+      &.ai-risk {
+        color: #d4380d;
+      }
+    }
+  }
+  .ai-table {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    .ai-cell {
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: var(--el-fill-color-blank);
+      border: 1px solid var(--el-border-color-lighter);
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      .ai-cell-label {
+        font-size: 11px;
+        color: var(--el-text-color-secondary);
+      }
+      b {
+        font-family: 'SFMono-Regular', ui-monospace, Menlo, monospace;
+        font-size: 14px;
+        color: var(--el-text-color-primary);
+        &.up { color: #f56c6c; }
+        &.down { color: #67c23a; }
+      }
+    }
+  }
+  .ai-trend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    .ai-trend-item {
+      font-size: 11.5px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      background: var(--el-fill-color-light);
+      font-family: 'SFMono-Regular', ui-monospace, Menlo, monospace;
+      &.up { color: #f56c6c; }
+      &.down { color: #67c23a; }
+    }
   }
 }
 

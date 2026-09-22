@@ -238,6 +238,25 @@ async def market_stock_quadrant_day(date: str, current_user: dict = Depends(get_
         return ok({"date": date, "frame": {}})
 
 
+@router.get("/market/stock-quadrant/ai-analysis")
+async def market_stock_quadrant_ai_analysis(code: str, current_user: dict = Depends(get_optional_current_user)):
+    """个股趋势 · 单股操作结论（LLM 优先，失败降级为规则引擎）。
+
+    数据源与页面完全一致（今日帧 8 元组 + 该股近期帧序列），
+    返回操作建议 / 综合评分 / 判断要点 / 风险提示 / 一句话结论 / engine（llm|rule）。
+    LLM 配置复用综合研判的 MongoDB llm_configs；未配置/失败时规则引擎兜底，保证可用。
+    """
+    if not code:
+        return ok({"found": False, "code": "", "name": "", "message": "缺少股票代码"})
+    try:
+        from app.services.stock_quadrant_analysis import analyze_stock_operation
+        return ok(await analyze_stock_operation(str(code).strip()))
+    except Exception as e:
+        logger.error(f"个股趋势AI分析异常: {code} - {e}")
+        return ok({"found": False, "code": str(code), "name": str(code),
+                   "message": "分析暂不可用，请稍后重试"})
+
+
 @router.get("/market/board-quadrant")
 async def market_board_quadrant(scope: str = "concept", current_user: dict = Depends(get_optional_current_user)):
     """趋势分析 · 概念/行业当前帧象限数据（仅当前快照，无 30 日时间轴）。

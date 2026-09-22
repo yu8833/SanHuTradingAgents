@@ -194,16 +194,6 @@ const routes: RouteRecordRaw[] = [
         }
       },
       {
-        path: 'review/concept',
-        name: 'ReviewConcept',
-        component: () => import('@/views/Vibe/Review/ConceptAnalysis.vue'),
-        meta: {
-          title: '概念分析',
-          parentTitle: '市场',
-          requiresAuth: true
-        }
-      },
-      {
         path: 'review/trend-analysis',
         name: 'ReviewTrendAnalysis',
         component: () => import('@/views/Vibe/Review/TrendAnalysis.vue'),

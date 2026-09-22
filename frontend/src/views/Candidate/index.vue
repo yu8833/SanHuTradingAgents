@@ -1,6 +1,6 @@
 <template>
   <div class="candidate-page app-page">
-    <!-- 顶部横幅：资金为王主线导航 -->
+    <!-- 顶部横幅：三层确认主线 -->
     <div class="page-hero">
       <div class="page-hero-main">
         <div class="page-hero-icon">
@@ -8,45 +8,114 @@
         </div>
         <div class="page-hero-text">
           <h2 class="page-hero-title">股票筛选</h2>
-          <p class="page-hero-sub">资金为王 · 行业资金流排序 → 个股质量筛选 + 三买三卖择时</p>
+          <p class="page-hero-sub">三层确认：赛道（行业/概念趋势）→ 标的（个股趋势）→ 时机（三买三卖）</p>
         </div>
       </div>
       <div class="page-hero-meta">
         <span v-if="screenAsOf" class="page-hero-tag">
           <el-icon :size="14"><Calendar /></el-icon> 数据日 {{ screenAsOf }}
         </span>
+        <el-button :icon="Refresh" :loading="refreshingAll" @click="refreshAll">刷新</el-button>
       </div>
     </div>
 
-    <el-tabs v-model="activeTab" class="candidate-tabs">
-      <!-- Tab1 行业筛选（行业 ETF 主力净流入排名 + 行业 ΔG 景气融合） -->
-      <el-tab-pane label="行业筛选" name="screening">
-        <el-alert
-          type="info"
-          :closable="false"
-          show-icon
-          class="tab-hint"
-          title="资金为王：按行业主题 ETF 主力净流入「净占比」分位排名（主力净流入=超大单+大单），同花顺行业净流入交叉核验方向。点击行进入个股筛选。"
-        />
-        <div class="screening-toolbar">
-          <el-button type="primary" :icon="Lightning" :loading="screenRefreshing" @click="loadScreening(true)">
-            实时采集
-          </el-button>
-          <el-button :icon="Refresh" :loading="screenLoading" @click="loadScreening(false)">刷新快照</el-button>
-          <span class="screening-hint">共 {{ screenCount }} 个行业 · 点行进入个股筛选</span>
+    <!-- ① 市场温度：大盘冷暖决定进攻节奏（来自个股趋势 · 全市场 30 日帧） -->
+    <section class="flow-block">
+      <div class="flow-head">
+        <span class="flow-step">①</span>
+        <div class="flow-title">
+          市场温度
+          <span class="flow-sub">个股趋势 · 全市场帧（{{ trendAsOf || '—' }}）</span>
+        </div>
+        <span class="flow-hint">先看大盘冷暖，再定进攻方向</span>
+      </div>
+      <div class="kpi-row">
+        <div class="kpi-cell">
+          <div class="kpi-label">个股总数</div>
+          <div class="kpi-value accent">{{ widthTotal ?? '—' }}</div>
+          <div class="kpi-sub">全市场 A 股（有成交额）</div>
+        </div>
+        <div class="kpi-cell">
+          <div class="kpi-label">上涨 / 下跌</div>
+          <div class="kpi-value">
+            <span class="up">{{ widthUp ?? '—' }}</span><span class="kpi-sep">/</span><span class="down">{{ widthDown ?? '—' }}</span>
+          </div>
+          <div class="kpi-sub">当前帧涨跌家数</div>
+        </div>
+        <div class="kpi-cell">
+          <div class="kpi-label">平均涨幅</div>
+          <div class="kpi-value accent" :class="clsByVal(widthAvg, '')">{{ fmtPct(widthAvg) }}</div>
+          <div class="kpi-sub">当前帧全市场均值</div>
+        </div>
+        <div class="kpi-cell">
+          <div class="kpi-label">上涨占比</div>
+          <div class="kpi-value accent" :class="clsByVal(widthUpRatio, '')">{{ widthUpRatio == null ? '—' : fmtNum(widthUpRatio, 1) + '%' }}</div>
+          <div class="kpi-sub">赚钱效应 · 强弱分水岭 50%</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ② 赛道双确认：行业资金流排序 × 行业/概念趋势象限 -->
+    <section class="flow-block">
+      <div class="flow-head">
+        <span class="flow-step">②</span>
+        <div class="flow-title">
+          赛道双确认
+          <span class="flow-sub">资金流决定排序，趋势象限决定强弱 —— 双维交叉定进攻方向</span>
+        </div>
+        <div class="flow-actions">
+          <el-radio-group v-model="boardScope" size="small" class="board-switch">
+            <el-radio-button value="industry">行业趋势</el-radio-button>
+            <el-radio-button value="concept">概念趋势</el-radio-button>
+          </el-radio-group>
+          <el-button size="small" type="primary" :icon="Lightning" :loading="screenRefreshing" @click="loadScreening(true)">实时采集</el-button>
+          <el-button size="small" :icon="Refresh" :loading="screenLoading" @click="loadScreening(false)">刷新快照</el-button>
+        </div>
+      </div>
+
+      <div class="split-grid board-split">
+        <!-- 左：行业资金流 -->
+        <div class="panel">
+          <div class="panel-title">行业主力资金净流入 TOP10（亿元 · 红流入绿流出）</div>
+          <div v-if="industryFlowData.length > 0">
+            <v-chart class="chart chart--industry" :option="industryFlowOption" autoresize @click="onIndustryChartClick" />
+          </div>
+          <el-empty v-else-if="!screenLoading && !screenRefreshing" :image-size="48" description="暂无行业资金流数据（点击「实时采集」获取）" />
+          <div class="panel-tip">点击柱形或下方列表进入该行业的个股筛选</div>
         </div>
 
-        <el-empty v-if="!screenRankings.length && !screenLoading && !screenRefreshing" description="暂无行业资金流数据（点击「实时采集」获取，或等待盘中任务入库）" />
-
-        <!-- 行业主力净流入柱状图（红流入绿流出，点击进入个股筛选） -->
-        <div v-if="industryFlowData.length > 0" class="chart-card industry-flow-chart">
-          <div class="chart-card-title">行业主力资金净流入 TOP10（亿元，点击进入个股筛选）</div>
-          <v-chart class="chart chart--industry" :option="industryFlowOption" autoresize @click="onIndustryChartClick" />
+        <!-- 右：行业/概念趋势象限 -->
+        <div class="panel">
+          <div class="panel-title">{{ boardScope === 'industry' ? '行业' : '概念' }}趋势 · 涨跌 × 主力资金（四象限强弱定位）</div>
+          <div v-if="boardReady" class="board-chart">
+            <v-chart class="chart chart--board" :option="boardOption" autoresize @click="onBoardChartClick" />
+          </div>
+          <el-empty v-else :image-size="48" description="趋势象限数据暂不可用（外部行情域受限）" />
+          <div class="board-tips">
+            <span v-for="(t, i) in BOARD_TIPS" :key="i" class="bt-item">
+              <i class="bt-dot" :class="'dot-' + i" />{{ t }}
+            </span>
+          </div>
+          <div v-if="strongBoards.length" class="strong-board">
+            <div class="strong-label">强势 {{ boardScope === 'industry' ? '行业' : '概念' }} TOP{{ strongBoards.length }}（点击跳详情）</div>
+            <div class="strong-chips">
+              <button
+                v-for="b in strongBoards"
+                :key="b.code"
+                class="strong-chip"
+                @click="openBoard(b.link)"
+              >
+                <span class="sc-name">{{ b.name }}</span>
+                <span class="sc-pct" :class="(b.pct || 0) >= 0 ? 'up' : 'down'">{{ fmtPct(b.pct, 1) }}</span>
+              </button>
+            </div>
+          </div>
         </div>
+      </div>
 
-        <!-- 全排名表 -->
-        <div class="section-title">行业资金流排名（{{ screenRankings.length }}）</div>
-        <div class="table-scroll">
+      <!-- 全行业资金流排名表 -->
+      <div class="section-title">行业资金流排名（{{ screenRankings.length }} · 点行进入个股筛选）</div>
+      <div class="table-scroll">
         <el-table
           :data="screenRankings"
           v-loading="screenLoading"
@@ -93,32 +162,27 @@
             </template>
           </el-table-column>
         </el-table>
-        </div>
-      </el-tab-pane>
+      </div>
+    </section>
 
-      <!-- Tab2 个股筛选（行业成分股多因子打分 + ΔG 象限 + 择时预览） -->
-      <el-tab-pane label="个股筛选" name="stock-screening">
-        <!-- 动量-ROE 散点（气泡=市值，颜色=当日涨跌） -->
-        <div v-if="scatterData.length > 1" class="chart-card momentum-chart">
-          <div class="chart-card-title">动量-ROE 分布（气泡大小 = 市值，颜色 = 当日涨跌）</div>
-          <v-chart class="chart chart--scatter" :option="scatterOption" autoresize />
+    <!-- ③ 标的精选：个股趋势帧确认 + 三买三卖时机 -->
+    <section ref="stockSection" class="flow-block">
+      <div class="flow-head">
+        <span class="flow-step">③</span>
+        <div class="flow-title">
+          标的精选
+          <span class="flow-sub">个股趋势列（主力净流入/5日/连板）附于候选 · 趋势数据日 {{ trendAsOf || '—' }}</span>
         </div>
-
-        <div class="stocks-toolbar">
+        <div class="flow-actions">
           <el-select
             v-model="selectedIndustry"
             filterable
             clearable
-            placeholder="选择行业（来自行业筛选）"
+            placeholder="选择行业（来自赛道确认）"
             class="industry-select"
             @change="loadCandidates"
           >
-            <el-option
-              v-for="ind in screenRankings"
-              :key="ind.industry"
-              :label="ind.industry"
-              :value="ind.industry"
-            />
+            <el-option v-for="ind in screenRankings" :key="ind.industry" :label="ind.industry" :value="ind.industry" />
           </el-select>
           <el-button :icon="Refresh" :loading="stockLoading" @click="loadCandidates">计算候选</el-button>
           <el-radio-group v-model="signalFilter" class="signal-filter" size="small">
@@ -130,10 +194,36 @@
             <el-radio-button value="S2">跌破卖点 {{ signalStats.S2 }}</el-radio-button>
             <el-radio-button value="S3">清仓卖出 {{ signalStats.S3 }}</el-radio-button>
           </el-radio-group>
-          <span class="stocks-hint">{{ selectedIndustry ? `行业 ${selectedIndustry} · top ${limit}` : `前10行业 · 每行业top3 · 共${signalStats.all}只` }} · 显示 {{ filteredCandidates.length }} 只</span>
         </div>
+      </div>
 
-        <div class="table-scroll">
+      <div class="split-grid scatter-split">
+        <!-- 质量轴 -->
+        <div class="panel">
+          <div class="panel-title">动量 × ROE（质量轴 · 气泡大小=市值，颜色=当日涨跌）</div>
+          <div v-if="scatterData.length > 1">
+            <v-chart class="chart chart--scatter" :option="scatterOption" autoresize />
+          </div>
+          <el-empty v-else :image-size="48" description="暂无候选个股" />
+          <div class="panel-tip">右上角 = 高动量 + 高 ROE 的质量优等生</div>
+        </div>
+        <!-- 趋势确认轴 -->
+        <div class="panel">
+          <div class="panel-title">涨跌 × 主力净流入（趋势确认轴 · 点击圆点看个股详情）</div>
+          <div v-if="candidateTrendCount > 0">
+            <v-chart class="chart chart--scatter" :option="candidateTrendOption" autoresize @click="onTrendChartClick" />
+          </div>
+          <el-empty v-else :image-size="48" description="候选暂无趋势帧数据（外部行情域受限）" />
+          <div class="board-tips">
+            <span v-for="(t, i) in BOARD_TIPS" :key="'c' + i" class="bt-item">
+              <i class="bt-dot" :class="'dot-' + i" />{{ t }}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div class="stocks-hint">{{ selectedIndustry ? `行业 ${selectedIndustry} · top 30` : '资金流前 10 行业 · 每行业 top 3' }} · 三买三卖信号 · 显示 {{ filteredCandidates.length }} 只</div>
+      <div class="table-scroll">
         <el-table
           :data="filteredCandidates"
           v-loading="stockLoading"
@@ -158,36 +248,54 @@
           </el-table-column>
           <el-table-column label="涨跌幅" prop="pct_chg" width="90" align="right" sortable :sort-method="(a, b) => (a.pct_chg||0) - (b.pct_chg||0)">
             <template #default="{ row }">
-              <span :class="(row.pct_chg || 0) >= 0 ? 'up' : 'down'">{{ fmtPct(row.pct_chg) }}</span>
+              <span :class="(row.pct_chg || 0) >= 0 ? 'up' : 'down'">{{ fmtPctF(row.pct_chg) }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="ΔG 象限" width="120">
+          <el-table-column label="趋势象限" width="110">
             <template #default="{ row }">
-              <el-tag v-if="row.dg_quadrant" size="small" :type="dgTagType(row.dg_quadrant)">
-                {{ row.dg_quadrant }}
-              </el-tag>
+              <span v-if="trendTagOf(row.code)" class="trend-tag" :class="trendTagOf(row.code)!.cls">
+                <i class="tt-dot" />{{ trendTagOf(row.code)!.label }}
+              </span>
               <span v-else class="muted">-</span>
             </template>
           </el-table-column>
-          <el-table-column label="择时信号" width="120">
+          <el-table-column label="主力净流入(亿)" width="120" align="right" sortable :sort-method="(a, b) => (mainFlowOf(a.code)||0) - (mainFlowOf(b.code)||0)">
             <template #default="{ row }">
-              <el-tag v-if="row.signal_type" size="small" :type="signalTagType(row.signal_type)">
-                {{ row.signal_label || row.signal_type }}
-              </el-tag>
+              <span v-if="mainFlowOf(row.code) != null" :class="(mainFlowOf(row.code) || 0) >= 0 ? 'up' : 'down'">{{ fmtSign(mainFlowOf(row.code), 1) }}</span>
               <span v-else class="muted">-</span>
             </template>
           </el-table-column>
-          <el-table-column label="预警" min-width="150">
+          <el-table-column label="5日涨跌" width="95" align="right" sortable :sort-method="(a, b) => (d5Of(a.code)||0) - (d5Of(b.code)||0)">
+            <template #default="{ row }">
+              <span v-if="d5Of(row.code) != null" :class="(d5Of(row.code) || 0) >= 0 ? 'up' : 'down'">{{ fmtPct(d5Of(row.code), 1) }}</span>
+              <span v-else class="muted">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="连板" width="70" align="center">
+            <template #default="{ row }">
+              <span v-if="boardOf(row.code) != null" :class="boardOf(row.code)! > 0 ? 'up' : 'muted'">{{ boardOf(row.code)! > 0 ? boardOf(row.code) + ' 板' : '未涨停' }}</span>
+              <span v-else class="muted">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="ΔG 象限" width="110">
+            <template #default="{ row }">
+              <el-tag v-if="row.dg_quadrant" size="small" :type="dgTagType(row.dg_quadrant)">{{ row.dg_quadrant }}</el-tag>
+              <span v-else class="muted">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="择时信号" width="110">
+            <template #default="{ row }">
+              <el-tag v-if="row.signal_type" size="small" :type="signalTagType(row.signal_type)">{{ row.signal_label || row.signal_type }}</el-tag>
+              <span v-else class="muted">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="预警" min-width="130">
             <template #default="{ row }">
               <template v-if="row.aux_warnings && row.aux_warnings.length">
                 <el-tooltip :content="row.aux_warnings.join('；')" placement="top">
                   <div class="warn-cell">
-                    <el-tag v-for="w in row.aux_warnings.slice(0, 2)" :key="w" size="small" type="warning" effect="light" class="warn-tag">
-                      {{ w }}
-                    </el-tag>
-                    <el-tag v-if="row.aux_warnings.length > 2" size="small" type="info" effect="plain" class="warn-tag">
-                      +{{ row.aux_warnings.length - 2 }}
-                    </el-tag>
+                    <el-tag v-for="w in row.aux_warnings.slice(0, 1)" :key="w" size="small" type="warning" effect="light" class="warn-tag">{{ w }}</el-tag>
+                    <el-tag v-if="row.aux_warnings.length > 1" size="small" type="info" effect="plain" class="warn-tag">+{{ row.aux_warnings.length - 1 }}</el-tag>
                   </div>
                 </el-tooltip>
               </template>
@@ -196,100 +304,184 @@
           </el-table-column>
           <el-table-column label="20日动量" prop="momentum_20d" width="100" align="right" sortable :sort-method="(a, b) => (a.momentum_20d||0) - (b.momentum_20d||0)">
             <template #default="{ row }">
-              <span :class="(row.momentum_20d || 0) >= 0 ? 'up' : 'down'">{{ fmtPct(row.momentum_20d) }}</span>
+              <span :class="(row.momentum_20d || 0) >= 0 ? 'up' : 'down'">{{ fmtPctF(row.momentum_20d) }}</span>
             </template>
           </el-table-column>
           <el-table-column label="ROE" prop="roe" width="80" align="right" sortable :sort-method="(a, b) => (a.roe||0) - (b.roe||0)">
             <template #default="{ row }">{{ fmtNum(row.roe) }}%</template>
           </el-table-column>
-          <el-table-column label="营收YOY" prop="or_yoy" width="90" align="right" sortable :sort-method="(a, b) => (a.or_yoy||0) - (b.or_yoy||0)">
-            <template #default="{ row }">{{ fmtPct(row.or_yoy, 0) }}</template>
-          </el-table-column>
-          <el-table-column label="PE(TTM)" prop="pe_ttm" width="90" align="right" sortable :sort-method="(a, b) => (a.pe_ttm||0) - (b.pe_ttm||0)">
-            <template #default="{ row }">{{ fmtNum(row.pe_ttm) }}</template>
-          </el-table-column>
-          <el-table-column label="市值(亿)" prop="total_mv" width="100" align="right" sortable :sort-method="(a, b) => (a.total_mv||0) - (b.total_mv||0)">
-            <template #default="{ row }">{{ fmtNum(row.total_mv) }}</template>
-          </el-table-column>
-          <el-table-column label="操作" width="110" fixed="right" align="center">
+          <el-table-column label="操作" width="170" fixed="right" align="center">
             <template #default="{ row }">
               <el-button size="small" type="success" plain @click="addFavorite(row)">+ 自选</el-button>
+              <el-button size="small" type="primary" plain :loading="aiRow?.code === row.code && aiLoading" :icon="Cpu" @click="doAiAnalyze(row)">AI 分析</el-button>
             </template>
           </el-table-column>
         </el-table>
+      </div>
+    </section>
+
+    <!-- AI 分析结果弹窗（复用个股趋势的单股 AI 操作结论） -->
+    <el-dialog v-model="aiDialog" :title="aiDialogTitle" width="640px" class="ai-dialog" :close-on-click-modal="false">
+      <div v-if="aiLoading" class="ai-body ai-loading">
+        <el-icon class="is-loading"><Loading /></el-icon>
+        <span>正在基于个股趋势帧生成操作结论…</span>
+      </div>
+      <el-alert v-else-if="aiError" :title="aiError" type="error" show-icon :closable="false" class="ai-body" />
+      <el-empty v-else-if="aiResult && !aiResult.found" :description="aiResult.message || '未找到该股数据'" />
+      <template v-else-if="aiResult">
+        <div class="ai-body">
+          <div class="ai-head">
+            <div class="ai-head-tags">
+              <el-tag :color="aiActionColor" effect="dark" size="large">{{ aiResult.action_label }}</el-tag>
+              <el-tag :type="aiResult.engine === 'llm' ? 'primary' : 'info'" size="small" effect="plain">
+                {{ aiResult.engine === 'llm' ? 'LLM 深度分析' : '规则引擎兜底' }}
+              </el-tag>
+            </div>
+            <div class="ai-score">
+              <el-progress :percentage="aiScorePct" :color="aiActionColor" :stroke-width="10" />
+              <span class="ai-score-txt">综合评分 {{ aiResult.score }} 分</span>
+            </div>
+          </div>
+          <p class="ai-summary">{{ aiResult.summary }}</p>
+          <div v-if="aiResult.reasons?.length" class="ai-block">
+            <div class="ai-block-title">判断要点</div>
+            <ul class="ai-list"><li v-for="(r, i) in aiResult.reasons" :key="'r' + i">{{ r }}</li></ul>
+          </div>
+          <div v-if="aiResult.risks?.length" class="ai-block">
+            <div class="ai-block-title">风险提示</div>
+            <ul class="ai-list ai-risk"><li v-for="(r, i) in aiResult.risks" :key="'k' + i">{{ r }}</li></ul>
+          </div>
+          <div class="ai-block">
+            <div class="ai-block-title">今日数据（个股趋势帧 · {{ aiResult.as_of }}）</div>
+            <div class="ai-table">
+              <div v-for="cell in aiTodayCells" :key="cell.label" class="ai-cell">
+                <span class="ai-cell-label">{{ cell.label }}</span>
+                <b :class="cell.cls">{{ cell.text }}</b>
+              </div>
+            </div>
+          </div>
+          <div v-if="aiResult.data?.recent_trend?.length" class="ai-block">
+            <div class="ai-block-title">近期走势（最近 {{ aiResult.data.recent_trend.length }} 个交易日）</div>
+            <div class="ai-trend">
+              <span v-for="t in aiResult.data.recent_trend" :key="t.date" class="ai-trend-item" :class="(t.pct ?? 0) >= 0 ? 'up' : 'down'">
+                {{ t.date.slice(5) }} {{ fmtPct(t.pct) }}
+              </span>
+            </div>
+          </div>
         </div>
-      </el-tab-pane>
-    </el-tabs>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Refresh, Lightning, TrendCharts, Calendar } from '@element-plus/icons-vue'
+import { Refresh, Lightning, TrendCharts, Calendar, Cpu, Loading } from '@element-plus/icons-vue'
 import {
   candidateApi,
   type CandidateStock,
   type IndustryScreeningItem
 } from '@/api/candidate'
+import { vibeApi, SQ } from '@/api/vibe'
+import { makeQuadrantOption, type QuadrantCfg } from '@/utils/quadrant'
 import {
   fmtNum,
   fmtYi,
   fmtYiSigned,
-  fmtPctFromFraction as fmtPct,
-  fmtSigned as fmtSign
+  fmtPct,
+  fmtPctFromFraction,
+  fmtSigned as fmtSign,
+  clsByVal
 } from '@/utils/format'
+/** 候选股/动量等"小数"口径（0.0123 → +1.23%）；趋势帧与市场温度为"百分数"口径（0.62 → +0.62%）用 fmtPct */
+const fmtPctF = fmtPctFromFraction
 import { use as echartsUse } from 'echarts/core'
 import { BarChart, ScatterChart } from 'echarts/charts'
-import { GridComponent, TooltipComponent } from 'echarts/components'
+import { GridComponent, TooltipComponent, DataZoomComponent, MarkAreaComponent, MarkLineComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
 
-echartsUse([BarChart, ScatterChart, GridComponent, TooltipComponent, CanvasRenderer])
+defineOptions({ name: 'CandidateScreening' })
 
-// 外层 Tab：行业筛选 / 个股筛选
-const activeTab = ref('screening')
-const stockLoading = ref(false)
+echartsUse([BarChart, ScatterChart, GridComponent, TooltipComponent, DataZoomComponent, MarkAreaComponent, MarkLineComponent, CanvasRenderer])
 
-// Tab1 行业筛选（行业 ETF 主力净流入资金流排名 + 行业 ΔG 景气）
+/* ---------------- ① 市场温度：全市场个股趋势帧（slim） ---------------- */
+const trendLoading = ref(false)
+const trendSlim = ref<{ total?: number; as_of?: string; breadth?: { up?: number; down?: number; avg_pct?: number | null }; frame?: Record<string, number[]> } | null>(null)
+const trendAsOf = computed(() => trendSlim.value?.as_of || '')
+const widthTotal = computed(() => trendSlim.value?.total ?? null)
+const trendBreadth = computed(() => trendSlim.value?.breadth || {})
+const widthUp = computed(() => trendBreadth.value.up ?? null)
+const widthDown = computed(() => trendBreadth.value.down ?? null)
+const widthAvg = computed(() => trendBreadth.value.avg_pct ?? null)
+const widthUpRatio = computed(() => {
+  const up = widthUp.value
+  const down = widthDown.value
+  if (up == null || down == null || up + down === 0) return null
+  return (up / (up + down)) * 100
+})
+
+// 个股趋势帧（最新交易日 8 元组），以纯数字代码为键便于候选股 join
+const trendByCode = computed(() => {
+  const frame = trendSlim.value?.frame || {}
+  const out: Record<string, number[]> = {}
+  for (const [code, v] of Object.entries(frame)) out[norm(code)] = v
+  return out
+})
+function norm(c: string): string {
+  return String(c).replace(/\D/g, '')
+}
+
+/* ---------------- ② 赛道双确认：行业资金流 + 行业/概念趋势象限 ---------------- */
 const screenLoading = ref(false)
 const screenRefreshing = ref(false)
-const screenTop = ref<IndustryScreeningItem[]>([])
 const screenRankings = ref<IndustryScreeningItem[]>([])
 const screenAsOf = ref('')
-const screenCount = ref(0)
+const refreshingAll = ref(false)
 
-// Tab2 个股筛选
-const selectedIndustry = ref('')
-const candidates = ref<CandidateStock[]>([])
-const limit = 30
-// 择时信号筛选：all(全部) / B1/B2/B3(三买) / S1/S2/S3(三卖)
-const signalFilter = ref<'all' | 'B1' | 'B2' | 'B3' | 'S1' | 'S2' | 'S3'>('all')
+// 行业/概念趋势象限（板块快照）
+const boardScope = ref<'industry' | 'concept'>('industry')
+const boardLoading = ref(false)
+const boardData = ref<{ as_of?: string; total?: number; meta?: Record<string, { name: string; industry: string; link?: string }>; frame?: Record<string, number[]> } | null>(null)
 
-/** 按择时信号筛选后的候选个股（后端已只返回三买三卖信号） */
-const filteredCandidates = computed(() => {
-  const f = signalFilter.value
-  if (f === 'all') return candidates.value
-  return candidates.value.filter((r) => r.signal_type === f)
+const BOARD_TIPS: [string, string, string, string] = ['流入+上涨 · 强势共振', '流出+上涨 · 缩量上行', '流入+下跌 · 低位承接', '流出+下跌 · 弱势杀跌']
+const BOARD_CARD: QuadrantCfg = {
+  id: 'money_pct', title: '涨跌 × 主力资金',
+  xKey: SQ.MAIN, yKey: SQ.P, xName: '主力净流入', xUnit: '亿', yName: '涨跌幅', yUnit: '%',
+  quadrants: ['强势共振', '缩量上行', '低位承接', '弱势杀跌'],
+  tips: BOARD_TIPS,
+  emptyHint: '当前快照主力资金数据暂不可用',
+}
+
+const boardReady = computed(() => {
+  const f = boardData.value?.frame || {}
+  return Object.keys(f).length > 0
+})
+const boardOption = computed(() => {
+  const meta = (boardData.value?.meta || {}) as Record<string, { name: string; industry: string }>
+  const frame = boardData.value?.frame || {}
+  if (!Object.keys(frame).length) return {} as any
+  return makeQuadrantOption(meta, frame, BOARD_CARD, new Set<string>())
+})
+// 强势板块 TOP8（按当日涨幅倒序）
+const strongBoards = computed(() => {
+  const f = boardData.value?.frame || {}
+  const meta = boardData.value?.meta || {}
+  const arr = Object.entries(f)
+    .map(([code, v]) => ({ code, name: meta[code]?.name || code, pct: v?.[SQ.P], link: meta[code]?.link || '' }))
+    .filter((x) => x.pct != null)
+    .sort((a, b) => (b.pct as number) - (a.pct as number))
+  return arr.slice(0, 8)
 })
 
-/** 择时信号统计：{all, B1, B2, B3, S1, S2, S3} */
-const signalStats = computed(() => {
-  const s: Record<string, number> = { all: candidates.value.length, B1: 0, B2: 0, B3: 0, S1: 0, S2: 0, S3: 0 }
-  for (const r of candidates.value) {
-    if (r.signal_type && s[r.signal_type] !== undefined) s[r.signal_type]++
-  }
-  return s
-})
-
-// ---------- Tab1 行业资金净流入柱状图 ----------
+// 行业资金流柱状图（TOP10）
 const industryFlowData = computed(() =>
   screenRankings.value
     .filter((r) => r.fund_net_inflow != null)
     .sort((a, b) => (b.fund_net_inflow || 0) - (a.fund_net_inflow || 0))
     .slice(0, 10)
 )
-
 const industryFlowOption = computed(() => {
   const items = industryFlowData.value
   return {
@@ -306,17 +498,12 @@ const industryFlowOption = computed(() => {
     },
     grid: { left: 8, right: 70, top: 8, bottom: 6, containLabel: true },
     xAxis: { type: 'value', axisLabel: { formatter: (v: number) => fmtYiSigned(v) }, splitLine: { lineStyle: { type: 'dashed', color: '#ebeef5' } } },
-    yAxis: {
-      type: 'category',
-      inverse: true,
-      axisLabel: { fontSize: 11 },
-      data: items.map(r => r.industry),
-    },
+    yAxis: { type: 'category', inverse: true, axisLabel: { fontSize: 11 }, data: items.map((r) => r.industry) },
     series: [{
       name: '主力净流入(亿)',
       type: 'bar',
       barWidth: 12,
-      data: items.map(r => ({
+      data: items.map((r) => ({
         value: Math.round(Number(r.fund_net_inflow || 0) * 100) / 100,
         itemStyle: { color: (r.fund_net_inflow || 0) >= 0 ? '#f56c6c' : '#67c23a', borderRadius: 3 },
       })),
@@ -325,12 +512,75 @@ const industryFlowOption = computed(() => {
   }
 })
 
-function onIndustryChartClick(params: any) {
-  const item = industryFlowData.value[params?.dataIndex]
-  if (item) goToStockScreening(item)
+/* ---------------- ③ 标的精选：候选 + 个股趋势帧 + 双散点 ---------------- */
+const selectedIndustry = ref('')
+const candidates = ref<CandidateStock[]>([])
+const limit = 30
+const stockSection = ref<HTMLElement | null>(null)
+const signalFilter = ref<'all' | 'B1' | 'B2' | 'B3' | 'S1' | 'S2' | 'S3'>('all')
+const stockLoading = ref(false)
+
+const filteredCandidates = computed(() => {
+  const f = signalFilter.value
+  if (f === 'all') return candidates.value
+  return candidates.value.filter((r) => r.signal_type === f)
+})
+const signalStats = computed(() => {
+  const s: Record<string, number> = { all: candidates.value.length, B1: 0, B2: 0, B3: 0, S1: 0, S2: 0, S3: 0 }
+  for (const r of candidates.value) {
+    if (r.signal_type && s[r.signal_type] !== undefined) s[r.signal_type]++
+  }
+  return s
+})
+
+// —— 个股趋势帧 join：候选股 → 趋势列 / 趋势确认散点 / 趋势象限标签 ——
+const mainFlowOf = (code: string) => {
+  const v = trendByCode.value[norm(code)]
+  return v ? v[SQ.MAIN] : null
+}
+const d5Of = (code: string) => {
+  const v = trendByCode.value[norm(code)]
+  return v ? v[SQ.D5] : null
+}
+const boardOf = (code: string) => {
+  const v = trendByCode.value[norm(code)]
+  return v ? (v[SQ.BOARD] || 0) : null
+}
+function trendTagOf(code: string) {
+  const v = trendByCode.value[norm(code)]
+  if (!v) return null
+  const p = v[SQ.P]
+  const m = v[SQ.MAIN]
+  if (p == null || m == null) return null
+  if (m >= 0 && p >= 0) return { label: '强势共振', cls: 'tq-red' }
+  if (m < 0 && p >= 0) return { label: '缩量上行', cls: 'tq-yellow' }
+  if (m >= 0 && p < 0) return { label: '低位承接', cls: 'tq-blue' }
+  return { label: '弱势杀跌', cls: 'tq-green' }
 }
 
-// ---------- Tab2 动量-ROE 散点图 ----------
+// 候选股子帧 + 子 meta（趋势确认散点用）
+const candidateTrendFrame = computed(() => {
+  const out: Record<string, number[]> = {}
+  for (const r of filteredCandidates.value) {
+    const v = trendByCode.value[norm(r.code)]
+    if (v) out[r.code] = v
+  }
+  return out
+})
+const candidateTrendMeta = computed(() => {
+  const out: Record<string, { name: string; industry: string }> = {}
+  for (const r of filteredCandidates.value) {
+    if (trendByCode.value[norm(r.code)]) out[r.code] = { name: r.name || r.code, industry: r.industry || '' }
+  }
+  return out
+})
+const candidateTrendCount = computed(() => Object.keys(candidateTrendFrame.value).length)
+const candidateTrendOption = computed(() => {
+  if (!candidateTrendCount.value) return {} as any
+  return makeQuadrantOption(candidateTrendMeta.value, candidateTrendFrame.value, BOARD_CARD, new Set<string>())
+})
+
+// —— 动量 × ROE 散点 ——
 const scatterData = computed(() =>
   filteredCandidates.value
     .filter((r) => r.momentum_20d != null && r.roe != null)
@@ -343,7 +593,6 @@ const scatterData = computed(() =>
       pct: Number(r.pct_chg || 0),
     }))
 )
-
 const scatterOption = computed(() => {
   const pts = scatterData.value
   return {
@@ -353,7 +602,7 @@ const scatterOption = computed(() => {
         const d = p?.data
         if (!d) return ''
         const v = d.value || []
-        return `${d.name}（${d.code}）<br/>动量：${fmtPct(v[0])}<br/>ROE：${fmtNum(v[1])}%<br/>市值：${fmtNum(v[2])}亿<br/>涨跌幅：${fmtPct(v[3])}`
+        return `${d.name}（${d.code}）<br/>动量：${fmtPctF(v[0])}<br/>ROE：${fmtNum(v[1])}%<br/>市值：${fmtNum(v[2])}亿<br/>涨跌幅：${fmtPctF(v[3])}`
       },
     },
     grid: { left: 56, right: 24, top: 24, bottom: 40 },
@@ -362,7 +611,7 @@ const scatterOption = computed(() => {
       name: '20日动量(%)',
       nameLocation: 'middle',
       nameGap: 24,
-      axisLabel: { formatter: (v: number) => fmtPct(v), fontSize: 10 },
+      axisLabel: { formatter: (v: number) => fmtPctF(v), fontSize: 10 },
       splitLine: { lineStyle: { type: 'dashed', color: '#ebeef5' } },
     },
     yAxis: {
@@ -375,7 +624,7 @@ const scatterOption = computed(() => {
       type: 'scatter',
       symbolSize: (d: any) => Math.max(8, Math.min(42, Math.sqrt(d[2] || 1) * 1.2)),
       itemStyle: { opacity: 0.75 },
-      data: pts.map(p => ({
+      data: pts.map((p) => ({
         name: p.name,
         code: p.code,
         value: [p.momentum, p.roe, p.mv, p.pct],
@@ -391,13 +640,87 @@ const scatterOption = computed(() => {
   }
 })
 
+/* ---------------- AI 分析（复用个股趋势单股 AI 操作结论） ---------------- */
+const aiDialog = ref(false)
+const aiLoading = ref(false)
+const aiError = ref('')
+const aiResult = ref<any>(null)
+const aiRow = ref<CandidateStock | null>(null)
+const AI_ACTION_COLOR: Record<string, string> = {
+  strong_buy: '#f56c6c',
+  buy: '#e6a23c',
+  hold: '#409eff',
+  wait: '#909399',
+  reduce: '#67c23a',
+  avoid: '#13a8a8',
+}
+const aiActionColor = computed(() => AI_ACTION_COLOR[aiResult.value?.action as string] || '#909399')
+const aiDialogTitle = computed(() => {
+  const r = aiResult.value
+  return r ? `AI 分析 · ${r.name}（${r.code}）` : 'AI 分析'
+})
+const aiScorePct = computed(() => {
+  const s = Number(aiResult.value?.score ?? 0)
+  return Math.max(0, Math.min(100, Math.round((s + 100) / 2)))
+})
+function fmtN(v: any, unit = '', sign = false): string {
+  if (v == null || v === '') return '—'
+  const n = Number(v)
+  if (Number.isNaN(n)) return '—'
+  const s = sign && n > 0 ? '+' : ''
+  const num = Number.isInteger(n) ? String(n) : n.toFixed(2)
+  return `${s}${num}${unit}`
+}
+const AI_TODAY_DEF = [
+  { key: 'pct', label: '涨跌幅', unit: '%', sign: true },
+  { key: 'amt', label: '成交额', unit: '亿' },
+  { key: 'turn', label: '换手率', unit: '%' },
+  { key: 'pe', label: '市盈率' },
+  { key: 'mv', label: '总市值', unit: '亿' },
+  { key: 'main', label: '主力净流入', unit: '亿', sign: true },
+  { key: 'board', label: '连板', render: (v: any) => (v == null ? '—' : v === 0 ? '未涨停' : `${v} 板`) },
+  { key: 'd5', label: '5日涨跌', unit: '%', sign: true },
+]
+const aiTodayCells = computed(() => {
+  const today = aiResult.value?.data?.today ?? {}
+  return AI_TODAY_DEF.map((d) => {
+    const raw = today[d.key]
+    let text: string
+    let cls = ''
+    if (d.render) {
+      text = d.render(raw)
+      cls = (raw != null && raw > 0) ? 'up' : (raw != null && raw < 0 ? 'down' : '')
+    } else {
+      text = fmtN(raw, d.unit || '', !!d.sign)
+      cls = (raw != null && raw > 0) ? 'up' : (raw != null && raw < 0 ? 'down' : '')
+    }
+    return { label: d.label, text, cls }
+  })
+})
+async function doAiAnalyze(row: CandidateStock) {
+  aiRow.value = row
+  aiError.value = ''
+  aiResult.value = null
+  aiDialog.value = true
+  aiLoading.value = true
+  try {
+    const res = await vibeApi.getStockQuadrantAiAnalysis(row.code)
+    aiResult.value = (res as any)?.data ?? null
+  } catch (e) {
+    console.error('AI 分析请求失败', e)
+    aiError.value = 'AI 分析请求失败，请稍后重试'
+  } finally {
+    aiLoading.value = false
+  }
+}
+
+/* ---------------- 交互与数据加载 ---------------- */
 function rankClass(i: number) {
   if (i === 0) return 'rank-gold'
   if (i === 1) return 'rank-silver'
   if (i === 2) return 'rank-bronze'
   return 'rank-normal'
 }
-
 function dgTagType(q: string) {
   if (q.includes('双击')) return 'success'
   if (q.includes('反转')) return 'info'
@@ -405,31 +728,45 @@ function dgTagType(q: string) {
   if (q.includes('双杀')) return 'danger'
   return 'info'
 }
-
 function signalTagType(s: string) {
   if (s.startsWith('B')) return 'danger'
   if (s.startsWith('S')) return 'success'
   return 'info'
 }
+function openBoard(link?: string) {
+  if (link) window.open(link, '_blank', 'noopener')
+}
+function onIndustryChartClick(params: any) {
+  const item = industryFlowData.value[params?.dataIndex]
+  if (item) goToStockScreening(item)
+}
+function onBoardChartClick(e: any) {
+  if (e?.componentType !== 'series') return
+  const code = e?.data?.code ?? e?.data?.name
+  if (!code || !boardData.value) return
+  openBoard(boardData.value?.meta?.[code]?.link)
+}
+function onTrendChartClick(e: any) {
+  if (e?.componentType !== 'series') return
+  const code = e?.data?.code ?? e?.data?.name
+  if (!code) return
+  window.open(`/stocks/${code}`, '_blank', 'noopener')
+}
+function goToStockScreening(item: IndustryScreeningItem) {
+  selectedIndustry.value = item.industry
+  loadCandidates()
+  nextTick(() => stockSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+}
 
-/** 行业筛选：读取行业 ETF 主力净流入排名（refresh=true 强制实时采集） */
 async function loadScreening(refresh = false) {
-  if (refresh) {
-    screenRefreshing.value = true
-  } else {
-    screenLoading.value = true
-  }
+  if (refresh) screenRefreshing.value = true
+  else screenLoading.value = true
   try {
     const res = await candidateApi.industryScreening(10, refresh)
     const data = res.data
-    screenTop.value = data?.top || []
     screenRankings.value = data?.rankings || []
     screenAsOf.value = data?.as_of || ''
-    screenCount.value = data?.industry_count ?? screenRankings.value.length
-    // 资金流排名就绪后，若未选行业则加载跨行业默认视图（前10行业每行业top3）
-    if (!selectedIndustry.value) {
-      loadCandidates()
-    }
+    if (!selectedIndustry.value) loadCandidates()
   } catch (e) {
     ElMessage.error('加载行业资金流失败')
   } finally {
@@ -438,22 +775,39 @@ async function loadScreening(refresh = false) {
   }
 }
 
-/** 从行业筛选进入个股筛选：选中行业并计算候选个股 */
-function goToStockScreening(item: IndustryScreeningItem) {
-  selectedIndustry.value = item.industry
-  activeTab.value = 'stock-screening'
-  loadCandidates()
+async function loadBoard() {
+  boardLoading.value = true
+  try {
+    const res = await vibeApi.getBoardQuadrant(boardScope.value)
+    boardData.value = (res as any)?.data ?? null
+  } catch (e) {
+    console.warn('加载板块趋势象限失败', e)
+    boardData.value = null
+  } finally {
+    boardLoading.value = false
+  }
+}
+
+async function loadTrendSlim() {
+  trendLoading.value = true
+  try {
+    const res = await vibeApi.getStockQuadrantSlim()
+    trendSlim.value = (res as any)?.data ?? null
+  } catch (e) {
+    console.warn('加载个股趋势帧失败', e)
+    trendSlim.value = null
+  } finally {
+    trendLoading.value = false
+  }
 }
 
 async function loadCandidates() {
   stockLoading.value = true
   try {
     if (selectedIndustry.value) {
-      // 选择了行业：只展示该行业有 B1/B2/B3 信号的前 limit(30) 只
       const res = await candidateApi.stocks(selectedIndustry.value, limit)
       candidates.value = res.data?.items || []
     } else {
-      // 未选行业：默认展示前 10 个行业每行业前 3 只 B 信号个股（共约 30 只）
       const topInds = screenRankings.value.slice(0, 10).map((r) => r.industry).filter(Boolean)
       const res = await candidateApi.stocksOverview(10, 3, topInds)
       candidates.value = res.data?.items || []
@@ -474,248 +828,230 @@ async function addFavorite(row: CandidateStock) {
   }
 }
 
+async function refreshAll() {
+  refreshingAll.value = true
+  try {
+    await Promise.allSettled([loadScreening(true), loadBoard(), loadTrendSlim()])
+  } finally {
+    refreshingAll.value = false
+  }
+}
+
+watch(boardScope, () => {
+  boardData.value = null
+  loadBoard()
+})
+
 onMounted(() => {
-  // 资金流排名就绪后会级联加载个股筛选的跨行业默认视图
   loadScreening(false)
+  loadBoard()
+  loadTrendSlim()
 })
 </script>
 
-<style scoped>
+<style scoped lang="scss">
 .candidate-page {
-  /* 页面容器交给全局 .app-page，这里仅保留业务布局扩展 */
+  /* 页面容器交给全局 .app-page */
 }
 
-/* 顶部横幅已由全局 .page-hero 提供，此处无需重复定义 */
-
-/* Tab 导航（外观由全局统一，仅保留高度） */
-.candidate-tabs {
-  --el-tabs-header-height: 46px;
+/* —— 三段式主线 —— */
+.flow-block {
+  margin-bottom: 20px;
+  padding: 18px 20px;
+  background: var(--el-bg-color);
+  border-radius: var(--app-radius-lg, 12px);
+  border: 1px solid var(--el-border-color-light);
+  box-shadow: var(--app-shadow, none);
 }
-.candidate-tabs :deep(.el-tabs__item) {
-  height: 46px;
-  line-height: 46px;
-  font-size: 15px;
-}
-
-.page-header {
+.flow-head {
   display: flex;
-  justify-content: space-between;
-  align-items: flex-end;
+  align-items: center;
+  gap: 12px;
   margin-bottom: 16px;
+  flex-wrap: wrap;
 }
-.page-header h2 {
-  margin: 0;
-  font-size: 22px;
-}
-.page-header .sub {
-  margin: 4px 0 0;
-  color: var(--el-text-color-secondary);
-  font-size: 13px;
-}
-.header-actions {
-  display: flex;
+.flow-step {
+  display: inline-flex;
   align-items: center;
-  gap: 12px;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  background: linear-gradient(120deg, #1e3a5f, #2b6cb0);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  flex-shrink: 0;
 }
-.tab-hint {
-  margin-bottom: 12px;
-}
-.screening-toolbar {
+.flow-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
   display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 12px;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
 }
-.screening-hint {
-  color: var(--el-text-color-secondary);
+.flow-sub {
   font-size: 12px;
+  font-weight: 400;
+  color: var(--el-text-color-secondary);
+}
+.flow-hint {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.flow-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+.board-switch .el-radio-button__inner {
+  padding: 4px 12px;
+}
+.industry-select {
+  width: 240px;
 }
 
-/* 图表卡片 */
-.chart-card {
+/* —— KPI —— */
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  .kpi-cell {
+    padding: 12px 16px;
+    border-radius: 8px;
+    background: var(--el-fill-color-blank);
+    border: 1px solid var(--el-border-color-lighter);
+    .kpi-label { font-size: 12px; color: var(--el-text-color-secondary); }
+    .kpi-value {
+      margin: 6px 0;
+      font-size: 22px;
+      font-weight: 600;
+      .kpi-sep { margin: 0 6px; color: var(--el-text-color-placeholder); font-weight: 400; }
+    }
+    .kpi-sub { font-size: 12px; color: var(--el-text-color-secondary); }
+  }
+}
+.accent { color: var(--el-color-warning); }
+
+/* —— 面板 —— */
+.panel {
   border: 1px solid var(--el-border-color-lighter);
-  border-radius: 12px;
+  border-radius: 10px;
   background: var(--el-fill-color-blank);
   padding: 12px 14px;
-  margin-bottom: 12px;
 }
-.chart-card-title {
+.panel-title {
   font-size: 13px;
   font-weight: 600;
   color: var(--el-text-color-primary);
   margin-bottom: 8px;
 }
-.chart--industry {
-  height: 260px;
+.panel-tip {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
-.chart--scatter {
-  height: 300px;
+.split-grid {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 16px;
 }
+.board-split {
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  .board-chart { min-height: 220px; }
+}
+.scatter-split {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  margin-top: 16px;
+}
+.chart--industry { height: 260px; }
+.chart--board { height: 340px; }
+.chart--scatter { height: 300px; }
+
+/* —— 板块象限图例 —— */
+.board-tips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  padding: 8px 10px;
+  margin-top: 10px;
+  border-radius: 8px;
+  background: var(--el-fill-color-light);
+  .bt-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+    white-space: nowrap;
+  }
+  .bt-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+    display: inline-block;
+  }
+  .dot-0 { background: #fbe0e0; }
+  .dot-1 { background: #fdf3d1; }
+  .dot-2 { background: #e3f0fd; }
+  .dot-3 { background: #e8f7e2; }
+}
+
+/* —— 强势板块 chips —— */
+.strong-board { margin-top: 10px; }
+.strong-label {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin-bottom: 6px;
+}
+.strong-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.strong-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--el-border-color-light);
+  background: var(--el-fill-color-blank);
+  cursor: pointer;
+  transition: box-shadow .15s, transform .15s;
+  &:hover {
+    box-shadow: var(--app-shadow-light, 0 2px 8px rgba(30,58,95,.12));
+    transform: translateY(-1px);
+  }
+  .sc-name { font-size: 12px; font-weight: 500; color: var(--el-text-color-primary); }
+  .sc-pct { font-size: 12px; font-weight: 600; }
+}
+
+/* —— 表格区 —— */
 .section-title {
   font-size: 14px;
   font-weight: 600;
   color: var(--el-text-color-primary);
-  margin: 16px 0 8px;
+  margin: 4px 0 10px;
 }
-
-/* 表格美化 */
+.stocks-hint {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  margin: 12px 0 8px;
+}
 .rank-table, .candidate-table {
-  border-radius: 12px;
+  border-radius: 10px;
   overflow: hidden;
   box-shadow: var(--el-box-shadow-light);
   border: 1px solid var(--el-border-color-light);
 }
-.top-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 12px;
-  margin-bottom: 8px;
-}
-.top-card {
-  background: var(--el-bg-color);
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 10px;
-  padding: 12px 14px;
-  cursor: pointer;
-  transition: box-shadow .2s, transform .2s;
-}
-.top-card:hover {
-  box-shadow: var(--el-box-shadow-light);
-  transform: translateY(-2px);
-}
-.top-card.rank-1 { border-top: 3px solid #f7ba2a; }
-.top-card.rank-2 { border-top: 3px solid #a0a4a8; }
-.top-card.rank-3 { border-top: 3px solid #cd7f32; }
-.card-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 8px;
-}
-.rank-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: #f0f2f5;
-  color: #909399;
-  font-size: 12px;
-  font-weight: 600;
-}
-.top-card.rank-1 .rank-badge { background: #f7ba2a; color: #fff; }
-.top-card.rank-2 .rank-badge { background: #a0a4a8; color: #fff; }
-.top-card.rank-3 .rank-badge { background: #cd7f32; color: #fff; }
-.card-score {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-.score-val {
-  font-weight: 700;
-  font-size: 18px;
-}
-.score-label {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-}
-.card-etf {
-  display: flex;
-  justify-content: space-between;
-  margin: 6px 0;
-  font-size: 12px;
-}
-.etf-name {
-  color: var(--el-text-color-primary);
-  font-weight: 500;
-}
-.etf-code {
-  color: var(--el-text-color-secondary);
-}
-.card-metrics {
-  display: flex;
-  gap: 16px;
-  border-top: 1px dashed var(--el-border-color-lighter);
-  padding-top: 6px;
-}
-.metric {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-}
-.m-label { display: block; }
-.m-val { font-weight: 600; }
-.ind-cell {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.ind-name {
-  font-weight: 600;
-  color: var(--el-text-color-primary);
-}
-.dg-empty {
-  font-size: 12px;
-}
-/* 行业卡片 & 表格：四象限分布 */
-.card-dg-dist {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 10px;
-  margin: 4px 0 6px;
-}
-.dg-dist-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-}
-.dg-dist-item b {
-  font-weight: 600;
-  color: var(--el-text-color-primary);
-}
-.dg-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  display: inline-block;
-}
-.dot-success { background: var(--app-down); }
-.dot-warning { background: #e6a23c; }
-.dot-danger { background: var(--app-up); }
-.dot-info { background: var(--app-flat); }
-.ind-line {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.ind-dg-dist {
-  display: block;
-  margin-top: 2px;
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-}
-.signal-filter {
-  flex-wrap: wrap;
-}
-.qscore, .aux-cell {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.qscore .el-progress, .aux-cell .el-progress {
-  flex: 1;
-}
-.score-num {
-  min-width: 36px;
-  text-align: right;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
-}
-.tone-strong { color: var(--app-up); }
-.tone-mid { color: #e6a23c; }
-.tone-weak { color: #2b6cb0; }
+.signal-filter { flex-wrap: wrap; }
+.muted { color: var(--el-text-color-secondary); }
 .rank {
   display: inline-block;
   width: 24px;
@@ -730,125 +1066,139 @@ onMounted(() => {
 .rank-silver { background: #a0a4a8; color: #fff; }
 .rank-bronze { background: #cd7f32; color: #fff; }
 .rank-normal { background: #f0f2f5; color: #909399; }
-.muted { color: var(--el-text-color-secondary); }
-.stocks-toolbar {
-  display: flex;
+.rank-table { cursor: pointer; }
+
+/* —— 个股趋势象限标签 —— */
+.trend-tag {
+  display: inline-flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-.industry-select {
-  width: 260px;
-}
-.stocks-hint {
-  color: var(--el-text-color-secondary);
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 6px;
   font-size: 12px;
-}
-.sector-dg-banner {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
-  margin-bottom: 12px;
-  border-radius: 8px;
-  background: var(--el-fill-color-light);
-  border: 1px solid var(--el-border-color-lighter);
-}
-.sector-dg-banner.dg-success { background: rgba(103, 194, 58, .08); border-color: rgba(103, 194, 58, .3); }
-.sector-dg-banner.dg-warning { background: rgba(230, 162, 60, .08); border-color: rgba(230, 162, 60, .3); }
-.sector-dg-banner.dg-danger { background: rgba(245, 108, 108, .08); border-color: rgba(245, 108, 108, .3); }
-.sector-dg-banner.dg-info { background: rgba(144, 147, 153, .08); border-color: rgba(144, 147, 153, .3); }
-.sector-dg-banner .dg-label {
-  font-weight: 600;
-  font-size: 14px;
-}
-.sector-dg-banner .dg-metric {
-  color: var(--el-text-color-secondary);
-  font-size: 13px;
-}
-.rank-table :deep(.el-table__cell),
-.candidate-table :deep(.el-table__cell),
-.rank-table :deep(.el-table__cell .cell),
-.candidate-table :deep(.el-table__cell .cell) {
+  font-weight: 500;
   white-space: nowrap;
+  .tt-dot { width: 8px; height: 8px; border-radius: 3px; display: inline-block; }
 }
-.warn-tag {
-  margin-right: 4px;
-  margin-bottom: 2px;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
+.tq-red { background: #fbe0e0; color: #c0392b; .tt-dot { background: #e57373; } }
+.tq-yellow { background: #fdf3d1; color: #b7791f; .tt-dot { background: #ecc94b; } }
+.tq-blue { background: #e3f0fd; color: #2b6cb0; .tt-dot { background: #63b3ed; } }
+.tq-green { background: #e8f7e2; color: #2f855a; .tt-dot { background: #68d391; } }
+
+.warn-tag { margin-right: 4px; white-space: nowrap; flex-shrink: 0; }
 .warn-cell {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
   overflow: hidden;
 }
-.rank-table {
-  cursor: pointer;
-}
 .table-scroll {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
-.table-scroll::-webkit-scrollbar {
-  height: 6px;
-}
-.table-scroll::-webkit-scrollbar-thumb {
-  background: var(--el-border-color);
-  border-radius: 3px;
-}
+.table-scroll::-webkit-scrollbar { height: 6px; }
+.table-scroll::-webkit-scrollbar-thumb { background: var(--el-border-color); border-radius: 3px; }
 
-/* ============ 响应式：手机端适配 ============ */
-@media (max-width: 768px) {
-  .screening-toolbar {
-    flex-wrap: wrap;
+/* —— AI 弹窗 —— */
+.ai-dialog {
+  .ai-body { padding: 4px 2px; }
+  .ai-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
     gap: 8px;
-    align-items: stretch;
+    min-height: 120px;
+    color: var(--el-text-color-secondary);
+    font-size: 13px;
   }
-  .screening-toolbar > * {
-    flex: 0 0 auto;
+  .ai-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 12px;
+    .ai-head-tags { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+    .ai-score {
+      flex: 1;
+      .el-progress { margin-bottom: 4px; }
+      .ai-score-txt { font-size: 12px; color: var(--el-text-color-secondary); }
+    }
   }
-  .screening-hint {
-    width: 100%;
-    margin-top: 4px;
+  .ai-summary {
+    margin: 0 0 12px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: var(--el-fill-color-light);
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--el-text-color-primary);
   }
-  .stocks-toolbar {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 10px;
+  .ai-block {
+    margin-top: 12px;
+    .ai-block-title { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+    .ai-list {
+      margin: 0;
+      padding-left: 18px;
+      font-size: 12.5px;
+      line-height: 1.9;
+      color: var(--el-text-color-regular);
+      &.ai-risk { color: #d4380d; }
+    }
   }
-  .industry-select {
-    width: 100%;
+  .ai-table {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    .ai-cell {
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: var(--el-fill-color-blank);
+      border: 1px solid var(--el-border-color-lighter);
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      .ai-cell-label { font-size: 11px; color: var(--el-text-color-secondary); }
+      b {
+        font-family: 'SFMono-Regular', ui-monospace, Menlo, monospace;
+        font-size: 14px;
+        color: var(--el-text-color-primary);
+        &.up { color: #f56c6c; }
+        &.down { color: #67c23a; }
+      }
+    }
   }
-  .signal-filter {
-    width: 100%;
+  .ai-trend {
+    display: flex;
+    flex-wrap: wrap;
     gap: 6px;
-  }
-  .signal-filter .el-radio-button__inner {
-    padding: 6px 10px;
-    font-size: 12px;
-  }
-  .candidate-tabs :deep(.el-tabs__item) {
-    font-size: 13px;
-    padding: 0 10px;
-  }
-  .section-title {
-    font-size: 13px;
-  }
-  .rank-table, .candidate-table {
-    font-size: 13px;
-  }
-  .table-scroll {
-    margin: 0 -16px;
-    padding: 0 16px;
+    .ai-trend-item {
+      font-size: 11.5px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      background: var(--el-fill-color-light);
+      font-family: 'SFMono-Regular', ui-monospace, Menlo, monospace;
+      &.up { color: #f56c6c; }
+      &.down { color: #67c23a; }
+    }
   }
 }
 
-@media (max-width: 480px) {
-  .signal-filter .el-radio-button {
-    flex: 1 1 calc(50% - 6px);
-  }
+/* —— 响应式 —— */
+@media (max-width: 1100px) {
+  .board-split, .scatter-split { grid-template-columns: 1fr !important; }
+  .kpi-row { grid-template-columns: repeat(2, 1fr); }
+  .flow-hint { display: none; }
+  .flow-actions { margin-left: 0; }
+}
+@media (max-width: 768px) {
+  .flow-block { padding: 14px; }
+  .flow-head { gap: 8px; }
+  .industry-select { width: 100%; }
+  .signal-filter { width: 100%; gap: 6px; }
+  .signal-filter .el-radio-button__inner { padding: 6px 10px; font-size: 12px; }
+  .kpi-row { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .kpi-cell .kpi-value { font-size: 18px; }
+  .rank-table, .candidate-table { font-size: 13px; }
+  .table-scroll { margin: 0 -14px; padding: 0 14px; }
 }
 </style>

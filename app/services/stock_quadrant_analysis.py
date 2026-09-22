@@ -27,6 +27,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 from datetime import datetime, timedelta, timezone
@@ -114,43 +115,88 @@ async def _run_in_thread(fn, *args, **kwargs):
 def _fetch_clist_snapshot() -> list[dict]:
     """东财 clist 全市场实时快照（分页拉全）。
 
-    一次请求 pz=5000（clist 分页上限），翻页收集直到空页。
+    实测（2026-09）东财 clist 将单页返回硬截断为 100 条，total 仍为全市场总数；
+    若沿用旧的「单页不足 5000 即停」停页条件，会只取到第一页 100 只
+    （按代码倒序恰是 920 开头北交所），令当日帧只剩 99 只有成交额的股票。
+    这里改为：读 total + 首页实际条数推算总页数 → 并发拉取剩余页 →
+    失败页顺序重试 + 总量不足时顺延补页（页容量推断偏差兜底），全量收齐后再过滤。
     ⚠️ 不走 em_get 的 auto 探测：push2 行情域在当前网络下可能整体不可达，
     em_get 会在两个 host 上各做「直连-降级代理」探测（约 20s/host），
     令缓存 miss 时的接口构建拖到 40s+ 引发前端超时。这里用 requests 直连 + 5s
     短超时快速失败，不可达时立即返回 [] 交给降级路径（market_quotes×stock_basic_info）。
     返回 [{code, name, price, pct, amount, turn, pe, mv, main, industry}]（金额单位元）。
     """
+    import concurrent.futures as cf
+    import math
     import requests as _requests
 
+    def _fetch_page(host: str, pn: int) -> tuple[int, list[dict]]:
+        """单页拉取：(total, diff)；失败抛异常由调用方重试/忽略。"""
+        direct = _requests.Session()
+        direct.trust_env = False  # 强直连（忽略系统代理）
+        params = {
+            "pn": pn, "pz": 5000, "po": 1, "np": 1, "fltt": 2, "invt": 2,
+            "fid": "f12", "fs": _EM_FS, "fields": _EM_FIELDS,
+        }
+        r = direct.get(
+            f"https://{host}/api/qt/clist/get", params=params,
+            headers={"User-Agent": astock.UA, "Referer": "https://quote.eastmoney.com/"},
+            timeout=5,
+        )
+        data = r.json().get("data") or {}
+        return int(data.get("total") or 0), (data.get("diff") or [])
+
     rows: list[dict] = []
-    direct = _requests.Session()
-    direct.trust_env = False  # 强直连（忽略系统代理，与 em_get 直连策略一致）
     for host in ("push2.eastmoney.com", "push2delay.eastmoney.com"):
-        got: list[dict] = []
-        pn = 1
         try:
-            while True:
-                params = {
-                    "pn": pn, "pz": 5000, "po": 1, "np": 1, "fltt": 2, "invt": 2,
-                    "fid": "f12", "fs": _EM_FS, "fields": _EM_FIELDS,
-                }
-                r = direct.get(
-                    f"https://{host}/api/qt/clist/get", params=params,
-                    headers={"User-Agent": astock.UA, "Referer": "https://quote.eastmoney.com/"},
-                    timeout=5,
-                )
-                diff = (r.json().get("data") or {}).get("diff") or []
+            total, first = _fetch_page(host, 1)
+        except Exception as e:
+            logger.debug(f"clist({host}) 直连失败（快失败）: {type(e).__name__}")
+            continue
+        if not first:
+            continue  # 空响应 → 换下一个 host
+        got: list[dict] = list(first)
+        # 以首页实际返回条数估算页容量（当前服务端硬截断 100），算总页数并发补齐
+        page_size = len(first)
+        last_pn = math.ceil(total / page_size) if total and page_size else 1
+        ok_pages = {1}
+        if last_pn > 1:
+            with cf.ThreadPoolExecutor(max_workers=6) as ex:
+                futs = {ex.submit(_fetch_page, host, pn): pn for pn in range(2, last_pn + 1)}
+                for fu in cf.as_completed(futs):
+                    pn = futs[fu]
+                    try:
+                        _, diff = fu.result()
+                        if diff:
+                            got.extend(diff)
+                            ok_pages.add(pn)
+                    except Exception as e:
+                        logger.debug(f"clist({host}) 第{pn}页并发拉取失败: {type(e).__name__}")
+            # 兜底一：并发失败的页顺序重试
+            for pn in range(2, last_pn + 1):
+                if pn in ok_pages:
+                    continue
+                for _ in range(2):
+                    try:
+                        _, diff = _fetch_page(host, pn)
+                        if diff:
+                            got.extend(diff)
+                            ok_pages.add(pn)
+                        break
+                    except Exception:
+                        pass
+        # 兜底二：总量仍未收齐（页容量推断偏差/服务端抖动）→ 顺延补页直到空页
+        if total and len(got) < total:
+            pn = last_pn + 1
+            while len(got) < total and pn <= 300:
+                try:
+                    _, diff = _fetch_page(host, pn)
+                except Exception:
+                    break
                 if not diff:
                     break
                 got.extend(diff)
-                if len(diff) < 5000:
-                    break
                 pn += 1
-        except Exception as e:
-            logger.debug(f"clist({host}) 直连失败（快失败）: {type(e).__name__}")
-            got = []
-            continue
         if got:
             rows = got
             break
@@ -427,13 +473,14 @@ def _assemble_history_frames(
     for d in dates:
         frame: dict[str, list] = {}
         day_zt = zt.get(d) or {}
-        day_chg = chg5d.get(d) or {}
         for code, series in quotes_map.items():
             row = series.get(d)
             if row is None or row.get("amt") is None:
                 continue  # 该日无成交额不入帧
             b = basic_map.get(code, {}).get(d) or {}
             mf = mf_map.get(code, {}).get(d)
+            # chg5d 结构 {code: {date: pct}}（外层 key 是 code，勿按日期索引）
+            d5 = chg5d.get(code, {}).get(d)
             frame[code] = [
                 _r(row.get("pct")),
                 _yi(row.get("amt")),
@@ -442,7 +489,7 @@ def _assemble_history_frames(
                 _r(b.get("mv")),
                 _yi(mf),
                 day_zt.get(code),           # board（无涨停池 → None）
-                _r(day_chg.get(code)),
+                _r(d5),
             ]
         frames[d] = frame
     return frames
@@ -582,3 +629,351 @@ async def get_stock_quadrant() -> dict[str, Any]:
         swr=True,
         stale_ttl=2 * 3600,
     )
+
+
+# ---------------------------------------------------------------------------
+# 4) 单股 AI 操作结论（基于「个股趋势」帧数据）
+# ---------------------------------------------------------------------------
+# 数据源与页面完全一致：复用 get_stock_quadrant() 的缓存（今日帧 8 元组 +
+# 近 N 个交易日该股帧序列 + meta.name/industry）。
+# 流程：优先调用 LLM（配置走 MongoDB llm_configs，与综合研判同一来源 _get_llm_cfg，
+# 当前模型 deepseek-v4-flash）；LLM 未配置/失败时降级为确定性规则引擎
+# （六图四象限同口径打分），保证结论始终可用。返回 engine=llm|rule 供前端标注。
+# 分析维度：涨跌幅 / 成交额 / 换手率 / PE / 总市值 / 主力净流入 / 连板 / 5日涨跌。
+
+_AI_RECENT_N = 8  # 结论参考的近期交易日数
+
+# 评分 → 操作档位（分数越高越积极）
+_AI_ACTION_TABLE: list[tuple[float, str, str]] = [
+    (55, "strong_buy", "积极买入"),
+    (30, "buy", "逢低关注"),
+    (10, "hold", "持有观察"),
+    (-10, "wait", "观望等待"),
+    (-34, "reduce", "减仓防范"),
+    (-999, "avoid", "回避为主"),
+]
+
+
+def _score_to_action(score: int) -> tuple[str, str]:
+    """评分 → (action, action_label)。"""
+    for lo, action, label in _AI_ACTION_TABLE:
+        if score >= lo:
+            return action, label
+    return "avoid", "回避为主"
+
+
+def _band(v: float | None, table: list[tuple[float, float, int]]) -> int:
+    """按区间表打分：table=[(lo, hi, score)]，闭区间顺序匹配；None 得 0 分。"""
+    if v is None:
+        return 0
+    for lo, hi, s in table:
+        if lo <= v <= hi:
+            return s
+    return 0
+
+
+def _rule_conclusion(name: str, code: str, today: list, recent: list[dict]) -> dict:
+    """确定性规则引擎：个股趋势 8 元组 × 近 N 日序列 → 操作结论。"""
+    pct = _num(today[IDX_PCT]); amt = _num(today[IDX_AMT])
+    turn = _num(today[IDX_TURN]); pe = _num(today[IDX_PE])
+    mv = _num(today[IDX_MV]); main = _num(today[IDX_MAIN])
+    board = today[IDX_BOARD]; d5 = _num(today[IDX_D5])
+    main_ratio = (main / amt * 100) if (main is not None and amt) else None
+    cum_n = sum(x["pct"] for x in recent if x["pct"] is not None) if recent else None
+    board_i = None if board is None else int(board)
+
+    # ── 多维度打分（-100 ~ 100，越高越积极）──
+    score = 0
+    score += _band(pct, [(9.5, 999, 25), (5, 9.5, 18), (2, 5, 12), (0, 2, 6),
+                         (-2, 0, 0), (-5, -2, -8), (-9.5, -5, -15), (-999, -9.5, -25)])
+    score += _band(d5, [(15, 999, 15), (8, 15, 10), (3, 8, 6), (0, 3, 2),
+                        (-3, 0, -2), (-8, -3, -6), (-999, -8, -12)])
+    score += _band(main_ratio, [(15, 999, 20), (8, 15, 14), (3, 8, 8), (0, 3, 3),
+                                (-3, 0, -3), (-8, -3, -8), (-15, -8, -14), (-999, -15, -20)])
+    score += _band(turn, [(2, 12, 8), (12, 20, 4), (20, 999, 0), (-999, 2, -2)])
+    if pe is not None:
+        score += -6 if pe < 0 else _band(pe, [(0, 20, 10), (20, 50, 5), (50, 100, 0), (100, 9999, -3)])
+    score += _band(mv, [(0, 50, 2), (50, 2000, 0), (2000, 99999, -2)])
+    if board_i is not None:
+        score += {0: 0, 1: 5}.get(board_i, 8 if board_i <= 3 else 3)
+    score += _band(cum_n, [(15, 9999, 10), (5, 15, 5), (-5, 5, 0), (-15, -5, -5), (-9999, -15, -10)])
+
+    # 连涨天数（从最新往前连续上涨）
+    up_days = 0
+    for r_ in reversed(recent):
+        if (r_["pct"] or 0) > 0:
+            up_days += 1
+        else:
+            break
+
+    action, action_label = _score_to_action(score)
+
+    # ── 判断要点（正向信号）──
+    reasons: list[str] = []
+    if amt is None or amt <= 0:
+        reasons.append("当日无成交额（停牌/未开盘或数据未就绪）")
+    if pct is not None and pct >= 5:
+        reasons.append(f"当日上涨 {_r(pct)}%，表现强势")
+    if main_ratio is not None and main_ratio >= 8:
+        reasons.append(f"主力净流入 {_r(main, 3)} 亿（占成交额 {_r(main_ratio)}%），资金积极")
+    if main is not None and pct is not None and main > 0 and pct > 0:
+        reasons.append("流入+上涨「强势共振」")
+    if turn is not None and 2 <= turn <= 12 and pct is not None and pct > 0:
+        reasons.append(f"换手率 {_r(turn)}% 温和放量上行")
+    if pe is not None and 0 <= pe <= 20 and pct is not None and pct > 0:
+        reasons.append(f"低估值（PE {_r(pe)}）叠加上涨，估值修复")
+    if d5 is not None and d5 >= 8:
+        reasons.append(f"5日动量 {_r(d5)}%，趋势延续")
+    if board_i is not None and 1 <= board_i <= 3:
+        reasons.append(f"当前连板 {board_i} 板，情绪上攻")
+    if cum_n is not None and cum_n >= 5:
+        reasons.append(f"近 {len(recent)} 日累计 {_r(cum_n)}%，趋势向好")
+    # 弱市情形：判断要点给出负向驱动因子，避免空泛
+    if not reasons and pct is not None and pct <= -2:
+        reasons.append(f"当日下跌 {_r(pct)}%，走势走弱")
+    if not reasons and d5 is not None and d5 <= -8:
+        reasons.append(f"5日动量 {_r(d5)}%，趋势偏弱")
+    if not reasons and main_ratio is not None and main_ratio <= -8:
+        reasons.append(f"主力净流出 {_r(main_ratio)}%（净流入 {_r(main, 3)} 亿）")
+    if not reasons:
+        reasons.append("各项数据暂未形成明确方向信号")
+
+    # ── 风险提示 ──
+    risks: list[str] = []
+    if main_ratio is not None and main_ratio <= -8:
+        risks.append(f"主力资金净流出 {_r(main_ratio)}%（净流入 {_r(main, 3)} 亿），警惕砸盘")
+    if turn is not None and turn >= 15 and pct is not None and pct < 0:
+        risks.append(f"高换手下跌（{_r(turn)}%），疑似放量出货")
+    if board_i is not None and board_i >= 4:
+        risks.append(f"高位连板 {board_i} 板，炸板/情绪退潮风险大")
+    if pct is not None and pct >= 9.5 and turn is not None and turn > 15:
+        risks.append("放巨量涨停，注意炸板分歧")
+    if pe is not None and pe < 0:
+        risks.append("市盈率（PE）为负，公司处于亏损状态，基本面风险")
+    if d5 is not None and d5 <= -8:
+        risks.append(f"5日累计下跌 {_r(d5)}%，趋势偏弱")
+    if up_days >= 4:
+        risks.append(f"已连续上涨 {up_days} 个交易日，短线乖离过大，谨防回吐")
+    if main is not None and pct is not None and main < 0 and pct > 0:
+        risks.append("股价上涨但主力净流出，持续性存疑")
+    if main is not None and pct is not None and main > 0 and pct < 0:
+        risks.append("股价下跌但主力净流入，暂不急于追进")
+
+    # ── 一句话结论 ──
+    parts = [f"{name}（{code}）"]
+    if pct is not None:
+        parts.append(f"今日 {_r(pct)}%")
+    if main is not None and amt:
+        parts.append(("主力净流入" if main >= 0 else "主力净流出") + f" {abs(_r(main, 3))} 亿")
+    if d5 is not None:
+        parts.append(f"5日 {_r(d5)}%")
+    parts.append(f"综合评分 {score} 分")
+    parts.append(f"操作建议：{action_label}")
+    summary = "，".join(parts) + "。"
+
+    return {
+        "action": action, "action_label": action_label, "score": score,
+        "reasons": reasons, "risks": risks, "summary": summary,
+    }
+
+
+# ── LLM 路径（配置与综合研判同源：MongoDB llm_configs → _get_llm_cfg）──
+
+_AI_SYSTEM_PROMPT = (
+    "你是一名资深 A 股交易员与机构策略师，精通短线量价、资金、情绪与估值分析。\n"
+    "我会给你一只股票在「个股趋势」页面（六维四象限）的量化帧数据（今日 8 个维度 + 近期走势），"
+    "请基于这些数据给出该股当前的操作结论。\n"
+    "只输出一个 JSON 对象，不要输出任何解释文字、不要使用 markdown 代码块：\n"
+    '{"action":"strong_buy|buy|hold|wait|reduce|avoid","action_label":"积极买入|逢低关注|持有观察|观望等待|减仓防范|回避为主",'
+    '"score":<必填，-100~100 的整数，越高越积极>,"summary":"1-2 句话的操作结论","reasons":["判断要点 2-4 条，每条一句话，必须基于给定数据"],'
+    '"risks":["风险提示 0-3 条"]}\n'
+    "action 六档含义：strong_buy=积极买入（趋势+资金+情绪共振且估值有利）；buy=逢低关注（有支撑逻辑但需等待买点）；"
+    "hold=持有观察（趋势未破，不加不砍）；wait=观望等待（方向不明或性价比不足）；reduce=减仓防范（趋势走弱/资金流出）；"
+    "avoid=回避为主（破位/高估/风险显著）。\n"
+    "数据可能有缺失（值为空）：缺失时依据已有信息判断并在结论中体现，不要臆造数据。篇幅：全文 300 字以内。"
+)
+
+_AI_RETRY_TAIL = (
+    "\n\n【重要】直接输出符合上述 JSON 结构的原始 JSON："
+    "不要输出任何解释文字，不要使用 markdown 代码块（不要以 ``` 开头），结尾不要追加说明。"
+)
+
+_AI_ACTION_ALIAS: dict[str, tuple[str, str]] = {
+    "strong_buy": ("strong_buy", "积极买入"), "积极买入": ("strong_buy", "积极买入"),
+    "强烈买入": ("strong_buy", "积极买入"), "买入": ("buy", "逢低关注"),
+    "buy": ("buy", "逢低关注"), "逢低关注": ("buy", "逢低关注"), "低吸": ("buy", "逢低关注"),
+    "hold": ("hold", "持有观察"), "持有": ("hold", "持有观察"), "持有观察": ("hold", "持有观察"),
+    "wait": ("wait", "观望等待"), "观望": ("wait", "观望等待"), "观望等待": ("wait", "观望等待"),
+    "reduce": ("reduce", "减仓防范"), "减仓": ("reduce", "减仓防范"), "减仓防范": ("reduce", "减仓防范"),
+    "卖出": ("reduce", "减仓防范"), "sell": ("reduce", "减仓防范"),
+    "avoid": ("avoid", "回避为主"), "回避": ("avoid", "回避为主"), "回避为主": ("avoid", "回避为主"),
+}
+
+
+def _llm_cfg() -> dict | None:
+    """获取快速分析模型配置 {model, api_base, api_key, ...}；无配置返回 None。"""
+    try:
+        from app.services.macro.macro_service import _get_llm_cfg
+        return _get_llm_cfg()
+    except Exception as e:
+        logger.warning(f"个股趋势AI分析获取 LLM 配置失败（将降级规则）: {e}")
+        return None
+
+
+def _llm_chat(cfg: dict, system: str, user: str, max_tokens: int = 900) -> dict:
+    """非流式调用 chat/completions 并解析 JSON 对象；任何失败抛异常（调用方降级）。"""
+    import requests
+    from app.services.macro.macro_service import _parse_llm_json
+
+    api_base = cfg["api_base"].rstrip("/")
+    if not api_base.endswith("/chat/completions"):
+        api_base += "/chat/completions"
+    resp = requests.post(
+        api_base,
+        json={
+            "model": cfg["model"],
+            "messages": [{"role": "system", "content": system},
+                         {"role": "user", "content": user}],
+            "temperature": cfg.get("temperature", 0.3),
+            "max_tokens": max_tokens,
+            "stream": False,
+        },
+        headers={"Authorization": f"Bearer {cfg['api_key']}",
+                 "Content-Type": "application/json"},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    content = resp.json()["choices"][0]["message"]["content"]
+    res = _parse_llm_json(content)
+    if isinstance(res, list) and res and isinstance(res[0], dict):
+        res = res[0]  # 模型偶发把对象包进数组
+    if not isinstance(res, dict):
+        raise ValueError("LLM 输出不是 JSON 对象")
+    return res
+
+
+def _fmt_or(v, unit: str = "") -> str:
+    """金额/百分比等数值 → 展示文本；空 → '空'。"""
+    return f"{_r(v)}{unit}" if v is not None else "空"
+
+
+def _build_ai_prompt(name: str, code: str, industry: str,
+                     today: dict, recent: list[dict], rule: dict) -> str:
+    """把该股在个股趋势中的数据+规则引擎参考打包成 LLM 的 user prompt。"""
+    board = today.get("board")
+    board_s = "无" if board is None else ("未涨停" if board == 0 else f"{board} 板")
+    trend_s = " → ".join(f"{r['date'][5:]}:{_r(r['pct'])}%" for r in recent) or "空"
+    return (
+        f"【股票】{name}（{code}） · 行业 {industry}\n"
+        "【今日个股趋势帧数据】\n"
+        f"- 涨跌幅: {_fmt_or(today.get('pct'))}%\n"
+        f"- 成交额: {_fmt_or(today.get('amt'))} 亿\n"
+        f"- 换手率: {_fmt_or(today.get('turn'))}%\n"
+        f"- 市盈率 PE: {_fmt_or(today.get('pe'))}\n"
+        f"- 总市值: {_fmt_or(today.get('mv'))} 亿\n"
+        f"- 主力净流入: {_fmt_or(today.get('main'))} 亿\n"
+        f"- 连板高度: {board_s}\n"
+        f"- 5日涨跌: {_fmt_or(today.get('d5'))}%\n"
+        "【近期走势（近若干交易日收盘涨跌幅，旧→新）】\n"
+        f"  {trend_s}\n"
+        f"【规则引擎参考】该股基于个股趋势六维数据的规则评分 {rule['score']} 分，"
+        f"方向：{rule['action_label']}（仅供模型参考，请独立判断）\n"
+        "请基于上述个股趋势数据，给出该股当前的操作结论 JSON。"
+    )
+
+
+def _normalize_llm_result(res: dict, rule: dict) -> dict:
+    """LLM 输出归一化：action 归一到六档、score 收敛到 [-100,100]，缺字段用规则兜底。"""
+    score_raw = res.get("score")
+    score = int(round(float(score_raw))) if score_raw not in (None, "") else rule["score"]
+    score = max(-100, min(100, score))
+    action_raw = str(res.get("action") or "").strip()
+    action, action_label = _AI_ACTION_ALIAS.get(action_raw, (_score_to_action(score)))
+    reasons = [str(x).strip() for x in (res.get("reasons") or []) if str(x).strip()][:6]
+    risks = [str(x).strip() for x in (res.get("risks") or []) if str(x).strip()][:5]
+    summary = str(res.get("summary") or "").strip()
+    return {
+        "action": action, "action_label": action_label, "score": score,
+        "reasons": reasons or rule["reasons"],
+        "risks": risks or rule["risks"],
+        "summary": summary or rule["summary"],
+    }
+
+
+async def analyze_stock_operation(code: str) -> dict[str, Any]:
+    """对个股趋势中的一只股票给出操作结论（LLM 优先，规则兜底）。
+
+    返回：
+      found / code / name / industry / as_of / engine（llm|rule）
+      action / action_label / score（-100~100）/ reasons / risks / summary
+      data.today（8 元组转可读字段） data.recent_trend（近 8 个交易日 pct）
+    """
+    full = await get_stock_quadrant()
+    frames = full.get("frames") or {}
+    dates = full.get("dates") or []
+    meta_all = full.get("meta") or {}
+    meta = meta_all.get(code) or {}
+    name = meta.get("name") or code
+    industry = meta.get("industry") or ""
+
+    # 收集该股最近 N 个有数据的交易日（今日优先，随后历史帧）
+    today: list | None = None
+    recent: list[dict[str, Any]] = []
+    for d in reversed(dates):
+        row = (frames.get(d) or {}).get(code)
+        if row is None or not row:
+            continue
+        if today is None:
+            today = row
+        recent.append({"date": d, "pct": _r(row[IDX_PCT])})
+        if len(recent) >= _AI_RECENT_N:
+            break
+    recent.reverse()
+
+    if today is None:
+        return {
+            "found": False, "code": code, "name": name, "industry": industry,
+            "message": f"未在「个股趋势」中找到 {name}（{code}）的帧数据（可能停牌或当日无成交）",
+        }
+
+    today_readable = {
+        "pct": _r(_num(today[IDX_PCT])),
+        "amt": _r(_num(today[IDX_AMT]), 3),
+        "turn": _r(_num(today[IDX_TURN])),
+        "pe": _r(_num(today[IDX_PE])),
+        "mv": _r(_num(today[IDX_MV])),
+        "main": _r(_num(today[IDX_MAIN]), 3),
+        "board": None if today[IDX_BOARD] is None else int(today[IDX_BOARD]),
+        "d5": _r(_num(today[IDX_D5])),
+    }
+
+    # 规则引擎始终先行（供兜底 + 作为 LLM 的参考信号）
+    rule = _rule_conclusion(name, code, today, recent)
+
+    # LLM 优先：失败/未配置 → 规则兜底
+    engine = "rule"
+    pick = {k: rule[k] for k in ("action", "action_label", "score", "reasons", "risks", "summary")}
+    cfg = _llm_cfg()
+    if cfg:
+        for attempt in (1, 2):
+            try:
+                user_p = _build_ai_prompt(name, code, industry, today_readable, recent, rule)
+                if attempt == 2:
+                    user_p += _AI_RETRY_TAIL
+                res = await asyncio.to_thread(_llm_chat, cfg, _AI_SYSTEM_PROMPT, user_p)
+                pick = _normalize_llm_result(res, rule)
+                engine = "llm"
+                break
+            except Exception as e:
+                logger.warning(f"个股趋势AI分析 LLM 第 {attempt}/2 次失败（降级规则）: {type(e).__name__}: {str(e)[:120]}")
+
+    return {
+        "found": True,
+        "code": code, "name": name, "industry": industry,
+        "as_of": full.get("as_of", ""),
+        "engine": engine,
+        "action": pick["action"], "action_label": pick["action_label"],
+        "score": pick["score"],
+        "reasons": pick["reasons"], "risks": pick["risks"], "summary": pick["summary"],
+        "data": {"today": today_readable, "recent_trend": recent},
+    }

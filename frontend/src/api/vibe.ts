@@ -516,10 +516,6 @@ export const vibeApi = {
     return cachedGet<TurnoverTop>('/api/vibe/market/turnover-top', undefined, 180000, { timeout: 15000 })
   },
 
-  async getConceptAnalysis() {
-    return cachedGet<ConceptAnalysis>('/api/vibe/market/concept-analysis', undefined, 180000, { timeout: 20000 })
-  },
-
   async getStockQuadrant() {
     // 冷启动构建含 30 帧全市场聚合，可能达 40s+；预热后命中缓存即秒级，超时给足兜底
     return cachedGet<StockQuadrant>('/api/vibe/market/stock-quadrant', undefined, 120000, { timeout: 90000 })
@@ -533,6 +529,13 @@ export const vibeApi = {
   async getStockQuadrantDay(date: string) {
     return ApiClient.get<{ date: string; frame: Record<string, number[]> }>(
       '/api/vibe/market/stock-quadrant/day', { date }, { timeout: 20000 }
+    )
+  },
+
+  // 个股趋势 · 单股AI操作结论（基于个股趋势帧数据，规则引擎实时生成，不做前端缓存）
+  async getStockQuadrantAiAnalysis(code: string) {
+    return ApiClient.get<any>(
+      '/api/vibe/market/stock-quadrant/ai-analysis', { code }, { timeout: 60000 }
     )
   },
 

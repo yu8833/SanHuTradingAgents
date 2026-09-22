@@ -144,7 +144,8 @@ export function makeQuadrantOption(
   const matched = pts.filter((p) => p.isMatch) // 命中股独立成系列，置顶层绘制
 
   const mkData = (arr: Point[]) => arr.map((p) => ({
-    name: p.code,
+    // 显示名称用真实名称（个股=股票名/板块=概念或行业名）；code 单独保留供点击跳转与搜索定位
+    name: p.name,
     code: p.code,
     value: [p.x, p.y],
     amt: p.v[1] || 0,
@@ -159,7 +160,7 @@ export function makeQuadrantOption(
 
   // 命中股数据：宝蓝高亮 + 放大 + 涨幅标签（置于顶层系列，永不被散点遮挡）
   const mkMatchedData = (arr: Point[]): any[] => arr.map((p) => ({
-    name: p.code,
+    name: p.name,
     code: p.code,
     value: [p.x, p.y],
     amt: p.v[1] || 0,
@@ -270,7 +271,7 @@ export function makeQuadrantOption(
         const xCls = px >= 0 ? '#f56c6c' : '#67c23a'
         const yCls = py >= 0 ? '#f56c6c' : '#67c23a'
         const rows: string[] = []
-        rows.push(`<b>${d.name || ''}</b> <span style="color:#a0aec0;font-size:11px">${d.industry || ''}</span>`)
+        rows.push(`<b>${d.code || ''} ${d.name || ''}</b> <span style="color:#a0aec0;font-size:11px">${d.industry || ''}</span>`)
         rows.push(`<span style="color:#a0aec0">${cfg.xName}</span> <b style="color:${xCls};font-family:${MONO}">${fmt(px, xUnit, true)}</b>`)
         rows.push(`<span style="color:#a0aec0">${cfg.yName}</span> <b style="color:${yCls};font-family:${MONO}">${fmt(py, yUnit, !cfg.logY)}</b>`)
         rows.push(`<span style="color:#a0aec0">涨跌</span> <b style="font-family:${MONO}">${fmt(d.pct, '%', true)}</b>`)
