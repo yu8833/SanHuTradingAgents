@@ -73,9 +73,9 @@
               @change="onSeek"
             />
             <el-select v-model="playSpeed" size="small" class="tl-speed" :disabled="dates.length < 2">
-              <el-option :value="1000" label="1x" />
-              <el-option :value="500" label="2x" />
-              <el-option :value="250" label="4x" />
+              <el-option :value="3000" label="1x" />
+              <el-option :value="1500" label="2x" />
+              <el-option :value="750" label="4x" />
             </el-select>
           </div>
         </div>
@@ -211,7 +211,8 @@ const CARDS: (QuadrantCfg & { subtitle: string })[] = [
 // ── 时间轴 ──
 const currentIndex = ref(0)
 const playing = ref(false)
-const playSpeed = ref(1000)
+// 播放节拍（ms/帧）：1x=3s / 2x=1.5s / 4x=0.75s（调慢3倍，给每帧渲染留足时间）
+const playSpeed = ref(3000)
 let playTimer: ReturnType<typeof setInterval> | null = null
 
 const dates = computed(() => data.value?.dates || [])
@@ -239,6 +240,21 @@ async function ensureFrame(date: string) {
   }
 }
 
+// 并发预取多个日期帧（分片，避免同时令过多请求，服务端/网络友好）
+const PREFETCH_CONCURRENCY = 4
+async function prefetchDates(batch: string[]) {
+  const miss = batch.filter((d) => d && !frameCache.value[d] && !loadingFrames.value.has(d))
+  for (let i = 0; i < miss.length; i += PREFETCH_CONCURRENCY) {
+    await Promise.allSettled(miss.slice(i, i + PREFETCH_CONCURRENCY).map(ensureFrame))
+  }
+}
+
+// 一次性补齐全部缺失帧（首次加载后 + 播放开始前调用，确保播放时无空白）
+async function prefetchAll() {
+  if (!dates.value.length) return
+  await prefetchDates(dates.value.slice())
+}
+
 // 时间轴移动 → 确保当前帧 + 预取相邻帧（播放时衔接更顺）
 watch(currentIndex, (i) => {
   const d = dates.value[i]
@@ -256,6 +272,8 @@ function togglePlay() {
     return
   }
   if (currentIndex.value >= dates.value.length - 1) currentIndex.value = dates.value.length - 1
+  // 播放前补齐全部缺失帧（不阻塞，后台预取；播放时每帧数据已就绪无空白）
+  prefetchAll()
   playing.value = true
 }
 watch(playing, (on) => {
@@ -452,8 +470,8 @@ async function loadAll() {
     const latest = datesArr[datesArr.length - 1] || ''
     frameCache.value = latest && slim?.frame ? { [latest]: slim.frame } : {}
     currentIndex.value = Math.max(0, datesArr.length - 1)
-    // 预取前一帧，便于立即回看
-    if (datesArr.length > 1) ensureFrame(datesArr[datesArr.length - 2])
+    // 静默补齐全部历史帧：首次进入即后台预取（分片并发），播放/拖动时全缓存命中零空白
+    prefetchAll()
   } catch (e) {
     console.error('加载个股趋势失败', e)
   } finally {

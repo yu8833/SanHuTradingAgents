@@ -51,7 +51,7 @@
         <div class="control-search">
           <div class="search-head">
             <span class="block-title"><el-icon><Search /></el-icon> 查找{{ unitName }}（名称）</span>
-            <span v-if="matchNames.length" class="block-hint">命中 {{ matchNames.length }} 个，六图同步高亮</span>
+            <span v-if="matchNames.length" class="block-hint">命中 {{ matchNames.length }} 个，图表同步高亮</span>
           </div>
           <div class="search-row">
             <el-input
@@ -71,7 +71,7 @@
         </div>
       </div>
       <div class="panel-hint">
-        六图四象限 · 当前快照（无历史时间轴） · 点击圆点跳转外部详情 · 滚轮缩放
+        板块四象限 · 当前快照（无历史时间轴） · 点击圆点跳转外部详情 · 滚轮缩放
         <span v-if="!mainAvailable" class="warn-hint">当前快照部分维度不可用（板块级暂无数据），对应图表以空态提示</span>
       </div>
     </section>
@@ -138,52 +138,34 @@ const heroSub = computed(() => (isConcept.value ? '概念板块四象限 · 当�
 const unitName = computed(() => (isConcept.value ? '概念' : '行业'))
 const unitSub = computed(() => (isConcept.value ? '同花顺概念板块' : '行业代表ETF'))
 
-// ── 六图配置（xKey/yKey 对齐帧 8 元组；板块不可用维度图表自动空态） ──
-const CARDS: (QuadrantCfg & { subtitle: string; emptyHint: string })[] = [
-  {
-    id: 'money_pct', title: '涨跌 × 主力资金', subtitle: '强弱共振定位',
-    xKey: SQ.MAIN, yKey: SQ.P, xName: '主力净流入', xUnit: '亿', yName: '涨跌幅', yUnit: '%',
-    quadrants: ['强势共振', '缩量上行', '低位承接', '弱势杀跌'],
-    tips: ['流入+上涨 · 强势共振', '流出+上涨 · 缩量上行', '流入+下跌 · 低位承接', '流出+下跌 · 弱势杀跌'],
-    emptyHint: '当前快照主力资金数据暂不可用',
-  },
-  {
-    id: 'pct_turn', title: '涨跌 × 换手率', subtitle: '量价关系',
-    xKey: SQ.P, yKey: SQ.TURN, xName: '涨跌幅', xUnit: '%', yName: '换手率', yUnit: '%',
-    quadrants: ['放量上攻', '放量下跌', '缩量回调', '缩量阴跌'],
-    tips: ['高换手+上涨 · 抢筹', '高换手+下跌 · 出货', '低换手+上涨 · 惜售/临板', '低换手+下跌 · 阴跌'],
-    emptyHint: '当前快照换手率数据暂不可用',
-  },
-  {
-    id: 'pct_pe', title: '涨跌 × 市盈率', subtitle: '估值动量（对数轴）',
-    xKey: SQ.P, yKey: SQ.PE, xName: '涨跌幅', xUnit: '%', yName: '市盈率', logY: true,
-    quadrants: ['低估上攻', '高估上攻', '高估杀跌', '低估杀跌'],
-    tips: ['低PE+上涨 · 机会区', '高PE+上涨 · 雷达泡', '高PE+下跌 · 戴维斯双杀', '低PE+下跌 · 价值陷阱'],
-    emptyHint: '板块暂无市盈率数据（仅支持个股维度）',
-  },
-  {
-    id: 'pct_d5', title: '当日 × 5日涨跌', subtitle: '趋势确认',
-    xKey: SQ.P, yKey: SQ.D5, xName: '当日涨跌幅', xUnit: '%', yName: '5日涨跌幅', yUnit: '%',
-    quadrants: ['顺势加速', '高位回调', '超跌反弹', '破位加速'],
-    tips: ['双强 · 顺势加速', '5日强+今日回调 · 见顶预警', '5日弱+今日反弹 · 诱多', '双弱 · 破位加速'],
-    emptyHint: '板块暂无 5 日涨跌数据（仅支持当前快照）',
-  },
-  {
-    id: 'pct_mv', title: '涨跌 × 总市值', subtitle: '体量风格（对数轴）',
-    xKey: SQ.P, yKey: SQ.MV, xName: '涨跌幅', xUnit: '%', yName: '总市值', yUnit: '亿', logY: true,
-    quadrants: ['权重搭台', '题材活跃', '权重杀跌', '题材退潮'],
-    tips: ['大市值+上涨 · 权重搭台', '小市值+上涨 · 题材活跃', '大市值+下跌 · 权重杀跌', '小市值+下跌 · 题材退潮'],
-    emptyHint: '板块暂无市值数据（仅支持个股维度）',
-  },
-  {
-    id: 'board_money', title: '连板 × 主力资金', subtitle: '情绪周期（涨停梯队）',
-    xKey: SQ.MAIN, yKey: SQ.BOARD, xName: '主力净流入', xUnit: '亿', yName: '连板高度',
-    filter: (v) => (v[SQ.BOARD] || 0) >= 1,
-    quadrants: ['情绪加速', '分歧退潮', '首板启动', '炸板风险'],
-    tips: ['高标+流入 · 情绪加速', '高标+流出 · 分歧退潮', '首板+流入 · 启动', '首板+流出 · 炸板风险'],
-    emptyHint: '板块无连板数据（仅支持个股维度）',
-  },
-]
+// ── 图配置（xKey/yKey 对齐帧 8 元组）──
+// 板块数据源仅提供 涨跌/换手/资金 能力；概念无市值，行业可叠加市值（代表ETF）。
+// 市盈率/5日涨跌/连板为结构化不可得（板块无PE聚合、无历史序列、连板为个股专属），不提供图。
+type BoardCard = QuadrantCfg & { subtitle: string; emptyHint: string }
+
+const MONEY_CARD: BoardCard = {
+  id: 'money_pct', title: '涨跌 × 主力资金', subtitle: '强弱共振定位',
+  xKey: SQ.MAIN, yKey: SQ.P, xName: '主力净流入', xUnit: '亿', yName: '涨跌幅', yUnit: '%',
+  quadrants: ['强势共振', '缩量上行', '低位承接', '弱势杀跌'],
+  tips: ['流入+上涨 · 强势共振', '流出+上涨 · 缩量上行', '流入+下跌 · 低位承接', '流出+下跌 · 弱势杀跌'],
+  emptyHint: '当前快照主力资金数据暂不可用',
+}
+const TURN_CARD: BoardCard = {
+  id: 'pct_turn', title: '涨跌 × 换手率', subtitle: '量价关系',
+  xKey: SQ.P, yKey: SQ.TURN, xName: '涨跌幅', xUnit: '%', yName: '换手率', yUnit: '%',
+  quadrants: ['放量上攻', '放量下跌', '缩量回调', '缩量阴跌'],
+  tips: ['高换手+上涨 · 抢筹', '高换手+下跌 · 出货', '低换手+上涨 · 惜售/临板', '低换手+下跌 · 阴跌'],
+  emptyHint: '当前快照换手率数据暂不可用',
+}
+const MV_CARD: BoardCard = {
+  id: 'pct_mv', title: '涨跌 × 总市值', subtitle: '体量风格（对数轴）',
+  xKey: SQ.P, yKey: SQ.MV, xName: '涨跌幅', xUnit: '%', yName: '总市值', yUnit: '亿', logY: true,
+  quadrants: ['权重搭台', '题材活跃', '权重杀跌', '题材退潮'],
+  tips: ['大市值+上涨 · 权重搭台', '小市值+上涨 · 题材活跃', '大市值+下跌 · 权重杀跌', '小市值+下跌 · 题材退潮'],
+  emptyHint: '板块暂无市值数据（仅支持个股维度）',
+}
+// 行业可用代表ETF总市值；概念无市值聚合 → 不展示该图
+const CARDS = computed<BoardCard[]>(() => (isConcept.value ? [MONEY_CARD, TURN_CARD] : [MONEY_CARD, TURN_CARD, MV_CARD]))
 
 const currentFrame = computed(() => data.value?.frame || {})
 const mapReady = computed(() => !!data.value && Object.keys(currentFrame.value).length > 0)
@@ -206,7 +188,7 @@ const chartOptions = computed<Record<string, EChartsOption>>(() => {
   const frame = currentFrame.value
   const out: Record<string, EChartsOption> = {}
   if (!frame || !Object.keys(frame).length) return out
-  for (const card of CARDS) {
+  for (const card of CARDS.value) {
     out[card.id] = makeQuadrantOption(meta, frame, card, matchSet.value)
   }
   return out
@@ -214,7 +196,7 @@ const chartOptions = computed<Record<string, EChartsOption>>(() => {
 
 const chartPointCount = computed<Record<string, number>>(() => {
   const out: Record<string, number> = {}
-  for (const card of CARDS) {
+  for (const card of CARDS.value) {
     const opt: any = chartOptions.value[card.id]
     const s0 = opt?.series?.[0]?.data?.length ?? 0
     const s1 = opt?.series?.[1]?.data?.length ?? 0
@@ -240,7 +222,7 @@ const matchPoints = computed(() => {
   const frame = currentFrame.value
   if (!frame) return []
   const pts: { chartId: string; seriesIndex: number; dataIndex: number }[] = []
-  for (const card of CARDS) {
+  for (const card of CARDS.value) {
     for (const p of computeMatchPoints(frame, card, matchSet.value)) {
       pts.push({ chartId: card.id, seriesIndex: p.seriesIndex, dataIndex: p.dataIndex })
     }
