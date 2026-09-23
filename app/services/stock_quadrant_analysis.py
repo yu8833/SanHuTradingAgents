@@ -7,21 +7,24 @@
     pct   涨跌幅 %
     amt   成交额 亿元
     turn  换手率 %
-    pe    市盈率（当日帧=东财动态PE，历史帧=pe_ttm）
+    pe    市盈率（当日帧与历史帧统一取 pe_ttm，保证时间轴可比）
     mv    总市值 亿元
     main  主力净流入 亿元
     board 连板高度（None=涨停池不可用；0=未涨停；1=首板；2+=连板）
     d5    5 日涨跌幅 %（(当前价 / 5 个交易日前收盘 - 1) * 100）
 
 来源：
-- 当日帧（盘中实时）：东财 clist 实时全市场快照
-  （f2 现价、f62 主力净流入、f8 换手、f9 PE、f20 总市值、f6 成交额、f100 行业，一次分页拉全）+ 东财涨停池。
+- 当日帧（盘中）：主源为 market_quotes 当日实时全量（120s 采集轮，全市场统一口径，
+  涨跌幅/成交额/收盘价），stock_basic_info 静态兜底（pe_ttm/turnover_rate/total_mv）；
+  东财 clist 仅作增强（实时主力 f62、实时现价、名称行业，抓多少算多少，不影响帧完整性）
+  + 东财涨停池 board。
 - 历史帧：stock_daily_quotes（涨跌幅/成交额/收盘价序列）+
   stock_daily_basic（pe_ttm/turnover_rate/total_mv）+ stock_daily_moneyflow（main_net）+
   stock_daily_zt_pool（连板，按日缓存，缺失自动回填）。
 
-降级（遵循项目约束：资金数据不估计、外部接口失败返回 unavailable）：
-- clist 失败 → market_quotes × stock_basic_info 组合当日帧，main 置 None（图1/6 资金轴提示不可用）；
+口径约定（跟随项目约束：资金数据不估计、外部接口失败返回 unavailable）：
+- pe：当日帧与历史帧统一 pe_ttm，避免同帧内混用动态 PE/TTM 导致估值轴不可比；
+- main：clist f62（实时增强）→ 当日已入库 stock_daily_moneyflow（盘后 19:30 真实值）→ None；
 - 涨停池失败 → 该帧 board 为 None（图6 提示连板数据不可用），不阻塞其余图。
 """
 
@@ -230,28 +233,22 @@ async def _fetch_zt_board(date_ymd: str) -> dict[str, int]:
     return {str(p.get("c", "")).strip(): int(_num(p.get("lbc")) or 1) for p in pool if p.get("c")}
 
 
-def _build_today_frame(snapshot: list[dict], board: dict[str, int]) -> dict[str, Any]:
-    """把 clist 快照组装成当日帧（金额统一亿元）。main/board 缺失置 None（不估计）。"""
-    frame: dict[str, list] = {}
-    meta: dict[str, dict] = {}
-    for s in snapshot:
-        code = s["code"]
-        frame[code] = [
-            _r(s["pct"]),                  # pct
-            _yi(s["amount"]),              # amt
-            _r(s["turn"]),                 # turn
-            _r(s["pe"], 2),                # pe
-            _yi(s["mv"]),                  # mv
-            _yi(s["main"]),                # main
-            board.get(code),               # board（非涨停股为 None → 前端按 0 处理）
-            None,                          # d5 由组装时补齐
-        ]
-        meta[code] = {"name": s["name"], "industry": s["industry"]}
-    return {"frame": frame, "meta": meta, "price": {s["code"]: s["price"] for s in snapshot}}
+async def _build_today_frame(today_mf: dict[str, float | None],
+                             snapshot: list[dict] | None = None,
+                             today_zt: dict[str, int] | None = None) -> dict[str, Any]:
+    """当日帧：market_quotes 当日实时全量为主源，clist 仅作增强（全市场统一口径）。
 
+    数据优先级（避免同帧口径混用，页面时间轴 30 天可比）：
+    - pct / amt / turn / pe / mv：一律取 market_quotes × stock_basic_info
+      （pe 统一 pe_ttm，与历史帧一致；不混入 clist 动态 PE）；
+    - main：clist f62（实时增强）→ 当日已入库 stock_daily_moneyflow（盘后真实值）→ None；
+    - price（d5 基准现价）：clist 实时现价 → market_quotes.close；
+    - board：当日涨停池。
 
-async def _build_today_frame_fallback() -> dict[str, Any]:
-    """clist 不可达时：market_quotes × stock_basic_info 组合当日帧（资金维度不可用）。"""
+    snapshot 为空（clist 失败/风控）不影响帧完整性，仅资金/现价增强略去。
+    """
+    if today_zt is None:
+        today_zt = {}
     quotes = col("market_quotes")
     basics = col("stock_basic_info")
     latest = None
@@ -277,25 +274,31 @@ async def _build_today_frame_fallback() -> dict[str, Any]:
             continue
         bmap[code] = b
 
+    snap_map: dict[str, dict] = {s["code"]: s for s in (snapshot or []) if s.get("code")}
+
     frame: dict[str, list] = {}
     meta: dict[str, dict] = {}
     price: dict[str, float | None] = {}
     for code, q in qmap.items():
-        b = bmap.get(code, {})
-        if q.get("amt") is None:
-            continue
+        amt = q.get("amt")
+        if amt is None or amt <= 0:
+            continue  # 停牌/无成交额不入当日帧（排除 market_quotes 占位空记录）
+        b = bmap.get(code) or {}
+        sn = snap_map.get(code) or {}
+        main_raw = sn.get("main") if sn.get("main") is not None else today_mf.get(code)
         frame[code] = [
             _r(q.get("pct")),
-            _yi(q.get("amt")),
+            _yi(amt),
             _r(b.get("turnover_rate")),
-            _r(b.get("pe_ttm"), 2),
+            _r(b.get("pe_ttm"), 2),          # pe 统一 pe_ttm（与历史帧一致）
             _r(b.get("total_mv")),           # stock_basic_info.total_mv 已是亿元
-            None,                            # main 不可用
-            None,
-            None,
+            _yi(main_raw) if main_raw is not None else None,
+            today_zt.get(code),              # board（非涨停股为 None → 前端按 0 处理）
+            None,                            # d5 由组装时补齐
         ]
-        meta[code] = {"name": b.get("name") or "", "industry": b.get("industry") or ""}
-        price[code] = q.get("close")
+        meta[code] = {"name": sn.get("name") or b.get("name") or "",
+                      "industry": sn.get("industry") or b.get("industry") or ""}
+        price[code] = sn.get("price") if sn.get("price") is not None else q.get("close")
     return {"frame": frame, "meta": meta, "price": price}
 
 
@@ -539,12 +542,13 @@ async def build_stock_quadrant() -> dict[str, Any]:
             return {}
 
     # 五源并行：历史帧 mongo 三源 + 当日涨停池 + clist 实时快照（聚合耗时集中在它们）
+    # 资金流范围扩到今日：当日 moneyflow 盘后 19:30 即入库，今日帧 main 可直接回填（非估计）
     import asyncio
 
     quotes_map, basic_map, mf_map, zt, today_zt, snapshot = await asyncio.gather(
         _fetch_quotes_map(fetch_start, fetch_end),
         _fetch_basic_map(hist_dates[0], hist_dates[-1]),
-        _fetch_moneyflow_map(hist_dates[0], hist_dates[-1]),
+        _fetch_moneyflow_map(hist_dates[0], today),
         _load_zt_pools(hist_dates),
         _safe_zt(),
         asyncio.to_thread(_fetch_clist_snapshot),
@@ -553,21 +557,24 @@ async def build_stock_quadrant() -> dict[str, Any]:
 
     frames = _assemble_history_frames(hist_dates, quotes_map, basic_map, mf_map, zt, chg5d)
 
-    # 当日帧：盘中实时 clist；失败降级本地库存（main 置 None）
+    # 当日资金流映射 {code: main_net(元)}：仅当日行情已入库时为非空，否则空 dict（main 置 None）
+    today_mf: dict[str, float | None] = {}
+    for code, dm in mf_map.items():
+        if (dm or {}).get(today) is not None:
+            today_mf[code] = dm[today]
+
+    # 当日帧：market_quotes 当日实时全量为主源（120s 采集轮，全市场统一口径），
+    # clist 仅作增强（实时 f62/现价/名称行业），失败或抓不全不影响帧完整性。
     today_out = {"frame": {}, "meta": {}, "price": {}}
     try:
-        if snapshot:
-            today_out = _build_today_frame(snapshot, today_zt)
-        else:
-            # push2 行情域不可达（clist 空）→ 本地库存降级；涨停池仍可单独补（push2ex 域独立）
-            logger.warning("clist 实时快照为空，当日帧降级 market_quotes × stock_basic_info（资金维度不可用）")
-            today_out = await _build_today_frame_fallback()
-            for code, lb in today_zt.items():
-                if code in today_out["frame"]:
-                    today_out["frame"][code][IDX_BOARD] = lb
+        today_out = await _build_today_frame(today_mf, snapshot, today_zt)
     except Exception as e:
-        logger.warning(f"当日帧 clist 构建失败，降级本地库存: {e}")
-        today_out = await _build_today_frame_fallback()
+        logger.warning(f"当日帧构建失败（去掉 clist 增强重试）: {e}")
+        today_out = await _build_today_frame(today_mf, None, today_zt)
+    if snapshot:
+        logger.info(f"当日帧：market_quotes 主源组装完成 + clist 增强 {len(snapshot)} 只（实时 f62/现价/名称）")
+    else:
+        logger.info("当日帧：market_quotes 主源组装完成（clist 不可用，资金/现价增强略去）")
 
     hist_last = hist_dates[-1]
     gap_days = (datetime.strptime(today, "%Y-%m-%d").date()
