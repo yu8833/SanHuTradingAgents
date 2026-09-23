@@ -16,8 +16,9 @@
     - market_quotes 最新交易日 > 日线最新交易日：立即返回 True，不触发采样/重建
     - 两者一致（含 dash/compact 格式差异）：继续走原有校验逻辑（不误伤 bug-013 检测）
 """
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 
 class _FakeColl:

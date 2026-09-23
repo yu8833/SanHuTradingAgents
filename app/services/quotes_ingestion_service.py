@@ -595,18 +595,18 @@ class QuotesIngestionService:
             # 无效或缺省则仅对新文档插入时兜底写入 None（不覆盖已有有效值）。
             set_on_insert: dict[str, float | str | None] = {}
 
-            def _price_field(key: str) -> None:
-                v = _s_price(q.get(key))
+            def _price_field(key: str, source: dict, sf: dict, soi: dict) -> None:
+                v = _s_price(source.get(key))
                 if v is not None and v > 0:
-                    set_fields[key] = v
+                    sf[key] = v
                 else:
-                    set_on_insert[key] = None
+                    soi[key] = None
 
-            _price_field("close")
-            _price_field("open")
-            _price_field("high")
-            _price_field("low")
-            _price_field("pre_close")
+            _price_field("close", q, set_fields, set_on_insert)
+            _price_field("open", q, set_fields, set_on_insert)
+            _price_field("high", q, set_fields, set_on_insert)
+            _price_field("low", q, set_fields, set_on_insert)
+            _price_field("pre_close", q, set_fields, set_on_insert)
 
             # 🔥 涨跌幅：仅当来源提供了有效值才 $set；缺失时用 close/pre_close 回退计算，
             #    仍无法得到（停牌/无行情）则用 $setOnInsert 兜底（不覆盖已有正常值）。

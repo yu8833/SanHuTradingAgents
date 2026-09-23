@@ -130,7 +130,7 @@ def _fetch_clist_snapshot() -> list[dict]:
     返回 [{code, name, price, pct, amount, turn, pe, mv, main, industry}]（金额单位元）。
     """
     import concurrent.futures as cf
-    import math
+
     import requests as _requests
 
     def _fetch_page(host: str, pn: int) -> tuple[int, list[dict]]:
@@ -681,10 +681,14 @@ def _band(v: float | None, table: list[tuple[float, float, int]]) -> int:
 
 def _rule_conclusion(name: str, code: str, today: list, recent: list[dict]) -> dict:
     """确定性规则引擎：个股趋势 8 元组 × 近 N 日序列 → 操作结论。"""
-    pct = _num(today[IDX_PCT]); amt = _num(today[IDX_AMT])
-    turn = _num(today[IDX_TURN]); pe = _num(today[IDX_PE])
-    mv = _num(today[IDX_MV]); main = _num(today[IDX_MAIN])
-    board = today[IDX_BOARD]; d5 = _num(today[IDX_D5])
+    pct = _num(today[IDX_PCT])
+    amt = _num(today[IDX_AMT])
+    turn = _num(today[IDX_TURN])
+    pe = _num(today[IDX_PE])
+    mv = _num(today[IDX_MV])
+    main = _num(today[IDX_MAIN])
+    board = today[IDX_BOARD]
+    d5 = _num(today[IDX_D5])
     main_ratio = (main / amt * 100) if (main is not None and amt) else None
     cum_n = sum(x["pct"] for x in recent if x["pct"] is not None) if recent else None
     board_i = None if board is None else int(board)
@@ -830,6 +834,7 @@ def _llm_cfg() -> dict | None:
 def _llm_chat(cfg: dict, system: str, user: str, max_tokens: int = 900) -> dict:
     """非流式调用 chat/completions 并解析 JSON 对象；任何失败抛异常（调用方降级）。"""
     import requests
+
     from app.services.macro.macro_service import _parse_llm_json
 
     api_base = cfg["api_base"].rstrip("/")

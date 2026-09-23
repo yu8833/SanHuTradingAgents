@@ -18,13 +18,11 @@ import logging
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from app.utils.timezone import get_tz, now_tz, to_config_tz
 
 import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
-from app.utils.scheduler_utils import cron_trigger
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -82,6 +80,8 @@ from app.routers import websocket_notifications as websocket_notifications_route
 from app.services.multi_source_basics_sync_service import MultiSourceBasicsSyncService
 from app.services.quotes_ingestion_service import QuotesIngestionService
 from app.services.scheduler_service import set_scheduler_instance
+from app.utils.scheduler_utils import cron_trigger
+from app.utils.timezone import get_tz, now_tz, to_config_tz
 from app.worker.akshare_sync_service import (
     run_akshare_basic_info_sync,
     run_akshare_financial_sync,
@@ -323,10 +323,6 @@ async def lifespan(app: FastAPI):
     # 启动每日定时任务：可配置
     scheduler: AsyncIOScheduler | None = None
     try:
-        pass
-    except Exception:
-        pass  # 可选依赖
-    try:
         scheduler = AsyncIOScheduler(
             timezone=get_tz(),
             job_defaults={
@@ -501,8 +497,8 @@ async def lifespan(app: FastAPI):
                     """合并执行财务+分红同步（串行，避免 scheduler 任务数量膨胀）"""
                     try:
                         from app.worker.tushare_sync_service import (
-                            run_tushare_financial_sync,
                             run_tushare_dividend_sync,
+                            run_tushare_financial_sync,
                         )
                         await run_tushare_financial_sync()
                         if settings.TUSHARE_DIVIDEND_SYNC_ENABLED:
@@ -840,8 +836,8 @@ async def lifespan(app: FastAPI):
         try:
             async def run_macro_daily_scan():
                 try:
-                    from app.utils.trading_time import is_trading_day
                     from app.utils.timezone import now_tz
+                    from app.utils.trading_time import is_trading_day
                     if not is_trading_day(now_tz()):
                         logger.info("⏭️ 非交易日，跳过宏观快扫")
                         return
@@ -869,8 +865,8 @@ async def lifespan(app: FastAPI):
             async def run_macro_scan_plan():
                 """9:00 候选池冷算 + 当日计划快照（与宏观快照解耦，独立失败互不影响）。"""
                 try:
-                    from app.utils.trading_time import is_trading_day
                     from app.utils.timezone import now_tz
+                    from app.utils.trading_time import is_trading_day
                     if not is_trading_day(now_tz()):
                         logger.info("⏭️ 非交易日，跳过当日候选池/计划快照")
                         return
@@ -879,7 +875,7 @@ async def lifespan(app: FastAPI):
                     # 不阻塞任何用户请求；下次点击生成只读库 + 秒级装配。
                     from app.services.candidate_pool import candidate_pool_service
                     snap = await candidate_pool_service.compute_daily_candidate_snapshot(
-                        top_n=10, per_industry=3, limit=20,
+                        top_n=10, per_industry=5, limit=20,
                     )
                     logger.info(
                         f"✅ [APScheduler] 当日候选快照已持久化: as_of={snap.get('as_of')}, "
@@ -920,15 +916,15 @@ async def lifespan(app: FastAPI):
         try:
             async def run_postmarket_signal_scan():
                 try:
-                    from app.utils.trading_time import is_trading_day
                     from app.utils.timezone import now_tz
+                    from app.utils.trading_time import is_trading_day
                     if not is_trading_day(now_tz()):
                         logger.info("⏭️ 非交易日，跳过盘后全市场信号扫描")
                         return
+                    from app.services.signal_tracking_service import save_scan_signals
                     from app.services.three_buys_three_sells_service import (
                         get_three_buys_three_sells_service,
                     )
-                    from app.services.signal_tracking_service import save_scan_signals
                     svc = get_three_buys_three_sells_service()
                     result = await svc.scan_three_buys_three_sells({"top_n": 30, "limit": 20})
                     await save_scan_signals(result.get("items") or [])
@@ -956,8 +952,8 @@ async def lifespan(app: FastAPI):
         try:
             async def run_signal_backfill():
                 try:
-                    from app.utils.trading_time import is_trading_day
                     from app.utils.timezone import now_tz
+                    from app.utils.trading_time import is_trading_day
                     if not is_trading_day(now_tz()):
                         logger.info("⏭️ 非交易日，跳过信号有效性回填")
                         return
@@ -984,10 +980,10 @@ async def lifespan(app: FastAPI):
         try:
             async def run_weekly_review():
                 try:
-                    from app.utils.trading_time import is_trading_day
-                    from app.utils.timezone import now_tz
                     from app.core.database import get_mongo_db
                     from app.services.weekly_review_service import generate_weekly_review
+                    from app.utils.timezone import now_tz
+                    from app.utils.trading_time import is_trading_day
                     if not is_trading_day(now_tz()):
                         logger.info("⏭️ 非交易日，跳过周度复盘自动生成")
                         return
@@ -1174,7 +1170,7 @@ async def lifespan(app: FastAPI):
         # 导致当日日K无法同步，Dashboard 数据新鲜度显示"历史K线过期 1 天"直到次日 cron 才会修复。
         # 修复：启动时若当天为工作日且当前时间已过 cron 时间，则立即跑一次增量同步（延迟 30s，等初始化完成后）。
         try:
-            from datetime import datetime, timedelta
+            from datetime import timedelta
 
             _now = now_tz()
             _tz = get_tz()
