@@ -1,7 +1,5 @@
 import logging
-from datetime import datetime
 from typing import Any, Literal
-from app.utils.timezone import now_tz
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -15,6 +13,7 @@ from app.services.paper_executor import (
     execute_market_order,
 )
 from app.services.portfolio_service import portfolio_service
+from app.utils.timezone import now_tz
 
 router = APIRouter(prefix="/paper", tags=["paper"])
 logger = logging.getLogger("webapi")
@@ -462,11 +461,32 @@ async def review_trades(current_user: dict = Depends(get_current_user)):
 
     以 paper_trades 成交流水为基础，同一 code 按时间配对一买一卖形成完整周期：
     先出现 buy，后出现 sell，则为一笔已平仓周期，计算盈亏金额/盈亏率/持仓天数。
+
+    每条周期带 id（卖出成交流水主键）与 handled 标记：
+    - 已被删除（dismissed=true）的周期直接不返回——胜率/盈亏等复盘统计随之剔除；
+    - 已创建复盘笔记（trade_id 指向该周期买卖任一端）的周期标记 handled=true，
+      前端「交易记录」列表将其隐藏（避免重复复盘），但统计/图表仍计入该笔交易；
+    - 统计/图表基于本接口全量返回，删除即刻影响统计。
     """
     db = get_mongo_db()
     trades = await db["paper_trades"].find(
         {"user_id": current_user["id"]}
     ).sort("timestamp", 1).to_list(None)
+
+    # 已删除 / 已复盘对应的成交流水 id 集合（trade_id 均为字符串）
+    notes = await db["trade_reviews"].find(
+        {"user_id": current_user["id"], "trade_id": {"$nin": [None, ""]}}
+    ).to_list(None)
+    dismissed_ids: set[str] = set()
+    handled_ids: set[str] = set()
+    for n in notes:
+        tid = n.get("trade_id")
+        if not tid:
+            continue
+        if n.get("dismissed"):
+            dismissed_ids.add(str(tid))
+        else:
+            handled_ids.add(str(tid))
 
     open_pos: dict[str, dict] = {}  # code -> buy 记录（等待平仓）
     cycles: list[dict] = []
@@ -485,7 +505,15 @@ async def review_trades(current_user: dict = Depends(get_current_user)):
             sell_price = float(t.get("price") or 0)
             qty = int(t.get("quantity") or 0)
             pnl = float(t.get("pnl") or 0)
+            sell_id = str(t.get("_id") or "")
+            buy_id = str(buy.get("_id") or "")
+            # 被删除的周期：从全量剔除（列表/统计/图表都不再出现）
+            if (sell_id in dismissed_ids) or (buy_id in dismissed_ids):
+                continue
             cycles.append({
+                "id": sell_id,
+                "buy_id": buy_id,
+                "handled": (sell_id in handled_ids) or (buy_id in handled_ids),
                 "code": code,
                 "name": t.get("stock_name") or buy.get("stock_name") or "",
                 "strategy": t.get("strategy") or buy.get("strategy") or "",
@@ -506,12 +534,21 @@ async def review_trades(current_user: dict = Depends(get_current_user)):
 
 @router.get("/review/notes", response_model=dict)
 async def list_review_notes(current_user: dict = Depends(get_current_user)):
-    """复盘笔记列表（按更新时间倒序）。"""
+    """复盘笔记列表（按更新时间倒序）。
+
+    仅返回真实复盘笔记：排除「交易记录移除」的隐藏标记（dismissed=true）。
+    必须把 _id 转为字符串 id 返回，否则前端编辑/删除拿不到笔记 ID。
+    """
+    from bson import ObjectId
     db = get_mongo_db()
     items = await db["trade_reviews"].find(
-        {"user_id": current_user["id"]}
+        {"user_id": current_user["id"], "dismissed": {"$ne": True}}
     ).sort("updated_at", -1).to_list(None)
-    cleaned = [{k: v for k, v in it.items() if k != "_id"} for it in items]
+    cleaned = []
+    for it in items:
+        oid = it.pop("_id", None)
+        it["id"] = str(oid) if isinstance(oid, ObjectId) else str(oid)
+        cleaned.append(it)
     return ok({"items": cleaned})
 
 
@@ -565,6 +602,47 @@ async def delete_review_note(note_id: str, current_user: dict = Depends(get_curr
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="复盘笔记不存在")
     return ok({"message": "已删除"})
+
+
+@router.delete("/review/trades/{trade_id}", response_model=dict)
+async def delete_review_trade(trade_id: str, current_user: dict = Depends(get_current_user)):
+    """将一笔已平仓周期从「交易记录」列表移除。
+
+    不删除原始成交流水（paper_trades），避免破坏复盘统计/图表；
+    而是写入一条 dismissed 隐藏标记（复用 trade_reviews 集合），
+    review_trades 据此把该周期标记为 handled，前端列表自动隐藏。
+    已创建复盘笔记的周期本就自动隐藏，此处直接返回。
+    """
+    from bson import ObjectId
+    db = get_mongo_db()
+    try:
+        ObjectId(trade_id)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="无效的交易记录 ID") from e
+
+    # 该周期已有关联复盘笔记 → 已自动隐藏，无需再写隐藏标记
+    existing = await db["trade_reviews"].find_one(
+        {"user_id": current_user["id"], "trade_id": trade_id, "dismissed": {"$ne": True}}
+    )
+    if existing:
+        return ok({"message": "已从交易记录移除"})
+
+    now = now_tz().isoformat()
+    # 注意：dismissed/updated_at 只放 $set，不能同时出现在 $setOnInsert——
+    # MongoDB 对同路径双写会抛 WriteError(code=40) 冲突。
+    await db["trade_reviews"].update_one(
+        {"user_id": current_user["id"], "trade_id": trade_id},
+        {
+            "$set": {"dismissed": True, "updated_at": now},
+            "$setOnInsert": {
+                "user_id": current_user["id"],
+                "trade_id": trade_id,
+                "created_at": now,
+            },
+        },
+        upsert=True,
+    )
+    return ok({"message": "已从交易记录移除"})
 
 
 @router.get("/review/stats", response_model=dict)

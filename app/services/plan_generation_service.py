@@ -15,16 +15,17 @@ import json
 import logging
 import time
 import uuid
-from typing import Any, Callable, Awaitable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
-from app.services.macro import macro_service
 from app.services import plan_service
+from app.services.macro import macro_service
 
 logger = logging.getLogger(__name__)
 
 # 供应链 Redis 进度事件 JSON 序列化兜底（写进度含 datetime 字段）
 def _json_default(obj: Any) -> Any:
-    from datetime import datetime, date
+    from datetime import date, datetime
     if isinstance(obj, (datetime, date)):
         return obj.isoformat()
     raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
@@ -42,7 +43,7 @@ SELL_CONDITION_TMPL = "跌破MA60 或 盈利{target}% 分批止盈，触及止�
 
 # 候选阈值：行业数 / 每行业个股数 / 候选上限
 DEFAULT_TOP_N = 10
-DEFAULT_PER_INDUSTRY = 3
+DEFAULT_PER_INDUSTRY = 5
 DEFAULT_LIMIT = 20
 
 
@@ -430,7 +431,7 @@ async def _build_stock_step(user_id: str, direction: str | None, basis: dict | N
     """个股段：候选池+已验证信号 **硬绑定** 当日预测行业池（Stage3）。
 
     行业池由 Stage2 行业方向预测产出（含行业置信度）；本段只保留
-    industry ∈ 行业池 的个股，并按行业限流（每行业上限默认3只）+ 方向过滤，
+    industry ∈ 行业池 的个股，并按行业限流（每行业上限默认5只）+ 方向过滤，
     且剔除「当日计划中已存在」的代码（避免已确认/已添加的标的重复出现在候选）。
     """
     allowed = {x.get("industry") for x in (industry_pool or []) if x.get("industry")}
@@ -793,7 +794,9 @@ async def save_plan_overrides(user_id: str, dismissed: dict | None = None,
 
 async def persist_daily_plan_snapshot(result: dict) -> dict:
     """把当日计划结果按「今日日期」落库（upsert，跨天自动重建）。"""
-    from datetime import datetime, timezone as dt_timezone
+    from datetime import datetime
+    from datetime import timezone as dt_timezone
+
     from app.core.database import get_mongo_db
     from app.utils.timezone import now_tz
     date = now_tz().strftime("%Y-%m-%d")

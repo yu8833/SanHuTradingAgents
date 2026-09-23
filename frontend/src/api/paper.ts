@@ -79,6 +79,9 @@ export const paperApi = {
 // ==================== 交易复盘 ====================
 
 export interface ReviewCycleItem {
+  id?: string
+  buy_id?: string
+  handled?: boolean
   code: string
   name: string
   strategy: string
@@ -120,6 +123,9 @@ export interface ReviewStats {
 export const reviewApi = {
   async getTrades() {
     return ApiClient.get<{ items: ReviewCycleItem[]; total: number }>('/api/paper/review/trades')
+  },
+  async deleteTrade(tradeId: string) {
+    return ApiClient.delete<{ message: string }>(`/api/paper/review/trades/${tradeId}`)
   },
   async getNotes() {
     return ApiClient.get<{ items: ReviewNoteItem[] }>('/api/paper/review/notes')

@@ -61,7 +61,7 @@
         </div>
         <div class="table-card">
           <div class="table-card-hd">
-            <span class="table-card-sub">{{ tradeRows.length }} 条记录（含 {{ holdingRows.length }} 持仓中）</span>
+            <span class="table-card-sub">{{ tradeRows.length }} 条待处理记录（含 {{ holdingRows.length }} 持仓中 · 已复盘/已删除的默认隐藏）</span>
           </div>
           <el-table :data="tradeRows" v-loading="loading" size="small" stripe empty-text="暂无交易记录" class="app-table app-table--trades">
             <el-table-column label="股票" min-width="130">
@@ -117,10 +117,13 @@
                 <span class="pct" :class="tradePnlPct(row) >= 0 ? 'up' : 'down'">{{ fmtPct(tradePnlPct(row)) }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="132">
+            <el-table-column label="操作" width="180">
               <template #default="{ row }">
-                <el-button size="small" type="primary" link @click="openAddNote(row)">记录复盘</el-button>
-                <el-button v-if="row.status === 'open'" size="small" type="danger" link @click="sellHolding(row)">卖出</el-button>
+                <div class="row-ops">
+                  <el-button size="small" type="primary" link @click="openAddNote(row)">记录复盘</el-button>
+                  <el-button v-if="row.status === 'closed' && row.id" size="small" type="danger" link :icon="Delete" @click="removeTrade(row)">删除</el-button>
+                  <el-button v-if="row.status === 'open'" size="small" type="danger" link @click="sellHolding(row)">卖出</el-button>
+                </div>
               </template>
             </el-table-column>
           </el-table>
@@ -167,28 +170,41 @@
       <!-- 复盘笔记面板 -->
       <el-tab-pane label="复盘笔记" name="notes">
         <div class="notes-toolbar">
+          <span class="notes-count">{{ notes.length }} 篇笔记</span>
           <el-button type="primary" size="small" :icon="Plus" @click="openAddNote()">新增复盘</el-button>
         </div>
         <el-empty v-if="!loading && notes.length === 0" description="暂无复盘笔记" />
         <div v-else class="notes-list">
-          <div v-for="n in notes" :key="n.id" class="note-card">
+          <div v-for="n in notes" :key="n.id" class="note-row">
             <div class="note-head">
-              <div class="note-title">
-                <el-tag size="small" type="warning" v-if="n.result">{{ resultLabel(n.result) }}</el-tag>
-                <span class="note-subject">{{ n.code ? (n.name || n.code) : '自由记录' }}</span>
-                <el-tag size="small" v-if="n.strategy">{{ strategyLabel(n.strategy) }}</el-tag>
+              <div class="note-subject">
+                <template v-if="n.code">
+                  <span class="note-name">{{ n.name || n.code }}</span>
+                  <span class="note-code">{{ n.code }}</span>
+                </template>
+                <el-tag v-else size="small" type="info" effect="plain">自由记录</el-tag>
               </div>
               <div class="note-actions">
-                <el-button size="small" text @click="openEditNote(n)">编辑</el-button>
-                <el-button size="small" text type="danger" @click="removeNote(n)">删除</el-button>
+                <el-tag v-if="n.result" size="small" :type="resultTagType(n.result)">{{ resultLabel(n.result) }}</el-tag>
+                <el-tag v-if="n.strategy" size="small" type="primary" effect="plain">{{ strategyLabel(n.strategy) }}</el-tag>
+                <span class="note-time">{{ formatTime(n.updated_at) }}</span>
+                <el-button size="small" text :icon="Edit" @click="openEditNote(n)">编辑</el-button>
+                <el-button size="small" text type="danger" :icon="Delete" @click="removeNote(n)">删除</el-button>
               </div>
             </div>
-            <div class="note-body" v-if="n.lesson"><div class="note-field"><span class="field-label">教训</span>{{ n.lesson }}</div></div>
-            <div class="note-body" v-if="n.improvement"><div class="note-field"><span class="field-label">改进</span>{{ n.improvement }}</div></div>
-            <div class="note-tags" v-if="n.tags && n.tags.length">
-              <el-tag v-for="t in n.tags" :key="t" size="small" type="info">{{ t }}</el-tag>
+            <div class="note-body">
+              <div v-if="n.lesson" class="note-line">
+                <span class="line-label">经验教训</span>
+                <span class="line-text">{{ n.lesson }}</span>
+              </div>
+              <div v-if="n.improvement" class="note-line">
+                <span class="line-label">改进计划</span>
+                <span class="line-text">{{ n.improvement }}</span>
+              </div>
+              <div v-if="n.tags && n.tags.length" class="note-tags">
+                <el-tag v-for="t in n.tags" :key="t" size="small" type="info" effect="plain">{{ t }}</el-tag>
+              </div>
             </div>
-            <div class="note-time">{{ formatTime(n.updated_at) }}</div>
           </div>
         </div>
       </el-tab-pane>
@@ -198,7 +214,26 @@
     <el-dialog v-model="noteDialogVisible" :title="editingId ? '编辑复盘' : '新增复盘'" width="560px">
       <el-form :model="noteForm" label-width="80px">
         <el-form-item label="股票代码">
-          <el-input v-model="noteForm.code" placeholder="可空，留空表示自由记录" />
+          <StockCodeAutocomplete
+            v-model="noteForm.code"
+            :markets="['CN', 'HK', 'US']"
+            placeholder="可空，输入代码或名称联想匹配；留空表示自由记录"
+            @select="onNoteStockPicked"
+            @clear="onNoteStockCleared"
+          />
+        </el-form-item>
+        <el-form-item label="股票名称">
+          <template v-if="noteForm.code">
+            <router-link target="_blank" rel="noopener" :to="`/stocks/${noteForm.code}`" class="stk-name">
+              {{ noteForm.name || noteForm.code }}
+            </router-link>
+          </template>
+          <span v-else class="note-empty-name">—（未绑定股票）</span>
+        </el-form-item>
+        <el-form-item label="交易策略">
+          <el-select v-model="noteForm.strategy" placeholder="该笔交易所用策略（可空）" clearable style="width:100%">
+            <el-option v-for="opt in strategyOptions" :key="opt.id" :label="opt.name" :value="opt.id" />
+          </el-select>
         </el-form-item>
         <el-form-item label="交易结果">
           <el-select v-model="noteForm.result" placeholder="选择交易结果归因" clearable style="width:100%">
@@ -229,7 +264,7 @@
 import { onMounted, reactive, ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { DataAnalysis, Refresh, Plus } from '@element-plus/icons-vue'
+import { DataAnalysis, Refresh, Plus, Edit, Delete } from '@element-plus/icons-vue'
 import { paperApi, reviewApi, type ReviewCycleItem, type ReviewNoteItem, type ReviewStats } from '@/api/paper'
 import { stocksApi } from '@/api/stocks'
 import { getStrategyNameMap, strategyNameSync } from '@/utils/strategyName'
@@ -257,6 +292,8 @@ const resultOptions = ref<string[]>([])
 
 // ── 交易记录融合视图：已平仓（买卖一行） + 持仓中 ──
 interface TradeRow {
+  id?: string
+  handled?: boolean
   code: string
   name?: string
   strategy?: string
@@ -286,8 +323,10 @@ const holdingRows = computed<TradeRow[]>(() => {
   }))
 })
 
+/** 全部已平仓周期：用于图表/统计（含已复盘、已移除的记录） */
 const closedRows = computed<TradeRow[]>(() => {
   return (cycles.value || []).map(c => ({
+    id: c.id,
     code: c.code,
     name: c.name,
     strategy: c.strategy,
@@ -303,10 +342,31 @@ const closedRows = computed<TradeRow[]>(() => {
   }))
 })
 
-/** 交易记录 = 持仓中（进行中，置顶） + 已平仓（按平仓时间倒序） */
+/** 待复盘周期：未记录复盘、未被删除的已平仓记录（列表只展示这些） */
+const pendingClosedRows = computed<TradeRow[]>(() => {
+  return (cycles.value || [])
+    .filter(c => !c.handled)
+    .map(c => ({
+      id: c.id,
+      code: c.code,
+      name: c.name,
+      strategy: c.strategy,
+      reason: c.reason,
+      status: 'closed' as const,
+      buy_price: Number(c.buy_price ?? 0),
+      sell_price: Number(c.sell_price ?? 0),
+      quantity: Number(c.quantity ?? 0),
+      pnl: Number(c.pnl ?? 0),
+      pnl_pct: Number(c.pnl_pct ?? 0),
+      buy_time: c.buy_time,
+      sell_time: c.sell_time,
+    }))
+})
+
+/** 交易记录 = 持仓中（进行中，置顶） + 待复盘已平仓（按平仓时间倒序） */
 const tradeRows = computed<TradeRow[]>(() => [
   ...holdingRows.value,
-  ...closedRows.value.sort((a, b) => (b.sell_time || '').localeCompare(a.sell_time || '')),
+  ...pendingClosedRows.value.sort((a, b) => (b.sell_time || '').localeCompare(a.sell_time || '')),
 ])
 
 /** el-tag 状态类型（已平仓=success / 持仓中=warning） */
@@ -337,10 +397,13 @@ const noteDialogVisible = ref(false)
 const editingId = ref<string | null>(null)
 const noteForm = reactive({
   code: '',
+  name: '',
+  strategy: '',
   result: '',
   lesson: '',
   improvement: '',
-  tags: [] as string[]
+  tags: [] as string[],
+  tradeId: null as string | null,
 })
 
 const RESULT_LABELS: Record<string, string> = {
@@ -399,6 +462,42 @@ async function loadHoldings() {
   }
 }
 
+// 复盘笔记名称补全：历史笔记可能只存了代码没有名称（如北交所 92 开头），
+// 按代码异步取行情名称填充展示；会话内缓存避免重复请求。
+const noteNameCache = new Map<string, string>()
+async function fillNoteNames() {
+  const missing = [...new Set(
+    (notes.value || [])
+      .filter(n => n.code && !n.name)
+      .map(n => n.code!)
+  )]
+  if (missing.length === 0) return
+  const apply = (code: string, name: string) => {
+    notes.value.forEach(n => {
+      if (n.code === code && !n.name) n.name = name
+    })
+  }
+  await Promise.all(
+    missing.map(async (code) => {
+      const cached = noteNameCache.get(code)
+      if (cached) {
+        apply(code, cached)
+        return
+      }
+      try {
+        const res = await stocksApi.getQuote(code)
+        const nm = res.data?.name
+        if (nm) {
+          noteNameCache.set(code, nm)
+          apply(code, nm)
+        }
+      } catch (e) {
+        console.warn(`获取股票 ${code} 名称失败:`, e)
+      }
+    })
+  )
+}
+
 async function loadAll() {
   loading.value = true
   try {
@@ -409,6 +508,7 @@ async function loadAll() {
     ])
     cycles.value = tradesRes.data.items || []
     notes.value = notesRes.data.items || []
+    fillNoteNames() // 不阻塞加载：历史笔记缺名称的按代码异步补全
     stats.value = statsRes.data
     resultOptions.value = statsRes.data?.result_options || []
     // 预载策略名称映射，保证店铺展示与「常用策略」名称对齐
@@ -425,7 +525,11 @@ async function loadAll() {
 
 function openAddNote(row?: TradeRow) {
   editingId.value = null
+  // 已平仓周期关联成交流水 id：保存复盘笔记后该记录自动从「交易记录」列表隐藏
+  noteForm.tradeId = (row?.status === 'closed' && row?.id) ? row.id : null
   noteForm.code = row?.code || ''
+  noteForm.name = row?.name || ''
+  noteForm.strategy = row?.strategy || ''
   noteForm.result = ''
   noteForm.lesson = ''
   noteForm.improvement = ''
@@ -435,7 +539,10 @@ function openAddNote(row?: TradeRow) {
 
 function openEditNote(n: ReviewNoteItem) {
   editingId.value = n.id || null
+  noteForm.tradeId = n.trade_id || null
   noteForm.code = n.code || ''
+  noteForm.name = n.name || ''
+  noteForm.strategy = n.strategy || ''
   noteForm.result = n.result || ''
   noteForm.lesson = n.lesson || ''
   noteForm.improvement = n.improvement || ''
@@ -443,15 +550,28 @@ function openEditNote(n: ReviewNoteItem) {
   noteDialogVisible.value = true
 }
 
+// 股票联想选中 → 自动回填代码+名称
+function onNoteStockPicked(stock: any) {
+  if (stock?.name) noteForm.name = stock.name
+}
+
+// 清空代码 → 名称同步清空
+function onNoteStockCleared() {
+  noteForm.name = ''
+}
+
 async function saveNote() {
   saving.value = true
   try {
     const payload = {
       code: noteForm.code || null,
+      name: noteForm.name || null,
+      strategy: noteForm.strategy || null,
       result: noteForm.result || null,
       lesson: noteForm.lesson || null,
       improvement: noteForm.improvement || null,
-      tags: noteForm.tags
+      tags: noteForm.tags,
+      trade_id: noteForm.tradeId,
     }
     if (editingId.value) {
       await reviewApi.updateNote(editingId.value, payload)
@@ -465,6 +585,20 @@ async function saveNote() {
     ElMessage.error('保存失败')
   } finally {
     saving.value = false
+  }
+}
+
+async function removeTrade(row: TradeRow) {
+  if (!row.id) return
+  try {
+    await ElMessageBox.confirm(
+      `确定将「${row.name || row.code}」从交易记录中删除？\n删除后该记录将不再计入胜率/盈亏等复盘统计。`,
+      '删除交易记录', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
+    await reviewApi.deleteTrade(row.id)
+    ElMessage.success('已删除，复盘统计已更新')
+    await loadAll()
+  } catch (e) {
+    /* 取消则不处理 */
   }
 }
 
@@ -645,6 +779,49 @@ function getStrategyTagType(s: string): 'primary' | 'success' | 'warning' | 'inf
   return map[s] || 'primary'
 }
 
+/** 交易结果 → 标签颜色（正向=绿，负向=红，中性=灰/黄） */
+function resultTagType(s: string): 'success' | 'danger' | 'warning' | 'info' {
+  const map: Record<string, 'success' | 'danger' | 'warning' | 'info'> = {
+    executed: 'success',
+    stop_loss_timely: 'success',
+    chasing_high: 'danger',
+    cut_loss_early: 'warning',
+    missed: 'info',
+    other: 'info',
+  }
+  return map[s] || 'info'
+}
+
+// 策略下拉选项：注册表映射 + 历史策略兜底（与持仓页一致）
+const LEGACY_STRATEGY_POOL: [string, string][] = [
+  ['extreme_reversal', '极端反转'],
+  ['turnaround', '困境反转'],
+  ['small_cap_value', '小盘价值'],
+  ['convertible_arbitrage', '转债套利'],
+  ['ma_golden_cross', 'MA金叉'],
+  ['macd_golden', 'MACD金叉'],
+]
+const strategyOptions = computed<{ id: string; name: string }[]>(() => {
+  const seen = new Set<string>()
+  const out: { id: string; name: string }[] = []
+  const push = (id: string, name: string | undefined) => {
+    const n = (name || '').trim()
+    if (!id || !n || seen.has(id)) return
+    seen.add(id)
+    out.push({ id, name: n })
+  }
+  // 注册表 + 兜底映射（跳过旧数据别名 tbs，避免与 MA金叉重复）
+  for (const [id, name] of Object.entries(strategyNames.value)) {
+    if (id === 'tbs') continue
+    push(id, name)
+  }
+  // 注册表未命中的历史项兜底
+  for (const [id, name] of LEGACY_STRATEGY_POOL) push(id, name)
+  // 「默认」置顶，其余保持注册表顺序
+  out.sort((a, b) => (a.id === 'default' ? -1 : b.id === 'default' ? 1 : 0))
+  return out
+})
+
 onMounted(() => {
   loadAll()
 })
@@ -811,61 +988,116 @@ onMounted(() => {
 .side-buy { color: var(--app-up); }
 .side-sell { color: var(--app-down); }
 
-/* 复盘笔记 */
+/* 交易记录操作按钮组 */
+.row-ops {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+/* 复盘笔记：分割线列表（一行一笔记，轻镶边，强文字层级） */
 .notes-toolbar {
-  margin-bottom: 12px;
-  text-align: right;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.notes-count {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  font-family: var(--app-font-mono);
 }
 .notes-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-  gap: 12px;
+  display: flex;
+  flex-direction: column;
 }
-.note-card {
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: var(--app-radius);
-  background: var(--el-fill-color-blank);
-  padding: 14px 16px;
-  transition: box-shadow .2s ease, transform .2s ease;
+.note-row {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 14px 12px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  transition: background .15s ease;
 }
-.note-card:hover {
-  box-shadow: 0 6px 18px rgba(0, 0, 0, .06);
-  transform: translateY(-1px);
+.note-row:first-child {
+  padding-top: 6px;
+}
+.note-row:last-child {
+  border-bottom: none;
+}
+.note-row:hover {
+  background: var(--el-fill-color-lighter);
 }
 .note-head {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
-.note-title {
+.note-subject {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.note-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+}
+.note-code {
+  font-size: 12px;
+  color: var(--el-text-color-placeholder);
+  font-family: var(--app-font-mono);
+  flex-shrink: 0;
+}
+.note-actions {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-.note-subject {
-  font-weight: 600;
-}
-.note-body {
-  margin-top: 8px;
-}
-.note-field {
-  font-size: 14px;
-  line-height: 1.6;
-}
-.field-label {
-  display: inline-block;
-  width: 44px;
-  color: var(--el-text-color-secondary);
-}
-.note-tags {
-  margin-top: 8px;
-  display: flex;
-  gap: 6px;
+  flex-shrink: 0;
 }
 .note-time {
-  margin-top: 8px;
   font-size: 12px;
+  color: var(--el-text-color-placeholder);
+  font-family: var(--app-font-mono);
+  margin-left: 4px;
+}
+.note-empty-name {
+  color: var(--el-text-color-placeholder);
+  font-size: 12.5px;
+}
+.note-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 2px;
+}
+.note-line {
+  display: flex;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.65;
+}
+.line-label {
+  flex-shrink: 0;
+  width: 52px;
+  padding-top: 2px;
+  font-size: 11.5px;
+  font-weight: 600;
   color: var(--el-text-color-secondary);
+}
+.line-text {
+  color: var(--el-text-color-regular);
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+.note-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 /* ═══════════ 策略收益率 ═══════════ */

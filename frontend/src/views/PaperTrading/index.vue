@@ -193,7 +193,16 @@
           </el-radio-group>
         </el-form-item>
         <el-form-item label="代码">
-          <el-input v-model="order.code" placeholder="A股: 600519 | 港股: 0700 | 美股: AAPL" @input="detectMarket" />
+          <StockCodeAutocomplete
+            v-model="order.code"
+            :markets="['CN', 'HK', 'US']"
+            placeholder="A股: 600519 | 港股: 0700 | 美股: AAPL"
+            @select="onOrderStockPicked"
+          />
+        </el-form-item>
+        <el-form-item label="名称" v-if="orderName">
+          <span style="font-weight:600">{{ orderName }}</span>
+          <span style="color:#909399;font-size:12px;margin-left:8px;">所选标的，下单前请核对</span>
         </el-form-item>
         <el-form-item label="市场" v-if="detectedMarket">
           <div>
@@ -220,7 +229,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, watch, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { CreditCard, Refresh, Plus, Delete, ArrowRight } from '@element-plus/icons-vue'
@@ -237,6 +246,19 @@ const router = useRouter()
 const orderDialog = ref(false)
 const order = ref({ side: 'buy', code: '', qty: 100 })
 const detectedMarket = ref<string>('')
+const orderName = ref('')
+
+// 代码变化（联想选中/清空/程序赋值）→ 刷新市场标签；清空时同步清空名称回显
+watch(() => order.value.code, (v) => {
+  detectMarket()
+  if (!v) orderName.value = ''
+})
+
+// 股票联想选中 → 回填名称回显 + 市场识别
+function onOrderStockPicked(stock: any) {
+  if (stock?.name) orderName.value = stock.name
+  detectMarket()
+}
 
 // ── 今日买卖信号（来自综合研判：计划/候选 + 持仓卖点评估） ──
 const syn = ref<MarketSynthesis | null>(null)
@@ -304,6 +326,7 @@ function buyFromSignal(row: any) {
   order.value.side = 'buy'
   order.value.code = row.code
   order.value.qty = 100
+  orderName.value = row.name || ''
   detectMarket()
   orderDialog.value = true
 }
@@ -314,6 +337,7 @@ function sellFromSignal(row: any) {
   order.value.side = 'sell'
   order.value.code = row.code
   order.value.qty = Math.max(1, Number(row.quantity || 0))
+  orderName.value = row.name || ''
   detectMarket()
   orderDialog.value = true
 }
@@ -407,6 +431,8 @@ function detectMarket() {
 }
 
 function openOrderDialog() {
+  order.value.code = ''
+  orderName.value = ''
   orderDialog.value = true
 }
 
