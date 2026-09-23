@@ -177,19 +177,20 @@
     <!-- 添加/编辑持仓对话框 -->
     <el-dialog v-model="editDialogVisible" :title="editingId ? '编辑持仓' : '手动添加持仓'" width="520px">
       <el-form :model="editForm" label-width="100px" size="default">
-        <el-form-item label="股票代码" v-if="!editingId">
-          <el-input v-model="editForm.symbol" placeholder="如 600519" />
-        </el-form-item>
-        <el-form-item label="股票名称" v-if="!editingId">
-          <el-input v-model="editForm.stock_name" placeholder="如 贵州茅台" />
+        <el-form-item label="股票" v-if="!editingId">
+          <StockCodeAutocomplete
+            v-model="editForm.symbol"
+            :markets="['CN']"
+            placeholder="输入代码或名称自动匹配（如 600519 或 贵州茅台）"
+            @select="onEditStockPicked"
+          />
+          <div v-if="editForm.stock_name" style="font-size: 12px; color: #909399; margin-top: 4px;">
+            股票名称：{{ editForm.stock_name }}
+          </div>
         </el-form-item>
         <el-form-item label="策略" v-if="!editingId">
           <el-select v-model="editForm.strategy" style="width:100%">
-            <el-option label="默认" value="default" />
-            <el-option label="极端反转" value="extreme_reversal" />
-            <el-option label="困境反转" value="turnaround" />
-            <el-option label="小盘价值" value="small_cap_value" />
-            <el-option label="转债套利" value="convertible_arbitrage" />
+            <el-option v-for="opt in strategyOptions" :key="opt.id" :label="opt.name" :value="opt.id" />
           </el-select>
         </el-form-item>
         <el-form-item label="数量" v-if="!editingId">
@@ -263,11 +264,7 @@
       <el-form label-width="100px">
         <el-form-item label="策略标签">
           <el-select v-model="importStrategy" style="width:100%">
-            <el-option label="默认" value="default" />
-            <el-option label="极端反转" value="extreme_reversal" />
-            <el-option label="困境反转" value="turnaround" />
-            <el-option label="小盘价值" value="small_cap_value" />
-            <el-option label="转债套利" value="convertible_arbitrage" />
+            <el-option v-for="opt in strategyOptions" :key="opt.id" :label="opt.name" :value="opt.id" />
           </el-select>
         </el-form-item>
         <el-form-item label="CSV文件">
@@ -462,6 +459,11 @@ const openAddDialog = () => {
   editDialogVisible.value = true
 }
 
+// 股票联想选中 → 自动回填股票名称
+const onEditStockPicked = (stock: any) => {
+  if (stock?.name) editForm.stock_name = stock.name
+}
+
 const openEditDialog = (row: PositionItem) => {
   editingId.value = row.id
   Object.assign(editForm, {
@@ -573,6 +575,35 @@ const strategyNames = ref<Record<string, string>>({})
 const strategyLabel = (s: string) => {
   return strategyNames.value[s] || strategyNameSync(s) || s
 }
+
+// 手动添加/导入持仓的策略下拉：优先取系统策略注册表（/api/strategy/list，20+ 策略；
+// strategyNames 已并入兜底映射 + 注册表），再补历史硬编码的 5 项保证接口失败时仍可选。
+const LEGACY_STRATEGY_POOL: [string, string][] = [
+  ['extreme_reversal', '极端反转'],
+  ['turnaround', '困境反转'],
+  ['small_cap_value', '小盘价值'],
+  ['convertible_arbitrage', '转债套利'],
+]
+const strategyOptions = computed<{ id: string; name: string }[]>(() => {
+  const seen = new Set<string>()
+  const out: { id: string; name: string }[] = []
+  const push = (id: string, name: string | undefined) => {
+    const n = (name || '').trim()
+    if (!id || !n || seen.has(id)) return
+    seen.add(id)
+    out.push({ id, name: n })
+  }
+  // 注册表 + 兜底映射（跳过旧数据别名 tbs，避免与 MA金叉重复）
+  for (const [id, name] of Object.entries(strategyNames.value)) {
+    if (id === 'tbs') continue
+    push(id, name)
+  }
+  // 注册表/映射未命中的历史项兜底
+  for (const [id, name] of LEGACY_STRATEGY_POOL) push(id, name)
+  // 「默认」置顶，其余保持注册表顺序
+  out.sort((a, b) => (a.id === 'default' ? -1 : b.id === 'default' ? 1 : 0))
+  return out
+})
 
 const getStrategyTagType = (s: string): 'primary' | 'success' | 'warning' | 'info' | 'danger' => {
   const map: Record<string, 'primary' | 'success' | 'warning' | 'info' | 'danger'> = {

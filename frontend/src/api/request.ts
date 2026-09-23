@@ -284,7 +284,14 @@ const createAxiosInstance = (): AxiosInstance => {
             break
 
           case 404:
-            showErrorMessage('请求的资源不存在')
+            // 业务性 404（如三买三卖「数据不足」）仍应留给调用方兜底承接 → 尊重 skipErrorHandler
+            if (!config?.skipErrorHandler) {
+              // 透出后端具体 detail（如「无效的股票代码: xxx」「未找到该股票的任何信息」），
+              // 仅当后端没有可读文案（如路由级默认 Not Found）才回退到通用提示。
+              const detail = data?.detail || data?.message
+              const readable = typeof detail === 'string' && detail.trim() && detail.trim().toLowerCase() !== 'not found'
+              showErrorMessage(readable ? detail : '请求的资源不存在（可能已下线或代码有误）')
+            }
             break
 
           case 429:

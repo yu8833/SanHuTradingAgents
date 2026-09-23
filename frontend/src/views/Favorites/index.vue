@@ -261,10 +261,11 @@
         </el-form-item>
 
         <el-form-item label="股票代码" prop="stock_code">
-          <el-input
+          <StockCodeAutocomplete
             v-model="addForm.stock_code"
+            :markets="stockCodeMarkets"
             :placeholder="getStockCodePlaceholder()"
-            @blur="fetchStockInfo"
+            @select="onAddStockPicked"
           />
           <div style="font-size: 12px; color: #909399; margin-top: 4px;">
             {{ getStockCodeHint() }}
@@ -524,7 +525,7 @@
 <script setup lang="ts">
 // 显式声明组件名，供 <keep-alive :include> 匹配
 defineOptions({ name: 'FavoritesHome' })
-import { ref, computed, onMounted, onActivated } from 'vue'
+import { ref, computed, watch, onMounted, onActivated } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import {
@@ -658,6 +659,27 @@ const addRules = {
     { required: true, message: '请输入股票名称', trigger: 'blur' }
   ]
 }
+
+// 股票联想：市场 → 搜索域映射（A股/港股/美股对应 CN/HK/US）
+const stockCodeMarkets = computed(() => {
+  const map: Record<string, string[]> = { A股: ['CN'], 港股: ['HK'], 美股: ['US'] }
+  return map[addForm.value.market] || ['CN']
+})
+
+// 股票联想选中 → 自动回填股票名称
+const onAddStockPicked = (stock: any) => {
+  if (stock?.name) addForm.value.stock_name = stock.name
+}
+
+// 手动输入 A股完整代码但未走联想选择 → 仍自动补全名称（保留原有体验）
+watch(
+  () => addForm.value.stock_code,
+  (v) => {
+    if (addForm.value.market === 'A股' && /^\d{6}$/.test((v || '').trim()) && !addForm.value.stock_name) {
+      fetchStockInfo()
+    }
+  }
+)
 
 // 编辑对话框
 const editDialogVisible = ref(false)
