@@ -98,8 +98,8 @@ export const candidateApi = {
     ApiClient.get<CandidateStockList>(
       '/api/candidate/stocks', { industry, limit }),
 
-  /** Tab2 默认视图：未选行业时，前 top_n 行业每行业 top per_industry 只三买三卖信号个股 */
-  stocksOverview: (topN = 10, perIndustry = 3, industries: string[] = []) =>
+  /** Tab2 默认视图：未选行业时，前 top_n 行业每行业 top per_industry 只三买三卖信号个股（默认每行业 5 只） */
+  stocksOverview: (topN = 10, perIndustry = 5, industries: string[] = []) =>
     ApiClient.get<CandidateStockList>(
       '/api/candidate/stocks-overview',
       { top_n: topN, per_industry: perIndustry, industries: industries.join(',') }),

@@ -55,7 +55,7 @@
       </div>
     </section>
 
-    <!-- ② 标的精选：个股趋势帧确认 + 三买三卖时机（默认计算机行业） -->
+    <!-- ② 标的精选：个股趋势帧确认 + 三买三卖时机（默认各行业三买 TOP） -->
     <section ref="stockSection" class="flow-block">
       <div class="flow-head">
         <span class="flow-step">②</span>
@@ -68,7 +68,7 @@
             v-model="selectedIndustry"
             filterable
             clearable
-            placeholder="选择行业（来自赛道确认）"
+            placeholder="全部行业（各行业三买 TOP）"
             class="industry-select"
             @change="loadCandidates"
           >
@@ -76,6 +76,7 @@
           </el-select>
           <el-button :icon="Refresh" :loading="stockLoading" @click="loadCandidates">计算候选</el-button>
           <el-radio-group v-model="signalFilter" class="signal-filter" size="small">
+            <el-radio-button value="buy">三买 {{ signalStats.buy }}</el-radio-button>
             <el-radio-button value="all">全部 {{ signalStats.all }}</el-radio-button>
             <el-radio-button value="B1">左侧买点 {{ signalStats.B1 }}</el-radio-button>
             <el-radio-button value="B2">突破买点 {{ signalStats.B2 }}</el-radio-button>
@@ -112,13 +113,13 @@
         </div>
       </div>
 
-      <div class="stocks-hint">{{ stocksHint }} · 三买三卖信号 · 显示 {{ filteredCandidates.length }} 只</div>
+      <div class="stocks-hint">{{ stocksHint }} · {{ signalFilter === 'buy' ? '仅三买' : signalFilter === 'all' ? '三买三卖' : signalFilter }} · 显示 {{ filteredCandidates.length }} 只</div>
       <div class="table-scroll">
         <el-table
           :data="filteredCandidates"
           v-loading="stockLoading"
           stripe
-          empty-text="请选择行业后计算候选个股"
+          :empty-text="selectedIndustry ? '该行业当前无三买信号，可切「全部」查看三买三卖' : '市场当前无三买买入信号（可切换行业，或稍后再看）'"
           class="candidate-table app-table app-table--trades"
         >
           <el-table-column prop="code" label="代码" width="90">
@@ -542,13 +543,12 @@ const industryFlowOption = computed(() => {
 })
 
 /* ---------------- ③ 标的精选：候选 + 个股趋势帧 + 双散点 ---------------- */
-// 默认选中「计算机」行业，页面打开即展示其候选股
-const DEFAULT_INDUSTRY = '计算机'
-const selectedIndustry = ref(DEFAULT_INDUSTRY)
+// 默认未选行业：直接展示「各行业 top5」的三买买入候选 TOP（每行业质量前10窗）
+const selectedIndustry = ref('')
 const candidates = ref<CandidateStock[]>([])
 const limit = 30
 const stockSection = ref<HTMLElement | null>(null)
-const signalFilter = ref<'all' | 'B1' | 'B2' | 'B3' | 'S1' | 'S2' | 'S3'>('all')
+const signalFilter = ref<'all' | 'buy' | 'B1' | 'B2' | 'B3' | 'S1' | 'S2' | 'S3'>('buy')
 const stockLoading = ref(false)
 
 // 行业下拉选项：资金流排名 + 兜底默认行业（若排名中不包含「计算机」）
@@ -562,18 +562,21 @@ const industryOptions = computed(() => {
 const stocksHint = computed(() =>
   selectedIndustry.value
     ? `行业 ${selectedIndustry.value} · top 30`
-    : '资金流前 10 行业 · 每行业 top 3'
+    : '全市场各行业 · 每行业 top 5 · 全为三买信号'
 )
 
+// 信号过滤：buy=仅三买（B1/B2/B3）/ all=全部 / 具体信号
 const filteredCandidates = computed(() => {
   const f = signalFilter.value
   if (f === 'all') return candidates.value
+  if (f === 'buy') return candidates.value.filter((r) => (r.signal_type || '').startsWith('B'))
   return candidates.value.filter((r) => r.signal_type === f)
 })
 const signalStats = computed(() => {
-  const s: Record<string, number> = { all: candidates.value.length, B1: 0, B2: 0, B3: 0, S1: 0, S2: 0, S3: 0 }
+  const s: Record<string, number> = { all: candidates.value.length, buy: 0, B1: 0, B2: 0, B3: 0, S1: 0, S2: 0, S3: 0 }
   for (const r of candidates.value) {
     if (r.signal_type && s[r.signal_type] !== undefined) s[r.signal_type]++
+    if (r.signal_type && r.signal_type.startsWith('B')) s.buy++
   }
   return s
 })
@@ -863,8 +866,8 @@ async function loadCandidates() {
       const res = await candidateApi.stocks(selectedIndustry.value, limit)
       candidates.value = res.data?.items || []
     } else {
-      const topInds = screenRankings.value.slice(0, 10).map((r) => r.industry).filter(Boolean)
-      const res = await candidateApi.stocksOverview(10, 3, topInds)
+      // 未选行业：后端按全量行业扫描各行业三买买入候选 TOP（每行业质量前10窗取top5，覆盖回调行业，避免漏单）
+      const res = await candidateApi.stocksOverview(10, 5)
       candidates.value = res.data?.items || []
     }
   } catch (e) {
@@ -897,7 +900,7 @@ watch(boardScope, () => {
   loadBoard()
 })
 
-// 首次进入：并行加载，完成后平滑滚动到②标的精选（默认已选「计算机」，打开即见候选股）
+// 首次进入：并行加载，完成后平滑滚动到②标的精选（默认各行业三买 TOP，打开即见候选）
 let initialScrollDone = false
 onMounted(async () => {
   await Promise.allSettled([loadScreening(false), loadBoard(), loadTrendSlim()])

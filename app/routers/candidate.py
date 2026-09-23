@@ -10,14 +10,15 @@
 import asyncio
 import logging
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from app.core.response import ok
 from app.routers.auth_db import get_current_user
 from app.services.candidate_pool import candidate_pool_service
 from app.services.candidate_pool.candidate_pool_service import (
-    local_industries_for, _aggregate_sector_dg,
+    _aggregate_sector_dg,
+    local_industries_for,
 )
 
 router = APIRouter(prefix="/candidate", tags=["candidate"])
@@ -70,17 +71,18 @@ async def candidate_stocks(industry: str, limit: int = 30, as_of: str | None = N
 
 
 @router.get("/stocks-overview")
-async def candidate_stocks_overview(top_n: int = 10, as_of: str | None = None,
+async def candidate_stocks_overview(top_n: int = 10, per_industry: int = 5, as_of: str | None = None,
                                     industries: str | None = None,
                                     _: dict = Depends(get_current_user)):
-    """个股筛选默认视图（未选行业）：前 top_n 个行业，每行业 top 3 只三买三卖信号个股，共约 30 只。
+    """个股筛选默认视图（未选行业）：前 top_n 个行业，每行业 top per_industry 只三买三卖信号个股，共约 30 只。
 
+    per_industry 默认 5：每行业质量前 10 窗（limit×2）内取最多 5 只信号股，放宽后能兜住更多行业三买。
     industries 为逗号分隔的行业名列表（默认取行业资金流排名的前 top_n 个）。
     """
     ind_names = [s.strip() for s in (industries or "").split(",") if s.strip()] or None
     try:
         data = await candidate_pool_service.get_candidate_stocks_overview(
-            top_n=top_n, as_of=as_of, industries=ind_names)
+            top_n=top_n, per_industry=per_industry, as_of=as_of, industries=ind_names)
         return ok(data)
     except Exception as e:
         logger.exception(f"[candidate/stocks-overview] 失败: {e}")

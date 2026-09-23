@@ -22,6 +22,7 @@ import threading
 import time
 from collections import OrderedDict
 from datetime import datetime, timezone
+from typing import Any
 
 from app.core.database import get_mongo_db, get_mongo_db_sync
 from app.services.cache_layer import json_default
@@ -117,6 +118,26 @@ def _codes_by_local_industries(local_inds: set[str]) -> list[str]:
         {"_id": 0, "code": 1},
     )
     return sorted({str(d.get("code") or "") for d in cursor if d.get("code")})
+
+
+# 全量行业名单的行业数上限（本地行业约 190 个，取 500 兜底覆盖全部）
+_ALL_INDUSTRIES_TOP_N = 500
+
+
+def _all_local_industry_names(as_of: str) -> list[str]:
+    """全部本地行业名单（强弱都算，含回调/底部行业）。
+
+    三买买入信号常出现在回调、突破、回踩位置，而这些行业往往不在「强势行业」榜单
+    （如电子行业出现 B2 突破买点但资金流/动量偏弱）。默认视图按全量行业扫描，
+    避免「全市场无三买」的假象。复用 industry_layer 的面板（screener LRU 缓存），
+    冷启动后价格低廉。
+    """
+    try:
+        data = industry_layer.get_industries(top_n=_ALL_INDUSTRIES_TOP_N, as_of=as_of)
+        return [i.get("industry", "") for i in (data.get("industries") or []) if i.get("industry")]
+    except Exception as e:
+        logger.warning(f"候选池全量行业名单获取失败（回退强势榜）: {e}")
+        return []
 
 # ETF 主题行业 → 本地行业（stock_basic_info.industry，190 细类）映射，用于行业 ΔG 景气聚合
 # 与个股筛选的成分股定位。未覆盖的 ETF 行业不做 ΔG 融合（sector_dg=None）。
@@ -431,28 +452,45 @@ async def get_candidate_stocks(industry: str, limit: int = 30, as_of=None,
     }
 
 
-async def get_candidate_stocks_overview(top_n: int = 10, per_industry: int = 3,
+async def get_candidate_stocks_overview(top_n: int = 10, per_industry: int = 5,
                                         limit: int = 30, as_of=None,
                                         industries: list[str] | None = None) -> dict:
-    """个股筛选默认视图（未选择行业）：前 top_n 个行业，每行业取 per_industry 只 B 信号个股。
+    """个股筛选默认视图（未选择行业）：各行业三买买入候选 TOP。
 
-    复用 get_candidate_stocks（已只保留 B1/B2/B3 信号），按行业资金流排名顺序聚合，
-    去重后共约 limit 只，供前端默认展示。
+    每行业窗口 per_industry（默认 5）：行业内打分截断 limit×2=10 → 择时预览 →
+    按质量分取前 per_industry 只信号股。放宽后更多行业内三买能进默认视图
+    （原 per_industry=3 时，质量前 6 窗内高于买点的卖点会先占位，把买点挤出）。
 
-    industries 可显式传入（默认取行业资金流排名的前 top_n 个行业名），否则回退到强势行业列表。
+    未显式传入 industries 时扫描**全部本地行业**（约 190 个，强弱都算）——
+    三买信号常出现在回调/底部行业，仅扫「强势 top_n」会漏单（如「电子」行业的
+    B2 信号从未进入旧默认视图）。为避免 190 行业并发打爆服务，按批次并发执行。
 
-    性能：结果级 TTL 缓存 + 并集代码池缩小底层面板加载，冷启动/重复打开均显著提速。
+    已显式传入 industries 时仅扫描该集合（用于前端显式行业集场景）。
+
+    性能：结果级 TTL 缓存（key 与行业集绑定）+ 并集代码池缩小底层面板加载，
+    冷启动后重复打开毫秒级返回。
     """
     # 先解析交易日，保证缓存键稳定（as_of 变化 → 键变化 → 自动失效）
     as_of_date = _resolve_as_of(get_mongo_db_sync(), as_of) or ""
-    cache_key = _overview_cache_key(as_of_date, top_n, per_industry, industries)
+
+    # 决定扫描行业集：显式 industries 或全量本地行业（排序稳定 → 缓存键稳定）
+    if industries:
+        ind_names = [n for n in (industries or []) if n][:top_n]
+    else:
+        # 全量行业名单（同步面板构建较重，放线程池避免阻塞事件循环）
+        ind_names = await asyncio.to_thread(_all_local_industry_names, as_of_date)
+    ind_names = sorted({n for n in ind_names if n})
+    if not ind_names:
+        return {"as_of": as_of_date, "industry": "", "items": [], "total": 0}
+
+    cache_key = _overview_cache_key(as_of_date, top_n, per_industry, ind_names)
     cached = _overview_cache_get(cache_key)
     if cached is not None:
         return cached
 
     # 跨进程兜底：backend/worker 各进程内存缓存独立，先查 Redis（行业/个股结果已落在 Redis，
     # 重启或换进程也秒回，无需全量重算）
-    redis_key = _overview_redis_key(as_of_date, top_n, per_industry, industries)
+    redis_key = _overview_redis_key(as_of_date, top_n, per_industry, ind_names)
     try:
         from app.core.database import get_redis_client
         raw = await get_redis_client().get(redis_key)
@@ -463,26 +501,23 @@ async def get_candidate_stocks_overview(top_n: int = 10, per_industry: int = 3,
     except Exception as e:
         logger.warning(f"候选池 overview Redis 读取失败（重算）: {e}")
 
-    if industries:
-        ind_names = [n for n in (industries or []) if n][:top_n]
-    else:
-        inds = await get_candidate_industries(top_n=top_n, as_of=as_of_date)
-        ind_names = [ind.get("industry", "") for ind in (inds.get("industries", []) or [])
-                     if ind.get("industry")]
-    if not ind_names:
-        return {"as_of": as_of_date, "industry": "", "items": [], "total": 0}
-
-    # 构建并集代码池（top_n 行业成分股），缩小面板加载范围、缩短冷启动。
-    # 注意：get_candidate_industries 返回的是**本地细类**行业名，必须按细类直接取成分股，
+    # 构建并集代码池（全部扫描行业的成分股），缩小面板加载范围、缩短冷启动。
+    # 注意：扫描行业为**本地细类**行业名，必须按细类直接取成分股，
     # 不能走 _build_industry_pool（它按 ETF 主题名查映射）——否则重名细类（如"银行"）会被
     # 当成 ETF 主题，把缩池错误收敛到单行业成分股，导致其它行业取不到股票（候选池全空）。
     pool_codes = _codes_by_local_industries(set(ind_names)) or None
 
-    results = await asyncio.gather(
-        *[get_candidate_stocks(ind, limit=per_industry, as_of=as_of_date, pool=pool_codes)
-          for ind in ind_names],
-        return_exceptions=True,
-    )
+    # 全量行业扫描：分批并发（避免 190 行业同时跑 CPU 密集打分压垮服务）
+    _OVERVIEW_BATCH = 8
+    results: list[Any] = []
+    for i in range(0, len(ind_names), _OVERVIEW_BATCH):
+        chunk = ind_names[i:i + _OVERVIEW_BATCH]
+        partial = await asyncio.gather(
+            *[get_candidate_stocks(ind, limit=per_industry, as_of=as_of_date, pool=pool_codes)
+              for ind in chunk],
+            return_exceptions=True,
+        )
+        results.extend(partial)
     items = []
     for res in results:
         if isinstance(res, dict):
@@ -532,7 +567,7 @@ _DAILY_SNAPSHOT_COLLECTION = "daily_candidate_snapshots"
 
 
 async def compute_daily_candidate_snapshot(
-    top_n: int = 10, per_industry: int = 3, limit: int = 20,
+    top_n: int = 10, per_industry: int = 5, limit: int = 20,
 ) -> dict:
     """计算并持久化「当日候选快照」到 MongoDB（按 as_of 交易日唯一）。
 
