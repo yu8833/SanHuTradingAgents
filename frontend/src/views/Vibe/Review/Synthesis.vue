@@ -213,7 +213,8 @@ function fmtClock(s: string | null | undefined): string {
 const loadAll = async (refresh = false) => {
   loading.value = true
   try {
-    // 正常加载命中市场级缓存秒开；「AI 重新研判」传 refresh=true 强制重算
+    // 页面打开传 refresh=true 强制重新研判（取最新市场数据，不再依赖后台定时 LLM）；
+    // 加载失败时后端降级为规则兜底结论，页面仍可展示。
     const res: any = await vibeApi.getSynthesis(refresh)
     if (res?.code === 401) {
       ElMessage.warning('登录已过期，请重新登录')
@@ -228,12 +229,12 @@ const loadAll = async (refresh = false) => {
   }
 }
 
-onMounted(() => loadAll())
+onMounted(() => loadAll(true))
 
-// keep-alive 恢复时刷新（AI 研判随刷新重算）
+// keep-alive 恢复时刷新（AI 研判随刷新重算；打开即取最新，不再依赖后台定时 LLM）
 let inited = false
 onActivated(() => {
-  if (inited) loadAll()
+  if (inited) loadAll(true)
   inited = true
 })
 </script>

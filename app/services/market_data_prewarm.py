@@ -9,9 +9,10 @@ Vibe 市场模块数据预热服务。
 用户请求直接命中缓存（毫秒级），周期性真实抓取的成本由后台任务承担。
 
 实现：
-- APScheduler interval 任务驱动（main.py 注册）
+- APScheduler interval 任务驱动（main.py 注册）：交易时段每 10 分钟，非交易时段 30 分钟节流
 - 预热调用走业务 service 的缓存函数（get_dashboard / get_short_term_emotion 等），
   命中未过期缓存时零开销；过期或缺失时才真正触发重建并写回 Redis。
+- 综合研判（纯 LLM）不在预热清单：改由页面打开时强制刷新触发，避免定期消耗 LLM 额度。
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ import logging
 
 logger = logging.getLogger("webapi")
 
-# 非交易时段时间节流：非交易时段数据变化小，预热频率从交易时段的 5 分钟
+# 非交易时段时间节流：非交易时段数据变化小，预热频率从交易时段的 10 分钟
 # 降为 30 分钟（记录上次实际执行时间，避免无意义的外部数据源请求）。
 _NON_TRADING_INTERVAL_SECONDS = 30 * 60
 _last_prewarm_ts: float = 0.0
@@ -51,14 +52,13 @@ async def prewarm_market_data() -> None:
 
     try:
         # 延迟导入：避免模块加载期依赖数据库/外部服务未就绪
+        from app.services.concept_analysis import get_concept_analysis
         from app.services.market_dashboard import get_dashboard
         from app.services.market_overview import (
             get_overview,
             get_short_term_emotion,
             get_turnover_top,
         )
-        from app.services.concept_analysis import get_concept_analysis
-        from app.services.market_synthesis import get_market_synthesis_cached
         from app.services.stock_quadrant_analysis import get_stock_quadrant
 
         async def _safe(desc: str, coro):
@@ -74,9 +74,6 @@ async def prewarm_market_data() -> None:
             _safe("市场总览", get_overview()),
             _safe("短线情绪", get_short_term_emotion()),
             _safe("概念分析", get_concept_analysis()),
-            # 综合研判市场级快照（含 LLM 判决）：后台提前重算并回写缓存，
-            # 用户访问 /market/synthesis 直接命中缓存秒开，无需前台等 10-60s。
-            _safe("综合研判", get_market_synthesis_cached()),
             _safe("成交额Top20", get_turnover_top()),
             # 个股趋势（六图四象限 + 30日时间轴）：构建含全市场帧聚合，冷启动最重，
             # 必须后台预热，避免用户首刷等 40s+。
@@ -102,15 +99,15 @@ def register_prewarm_job(scheduler) -> None:
     async def _run_prewarm():
         await prewarm_market_data()
 
-    # 交易时段 5 分钟一次
+    # 交易时段 10 分钟一次（综合研判 LLM 已改为页面打开时触发，不再由 prewarm 定期调用）
     scheduler.add_job(
         _run_prewarm,
-        IntervalTrigger(minutes=5),
+        IntervalTrigger(minutes=10),
         id="market_data_prewarm_trading",
         name="市场数据预热（交易时段）",
         replace_existing=True,
     )
-    logger.info("📈 [prewarm] 市场数据预热任务已注册（交易时段每5分钟）")
+    logger.info("📈 [prewarm] 市场数据预热任务已注册（交易时段每10分钟）")
 
     # 启动后延迟 3s 立即预热一轮：服务重启后尽快填热缓存，避免首个请求冷启动
     async def _run_prewarm_startup():
