@@ -938,6 +938,23 @@ class QuotesIngestionService:
                 return True
             latest_td = latest_doc.get("trade_date")  # "2026-07-31"
 
+            # 当日实时快照在库（market_quotes 最新交易日超前于日线最新交易日）时，
+            # 跳过一致性抽样与强制重建：盘中/午间实时金额与上一交易日日线口径必然不一致，
+            # 强行对比会把当日实时行情整体回滚成昨日收盘
+            # （修复：后端重启时校验误判 19/20 不一致 → 强制重建 → 当日帧只剩 14 只）。
+            mq_newest = await db["market_quotes"].find_one(
+                {}, {"trade_date": 1}, sort=[("trade_date", -1)]
+            )
+            if mq_newest:
+                mq_td = str(mq_newest.get("trade_date") or "").replace("-", "")
+                daily_td = str(latest_td).replace("-", "")
+                if mq_td > daily_td:
+                    logger.info(
+                        f"⏭️ market_quotes 已含 {mq_td} 实时快照（超前于日线 {daily_td}），"
+                        f"跳过一致性校验与强制重建（口径差异属正常）"
+                    )
+                    return True
+
             # 非交易时段：先做日终校准（收盘前滞留快照 → 日线收盘值）
             if not self._is_trading_time():
                 try:
