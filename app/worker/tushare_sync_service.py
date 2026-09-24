@@ -1152,17 +1152,19 @@ class TushareSyncService:
     async def sync_dividend_data(self, symbols: list[str] = None, job_id: str = None) -> dict[str, Any]:
         """同步分红送配数据到 stock_dividend 集合。
 
-        每条公告记录一个文档（按 code+ann_date upsert），供筛选策略计算股息率与分红稳定性。
+        每条分红事件记录一个文档（按 code+end_date upsert，报告期为唯一键），
+        供筛选策略计算股息率与分红稳定性。
         """
         logger.info("🔄 开始同步分红送配数据...")
 
-        # 自愈保障：确保 (code, ann_date) 唯一索引存在，否则每次 upsert 全表扫描导致 MongoDB CPU 打满
+        # 自愈保障：确保 (code, end_date) 唯一索引存在（分红事件键），
+        # 否则每次 upsert 全表扫描导致 MongoDB CPU 打满
         try:
             await self.db.stock_dividend.create_index(
-                [("code", 1), ("ann_date", 1)],
+                [("code", 1), ("end_date", 1)],
                 unique=True,
                 background=True,
-                name="uniq_code_ann_date",
+                name="uniq_code_end_date",
             )
         except Exception as e:
             logger.warning(f"⚠️ stock_dividend 索引创建/校验失败（继续同步）: {e}")
@@ -1276,7 +1278,13 @@ class TushareSyncService:
             return stats
 
     async def _save_dividend_data(self, symbol: str, records: list[dict]) -> int:
-        """保存单只股票的分红记录到 stock_dividend 集合（按 code+ann_date upsert）。"""
+        """保存单只股票的分红记录到 stock_dividend 集合（按 code+end_date upsert）。
+
+        去重键以 (code, end_date 报告期) 为分红事件唯一键（集合唯一索引 uniq_code_end_date 兜底）：
+        - 同一报告期的预案/实施公告（ann_date 不同、end_date 相同）自动合并为一条；
+        - 不同报告期（年度/中期分红）各自保留，避免同除权日分红被错误合并。
+        end_date 缺失时退化为 ann_date 兜底，避免重复插入。
+        """
         if not records:
             return 0
 
@@ -1286,14 +1294,17 @@ class TushareSyncService:
         saved = 0
         for r in records:
             ann_date = _norm_date(r.get("ann_date"))
-            if not ann_date:
+            end_date = _norm_date(r.get("end_date"))
+            # 分红事件键：end_date（报告期）优先，缺失时退化为 ann_date
+            group_key = end_date or ann_date
+            if not group_key:
                 continue
             doc = {
                 "symbol": symbol,
                 "code": symbol,
                 "ts_code": r.get("ts_code") or "",
                 "ann_date": ann_date,
-                "end_date": _norm_date(r.get("end_date")),
+                "end_date": end_date,
                 "div_proc": r.get("div_proc") or "",
                 "stk_div": _to_float(r.get("stk_div")),
                 "cash_div": _to_float(r.get("cash_div")),
@@ -1305,7 +1316,7 @@ class TushareSyncService:
                 "updated_at": get_utc8_now(),
             }
             ops.append(UpdateOne(
-                {"code": symbol, "ann_date": ann_date},
+                {"code": symbol, "end_date": group_key},
                 {"$set": doc},
                 upsert=True,
             ))
@@ -1535,7 +1546,7 @@ class TushareSyncService:
         # 2) 已同步交易日（增量跳过，但按覆盖完整性判定）：
         #    仅当该交易日记录数 >= 阈值（全市场约 5550 只的 9 成）才视为已完整同步；
         #    记录数不足（同步中途失败/中断）的日期仍需重拉补齐（upsert 幂等）。
-        _MONEYFLOW_COMPLETE_MIN = 5000
+        _MONEYFLOW_COMPLETE_MIN = getattr(settings, "MONEYFLOW_COMPLETE_MIN", 5000)
         synced: set[str] = set()
         partial: set[str] = set()
         cursor = self.db.stock_daily_moneyflow.aggregate([

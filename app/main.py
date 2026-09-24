@@ -722,6 +722,20 @@ async def lifespan(app: FastAPI):
         else:
             logger.info(f"⏭️ 数据完整性检查未启用（未注册）: {settings.DATA_INTEGRITY_CHECK_CRON}")
 
+        # 数据健康巡检任务（每日扫描重复率/覆盖率/新鲜度 → data_metrics）
+        if settings.DATA_HEALTH_CHECK_ENABLED:
+            from app.worker.data_health_service import run_data_health_check
+
+            scheduler.add_job(
+                run_data_health_check,
+                cron_trigger(settings.DATA_HEALTH_CHECK_CRON, timezone=get_tz()),
+                id="data_health_check",
+                name="数据健康巡检（重复率/覆盖率/新鲜度）",
+            )
+            logger.info(f"🔍 数据健康巡检已配置: {settings.DATA_HEALTH_CHECK_CRON}")
+        else:
+            logger.info("⏭️ 数据健康巡检未启用（未注册）")
+
         # 新闻数据同步任务配置
         logger.info("🔄 配置新闻数据同步任务...")
 

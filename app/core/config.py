@@ -292,6 +292,17 @@ class Settings(BaseSettings):
     # 默认使用 tushare 作为首选补数源（付费源字段最全/最准），失败自动降级到 akshare
     DATA_INTEGRITY_REMEDIATE_SOURCE: str = Field(default="tushare", description="补数首选数据源（失败自动降级 akshare）")
 
+    # 数据健康巡检配置（每日扫描关键集合重复率/覆盖率/新鲜度，结果写入 data_metrics）
+    DATA_HEALTH_CHECK_ENABLED: bool = Field(default=True, description="启用数据健康巡检")
+    DATA_HEALTH_CHECK_CRON: str = Field(default="0 3 * * *", description="数据健康巡检CRON（每日03:00）")
+
+    # 主力资金（stock_daily_moneyflow）单交易日全市场完整覆盖阈值
+    # 低于该条数视为覆盖不足（全市场约 5000+ 只，历史 95% 覆盖 ≈ 5000 条）
+    MONEYFLOW_COMPLETE_MIN: int = Field(
+        default=5000,
+        description="moneyflow 单交易日完整覆盖阈值（条数，低于视为覆盖不足）",
+    )
+
     # Tushare数据初始化配置
     TUSHARE_INIT_HISTORICAL_DAYS: int = Field(default=365, ge=1, le=3650, description="初始化历史数据天数")
     TUSHARE_INIT_BATCH_SIZE: int = Field(default=100, ge=10, le=1000, description="初始化批处理大小")

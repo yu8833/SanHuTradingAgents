@@ -530,14 +530,16 @@ async def create_database_indexes(db):
         if await _safe_create_index(daily_basic, [("symbol", 1), ("trade_date", 1)], background=True):
             index_count += 1
 
-        # stock_dividend 的索引（分红送配，Tushare 同步按 code+ann_date 高频 upsert）
+        # stock_dividend 的索引（分红送配，Tushare 同步按 code+end_date 高频 upsert；
+        # end_date 报告期为分红事件唯一键——同报告期的预案/实施公告合并为一条）
         # 缺失该索引时每次 upsert 全表扫描，曾导致 MongoDB 容器 CPU 打满（~760%）
         stock_dividend = db["stock_dividend"]
         if await _safe_create_index(
             stock_dividend,
-            [("code", 1), ("ann_date", 1)],
+            [("code", 1), ("end_date", 1)],
             unique=True,
             background=True,
+            name="uniq_code_end_date",
         ):
             index_count += 1
 
