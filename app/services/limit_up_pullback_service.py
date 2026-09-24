@@ -13,6 +13,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Any
+from app.core.data_source_priority import source_rank
 from app.utils.timezone import now_tz
 
 import numpy as np
@@ -860,9 +861,7 @@ class LimitUpPullbackService:
         all_quotes = await quotes_cursor.to_list(length=total_scanned * 300)
 
         # 按股票代码分组，并按日期去重
-        # 数据源优先级: tushare > sina > baostock > akshare
-        # 原因: tushare 数据最新，pct_chg 可以自己计算
-        DATA_SOURCE_PRIORITY = {"tushare": 4, "sina": 3, "baostock": 2, "akshare": 1}
+        # 数据源优先级统一走 app.core.data_source_priority（tushare > baostock > akshare > sina）
         quotes_by_stock = defaultdict(list)
         quotes_by_date_by_stock = defaultdict(dict)
         for quote in all_quotes:
@@ -879,9 +878,7 @@ class LimitUpPullbackService:
             else:
                 existing_src = existing.get("data_source", "")
                 new_src = quote.get("data_source", "")
-                existing_priority = DATA_SOURCE_PRIORITY.get(existing_src, 0)
-                new_priority = DATA_SOURCE_PRIORITY.get(new_src, 0)
-                if new_priority > existing_priority:
+                if source_rank(new_src) < source_rank(existing_src):
                     quotes_by_date_by_stock[code][trade_date] = quote
 
         # 转换为列表格式并按日期排序
@@ -1638,7 +1635,7 @@ class LimitUpPullbackService:
         # 性能优化：流式遍历游标直接写入分组字典，避免 to_list 产生巨型中间列表
         # 原 to_list(length=total_scanned*300) 会把 ~1.5M 条记录全量驻留内存，
         # 再复制到 quotes_by_date_by_stock，导致内存翻倍。流式处理只需一份内存。
-        DATA_SOURCE_PRIORITY = {"tushare": 4, "sina": 3, "baostock": 2, "akshare": 1}
+        # 数据源优先级统一走 app.core.data_source_priority（tushare > baostock > akshare > sina）
         quotes_by_date_by_stock = defaultdict(dict)
         raw_count = 0
         async for quote in quotes_cursor:
@@ -1655,9 +1652,7 @@ class LimitUpPullbackService:
             else:
                 existing_src = existing.get("data_source", "")
                 new_src = quote.get("data_source", "")
-                existing_priority = DATA_SOURCE_PRIORITY.get(existing_src, 0)
-                new_priority = DATA_SOURCE_PRIORITY.get(new_src, 0)
-                if new_priority > existing_priority:
+                if source_rank(new_src) < source_rank(existing_src):
                     quotes_by_date_by_stock[code][trade_date] = quote
             raw_count += 1
         logger.info(f"📊 流式加载行情完成: {raw_count} 条原始记录, {len(quotes_by_date_by_stock)} 只股票")

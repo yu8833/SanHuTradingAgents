@@ -18,6 +18,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from app.core.data_source_priority import source_rank
 from app.services import plan_service
 from app.services.macro import macro_service
 
@@ -449,11 +450,11 @@ async def _build_stock_step(user_id: str, direction: str | None, basis: dict | N
     # 标准分类、tushare 是本地细类（与预测行业池同命名，如"普钢"/"通信设备"）。
     # 已验证信号（signal_tracking）的 industry 是证监会标准分类（来自扫描时聚合），
     # 与预测行业池命名空间不一致，直接硬绑定会全部误杀（实测近一周 kept=0）。
-    # 因此按 tushare > baostock 优先解析本地细类，统一映射到预测行业池命名。
+    # 因此按统一 source_rank 优先解析本地细类（tushare > baostock > akshare > sina），
+    # 统一映射到预测行业池命名。
     code_industry: dict[str, str] = {}
     try:
         from app.core.database import get_mongo_db_sync
-        _SRC_PRIORITY = {"tushare": 3, "baostock": 2, "akshare": 1}
         codes = {str(it.get("code")) for it in (*pool_items, *verified_items) if it.get("code")}
         for d in get_mongo_db_sync()["stock_basic_info"].find(
             {"code": {"$in": [c for c in codes if c]}, "industry": {"$ne": "", "$type": "string"}},
@@ -463,7 +464,7 @@ async def _build_stock_step(user_id: str, direction: str | None, basis: dict | N
             if not ind:
                 continue
             cur = code_industry.get(c)
-            if cur is None or _SRC_PRIORITY.get(src, 0) > _SRC_PRIORITY.get(cur.get("src", ""), 0):
+            if cur is None or source_rank(src) < source_rank(cur.get("src", "")):
                 code_industry[c] = {"ind": ind, "src": src}
     except Exception as e:
         logger.warning(f"个股行业映射读取失败（跳过）: {e}")

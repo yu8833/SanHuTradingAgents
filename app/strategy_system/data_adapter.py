@@ -11,10 +11,9 @@ from datetime import date, datetime
 
 import pandas as pd
 
-logger = logging.getLogger(__name__)
+from app.core.data_source_priority import source_rank
 
-# 数据源优先级（与项目多源同步的偏好顺序一致）
-DATA_SOURCE_PRIORITY = ["tushare", "baostock", "akshare"]
+logger = logging.getLogger(__name__)
 
 # 输出统一列
 PANEL_COLUMNS = ["symbol", "date", "open", "high", "low", "close", "volume", "amount", "pct_chg"]
@@ -123,10 +122,7 @@ def load_daily_panel(
         key = (code, trade_date)
         src = doc.get("data_source", "")
         symbol_sources.setdefault(code, set()).add(src or "")
-        try:
-            src_rank = DATA_SOURCE_PRIORITY.index(src) if src else len(DATA_SOURCE_PRIORITY)
-        except ValueError:
-            src_rank = len(DATA_SOURCE_PRIORITY)
+        src_rank = source_rank(src)
         row = {
             "symbol": code,
             "date": trade_date,

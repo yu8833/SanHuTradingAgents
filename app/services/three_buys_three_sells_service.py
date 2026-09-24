@@ -25,6 +25,7 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Any
+from app.core.data_source_priority import source_rank
 from app.utils.timezone import now_tz
 
 import numpy as np
@@ -235,8 +236,6 @@ class ThreeBuysThreeSellsService:
         db = await self._get_db()
         collection = db["stock_daily_quotes"]
 
-        DATA_SOURCE_PRIORITY = {"tushare": 4, "sina": 3, "baostock": 2, "akshare": 1}
-
         cursor = collection.find(
             {
                 "code": {"$in": stock_codes},
@@ -266,7 +265,7 @@ class ThreeBuysThreeSellsService:
             else:
                 existing_src = existing.get("data_source", "")
                 new_src = quote.get("data_source", "")
-                if DATA_SOURCE_PRIORITY.get(new_src, 0) > DATA_SOURCE_PRIORITY.get(existing_src, 0):
+                if source_rank(new_src) < source_rank(existing_src):
                     quotes_by_date_by_stock[code][trade_date] = quote
 
         result = {}
