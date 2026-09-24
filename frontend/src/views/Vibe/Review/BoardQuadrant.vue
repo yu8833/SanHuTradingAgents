@@ -145,7 +145,7 @@ type BoardCard = QuadrantCfg & { subtitle: string; emptyHint: string }
 
 const MONEY_CARD: BoardCard = {
   id: 'money_pct', title: '涨跌 × 主力资金', subtitle: '强弱共振定位',
-  xKey: SQ.MAIN, yKey: SQ.P, xName: '主力净流入', xUnit: '亿', yName: '涨跌幅', yUnit: '%',
+  xKey: SQ.P, yKey: SQ.MAIN, xName: '涨跌幅', xUnit: '%', yName: '主力净流入', yUnit: '亿',
   quadrants: ['强势共振', '缩量上行', '低位承接', '弱势杀跌'],
   tips: ['流入+上涨 · 强势共振', '流出+上涨 · 缩量上行', '流入+下跌 · 低位承接', '流出+下跌 · 弱势杀跌'],
   emptyHint: '当前快照主力资金数据暂不可用',
