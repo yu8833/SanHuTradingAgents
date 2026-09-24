@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from app.core.config import settings
@@ -31,6 +31,47 @@ def get_tz() -> ZoneInfo:
 def now_tz() -> datetime:
     """Current time in configured timezone (tz-aware)."""
     return datetime.now(get_tz())
+
+
+def parse_beijing_naive(dt_str: str) -> datetime | None:
+    """解析「北京时间」的字符串（无时区/naive）为 aware UTC datetime，供 Mongo 统一按 UTC 存储。
+
+    处理规则（与 MongoDB「统一 UTC 存储」约定对齐，供写入端使用）：
+      - 常见北京墙钟格式（%Y-%m-%d %H:%M:%S / %Y-%m-%d %H:%M / %Y-%m-%d / %Y%m%d%H%M%S）
+        解析出的 naive 按「北京时间」解释，转为 UTC（-8h，aware）；
+      - 带 Z 后缀（ISO UTC）或已带时区的输入：按 UTC/自带偏移归一，不重复 -8h；
+      - 解析失败返回 None（调用方自行降级，避免把脏值当时间入库）。
+    返回值为 aware UTC，motor 写入即正确；读回 tz_aware=True 为 UTC aware，
+    展示侧用 to_config_tz / to_display_iso 转北京时间即可。
+    """
+    if not dt_str:
+        return None
+    s = str(dt_str).strip()
+    if not s:
+        return None
+    # 已带时区偏移（如 2026-09-24T07:58:58+00:00）或 Z 后缀（UTC）：按自带语义归一
+    if s.endswith("Z") or s.endswith("z"):
+        try:
+            body = s[:-1].rstrip("Zz")
+            return datetime.fromisoformat(body + "+00:00").astimezone(timezone.utc)
+        except ValueError:
+            pass
+    if "+" in s or "-" in s[10:]:
+        # 已带显式偏移（ISO）的输入：按字符串自带偏移归一，不做 -8h
+        try:
+            parsed = datetime.fromisoformat(s)
+            if parsed.tzinfo is not None:
+                return parsed.astimezone(timezone.utc)
+        except ValueError:
+            pass
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d", "%Y%m%d%H%M%S", "%Y%m%d"):
+        try:
+            naive = datetime.strptime(s, fmt)
+            # 北京墙钟 naive → UTC aware（-8h）
+            return naive.replace(tzinfo=get_tz()).astimezone(timezone.utc)
+        except ValueError:
+            continue
+    return None
 
 
 def to_config_tz(dt: datetime | str | None) -> datetime | None:

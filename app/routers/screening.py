@@ -1,6 +1,5 @@
 import logging
 from typing import Any
-from app.utils.timezone import now_tz, to_config_tz
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -10,6 +9,7 @@ from app.models.screening import ScreeningRequest as NewScreeningRequest
 from app.models.screening import ScreeningResponse as NewScreeningResponse
 from app.routers.auth_db import get_current_user
 from app.services.enhanced_screening_service import get_enhanced_screening_service
+from app.utils.timezone import now_tz, to_config_tz
 
 router = APIRouter(tags=["screening"])
 logger = logging.getLogger("webapi")
@@ -1061,7 +1061,8 @@ async def check_data_freshness(user: dict = Depends(get_current_user)):
                 news_dt = datetime.strptime(str(news_updated_at)[:19], "%Y-%m-%d %H:%M:%S")
             else:
                 news_dt = news_updated_at
-            # 🔥 bug-xxx：读回的是 naive UTC 墙钟时间，先转北京时区
+            # 🔥 新闻 publish_time 写入端已统一为 aware UTC（parse_beijing_naive 转 UTC 存库），
+            # 读回（tz_aware=True）为 UTC aware，这里按 UTC→北京转换，与其他数据项口径一致。
             news_dt = to_config_tz(news_dt)
             # 🔥 bug-018：自然日差 → 交易日差（周末/节假日不应当作过期天数）
             news_stale_days = count_trading_days_between(

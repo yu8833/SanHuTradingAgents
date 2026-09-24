@@ -4,14 +4,14 @@
 """
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
-from app.utils.timezone import now_tz
 
 from pymongo import ReplaceOne
 from pymongo.errors import BulkWriteError
 
 from app.core.database import get_database
+from app.utils.timezone import now_tz
 
 logger = logging.getLogger(__name__)
 
@@ -406,37 +406,30 @@ class NewsDataService:
         return symbol
     
     def _parse_datetime(self, dt_value) -> datetime | None:
-        """解析日期时间"""
+        """解析日期时间，返回 aware UTC（与 Mongo 统一 UTC 存储对齐）。
+
+        新闻源的发布时间为「北京时间墙钟」，解析后显式转为 UTC（-8h），
+        避免 naive 被 motor 当 UTC 存储导致读回转北京时 +8h 错位。
+        """
         if dt_value is None:
             return None
         
         if isinstance(dt_value, datetime):
-            return dt_value
+            # 已是 datetime：无时区按北京时间解释转 UTC；带时区按自带语义归一
+            if dt_value.tzinfo is None:
+                return dt_value.replace(tzinfo=now_tz().tzinfo).astimezone(timezone.utc)
+            return dt_value.astimezone(timezone.utc)
         
         if isinstance(dt_value, str):
-            try:
-                # 尝试多种日期格式
-                formats = [
-                    "%Y-%m-%d %H:%M:%S",
-                    "%Y-%m-%dT%H:%M:%S",
-                    "%Y-%m-%dT%H:%M:%SZ",
-                    "%Y-%m-%d",
-                ]
-                
-                for fmt in formats:
-                    try:
-                        return datetime.strptime(dt_value, fmt)
-                    except ValueError:
-                        continue
-                
-                # 如果都失败了，返回当前时间
-                self.logger.warning(f"⚠️ 无法解析日期时间: {dt_value}")
-                return now_tz()
-                
-            except Exception:
-                return now_tz()
+            from app.utils.timezone import parse_beijing_naive
+            parsed = parse_beijing_naive(dt_value)
+            if parsed is not None:
+                return parsed
+            # 解析失败：回退当前时间（aware UTC）
+            self.logger.warning(f"⚠️ 无法解析日期时间: {dt_value}")
+            return now_tz().astimezone(timezone.utc)
         
-        return now_tz()
+        return now_tz().astimezone(timezone.utc)
     
     def _safe_float(self, value) -> float | None:
         """安全转换为浮点数"""

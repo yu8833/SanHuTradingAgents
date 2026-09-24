@@ -7,9 +7,9 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
-from app.utils.timezone import now_tz
 
 from app.services.news_data_service import get_news_data_service
+from app.utils.timezone import now_tz
 from tradingagents.dataflows.news.realtime_news import RealtimeNewsAggregator
 from tradingagents.dataflows.providers.china.akshare import get_akshare_provider
 
@@ -293,27 +293,15 @@ class NewsDataSyncService:
             return []
     
     def _parse_publish_time(self, time_val: Any) -> datetime | None:
-        """解析发布时间，支持多种格式"""
+        """解析发布时间，支持多种格式，返回 aware UTC（与 Mongo 统一 UTC 存储对齐）。
+
+        新闻源（东财/akshare/tushare）返回的发布时间为「北京时间墙钟」，解析后
+        显式转为 UTC（-8h），避免 naive 被 motor 当 UTC 存储导致 +8h 错位。
+        """
         if not time_val:
             return None
-        time_str = str(time_val).strip()
-        if not time_str:
-            return None
-        formats = [
-            "%Y-%m-%d %H:%M:%S",
-            "%Y-%m-%d %H:%M",
-            "%Y-%m-%d",
-            "%Y%m%d%H%M%S",
-            "%Y%m%d",
-            "%Y-%m-%dT%H:%M:%S",
-            "%Y-%m-%dT%H:%M:%SZ",
-        ]
-        for fmt in formats:
-            try:
-                return datetime.strptime(time_str, fmt)
-            except ValueError:
-                continue
-        return None
+        from app.utils.timezone import parse_beijing_naive
+        return parse_beijing_naive(str(time_val).strip())
 
     def _standardize_tushare_news(self, news: dict[str, Any], symbol: str) -> dict[str, Any] | None:
         """标准化Tushare新闻数据"""

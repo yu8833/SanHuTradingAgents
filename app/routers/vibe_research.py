@@ -19,6 +19,7 @@ from app.services.market_dashboard import get_dashboard
 from app.services.market_overview import get_global_indices, get_overview, get_short_term_emotion, get_turnover_top
 from app.services.news_data_service import NewsQueryParams, get_news_data_service
 from app.services.newsradar import fetch_radar, get_radar_cached
+from app.utils.timezone import get_tz
 
 router = APIRouter(prefix="/api/vibe", tags=["Vibe-Research"])
 logger = logging.getLogger("webapi")
@@ -97,6 +98,7 @@ async def global_famous_stocks(current_user: dict = Depends(get_optional_current
     """全球市场著名股票涨跌（美股/港股蓝筹），分级TTL缓存"""
     try:
         from concurrent.futures import ThreadPoolExecutor
+
         from app.services.vibe_gstock import _push2_stock_get, _quote_from
 
         def _fetch(item: dict) -> dict:
@@ -162,9 +164,10 @@ async def market_stock_quadrant(current_user: dict = Depends(get_optional_curren
     数据量大（约 10MB 明文）：直接输出预序列化 + gzip 的字节，避免 FastAPI 对大 dict
     二次 jsonable_encoder 编码与明文传输拖慢响应（冷构建已 20s 级，不能再叠编码开销）。
     """
-    from fastapi.responses import Response
     import gzip
     import json as _json
+
+    from fastapi.responses import Response
 
     skeleton = {"total": 0, "breadth": {"up": 0, "down": 0, "avg_pct": 0},
                 "dates": [], "meta": {}, "frames": {}}
@@ -192,9 +195,10 @@ async def market_stock_quadrant_slim(current_user: dict = Depends(get_optional_c
     历史帧由 /market/stock-quadrant/day?date= 按需加载。
     复用同一 Redis 缓存（get_stock_quadrant），命中时毫秒级返回。
     """
-    from fastapi.responses import Response
     import gzip
     import json as _json
+
+    from fastapi.responses import Response
 
     skeleton = {"total": 0, "breadth": {"up": 0, "down": 0, "avg_pct": 0},
                 "dates": [], "meta": {}, "frame": {}}
@@ -409,12 +413,8 @@ def _convert_vibe_news_to_standard(vibe_news: dict[str, Any], symbol: str) -> di
 
     publish_time = None
     if publish_time_str:
-        for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"]:
-            try:
-                publish_time = datetime.strptime(publish_time_str, fmt)
-                break
-            except ValueError:
-                continue
+        from app.utils.timezone import parse_beijing_naive
+        publish_time = parse_beijing_naive(str(publish_time_str).strip())
 
     title_lower = title.lower()
     positive_words = ["增长", "上涨", "利好", "盈利", "成功", "突破", "创新", "优秀"]
@@ -466,11 +466,19 @@ def _convert_vibe_news_to_standard(vibe_news: dict[str, Any], symbol: str) -> di
     }
 
 
+def _fmt_news_time(dt: datetime) -> str:
+    """publish_time（aware UTC）转北京展示，与系统统一时区约定一致。"""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=get_tz())
+    return dt.astimezone(get_tz()).strftime("%Y-%m-%d %H:%M:%S")
+
+
 def _convert_standard_news_to_vibe(standard_news: dict[str, Any]) -> dict[str, Any]:
     """将标准格式（英文键名）的新闻转换为前端统一格式（英文键名）"""
     publish_time = standard_news.get("publish_time")
     if isinstance(publish_time, datetime):
-        publish_time_str = publish_time.strftime("%Y-%m-%d %H:%M:%S")
+        # publish_time 为 aware UTC，转北京展示（与系统统一时区约定一致）
+        publish_time_str = _fmt_news_time(publish_time)
     else:
         publish_time_str = str(publish_time) if publish_time else ""
 
@@ -692,10 +700,7 @@ async def news_batch(codes: str, limit: int = 10, since: str = "", current_user:
                     seen[title]["stock_codes"].append(symbol)
                 publish_time = news_item.get("publish_time")
                 if publish_time:
-                    if isinstance(publish_time, datetime):
-                        pt_str = publish_time.strftime("%Y-%m-%d %H:%M:%S")
-                    else:
-                        pt_str = str(publish_time)
+                    pt_str = _fmt_news_time(publish_time) if isinstance(publish_time, datetime) else str(publish_time)
                     if pt_str < seen[title].get("publish_time", ""):
                         seen[title]["publish_time"] = pt_str
 
