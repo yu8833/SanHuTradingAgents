@@ -10,6 +10,7 @@ import zipfile
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+
 from app.utils.timezone import get_tz, now_tz
 
 logger = logging.getLogger("webapi")
@@ -335,15 +336,15 @@ class LogExportService:
                 "log_types": {}
             }
             
+            # 文件数/大小/类型为全量口径（与 list_log_files 的 glob("*.log*") 一致），
+            # 避免页面「日志文件数」与下方文件列表数量不一致；
+            # recent_errors 仍按 days 过滤（语义为「最近 N 天的错误」）。
             for file_path in self.log_dir.glob("*.log*"):
                 if not file_path.is_file():
                     continue
                 
                 stat = file_path.stat()
                 modified_time = datetime.fromtimestamp(stat.st_mtime, tz=get_tz())
-                
-                if modified_time < cutoff_time:
-                    continue
                 
                 stats["total_files"] += 1
                 stats["total_size_mb"] += stat.st_size / (1024 * 1024)
@@ -354,14 +355,15 @@ class LogExportService:
                 # 统计错误日志
                 if log_type == "error":
                     stats["error_files"] += 1
-                    # 读取最近的错误
-                    try:
-                        with open(file_path, encoding='utf-8', errors='ignore') as f:
-                            lines = f.readlines()
-                            error_lines = [line for line in lines[-100:] if "ERROR" in line]
-                            stats["recent_errors"].extend(error_lines[-10:])
-                    except Exception:
-                        pass
+                    # 读取最近的错误（仅取最近 days 天内修改的错误日志）
+                    if modified_time >= cutoff_time:
+                        try:
+                            with open(file_path, encoding='utf-8', errors='ignore') as f:
+                                lines = f.readlines()
+                                error_lines = [line for line in lines[-100:] if "ERROR" in line]
+                                stats["recent_errors"].extend(error_lines[-10:])
+                        except Exception:
+                            pass
             
             stats["total_size_mb"] = round(stats["total_size_mb"], 2)
             
