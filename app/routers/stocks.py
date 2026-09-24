@@ -500,9 +500,18 @@ async def get_quote(
             # 需要兜底：取 stock_daily_quotes 最近两条，用“上一交易日”的 close 作为昨收
             latest_dq_cursor = db["stock_daily_quotes"].find(
                 {"$or": [{"code": code6}, {"symbol": code6}], "period": "daily"},
-                {"_id": 0, "trade_date": 1, "close": 1},
+                {"_id": 0, "trade_date": 1, "close": 1, "data_source": 1},
             ).sort("trade_date", -1).limit(2)
             latest_dq_list = await latest_dq_cursor.to_list(length=2)
+            # 同一天可能多源并存：按统一优先级保留最高源，避免取源不确定
+            from app.core.data_source_priority import source_rank
+            _best_by_date: dict[str, dict] = {}
+            for _dq in latest_dq_list:
+                _d = str(_dq.get("trade_date") or "")
+                _prev = _best_by_date.get(_d)
+                if _prev is None or source_rank(_dq.get("data_source") or "") < source_rank(_prev.get("data_source") or ""):
+                    _best_by_date[_d] = _dq
+            latest_dq_list = list(_best_by_date.values())
             # 若最新 daily 就是当日行情（trade_date == 当前 market_quotes 的 trade_date），
             # 则昨收必须是上一条记录（prev 交易日）
             prev_dq = None

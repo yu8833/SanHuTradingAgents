@@ -37,6 +37,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.core.collections import col
+from app.core.data_source_priority import source_rank as _src_rank
 from app.services import vibe_astock as astock
 from app.services.cache_layer import cached
 
@@ -338,7 +339,11 @@ async def _recent_dates(count: int) -> list[str]:
 
 
 async def _fetch_quotes_map(start: str, end: str) -> dict[str, dict[str, dict]]:
-    """[start, end] 全市场日线：{code: {"date": {close, pct, amt}}}（兼容 '-'/'compact' 两种存储）。"""
+    """[start, end] 全市场日线：{code: {"date": {close, pct, amt}}}（兼容 '-'/'compact' 两种存储）。
+
+    多源并存（同 code+date 多条不同 data_source）时按统一优先级取源（见
+    core.data_source_priority），高优先级后到时覆盖低优先级，保证取源确定性。
+    """
     out: dict[str, dict[str, dict]] = {}
     start_c, end_c = _compact(start), _compact(end)
     cursor = col("stock_daily_quotes").find(
@@ -346,17 +351,23 @@ async def _fetch_quotes_map(start: str, end: str) -> dict[str, dict[str, dict]]:
             {"trade_date": {"$gte": start, "$lte": end}},
             {"trade_date": {"$gte": start_c, "$lte": end_c}},
         ]},
-        {"code": 1, "trade_date": 1, "close": 1, "pct_chg": 1, "amount": 1},
+        {"code": 1, "trade_date": 1, "close": 1, "pct_chg": 1, "amount": 1, "data_source": 1},
     )
     async for q in cursor:
         code = str(q.get("code") or q.get("symbol") or "").strip()
         d = _dash(q.get("trade_date"))
         if not code or len(d) != 10:
             continue
+        src = q.get("data_source") or ""
+        src_rank = _src_rank(src)
+        existing = out.get(code, {}).get(d)
+        if existing is not None and existing.get("_rank", 0) <= src_rank:
+            continue  # 已有更高/同优先级数据，跳过
         out.setdefault(code, {})[d] = {
             "close": _num(q.get("close")),
             "pct": _r(q.get("pct_chg")),
             "amt": _num(q.get("amount")),
+            "_rank": src_rank,
         }
     return out
 

@@ -1532,15 +1532,24 @@ class TushareSyncService:
             return stats
         stats["total_processed"] = len(trade_days)
 
-        # 2) 已同步交易日（增量跳过）
+        # 2) 已同步交易日（增量跳过，但按覆盖完整性判定）：
+        #    仅当该交易日记录数 >= 阈值（全市场约 5550 只的 9 成）才视为已完整同步；
+        #    记录数不足（同步中途失败/中断）的日期仍需重拉补齐（upsert 幂等）。
+        _MONEYFLOW_COMPLETE_MIN = 5000
         synced: set[str] = set()
-        cursor = self.db.stock_daily_moneyflow.find(
-            {"trade_date": {"$gte": start, "$lte": end}}, {"trade_date": 1}
-        )
+        partial: set[str] = set()
+        cursor = self.db.stock_daily_moneyflow.aggregate([
+            {"$match": {"trade_date": {"$gte": start, "$lte": end}}},
+            {"$group": {"_id": "$trade_date", "n": {"$sum": 1}}},
+        ])
         async for doc in cursor:
-            d = str(doc.get("trade_date") or "")
-            if d:
+            d = str(doc.get("_id") or "")
+            if not d:
+                continue
+            if doc["n"] >= _MONEYFLOW_COMPLETE_MIN:
                 synced.add(d)
+            else:
+                partial.add(d)
 
         # 3) 逐日拉取并入库
         adapter = TushareAdapter()
@@ -1552,9 +1561,11 @@ class TushareSyncService:
                 stats["stopped"] = True
                 break
 
-            if td in synced:
+            if td in synced and td not in partial:
                 stats["skipped_count"] += 1
                 continue
+            if td in partial:
+                logger.info(f"🔄 {td} 覆盖不足（<{_MONEYFLOW_COMPLETE_MIN} 条），重拉补齐")
 
             await self.rate_limiter.acquire()
             try:

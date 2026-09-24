@@ -538,16 +538,22 @@ class QuotesIngestionService:
                     "period": "daily",
                     "trade_date": {"$in": [prev_day, prev_day_dash]},
                 },
-                {"_id": 0, "code": 1, "close": 1},
+                {"_id": 0, "code": 1, "close": 1, "data_source": 1},
             )
+            from app.core.data_source_priority import source_rank
             result: dict[str, float] = {}
+            result_rank: dict[str, int] = {}
             async for doc in cursor:
                 c = str(doc.get("code") or "")
                 if not c:
                     continue
                 close = _s_price(doc.get("close"))
                 if close is not None and close > 0:
-                    result.setdefault(c, close)
+                    # 同 code+date 多源并存时保留优先级最高源，避免取源不确定
+                    rank = source_rank(doc.get("data_source") or "")
+                    if c not in result_rank or rank < result_rank[c]:
+                        result[c] = close
+                        result_rank[c] = rank
             return result
         except Exception as e:
             logger.warning(f"批量补算上一交易日收盘失败（忽略）: {e}")
