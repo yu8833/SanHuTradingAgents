@@ -1,6 +1,6 @@
 <template>
   <div class="trend-analysis-page">
-    <!-- 三 Tab：个股趋势 / 概念趋势 / 行业趋势（懒加载，仅激活时挂载并缓存） -->
+    <!-- 双 Tab：个股趋势 / 概念趋势（懒加载，仅激活时挂载并缓存） -->
     <el-tabs v-model="activeTab" type="border-card" class="trend-tabs">
       <el-tab-pane label="个股趋势" name="stock">
         <KeepAlive>
@@ -10,11 +10,6 @@
       <el-tab-pane label="概念趋势" name="concept">
         <KeepAlive>
           <BoardQuadrant v-if="activeTab === 'concept'" key="concept" scope="concept" />
-        </KeepAlive>
-      </el-tab-pane>
-      <el-tab-pane label="行业趋势" name="industry">
-        <KeepAlive>
-          <BoardQuadrant v-if="activeTab === 'industry'" key="industry" scope="industry" />
         </KeepAlive>
       </el-tab-pane>
     </el-tabs>
@@ -28,7 +23,7 @@ import BoardQuadrant from './BoardQuadrant.vue'
 
 defineOptions({ name: 'TrendAnalysis' })
 
-const activeTab = ref<'stock' | 'concept' | 'industry'>('stock')
+const activeTab = ref<'stock' | 'concept'>('stock')
 </script>
 
 <style scoped lang="scss">

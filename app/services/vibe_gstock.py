@@ -15,12 +15,15 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import re
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 from app.services import vibe_astock as astock
+
+logger = logging.getLogger(__name__)
 
 _UA_H = {"User-Agent": astock.UA}
 _GS_HOSTS = ("push2.eastmoney.com", "push2delay.eastmoney.com")
@@ -64,12 +67,16 @@ _QUOTE_FIELDS = "f43,f44,f45,f46,f48,f57,f58,f59,f60,f116,f170"
 
 
 def _push2_stock_get(secid: str, fields: str) -> dict | None:
-    """东财 push2 stock/get：push2 优先、失败降级 push2delay；latch 可用主机。空数据返回 None。"""
+    """东财 push2 stock/get：push2 优先、失败降级 push2delay；latch 可用主机。空数据返回 None。
+
+    timeout=6（原 10）：push2 受限网络下单只最坏 3 主机×6s=18s，
+    避免多标的并发时整体等待叠加到数十秒（缓存化后冷构建也更快降级）。
+    """
     params = {"secid": secid, "fields": fields}
     for i in range(_gs_host[0], len(_GS_HOSTS)):
         try:
             r = astock.em_get(f"https://{_GS_HOSTS[i]}/api/qt/stock/get",
-                              params=params, headers=_UA_H, timeout=10)
+                              params=params, headers=_UA_H, timeout=6)
             d = r.json().get("data")
         except Exception:
             continue
@@ -104,7 +111,7 @@ def _quote_from(d: dict) -> dict:
 def global_indices() -> list[dict]:
     """全球指数快照（道指 / 标普500 / 纳斯达克 / 恒生 / 恒生科技 / 日经225 / KOSPI）。
 
-    各指数并行拉取（东财推单可能每只 3 主机×10s 重试，串行会叠加数分钟
+    各指数并行拉取（东财推单可能每只 3 主机×6s 重试，串行会叠加数分钟
     延迟），任一失败仅跳过该档；源无的档直接跳过。
     """
     def _one(idx: dict) -> dict | None:
@@ -121,6 +128,53 @@ def global_indices() -> list[dict]:
     with ThreadPoolExecutor(max_workers=min(len(_INDICES), 8)) as ex:
         items = list(ex.map(_one, _INDICES))
     return [it for it in items if it]
+
+
+# 全球市场「著名股票」清单（美股/港股大盘蓝筹，人为精选、仅客观行情）。
+# 硬编码 secid（与全球指数一致），避免依赖东财搜索 API（容器内 searchapi 不可达）。
+_GLOBAL_FAMOUS_STOCKS = [
+    # 美股
+    {"secid": "105.AAPL", "name": "苹果", "region": "美股"},
+    {"secid": "105.MSFT", "name": "微软", "region": "美股"},
+    {"secid": "105.NVDA", "name": "英伟达", "region": "美股"},
+    {"secid": "105.GOOGL", "name": "谷歌", "region": "美股"},
+    {"secid": "105.AMZN", "name": "亚马逊", "region": "美股"},
+    {"secid": "105.META", "name": "Meta", "region": "美股"},
+    {"secid": "105.TSLA", "name": "特斯拉", "region": "美股"},
+    # 港股
+    {"secid": "116.00700", "name": "腾讯", "region": "港股"},
+    {"secid": "116.09988", "name": "阿里巴巴", "region": "港股"},
+    {"secid": "116.03690", "name": "美团", "region": "港股"},
+    {"secid": "116.09999", "name": "网易", "region": "港股"},
+    {"secid": "116.09618", "name": "京东", "region": "港股"},
+    {"secid": "116.01810", "name": "小米", "region": "港股"},
+]
+
+
+def famous_stocks() -> list[dict]:
+    """全球著名股票涨跌（美股/港股蓝筹）：push2 并行抓取，单只失败跳过。
+
+    该数据变化频率低且东财 push2 在当前网络较慢，调用方应加 Redis 缓存
+    （见 market_overview.get_global_famous_stocks），避免每次并发抓取堆叠延迟。
+    """
+    def _fetch(item: dict) -> dict | None:
+        try:
+            d = _push2_stock_get(item["secid"], "f43,f57,f58,f59,f60,f170")
+            q = _quote_from(d or {})
+            return {
+                "secid": item["secid"],
+                "name": q.get("name") or item["name"],
+                "region": item["region"],
+                "price": q.get("price"),
+                "change_pct": q.get("change_pct"),
+            }
+        except Exception as e:
+            logger.warning(f"全球著名股票 {item['secid']} 获取失败（跳过）: {e}")
+            return None
+
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        rows = [r for r in ex.map(_fetch, _GLOBAL_FAMOUS_STOCKS) if r is not None]
+    return rows
 
 
 def vix_quote() -> dict | None:

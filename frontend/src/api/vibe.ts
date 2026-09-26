@@ -107,6 +107,30 @@ export interface SectorFlow {
   inflow: number
   outflow: number
   firms: number
+  ths_code?: string
+  /** 行业指数点位 */
+  index?: number
+  /** 领涨股名称 */
+  lead?: string
+  /** 领涨股涨跌幅 % */
+  lead_pct?: number
+  /** 领涨股当前价 元 */
+  lead_price?: number
+}
+
+export interface IndustryPeriodRow {
+  name: string
+  pct: number
+  net: number
+  inflow: number
+  outflow: number
+  firms: number
+}
+
+export interface IndustryPeriodFlows {
+  as_of: string
+  /** key: '3' | '5' | '10' | '20' */
+  periods: Record<string, IndustryPeriodRow[]>
 }
 
 export interface MarketOverview {
@@ -558,6 +582,20 @@ export const vibeApi = {
   async getBoardQuadrant(scope: 'concept' | 'industry') {
     return cachedGet<BoardQuadrant>(
       `/api/vibe/market/board-quadrant?scope=${scope}`, undefined, 180000, { timeout: 20000 }
+    )
+  },
+
+  // 大盘看板 · 行业多周期资金流（同花顺 3/5/10/20 日排行，market 级缓存）
+  async getIndustryPeriodFlows() {
+    return cachedGet<IndustryPeriodFlows>(
+      '/api/vibe/market/industry-period-flows', undefined, 180000, { timeout: 20000 }
+    )
+  },
+
+  // 大盘看板 · 行业 AI 分析（LLM 优先，规则兜底，不做前端缓存）
+  async getIndustryAiAnalysis(name: string) {
+    return ApiClient.get<any>(
+      '/api/vibe/market/industry-ai-analysis', { name }, { timeout: 60000 }
     )
   },
 

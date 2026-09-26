@@ -55,6 +55,8 @@ async def prewarm_market_data() -> None:
         from app.services.concept_analysis import get_concept_analysis
         from app.services.market_dashboard import get_dashboard
         from app.services.market_overview import (
+            get_global_famous_stocks,
+            get_global_indices,
             get_overview,
             get_short_term_emotion,
             get_turnover_top,
@@ -75,6 +77,10 @@ async def prewarm_market_data() -> None:
             _safe("短线情绪", get_short_term_emotion()),
             _safe("概念分析", get_concept_analysis()),
             _safe("成交额Top20", get_turnover_top()),
+            # 外围市场：美股/港股指数与蓝筹行情受 push2 网络制约单次抓取可 20s+，
+            # 必须后台预热，避免大盘看板首开/缓存过期时等待数十秒。
+            _safe("全球指数", get_global_indices()),
+            _safe("全球著名股票", get_global_famous_stocks()),
             # 个股趋势（六图四象限 + 30日时间轴）：构建含全市场帧聚合，冷启动最重，
             # 必须后台预热，避免用户首刷等 40s+。
             _safe("个股趋势", get_stock_quadrant()),

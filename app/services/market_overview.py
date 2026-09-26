@@ -71,7 +71,7 @@ def _fund_amount(v) -> float:
 
 
 def _sectors() -> list[dict]:
-    """行业资金流（按净额降序）。不含领涨股等个股字段。
+    """行业资金流（按净额降序）。含领涨股/行业指数等字段。
 
     AKShare stock_fund_flow_industry 金额列返回「X.XX亿/万」字符串或纯数字（亿），
     统一用 _fund_amount 规范化为数值（单位：元），
@@ -111,6 +111,7 @@ def _sectors() -> list[dict]:
         inflow_val = float(row.get("流入资金", 0) or 0)
         outflow_val = float(row.get("流出资金", 0) or 0)
         pct_val = _parse_pct_str(row.get("行业-涨跌幅", 0)) or 0
+        # 行业指数/当前价为纯数字（非亿/万字符串），直接取数；勿走 _fund_amount（会误乘 1e8）
         out.append({
             "name": str(row["行业"]),
             "pct": round(float(pct_val), 2),
@@ -119,6 +120,10 @@ def _sectors() -> list[dict]:
             "outflow": round(float(outflow_val), 2),
             "firms": _num(row.get("公司家数")),
             "ths_code": ths_map.get(str(row["行业"]).strip(), ""),
+            "index": round(float(row.get("行业指数", 0) or 0), 2),      # 行业指数点位
+            "lead": str(row.get("领涨股") or "").strip(),                # 领涨股名称
+            "lead_pct": round(float(_parse_pct_str(row.get("领涨股-涨跌幅", 0)) or 0), 2),   # 领涨股涨跌幅 %
+            "lead_price": round(float(row.get("当前价", 0) or 0), 2),    # 领涨股当前价 元
         })
     return out
 
@@ -243,3 +248,15 @@ async def get_turnover_top() -> dict:
 async def get_global_indices() -> list[dict]:
     """全球指数快照（美股 / 港股，Redis缓存 news 级TTL）。空结果不缓存。"""
     return await cached("vibe:global_indices", gstock.global_indices, category="news", valid=bool)
+
+
+async def get_global_famous_stocks() -> list[dict]:
+    """全球著名股票（美股/港股蓝筹）涨跌，Redis news 级缓存。
+
+    东财 push2 行情在当前网络环境较慢/受限，单次 13 只并发抓取可能 20s+。
+    该数据变化频率低，与全球指数同一缓存策略（交易 5 分钟 / 非交易 1 小时），
+    避免大盘看板每次打开都实时抓取导致数秒到数十秒等待。空结果不缓存。
+    """
+    return await cached(
+        "vibe:global_famous_stocks", gstock.famous_stocks, category="news", valid=bool
+    )

@@ -72,53 +72,16 @@ async def global_indices(current_user: dict = Depends(get_optional_current_user)
         return ok([])
 
 
-# 全球市场 Tab 内展示的「著名股票」清单（美股/港股大盘蓝筹，人为精选、仅客观行情）
-# 使用硬编码 secid（与全球指数一致），避免依赖东财搜索 API（容器内 searchapi 不可达导致解析失败）
-_GLOBAL_FAMOUS_STOCKS = [
-    # 美股
-    {"secid": "105.AAPL", "name": "苹果", "region": "美股"},
-    {"secid": "105.MSFT", "name": "微软", "region": "美股"},
-    {"secid": "105.NVDA", "name": "英伟达", "region": "美股"},
-    {"secid": "105.GOOGL", "name": "谷歌", "region": "美股"},
-    {"secid": "105.AMZN", "name": "亚马逊", "region": "美股"},
-    {"secid": "105.META", "name": "Meta", "region": "美股"},
-    {"secid": "105.TSLA", "name": "特斯拉", "region": "美股"},
-    # 港股
-    {"secid": "116.00700", "name": "腾讯", "region": "港股"},
-    {"secid": "116.09988", "name": "阿里巴巴", "region": "港股"},
-    {"secid": "116.03690", "name": "美团", "region": "港股"},
-    {"secid": "116.09999", "name": "网易", "region": "港股"},
-    {"secid": "116.09618", "name": "京东", "region": "港股"},
-    {"secid": "116.01810", "name": "小米", "region": "港股"},
-]
-
-
 @router.get("/global-stocks")
 async def global_famous_stocks(current_user: dict = Depends(get_optional_current_user)):
-    """全球市场著名股票涨跌（美股/港股蓝筹），分级TTL缓存"""
+    """全球市场著名股票涨跌（美股/港股蓝筹），news 级 Redis 缓存。
+
+    push2 行情受限网络下单次抓取可能 20s+，数据变化频率低，
+    缓存策略与全球指数一致（交易 5 分钟 / 非交易 1 小时），避免页面反复实时抓取。
+    """
     try:
-        from concurrent.futures import ThreadPoolExecutor
-
-        from app.services.vibe_gstock import _push2_stock_get, _quote_from
-
-        def _fetch(item: dict) -> dict:
-            try:
-                d = _push2_stock_get(item["secid"], "f43,f57,f58,f59,f60,f170")
-                q = _quote_from(d or {})
-                return {
-                    "secid": item["secid"],
-                    "name": q.get("name") or item["name"],
-                    "region": item["region"],
-                    "price": q.get("price"),
-                    "change_pct": q.get("change_pct"),
-                }
-            except Exception as e:
-                logger.warning(f"全球著名股票 {item['secid']} 获取失败（跳过）: {e}")
-                return None
-
-        with ThreadPoolExecutor(max_workers=8) as ex:
-            rows = [r for r in ex.map(_fetch, _GLOBAL_FAMOUS_STOCKS) if r is not None]
-        return ok(rows)
+        from app.services.market_overview import get_global_famous_stocks
+        return ok(await get_global_famous_stocks())
     except Exception as e:
         logger.error(f"全球著名股票异常: {e}")
         return ok([])
@@ -315,6 +278,34 @@ async def market_board_quadrant(scope: str = "concept", current_user: dict = Dep
     except Exception as e:
         logger.error(f"板块象限({scope})异常: {e}")
         return ok(skeleton)
+
+
+@router.get("/market/industry-period-flows")
+async def market_industry_period_flows(current_user: dict = Depends(get_optional_current_user)):
+    """大盘看板 · 行业多周期资金流（同花顺 3/5/10/20 日排行，market 级缓存，金额单位元）。"""
+    try:
+        from app.services.industry_dashboard import get_industry_period_flows
+        return ok(await get_industry_period_flows())
+    except Exception as e:
+        logger.error(f"行业多周期资金流异常: {e}")
+        return ok({"as_of": "", "periods": {}})
+
+
+@router.get("/market/industry-ai-analysis")
+async def market_industry_ai_analysis(name: str, current_user: dict = Depends(get_optional_current_user)):
+    """大盘看板 · 行业 AI 分析（LLM 优先，规则兜底）。
+
+    name 为同花顺行业名（精确匹配）；返回与个股趋势同构的操作结论
+    （action/score/判断要点/风险/一句话结论 + 今日即时与多周期数据快照）。
+    """
+    if not name or not str(name).strip():
+        return ok({"found": False, "name": str(name), "message": "缺少行业名称"})
+    try:
+        from app.services.industry_dashboard import analyze_industry
+        return ok(await analyze_industry(str(name).strip()))
+    except Exception as e:
+        logger.error(f"行业AI分析异常: {name} - {e}")
+        return ok({"found": False, "name": str(name), "message": "分析暂不可用，请稍后重试"})
 
 
 @router.get("/market/emotion")

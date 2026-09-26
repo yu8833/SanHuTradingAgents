@@ -5,10 +5,11 @@
 
 - 概念帧（get_concept_analysis，Redis market 级缓存秒开）：
     pct=概念涨跌幅, turn=换手率, main=净流入(亿元)，其余维度板块级暂无 → None
-- 行业帧（etf_radar_snapshot 最新快照，读库无网络）：
-    pct=行业涨跌幅（优先同花顺交叉校验值，回退代表ETF涨跌幅），
+- 行业帧（etf_radar_snapshot 最新快照 + 实时同花顺行业资金流交叉）：
+    pct=行业涨跌幅（优先实时同花顺行业值——与「大盘热力图·行业板块全景」同源同时点，
+    回退快照同花顺交叉校验值→代表ETF涨跌幅），
     turn=代表ETF换手率, mv=代表ETF总市值(亿元)，
-    main=行业净流入(优先同花顺亿元值，回退ETF主力净流入换算亿元)
+    main=行业净流入(优先实时同花顺亿元值，回退快照同花顺亿元值→ETF主力净流入换算亿元)
 
 只输出最新一帧（无 30 日时间轴）；meta 携带跳转链接：
 - 概念 → 同花顺概念详情页 https://q.10jqka.com.cn/gn/detail/code/{cid}/
@@ -108,28 +109,72 @@ async def _build_concept_quadrant() -> dict[str, Any]:
 
 
 async def _build_industry_quadrant() -> dict[str, Any]:
-    """行业当前帧：代表ETF快照（读库无网络），优先同花顺行业交叉校验值。"""
+    """行业当前帧：代表ETF快照（turn/mv）+ 实时同花顺行业资金流（pct/main）。
+
+    涨跌幅与主力净流入与「大盘热力图·行业板块全景」同源同时点（复用 market_overview
+    的实时同花顺行业资金流，market 级共用缓存），消除两处数值口径/时点不一致；
+    换手率与总市值仍取代表ETF快照（热力图无此维度）。行业值缺失时逐级回退：
+    pct: 实时同花顺 > 快照同花顺交叉校验 > 代表ETF涨跌幅；
+    main: 实时同花顺 > 快照同花顺 > 代表ETF主力净流入换算（金额为元）。
+    """
+    from app.services import market_overview
     from app.services.etf_radar import get_etf_radar_service
+    from app.services.etf_radar.industry_map import INDUSTRY_THS_ALIASES
 
     data = await get_etf_radar_service().get_summary(top_n=300)
     items = data.get("rankings") or []
+
+    # 与热力图同源：实时同花顺行业资金流（name=同花顺行业名, pct=涨跌幅%, net=净额元）
+    sector_map: dict[str, dict] = {}
+    try:
+        ov = await market_overview.get_overview()
+        for s in ov.get("sectors") or []:
+            nm = str(s.get("name") or "").strip()
+            if nm and nm not in sector_map:
+                sector_map[nm] = s
+    except Exception:
+        sector_map = {}
+
     frame: dict[str, list] = {}
     meta: dict[str, dict] = {}
     for it in items:
         code = str(it.get("etf_code") or "").strip()
         if not code:
             continue
-        # 行业级值优先（同花顺交叉校验，金额单位为亿元），否则回退代表ETF（金额为元）
-        pct = it.get("sector_pct_chg")
+        ind = str(it.get("industry") or "").strip()
+        # 实时同花顺行业值：候选行业名精确匹配，回退子串模糊匹配；
+        # 净流入=候选合计（元→亿），涨跌幅=净流入绝对值最大候选（与热力图同列值）
+        live_pct: float | None = None
+        live_main: float | None = None
+        matched: list[dict] = []
+        if ind and sector_map:
+            matched = [sector_map[c] for c in INDUSTRY_THS_ALIASES.get(ind, []) if sector_map.get(c)]
+            if not matched:
+                for name, s in sector_map.items():
+                    if name == ind or (ind and ind in name):
+                        matched.append(s)
+                        break
+        if matched:
+            total = sum(float(s.get("net") or 0) for s in matched)
+            top = max(matched, key=lambda s: abs(float(s.get("net") or 0)))
+            live_pct = top.get("pct")
+            live_main = total / 1e8
+        # 涨跌幅：实时同花顺 > 快照同花顺交叉校验 > 代表ETF（金额基准不同）
+        pct = live_pct
+        if pct is None:
+            pct = it.get("sector_pct_chg")
         if pct is None:
             pct = it.get("pct_chg")
-        main = _num(it.get("sector_net_inflow"))
+        # 主力净流入(亿元)：实时同花顺 > 快照同花顺 > 代表ETF主力净流入换算
+        main = live_main
+        if main is None:
+            main = _num(it.get("sector_net_inflow"))
         if main is None:
             main = (_num(it.get("fund_net_inflow")) or 0) / 1e8
         frame[code] = [
             _r(pct),                       # pct
             None,                          # amt
-            _r(it.get("turnover_rate")),   # turn 换手率
+            _r(it.get("turnover_rate")),   # turn 换手率（代表ETF）
             None,                          # pe
             _yi(it.get("total_mv")),       # mv 代表ETF总市值（亿元）
             _r(main),                      # main 净流入（亿元）
@@ -138,7 +183,7 @@ async def _build_industry_quadrant() -> dict[str, Any]:
         ]
         mkt = "sh" if code.startswith("5") else "sz"
         meta[code] = {
-            "name": str(it.get("industry") or "").strip() or str(it.get("etf_name") or ""),
+            "name": ind or str(it.get("etf_name") or ""),
             "industry": "行业",
             "link": f"https://quote.eastmoney.com/{mkt}{code}.html",
         }
