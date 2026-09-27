@@ -294,6 +294,55 @@
             </el-empty>
           </div>
         </el-tab-pane>
+
+        <el-tab-pane label="记录" name="records">
+          <div class="records-content">
+            <div class="records-head">
+              <div class="records-title">
+                <el-icon><Collection /></el-icon>
+                我的沉淀记录
+                <span v-if="notes.length > 0" class="records-count">共 {{ notes.length }} 条</span>
+              </div>
+              <div class="records-head-actions">
+                <el-radio-group v-model="notesFilter" size="small" class="records-filter">
+                  <el-radio-button value="all">全部</el-radio-button>
+                  <el-radio-button value="ai">AI 记录</el-radio-button>
+                  <el-radio-button value="other">其他</el-radio-button>
+                </el-radio-group>
+                <el-button size="small" :loading="notesLoading" @click="loadNotes">
+                  <el-icon><Refresh /></el-icon>
+                  刷新
+                </el-button>
+              </div>
+            </div>
+
+            <div v-if="notesLoading" class="records-loading">
+              <el-skeleton :rows="4" animated />
+            </div>
+
+            <div v-else-if="filteredNotes.length === 0" class="records-empty">
+              <el-empty :description="notes.length === 0 ? '暂无沉淀记录，点击「存入沉淀」后这里会展示' : '当前分类下暂无记录'">
+                <template #image>
+                  <el-icon :size="80" color="#c0c4cc"><Document /></el-icon>
+                </template>
+              </el-empty>
+            </div>
+
+            <div v-else class="records-list">
+              <div v-for="note in filteredNotes" :key="note.id" class="record-card">
+                <div class="record-head">
+                  <el-tag size="small" :type="kindTagType(note.kind)" effect="light">{{ note.kind }}</el-tag>
+                  <span class="record-title">{{ note.title }}</span>
+                  <span class="record-time">{{ formatNoteTime(note) }}</span>
+                  <el-button size="small" text type="danger" @click="removeNote(note)">
+                    <el-icon><Delete /></el-icon>
+                  </el-button>
+                </div>
+                <div class="record-content" v-html="renderedNoteContent(note)"></div>
+              </div>
+            </div>
+          </div>
+        </el-tab-pane>
       </el-tabs>
     </template>
   </div>
@@ -301,7 +350,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   DataLine,
   Refresh,
@@ -309,13 +358,16 @@ import {
   Reading,
   EditPen,
   Warning,
-  Plus
+  Plus,
+  Collection,
+  Document,
+  Delete
 } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 import { sanitizeHtml } from '@/utils/sanitize'
 import { toTimestamp } from '@/utils/datetime'
 import { vibeApi } from '@/api/vibe'
-import type { RadarData, Industry, RadarItem, SectorNode, SectorLink, BottleneckLevel } from '@/api/vibe'
+import type { RadarData, Industry, RadarItem, SectorNode, SectorLink, BottleneckLevel, Note } from '@/api/vibe'
 
 marked.setOptions({ breaks: true, gfm: true })
 
@@ -596,6 +648,83 @@ watch(currentKey, () => {
   aiResult.value = ''
   aiLoading.value = false
 })
+
+// ---------------------------------------------------------------------------
+// 记录 tab：研究记录（「存入沉淀」的数据在此展示）
+// ---------------------------------------------------------------------------
+type NoteRecord = Note & { created_at?: string }
+
+const notesLoading = ref(false)
+const notes = ref<NoteRecord[]>([])
+
+// kind → 分类：AI 生成（今日要点 / 问AI） vs 其他（如交易复盘等手动记录）
+const AI_KINDS = ['今日要点', '问AI']
+const notesFilter = ref<'all' | 'ai' | 'other'>('all')
+
+const filteredNotes = computed<NoteRecord[]>(() => {
+  if (notesFilter.value === 'all') return notes.value
+  const isAi = (kind: string) => AI_KINDS.includes(kind)
+  return notes.value.filter(n => notesFilter.value === 'ai' ? isAi(n.kind) : !isAi(n.kind))
+})
+
+const loadNotes = async () => {
+  notesLoading.value = true
+  try {
+    notes.value = await vibeApi.loadNotes()
+  } catch (e: any) {
+    ElMessage.error(e?.message || '加载记录失败')
+  } finally {
+    notesLoading.value = false
+  }
+}
+
+// 切换到记录 tab 时重新拉取，保证最新
+watch(activeTab, (tab) => {
+  if (tab === 'records') loadNotes()
+})
+
+const kindTagType = (kind: string): 'primary' | 'success' | 'warning' | 'danger' | 'info' => {
+  if (kind === '问AI') return 'success'
+  if (kind === '今日要点') return 'primary'
+  return 'info'
+}
+
+const formatNoteTime = (note: NoteRecord) => {
+  const raw = note.created_at || note.ts
+  if (!raw) return ''
+  const d = new Date(raw)
+  if (Number.isNaN(d.getTime())) return String(raw).slice(0, 16).replace('T', ' ')
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+const renderedNoteContent = (note: NoteRecord) => {
+  const content = note.content || ''
+  try {
+    return sanitizeHtml(String(marked.parse(content)))
+  } catch {
+    return sanitizeHtml(content.replace(/\n/g, '<br/>'))
+  }
+}
+
+const removeNote = async (note: NoteRecord) => {
+  try {
+    await ElMessageBox.confirm('确定删除该条记录吗？删除后不可恢复。', '删除记录', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+    })
+  } catch {
+    return
+  }
+  try {
+    await vibeApi.deleteNote(note.id)
+    notes.value = notes.value.filter(n => n.id !== note.id)
+    ElMessage.success('已删除')
+  } catch (e: any) {
+    ElMessage.error(e?.message || '删除失败')
+  }
+}
 
 onMounted(() => {
   loadRadar()
@@ -1387,6 +1516,125 @@ onMounted(() => {
   .pending-alert {
     margin-bottom: 24px;
     border-radius: 8px;
+  }
+}
+
+.records-content {
+  padding-top: 4px;
+
+  .records-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 14px;
+
+    .records-head-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+  }
+
+  .records-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--el-text-color-primary);
+
+    .records-count {
+      font-size: 12px;
+      font-weight: 400;
+      color: var(--el-text-color-secondary);
+    }
+  }
+
+  .records-loading {
+    padding: 8px 4px;
+  }
+
+  .records-empty {
+    padding: 30px 0;
+  }
+
+  .records-list {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .record-card {
+    border: 1px solid var(--el-border-color-lighter);
+    border-radius: 10px;
+    background: var(--el-bg-color);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+    overflow: hidden;
+    transition: box-shadow 0.2s;
+
+    &:hover {
+      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.08);
+    }
+  }
+
+  .record-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    background: var(--el-fill-color-light);
+    border-bottom: 1px solid var(--el-border-color-lighter);
+  }
+
+  .record-title {
+    flex: 1;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--el-text-color-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .record-time {
+    flex-shrink: 0;
+    font-size: 12px;
+    color: var(--el-text-color-placeholder);
+    font-family: var(--app-font-mono);
+  }
+
+  .record-content {
+    padding: 14px 16px;
+    font-size: 14px;
+    line-height: 1.8;
+    color: var(--el-text-color-primary);
+    word-break: break-word;
+
+    :deep(p) { margin: 6px 0; }
+    :deep(ul), :deep(ol) {
+      padding-left: 22px;
+      margin: 6px 0;
+      li { margin: 3px 0; }
+    }
+    :deep(strong) { color: #2c5282; }
+    :deep(code) {
+      background: var(--el-fill-color-light);
+      padding: 2px 5px;
+      border-radius: 3px;
+      font-size: 13px;
+      color: #c41d7f;
+    }
+    :deep(blockquote) {
+      margin: 10px 0;
+      padding: 8px 14px;
+      background: var(--el-fill-color-light);
+      border-left: 4px solid var(--app-flat);
+      color: var(--el-text-color-regular);
+      font-size: 13px;
+      border-radius: 0 4px 4px 0;
+    }
   }
 }
 

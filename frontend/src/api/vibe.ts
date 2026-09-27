@@ -184,6 +184,7 @@ export interface MarketRegime {
 
 export interface MarketDashboard {
   as_of: string
+  trade_date?: string
   regime?: MarketRegime | null
   indices: IndexQuote[]
   breadth: {
@@ -493,6 +494,7 @@ export interface MarketSynthesis {
   sell_count: number
   llm_available: boolean
   as_of: string
+  trade_date?: string
   sources: SynthesisSources | null
 }
 
@@ -534,6 +536,17 @@ export const vibeApi = {
 
   async getEmotion() {
     return cachedGet<ShortTermEmotion>('/api/vibe/market/emotion', undefined, 180000, { timeout: 15000 })
+  },
+
+  // 最新交易日（权威交易日历轻量接口）：页面标题首屏即显示正确交易日，避免先显示当天再纠正
+  async getLatestTradeDate(): Promise<string> {
+    try {
+      const res = await ApiClient.get<any>('/api/vibe/market/trade-date', undefined, { timeout: 8000 })
+      return (res?.data?.trade_date as string) || ''
+    } catch (e) {
+      console.warn('[getLatestTradeDate] 获取最新交易日失败:', e?.message || e)
+      return ''
+    }
   },
 
   async getTurnoverTop() {
@@ -759,7 +772,8 @@ export const vibeApi = {
   // 研究记录（后端 MongoDB 存储，跨设备同步）
   async loadNotes(): Promise<Note[]> {
     try {
-      const list = await ApiClient.get<Note[]>('/api/vibe/notes')
+      const res = await ApiClient.get<{ success: boolean; data: Note[] }>('/api/vibe/notes')
+      const list = Array.isArray(res) ? res : (res?.data ?? [])
       return Array.isArray(list) ? list : []
     } catch (e) {
       console.error('[loadNotes] 加载失败，回退到本地缓存:', e)

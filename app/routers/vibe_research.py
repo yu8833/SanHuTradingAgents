@@ -109,6 +109,18 @@ async def market_dashboard(current_user: dict = Depends(get_optional_current_use
         return ok({})
 
 
+@router.get("/market/trade-date")
+async def market_trade_date(current_user: dict = Depends(get_optional_current_user)):
+    """最新交易日（统一权威交易日历），轻量接口供各页面标题首屏即显示正确日期，避免先显示当天再纠正。"""
+    try:
+        from app.utils.trading_time import get_latest_trade_day
+
+        return ok({"trade_date": get_latest_trade_day().strftime("%Y-%m-%d")})
+    except Exception as e:
+        logger.error(f"最新交易日查询异常: {e}")
+        return ok({"trade_date": ""})
+
+
 @router.get("/market/concept-analysis")
 async def market_concept_analysis(current_user: dict = Depends(get_optional_current_user)):
     """概念分析：概念实时行情 + 领涨/领跌榜 + 资金流榜（同花顺，Redis分级TTL缓存）"""

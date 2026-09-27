@@ -7,7 +7,7 @@
           <el-icon :size="26"><DataAnalysis /></el-icon>
         </div>
         <div class="page-hero-text">
-          <h2 class="page-hero-title">{{ today }} · 大盘看板</h2>
+          <h2 class="page-hero-title">{{ titleDate }} · 大盘看板</h2>
           <p class="page-hero-sub">大盘指数 / 市场情绪 / 涨跌分布一屏看全</p>
         </div>
       </div>
@@ -310,6 +310,10 @@ const today = computed(() => {
   return `${y}-${m}-${day}`
 })
 
+// 标题日期：优先后端数据返回的交易日；数据未回前用轻量接口预取的最新交易日（首屏即正确，不闪非交易日当天）
+const tradeDate = ref('')
+const titleDate = computed(() => dashboard.value?.trade_date || tradeDate.value || '')
+
 // ── 外围市场 tab（分类快照：美股/港股/亚太/VIX/股指期货/A50/商品 + 个股行情）──
 const overseasLoading = ref(false)
 const overseasRefreshing = ref(false)
@@ -555,6 +559,7 @@ const loadAll = async () => {
 }
 
 onMounted(() => {
+  vibeApi.getLatestTradeDate().then((d) => { if (d) tradeDate.value = d })
   loadAll()
 })
 

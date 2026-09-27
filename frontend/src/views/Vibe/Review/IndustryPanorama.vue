@@ -196,10 +196,11 @@ const widthAvg = computed(() => {
   if (!arr.length) return null
   return arr.reduce((a, b) => a + b, 0) / arr.length
 })
-/** KPI 标题日期：优先取行业多周期的 as_of，回退今日 */
+/** 页头标题日期：最新交易日（轻量接口预取，首屏即正确，不闪非交易日当天） */
+const titleDate = ref('')
+/** KPI 标题日期：优先取行业多周期的 as_of（数据交易日），缺失回退最新交易日 */
 const trendAsOf = computed(() => periodFlows.value?.as_of || '')
-const todayStr = new Date().toISOString().slice(0, 10)
-const trendDate = computed(() => trendAsOf.value ? trendAsOf.value.slice(0, 10) : todayStr)
+const trendDate = computed(() => trendAsOf.value ? trendAsOf.value.slice(0, 10) : titleDate.value)
 
 // ── 大盘热力图：行业板块 treemap（面积=资金量，颜色=涨跌幅 红涨绿跌）──
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v))
@@ -830,6 +831,7 @@ const loadAll = async () => {
 }
 
 onMounted(() => {
+  vibeApi.getLatestTradeDate().then((d) => { if (d) titleDate.value = d })
   loadAll()
 })
 

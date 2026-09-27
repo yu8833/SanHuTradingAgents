@@ -23,6 +23,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.services.cache_layer import cached, set_cache
 from app.services.macro.macro_service import _get_llm_cfg, _parse_llm_json
+from app.utils.trading_time import get_latest_trade_day
 
 logger = logging.getLogger(__name__)
 
@@ -413,6 +414,8 @@ async def _build_market_part() -> dict:
         "verdict": verdict,
         "llm_available": llm_available,
         "as_of": datetime.now(BEIJING).strftime("%Y-%m-%d %H:%M:%S"),
+        # 权威最新交易日（统一交易日历），供前端页面标题「X月X日 · 综合研判」展示
+        "trade_date": get_latest_trade_day().strftime("%Y-%m-%d"),
         "sources": _slim_sources(dashboard, emotion, concept, radar, regime),
     }
 
@@ -466,6 +469,7 @@ async def build_market_synthesis(user_id: str, refresh: bool = False) -> dict:
         "sells": sells,
         "llm_available": market.get("llm_available", False),
         "as_of": market.get("as_of") or "",
+        "trade_date": market.get("trade_date") or "",
         "sources": market.get("sources") or {},
     }
 

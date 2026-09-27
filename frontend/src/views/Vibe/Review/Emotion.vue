@@ -7,7 +7,7 @@
           <el-icon :size="26"><TrendCharts /></el-icon>
         </div>
         <div class="page-hero-text">
-          <h2 class="page-hero-title">短线情绪</h2>
+          <h2 class="page-hero-title">{{ titleDate }} · 短线情绪</h2>
           <p class="page-hero-sub">连板梯队 / 打板情绪 · 客观公开榜单</p>
         </div>
       </div>
@@ -174,6 +174,16 @@ import {
 import { vibeApi, type ShortTermEmotion } from '@/api/vibe'
 import { fmtPrice, fmtYi, fmtPctFromFraction, fmtPct } from '@/utils/format'
 
+const today = computed(() => {
+  const d = new Date()
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+})
+
+// 标题日期：优先情绪数据日期（最新交易日）；数据未回前用轻量接口预取的最新交易日（首屏即正确，不闪非交易日当天）
+const tradeDate = ref('')
+const titleDate = computed(() => emotion.value?.date || tradeDate.value || '')
+
 const loading = ref(false)
 const emotion = ref<ShortTermEmotion | null>(null)
 
@@ -203,6 +213,7 @@ const load = async () => {
 }
 
 onMounted(() => {
+  vibeApi.getLatestTradeDate().then((d) => { if (d) tradeDate.value = d })
   load()
 })
 </script>

@@ -25,6 +25,7 @@ from app.core.database import get_mongo_db_sync
 from app.services import vibe_astock as astock
 from app.services.cache_layer import cached
 from app.services.market_overview import get_short_term_emotion, _sentiment
+from app.utils.trading_time import get_latest_trade_day
 
 logger = logging.getLogger("webapi")
 
@@ -364,6 +365,9 @@ async def _build() -> dict:
 
     return {
         "as_of": sentiment.get("date") or "",
+        # 权威最新交易日（trading_time.get_latest_trade_day → 统一交易日历），
+        # 供前端页面标题展示「X月X日 · 大盘看板」，非交易日出最近交易日
+        "trade_date": get_latest_trade_day().strftime("%Y-%m-%d"),
         "regime": regime,
         "indices": indices,
         "breadth": {

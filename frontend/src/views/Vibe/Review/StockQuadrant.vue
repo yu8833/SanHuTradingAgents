@@ -1,23 +1,5 @@
 <template>
   <div class="stock-quadrant-page">
-    <!-- 页面标题 -->
-    <div class="page-hero">
-      <div class="page-hero-main">
-        <div class="page-hero-icon">
-          <el-icon :size="26"><DataAnalysis /></el-icon>
-        </div>
-        <div class="page-hero-text">
-          <h2 class="page-hero-title">{{ today }} · 个股趋势</h2>
-          <p class="page-hero-sub">全市场个股六维四象限 · 30 日时间轴一屏看全</p>
-        </div>
-      </div>
-      <div class="page-hero-meta">
-        <el-button type="primary" plain :icon="Refresh" :loading="loading" @click="loadAll">
-          刷新
-        </el-button>
-      </div>
-    </div>
-
     <!-- 概念宽度 KPI（随时间轴当前帧联动） -->
     <section class="block">
       <div class="block-head">
@@ -209,7 +191,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Search, Refresh, DataAnalysis, TrendCharts, Odometer, Clock, VideoPlay, VideoPause, Cpu, Loading } from '@element-plus/icons-vue'
+import { Search, DataAnalysis, TrendCharts, Odometer, Clock, VideoPlay, VideoPause, Cpu, Loading } from '@element-plus/icons-vue'
 import { use as echartsUse } from 'echarts/core'
 import { ScatterChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, DataZoomComponent, MarkAreaComponent, MarkLineComponent } from 'echarts/components'
@@ -227,7 +209,6 @@ echartsUse([CanvasRenderer, ScatterChart, GridComponent, TooltipComponent, DataZ
 
 const QT_DOT = ['qt-red', 'qt-yellow', 'qt-blue', 'qt-green'] as const
 
-const today = new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' })
 const loading = ref(false)
 // 轻量首屏：dates + meta + 最新一帧（约 150KB gzip）；历史帧按需加载
 const data = ref<StockQuadrantSlim | null>(null)

@@ -1,23 +1,5 @@
 <template>
   <div class="board-quadrant-page">
-    <!-- 页面标题 -->
-    <div class="page-hero">
-      <div class="page-hero-main">
-        <div class="page-hero-icon">
-          <el-icon :size="26"><DataAnalysis /></el-icon>
-        </div>
-        <div class="page-hero-text">
-          <h2 class="page-hero-title">{{ today }} · {{ heroTitle }}</h2>
-          <p class="page-hero-sub">{{ heroSub }}</p>
-        </div>
-      </div>
-      <div class="page-hero-meta">
-        <el-button type="primary" plain :icon="Refresh" :loading="loading" @click="loadAll">
-          刷新
-        </el-button>
-      </div>
-    </div>
-
     <!-- 板块宽度 KPI（当前快照） -->
     <section class="block">
       <div class="block-head">
@@ -108,7 +90,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Search, Refresh, DataAnalysis, TrendCharts, Odometer } from '@element-plus/icons-vue'
+import { Search, DataAnalysis, TrendCharts, Odometer } from '@element-plus/icons-vue'
 import { use as echartsUse } from 'echarts/core'
 import { ScatterChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, DataZoomComponent, MarkAreaComponent, MarkLineComponent } from 'echarts/components'
@@ -126,17 +108,16 @@ echartsUse([CanvasRenderer, ScatterChart, GridComponent, TooltipComponent, DataZ
 
 const QT_DOT = ['qt-red', 'qt-yellow', 'qt-blue', 'qt-green'] as const
 
-const today = new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' })
+// 页头标题日期：最新交易日（轻量接口预取，首屏即正确，不闪非交易日当天）
+const titleDate = ref('')
 const loading = ref(false)
 const data = ref<BoardQuadrant | null>(null)
 
 // 固定为概念象限（行业趋势已改用同花顺行业全景组件 IndustryPanorama）
-// 顶部 KPI 标题日期：优先取 as_of（后端已归一 yyyy-mm-dd），回退今日（与个股趋势「市场宽度 · yyyy-mm-dd」一致）
+// 顶部 KPI 标题日期：优先取 as_of（后端已归一 yyyy-mm-dd），回退最新交易日（与个股趋势「市场宽度 · yyyy-mm-dd」一致）
 const boardDate = computed(() =>
-  data.value?.as_of ? String(data.value.as_of).slice(0, 10) : new Date().toISOString().slice(0, 10)
+  data.value?.as_of ? String(data.value.as_of).slice(0, 10) : (titleDate.value || '')
 )
-const heroTitle = '概念趋势'
-const heroSub = '概念板块四象限 · 当前快照一屏看全'
 const unitName = '概念'
 const unitSub = '同花顺概念板块'
 
@@ -293,13 +274,14 @@ async function loadAll() {
     const res = await vibeApi.getBoardQuadrant()
     data.value = (res as any)?.data ?? null
   } catch (e) {
-    console.error(`加载${heroTitle}失败`, e)
+    console.error('加载概念趋势失败', e)
   } finally {
     loading.value = false
   }
 }
 
 onMounted(() => {
+  vibeApi.getLatestTradeDate().then((d) => { if (d) titleDate.value = d })
   loadAll()
 })
 

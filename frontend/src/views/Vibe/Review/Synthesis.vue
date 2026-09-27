@@ -7,8 +7,8 @@
           <el-icon :size="26"><Aim /></el-icon>
         </div>
         <div class="page-hero-text">
-          <h2 class="page-hero-title">{{ today }} · 综合研判</h2>
-          <p class="page-hero-sub">汇聚大盘 / 情绪 / 概念 / 资讯四维数据，AI 综合研判市场方向</p>
+          <h2 class="page-hero-title">{{ titleDate }} · 综合研判</h2>
+          <p class="page-hero-sub">汇聚大盘 / 情绪 / 趋势 / 资讯四维数据，AI 综合研判市场方向</p>
         </div>
       </div>
       <div class="page-hero-meta">
@@ -153,6 +153,10 @@ const today = computed(() => {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
 })
 
+// 标题日期：优先后端数据返回的交易日；数据未回前用轻量接口预取的最新交易日（首屏即正确，不闪非交易日当天）
+const tradeDate = ref('')
+const titleDate = computed(() => syn.value?.trade_date || tradeDate.value || '')
+
 const verdict = computed(() => {
   const v = syn.value?.verdict
   if (!v) return null
@@ -229,7 +233,14 @@ const loadAll = async (refresh = false) => {
   }
 }
 
-onMounted(() => loadAll(true))
+function prefetchTradeDate() {
+  vibeApi.getLatestTradeDate().then((d) => { if (d) tradeDate.value = d })
+}
+
+onMounted(() => {
+  prefetchTradeDate()
+  loadAll(true)
+})
 
 // keep-alive 恢复时刷新（AI 研判随刷新重算；打开即取最新，不再依赖后台定时 LLM）
 let inited = false

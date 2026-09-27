@@ -150,10 +150,16 @@ def _emotion() -> dict:
     **不输出任何个股 code/name**——守产品「零标的」红线（个股清单是甩名单，不做）。
     """
     # 定位最近交易日：从今天往前回溯，第一日有涨停池即取（非交易日/盘前返空则继续回溯）。
+    # 注意：东财涨停池在非交易日也可能回吐数据（非交易日请求返回最近一份池子），
+    # 必须先按权威交易日历过滤，否则会把周末/节假日误当成数据日期。
+    from app.utils.trading_time import is_trading_day
+
     today = datetime.now(BEIJING).date()
     resolved, zt = "", []
     for back in range(8):
         d = (today - timedelta(days=back)).strftime("%Y%m%d")
+        if not is_trading_day(d):
+            continue
         zt = astock.em_zt_topic_pool("getTopicZTPool", d, "fbt:asc")
         if zt:
             resolved = d

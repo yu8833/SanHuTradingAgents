@@ -27,18 +27,19 @@ def test_norm_formats():
     assert _norm("2026-09-24") == "2026-09-24"
 
 
-# ── is_open_day 内存视图 ──
-def test_is_open_day_未装载返回_none():
+# ── is_open_day 内存视图（直接改写共享 _STATE 会污染同进程其他用例，
+#    必须用 monkeypatch.setitem 以便测试结束自动还原） ──
+def test_is_open_day_未装载返回_none(monkeypatch):
     import app.services.trade_calendar_service as tcs
 
-    tcs._STATE["open"] = frozenset()
+    monkeypatch.setitem(tcs._STATE, "open", frozenset())
     assert tcs.is_open_day("2026-09-24") is None
 
 
-def test_is_open_day_装载后判定():
+def test_is_open_day_装载后判定(monkeypatch):
     import app.services.trade_calendar_service as tcs
 
-    tcs._STATE["open"] = frozenset({"2026-09-24", "2026-10-08"})
+    monkeypatch.setitem(tcs._STATE, "open", frozenset({"2026-09-24", "2026-10-08"}))
     assert tcs.is_open_day("2026-09-24") is True
     assert tcs.is_open_day("2026-10-08") is True
     assert tcs.is_open_day("2026-10-01") is False

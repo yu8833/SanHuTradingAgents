@@ -7,7 +7,7 @@
           <el-icon :size="26"><TrendCharts /></el-icon>
         </div>
         <div class="page-hero-text">
-          <h2 class="page-hero-title">常用策略</h2>
+          <h2 class="page-hero-title">{{ titleDate }} · 常用策略</h2>
           <p class="page-hero-sub">
             基于本地行情数据 · 策略筛选与评分排序
             <template v-if="isRealtimeResult">
@@ -15,7 +15,7 @@
               <el-icon :size="13"><Connection /></el-icon>
               {{ decisionWindow ? '收盘定格（可成交窗口）' : '盘中预警（暂定，15:00 定格确认）' }}
             </template>
-            <template v-else-if="computedAt"> · <el-icon :size="13"><Clock /></el-icon> 数据更新于 {{ computedAt }}</template>
+            <template v-else-if="computedAt"> · <el-icon :size="13"><Clock /></el-icon> 数据更新于 {{ computedTime }}</template>
           </p>
         </div>
       </div>
@@ -258,6 +258,7 @@ import { retailApi } from '@/api/retail'
 import { strategyApi, type StrategyMeta, type StrategyRunItem, type StrategyRunAllItem } from '@/api/strategy'
 import { favoritesApi } from '@/api/favorites'
 import { monitorApi } from '@/api/monitor'
+import { vibeApi } from '@/api/vibe'
 import { fmtPrice, fmtPctFromFraction, fmtNum } from '@/utils/format'
 import { useAuthStore } from '@/stores/auth'
 import { use as echartsUse } from 'echarts/core'
@@ -303,6 +304,8 @@ const result = ref<{ items: StrategyRunItem[]; as_of: string; strategy_id: strin
 const showAllResult = ref<StrategyRunAllItem[] | null>(null)
 const showAll = ref(false)
 const asOf = ref('')
+// 标题日期：最新交易日（轻量接口预取）
+const titleDate = ref('')
 
 // 策略命中数排行（横向条，命中越多的策略靠上）
 const strategyHitChartData = computed(() =>
@@ -338,6 +341,8 @@ const strategyHitOption = computed(() => {
 })
 const tradeDates = ref<string[]>([])
 const computedAt = ref('')
+// 「数据更新于」仅显示时间（HH:MM）：数据日期已由页头标题的最新交易日承载，避免出现非交易日日期
+const computedTime = computed(() => computedAt.value ? String(computedAt.value).slice(11, 16) : '')
 const allStrategyRunning = ref(false)
 
 // ── 大盘四维检测（供矩阵初始维度与盘中实时刷新；画像由矩阵广播，联动策略池） ──────
@@ -538,6 +543,10 @@ const loadStrategies = async () => {
       const dres = datesRes.value as any
       const dates = dres?.data?.dates ?? []
       tradeDates.value = Array.isArray(dates) ? dates : []
+      // 标题日期兜底：trade-date 轻量接口不可用时，取交易日下拉的最新一个
+      if (!titleDate.value && tradeDates.value.length > 0) {
+        titleDate.value = tradeDates.value[0]
+      }
     }
     // 首次进入自动加载全部策略结果（后端缓存命中时秒回，否则后台计算）
     if (strategies.value.length > 0) {
@@ -709,6 +718,8 @@ const batchAddToFavorites = async () => {
 }
 
 onMounted(() => {
+  // 标题日期：最新交易日（轻量接口预取，首屏即正确）
+  vibeApi.getLatestTradeDate().then((d) => { if (d) titleDate.value = d })
   loadStrategies()
   loadMonitorStatus()
   loadMarketRegime()
