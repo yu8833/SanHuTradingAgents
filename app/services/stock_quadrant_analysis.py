@@ -591,8 +591,19 @@ async def build_stock_quadrant() -> dict[str, Any]:
     gap_days = (datetime.strptime(today, "%Y-%m-%d").date()
                 - datetime.strptime(hist_last, "%Y-%m-%d").date()).days if hist_dates else 99
     is_weekday = datetime.now(BEIJING).weekday() < 5
-    # 并入条件：今日未收盘入库（today 不在历史帧）且今日疑似交易日（有涨停池 / 工作日且与最新历史日邻近）
-    if (today_out["frame"] and today not in hist_dates
+    # 当日行情是否已入库：非交易日/盘前 market_quotes 无今日记录。
+    # 东财「即时涨停池」在非交易日会回退最近交易日数据（today_zt 判空不可靠），
+    # 若据此并入会生成「日期=今日、内容=最近收盘、无当日主力资金」的伪帧，
+    # 使最新帧的资金类图（涨跌×主力资金 / 连板×主力资金）整体为空。
+    has_today_quotes = False
+    async for _d in col("market_quotes").find(
+            {"trade_date": {"$in": [today, _compact(today)]}}, {"_id": 1}).limit(1):
+        has_today_quotes = True
+    if not has_today_quotes:
+        today_out = {"frame": {}, "meta": {}, "price": {}}
+        snapshot = []
+    # 并入条件：今日已收盘入库（today 不在历史帧）且当日行情真实入账
+    if (today_out["frame"] and today not in hist_dates and has_today_quotes
             and (bool(today_zt) or (is_weekday and 0 <= gap_days <= 3))):
         # 当日帧 d5：现价 vs 第 5 个历史交易日收盘
         for code, price_t in today_out["price"].items():
