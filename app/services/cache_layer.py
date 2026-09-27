@@ -51,9 +51,15 @@ TTL = {
 
 
 def _is_trading_hours() -> bool:
-    """判断当前是否为A股交易时段（9:30-11:30, 13:00-15:00）。"""
+    """判断当前是否为A股交易时段（9:30-11:30, 13:00-15:00）。
+
+    统一走 trading_time.is_trading_day（权威日历，节假日感知）——法定节假日落在
+    工作日时 TTL 自动切 non_trading 长档，减少无效重建；函数内懒导入避免与日历链成环。
+    """
+    from app.utils.trading_time import is_trading_day
+
     now = datetime.now(BEIJING)
-    if now.weekday() >= 5:
+    if not is_trading_day(now):
         return False
     t = now.hour * 60 + now.minute
     return (9 * 60 + 30 <= t <= 11 * 60 + 30) or (13 * 60 <= t <= 15 * 60)
