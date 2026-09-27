@@ -221,33 +221,6 @@
       </div>
     </section>
 
-    <!-- 行业资金榜：净流入 TOP12 / 净流出 TOP12 -->
-    <section v-if="heatmapReady" class="block">
-      <div class="block-head">
-        <span class="block-title"><el-icon><DataAnalysis /></el-icon> 行业资金榜</span>
-        <span class="block-hint">主力净流入 / 净流出 TOP 12 · 点击跳转同花顺板块</span>
-      </div>
-      <div class="sector-rank-grid">
-        <div v-for="(col, key) in sectorRankCols" :key="key" class="list-card">
-          <div class="list-head">
-            <span class="list-title">{{ col.title }}</span>
-            <span class="list-top">{{ col.rows.length }} 个行业</span>
-          </div>
-          <div v-for="(s, idx) in col.rows" :key="key + '-' + s.name" class="list-item sector-rank-item" @click="openThs(s)">
-            <span class="list-no">{{ idx + 1 }}</span>
-            <div class="list-main">
-              <span class="list-name">{{ s.name }}</span>
-              <div class="list-code">流入 {{ fmtAbs(s.inflowYi) }} / 流出 {{ fmtAbs(s.outflowYi) }} 亿</div>
-            </div>
-            <div class="sector-rank-right">
-              <div :class="clsByVal(s.pct)">{{ fmtPct(s.pct) }}</div>
-              <div class="list-amt" :class="clsByVal(s.netYi)">{{ fmtSigned(s.netYi) }}亿</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
     <!-- 行业资金 · 多周期（3/5/10/20 日阶段涨跌幅 + 区间净额） -->
     <section v-if="periodMatrixReady" class="block">
       <div class="block-head">
@@ -415,7 +388,7 @@
 <script setup lang="ts">
 // 显式声明组件名，供 <keep-alive :include> 匹配
 defineOptions({ name: 'ReviewOverview' })
-import { ref, computed, onMounted, onActivated, nextTick } from 'vue'
+import { ref, computed, onMounted, onActivated } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   DataAnalysis,
@@ -800,7 +773,7 @@ function onHeatmapClick(e: any) {
   window.open(`https://q.10jqka.com.cn/thshy/detail/code/${code}/`, '_blank', 'noopener')
 }
 
-// ── 行业象限 + 行业资金榜（复用热力图 sectors = 同花顺 stock_fund_flow_industry 即时）──
+// ── 行业象限（复用热力图 sectors = 同花顺 stock_fund_flow_industry 即时）──
 const MONO = "'SFMono-Regular', ui-monospace, Menlo, monospace"
 
 interface SectorPoint {
@@ -1011,24 +984,10 @@ function onSectorClick(e: any) {
   if (code) window.open(`https://q.10jqka.com.cn/thshy/detail/code/${code}/`, '_blank', 'noopener')
 }
 
-function openThs(s: SectorPoint) {
-  if (s.ths_code) window.open(`https://q.10jqka.com.cn/thshy/detail/code/${s.ths_code}/`, '_blank', 'noopener')
-}
-
-// 行业资金榜：净流入 TOP12 / 净流出 TOP12（净流出取最负者）
-const sectorRankCols = computed(() => {
-  const pts = sectorPoints.value
-  return [
-    { title: '净流入 TOP 12', rows: pts.slice().sort((a, b) => b.netYi - a.netYi).slice(0, 12) },
-    { title: '净流出 TOP 12', rows: pts.slice().sort((a, b) => a.netYi - b.netYi).slice(0, 12) },
-  ]
-})
-
-// ── 行业搜索：按名称查找，跨 热力图/象限/资金榜/领涨股/多周期 静态同步高亮 ──
+// ── 行业搜索：按名称查找，跨 热力图/象限/多周期矩阵 静态同步高亮 ──
 const sectorSearchKw = ref('')
 const matchNames = ref<string[]>([])
 const matchSet = computed(() => new Set(matchNames.value))
-const sectorHlCls = (name: string) => (matchSet.value.has(name) ? 'hl-match' : '')
 
 async function doSectorSearch() {
   const kw = sectorSearchKw.value.trim()
@@ -1044,10 +1003,6 @@ async function doSectorSearch() {
   }
   if (hits.length > 200) hits.length = 200
   matchNames.value = hits
-  await nextTick()
-  // 滚动到首个命中行（资金榜/领涨股/多周期任一卡片内的高亮行）
-  const first = document.querySelector('.hl-match')
-  first?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
 }
 
 function clearSectorMatch() {
@@ -1395,33 +1350,6 @@ onActivated(() => {
 .qt-dot.qt-blue { background: #60a5fa; }
 .qt-dot.qt-green { background: #4ade80; }
 
-/* 行业资金榜：净流入 / 净流出双卡 */
-.sector-rank-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
-
-.sector-rank-item {
-  cursor: pointer;
-}
-
-.sector-rank-item:hover .list-name {
-  color: var(--el-color-primary);
-}
-
-.sector-rank-right {
-  text-align: right;
-  flex-shrink: 0;
-}
-
-.sector-rank-right .list-amt {
-  margin-top: 2px;
-}
-
-.sector-rank-right .list-amt.up { color: var(--app-up); }
-.sector-rank-right .list-amt.down { color: var(--app-down); }
-
 /* 行业搜索条（名称查找 · AI 分析） */
 .search-row {
   display: flex;
@@ -1438,14 +1366,6 @@ onActivated(() => {
 .period-matrix-chart {
   width: 100%;
   height: 720px;
-}
-
-/* 搜索命中行高亮（静态同步） */
-.hl-match {
-  background: rgba(37, 99, 235, .08);
-  outline: 1px solid rgba(37, 99, 235, .55);
-  outline-offset: -1px;
-  border-radius: 4px;
 }
 
 /* 中轴零线：净流入（左）/ 净流出（右）分界 */
@@ -1990,7 +1910,7 @@ onActivated(() => {
 
 @media (max-width: 768px) {
   .kpi-row { grid-template-columns: repeat(2, 1fr); }
-  .dash-main, .list-grid, .sector-rank-grid { grid-template-columns: 1fr; }
+  .dash-main, .list-grid { grid-template-columns: 1fr; }
   .search-input { width: 100%; }
 }
 </style>
