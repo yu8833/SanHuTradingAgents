@@ -14,6 +14,28 @@
 
 from __future__ import annotations
 
+
+def _latest_trade_date() -> str:
+    """实收最近交易日（YYYY-MM-DD），与个股趋势/行业宽度统一口径（同步查询日线表）。"""
+    from app.services.stock_quadrant_analysis import _dash
+    from app.core.database import get_mongo_db_sync
+
+    try:
+        db = get_mongo_db_sync()
+        cursor = db["stock_daily_quotes"].find(
+            {"period": "daily"}, {"trade_date": 1}
+        ).sort("trade_date", -1).limit(1)
+        doc = next(cursor, None)
+        if doc:
+            d = _dash(doc.get("trade_date"))
+            if len(d) == 10:
+                return d
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"获取最近交易日失败（概念宽度回退当天）: {e}")
+    import datetime as _dt
+    return _dt.datetime.now().strftime("%Y-%m-%d")
+
+
 import logging
 import math
 import re
@@ -151,7 +173,9 @@ def _build() -> dict:
 
     return {
         "total": len(concepts),
-        "as_of": datetime.now(BEIJING).strftime("%Y-%m-%d %H:%M"),
+        # as_of 统一为「实收最近交易日」（与非交易日显示口径一致），updated_at 保留抓取时刻
+        "as_of": _latest_trade_date(),
+        "updated_at": datetime.now(BEIJING).strftime("%Y-%m-%d %H:%M"),
         "breadth": {
             "up": up_count,
             "down": down_count,

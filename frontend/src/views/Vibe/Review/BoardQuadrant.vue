@@ -21,7 +21,7 @@
     <!-- 板块宽度 KPI（当前快照） -->
     <section class="block">
       <div class="block-head">
-        <span class="block-title"><el-icon><Odometer /></el-icon> 板块宽度 · 当前</span>
+        <span class="block-title"><el-icon><Odometer /></el-icon> {{ unitName }}宽度 · {{ boardDate }}</span>
         <span v-if="data?.as_of" class="block-hint">数据更新于 {{ data.as_of }}</span>
       </div>
       <div class="kpi-row">
@@ -106,7 +106,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Search, Refresh, DataAnalysis, TrendCharts, Odometer } from '@element-plus/icons-vue'
 import { use as echartsUse } from 'echarts/core'
@@ -124,19 +124,21 @@ defineOptions({ name: 'BoardQuadrant' })
 
 echartsUse([CanvasRenderer, ScatterChart, GridComponent, TooltipComponent, DataZoomComponent, MarkAreaComponent, MarkLineComponent])
 
-const props = defineProps<{ scope: 'concept' | 'industry' }>()
-
 const QT_DOT = ['qt-red', 'qt-yellow', 'qt-blue', 'qt-green'] as const
 
 const today = new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' })
 const loading = ref(false)
 const data = ref<BoardQuadrant | null>(null)
 
-const isConcept = computed(() => props.scope === 'concept')
-const heroTitle = computed(() => (isConcept.value ? '概念趋势' : '行业趋势'))
-const heroSub = computed(() => (isConcept.value ? '概念板块四象限 · 当前快照一屏看全' : '行业板块四象限 · 代表ETF快照一屏看全'))
-const unitName = computed(() => (isConcept.value ? '概念' : '行业'))
-const unitSub = computed(() => (isConcept.value ? '同花顺概念板块' : '行业代表ETF'))
+// 固定为概念象限（行业趋势已改用同花顺行业全景组件 IndustryPanorama）
+// 顶部 KPI 标题日期：优先取 as_of（后端已归一 yyyy-mm-dd），回退今日（与个股趋势「市场宽度 · yyyy-mm-dd」一致）
+const boardDate = computed(() =>
+  data.value?.as_of ? String(data.value.as_of).slice(0, 10) : new Date().toISOString().slice(0, 10)
+)
+const heroTitle = '概念趋势'
+const heroSub = '概念板块四象限 · 当前快照一屏看全'
+const unitName = '概念'
+const unitSub = '同花顺概念板块'
 
 // ── 图配置（xKey/yKey 对齐帧 8 元组）──
 // 板块数据源仅提供 涨跌/换手/资金 能力；概念无市值，行业可叠加市值（代表ETF）。
@@ -157,15 +159,8 @@ const TURN_CARD: BoardCard = {
   tips: ['高换手+上涨 · 抢筹', '高换手+下跌 · 出货', '低换手+上涨 · 惜售/临板', '低换手+下跌 · 阴跌'],
   emptyHint: '当前快照换手率数据暂不可用',
 }
-const MV_CARD: BoardCard = {
-  id: 'pct_mv', title: '涨跌 × 总市值', subtitle: '体量风格（对数轴）',
-  xKey: SQ.P, yKey: SQ.MV, xName: '涨跌幅', xUnit: '%', yName: '总市值', yUnit: '亿', logY: true,
-  quadrants: ['权重搭台', '题材活跃', '权重杀跌', '题材退潮'],
-  tips: ['大市值+上涨 · 权重搭台', '小市值+上涨 · 题材活跃', '大市值+下跌 · 权重杀跌', '小市值+下跌 · 题材退潮'],
-  emptyHint: '板块暂无市值数据（仅支持个股维度）',
-}
-// 行业可用代表ETF总市值；概念无市值聚合 → 不展示该图
-const CARDS = computed<BoardCard[]>(() => (isConcept.value ? [MONEY_CARD, TURN_CARD] : [MONEY_CARD, TURN_CARD, MV_CARD]))
+// 概念无市值聚合 → 不展示市值图；原行业代表ETF分支已随行业趋势切换移除
+const CARDS = computed<BoardCard[]>(() => [MONEY_CARD, TURN_CARD])
 
 const currentFrame = computed(() => data.value?.frame || {})
 const mapReady = computed(() => !!data.value && Object.keys(currentFrame.value).length > 0)
@@ -274,7 +269,7 @@ function doSearch() {
   }
   if (!hits.length) {
     clearMatch()
-    ElMessage.warning(`未找到名称包含「${kw}」的${unitName.value}`)
+    ElMessage.warning(`未找到名称包含「${kw}」的${unitName}`)
     return
   }
   if (hits.length > 200) hits.length = 200
@@ -295,10 +290,10 @@ function onChartClick(e: any) {
 async function loadAll() {
   loading.value = true
   try {
-    const res = await vibeApi.getBoardQuadrant(props.scope)
+    const res = await vibeApi.getBoardQuadrant()
     data.value = (res as any)?.data ?? null
   } catch (e) {
-    console.error(`加载${heroTitle.value}失败`, e)
+    console.error(`加载${heroTitle}失败`, e)
   } finally {
     loading.value = false
   }
@@ -307,10 +302,7 @@ async function loadAll() {
 onMounted(() => {
   loadAll()
 })
-watch(() => props.scope, () => {
-  clearMatch()
-  loadAll()
-})
+
 onBeforeUnmount(() => {
   stopBlink()
   downplayAll()

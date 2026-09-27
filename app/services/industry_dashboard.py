@@ -29,6 +29,31 @@ logger = logging.getLogger("webapi")
 
 BEIJING = timezone(timedelta(hours=8))
 
+
+def _latest_trade_date() -> str:
+    """实收最近交易日（YYYY-MM-DD），与个股趋势/概念宽度统一口径。
+
+    直接查 stock_daily_quotes 最新交易日（兼容 YYYY-MM-DD / YYYYMMDD 两种存储），
+    纯同步查询避免 async event loop 耦合；失败回退当天。
+    """
+    from app.services.stock_quadrant_analysis import _dash
+    from app.core.database import get_mongo_db_sync
+
+    try:
+        db = get_mongo_db_sync()
+        cursor = db["stock_daily_quotes"].find(
+            {"period": "daily"}, {"trade_date": 1}
+        ).sort("trade_date", -1).limit(1)
+        doc = next(cursor, None)
+        if doc:
+            d = _dash(doc.get("trade_date"))
+            if len(d) == 10:
+                return d
+    except Exception as e:
+        logger.warning(f"获取最近交易日失败（行业多周期回退当天）: {e}")
+    return datetime.now(BEIJING).strftime("%Y-%m-%d")
+
+
 # 多周期档 symbol 映射（同花顺 stock_fund_flow_industry）
 PERIOD_SYMBOLS = {"3": "3日排行", "5": "5日排行", "10": "10日排行", "20": "20日排行"}
 PERIOD_LABELS = {"3": "3日", "5": "5日", "10": "10日", "20": "20日"}
@@ -84,10 +109,15 @@ def _build_period_flows() -> dict[str, list[dict]]:
 
 
 async def get_industry_period_flows() -> dict:
-    """行业多周期资金流（3/5/10/20 日）。Redis market 级缓存，金额单位「元」。"""
+    """行业多周期资金流（3/5/10/20 日）。Redis market 级缓存，金额单位「元」。
+
+    as_of 统一为「实收最近交易日」（与个股趋势/概念宽度一致），避免非交易日
+    显示当天日期造成口径不一致；新增 updated_at 保留抓取时刻便于排查。
+    """
     def build():
         return {
-            "as_of": datetime.now(BEIJING).strftime("%Y-%m-%d %H:%M"),
+            "as_of": _latest_trade_date(),
+            "updated_at": datetime.now(BEIJING).strftime("%Y-%m-%d %H:%M"),
             "periods": _build_period_flows(),
         }
     return await cached(

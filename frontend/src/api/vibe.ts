@@ -578,10 +578,10 @@ export const vibeApi = {
     )
   },
 
-  // 板块象限（趋势分析）：概念/行业当前帧（仅最新快照，轻量，秒回）
-  async getBoardQuadrant(scope: 'concept' | 'industry') {
+  // 板块象限（趋势分析）：概念当前帧（仅最新快照，轻量，秒回；行业趋势走 IndustryPanorama）
+  async getBoardQuadrant() {
     return cachedGet<BoardQuadrant>(
-      `/api/vibe/market/board-quadrant?scope=${scope}`, undefined, 180000, { timeout: 20000 }
+      '/api/vibe/market/board-quadrant', undefined, 180000, { timeout: 20000 }
     )
   },
 
