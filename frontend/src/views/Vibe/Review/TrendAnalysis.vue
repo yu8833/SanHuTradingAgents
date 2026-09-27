@@ -1,15 +1,20 @@
 <template>
   <div class="trend-analysis-page">
-    <!-- 双 Tab：个股趋势 / 概念趋势（懒加载，仅激活时挂载并缓存） -->
+    <!-- 三 Tab：行业趋势 / 概念趋势 / 个股趋势（懒加载，仅激活时挂载并缓存） -->
     <el-tabs v-model="activeTab" type="border-card" class="trend-tabs">
-      <el-tab-pane label="个股趋势" name="stock">
+      <el-tab-pane label="行业趋势" name="industry">
         <KeepAlive>
-          <StockQuadrant v-if="activeTab === 'stock'" />
+          <IndustryPanorama v-if="activeTab === 'industry'" key="industry" />
         </KeepAlive>
       </el-tab-pane>
       <el-tab-pane label="概念趋势" name="concept">
         <KeepAlive>
-          <BoardQuadrant v-if="activeTab === 'concept'" key="concept" scope="concept" />
+          <BoardQuadrant v-if="activeTab === 'concept'" key="concept" />
+        </KeepAlive>
+      </el-tab-pane>
+      <el-tab-pane label="个股趋势" name="stock">
+        <KeepAlive>
+          <StockQuadrant v-if="activeTab === 'stock'" key="stock" />
         </KeepAlive>
       </el-tab-pane>
     </el-tabs>
@@ -18,12 +23,13 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import IndustryPanorama from './IndustryPanorama.vue'
 import StockQuadrant from './StockQuadrant.vue'
 import BoardQuadrant from './BoardQuadrant.vue'
 
 defineOptions({ name: 'TrendAnalysis' })
 
-const activeTab = ref<'stock' | 'concept'>('stock')
+const activeTab = ref<'industry' | 'concept' | 'stock'>('industry')
 </script>
 
 <style scoped lang="scss">
