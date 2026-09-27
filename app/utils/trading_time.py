@@ -15,19 +15,16 @@ logger = logging.getLogger(__name__)
 
 
 def _parse_date_arg(d) -> date:
-    """内部工具：将 date/datetime/字符串(YYYY-MM-DD 或 YYYYMMDD) 统一转为 date 对象。"""
-    if isinstance(d, datetime):
-        return d.date()
-    if isinstance(d, date):
-        return d
-    if isinstance(d, str):
-        cleaned = d.replace("-", "").replace("/", "")
-        if len(cleaned) == 8:
-            try:
-                return date(int(cleaned[0:4]), int(cleaned[4:6]), int(cleaned[6:8]))
-            except (ValueError, IndexError):
-                pass
-    raise TypeError(f"无法将 {type(d).__name__} 值 {d!r} 解析为日期")
+    """内部工具：将 date/datetime/字符串(YYYY-MM-DD 或 YYYYMMDD) 统一转为 date 对象。
+
+    委托统一日期工具 parse_date；非法输入抛 TypeError（调用方依赖该异常降级）。
+    """
+    from app.utils.date_utils import parse_date
+
+    p = parse_date(d)
+    if p is None:
+        raise TypeError(f"无法将 {type(d).__name__} 值 {d!r} 解析为日期")
+    return p
 
 
 def is_trading_day(date) -> bool:

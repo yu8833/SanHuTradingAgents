@@ -56,10 +56,12 @@ def _yi(v, n: int = 3) -> float | None:
 
 
 def _dash(ymd: str) -> str:
-    """yyyymmdd ↔ yyyy-mm-dd 归一为 yyyy-mm-dd。"""
+    """yyyymmdd ↔ yyyy-mm-dd 归一为 yyyy-mm-dd（委托统一日期工具；非法回退截断，保持原约定）。"""
+    from app.utils.date_utils import normalize_date
+    norm = normalize_date(ymd)
+    if norm is not None:
+        return norm
     s = str(ymd).strip()
-    if len(s) == 8 and s.isdigit():
-        return f"{s[:4]}-{s[4:6]}-{s[6:]}"
     return s[:10] if len(s) >= 10 else s
 
 

@@ -11,8 +11,8 @@ from typing import Any
 from app.core.config import settings
 from app.core.database import get_mongo_db
 from app.core.rate_limiter import get_tushare_rate_limiter
-from app.services.historical_data_service import get_historical_data_service
 from app.services.data_sources.tushare_adapter import TushareAdapter
+from app.services.historical_data_service import get_historical_data_service
 from app.services.news_data_service import get_news_data_service
 from app.services.stock_data_service import get_stock_data_service
 from app.utils.timezone import now_tz
@@ -58,23 +58,19 @@ def _to_float(v):
 
 
 def _norm_date(d) -> str:
-    """将 yyyymmdd / yyyy-mm-dd 归一到 yyyy-mm-dd，非法返回空串。"""
-    if not d:
-        return ""
-    s = str(d).strip()
-    if len(s) == 8 and s.isdigit():
-        return f"{s[:4]}-{s[4:6]}-{s[6:]}"
-    return s[:10] if len(s) >= 10 else s
+    """将 yyyymmdd / yyyy-mm-dd 归一到 yyyy-mm-dd，非法返回空串（委托统一日期工具）。"""
+    from app.utils.date_utils import normalize_date
+    norm = normalize_date(d)
+    return norm if norm is not None else ""
 
 
 def _compact_date(d: str) -> str:
-    """将 yyyy-mm-dd 转成 Tushare 接口需要的 yyyymmdd。"""
+    """将 yyyy-mm-dd 转成 Tushare 接口需要的 yyyymmdd（委托统一日期工具；失败回退截断，接口参数容错）。"""
+    from app.utils.date_utils import compact_date
+    compacted = compact_date(d)
+    if compacted is not None:
+        return compacted
     s = str(d).strip()
-    if len(s) == 8 and s.isdigit():
-        return s
-    parts = s.replace("/", "-").split("-")
-    if len(parts) == 3:
-        return f"{parts[0]}{parts[1]}{parts[2]}"
     return s[:8]
 
 
@@ -1689,7 +1685,6 @@ class TushareSyncService:
                     result["amount"] = float(val)
 
         # 生成默认 report_period（当前季度末）
-        from datetime import datetime
         now = now_tz()
         quarter_month = ((now.month - 1) // 3) * 3 + 1  # 1/4/7/10
         result["report_period"] = f"{now.year}{quarter_month:02d}30"

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import date, datetime
+from datetime import datetime
 
 from app.core.collections import col
 
@@ -33,14 +33,12 @@ _STATE: dict = {"open": frozenset(), "loaded_date": None}
 
 
 def _norm(d) -> str:
-    """date/datetime/YYYYMMDD/YYYY-MM-DD → 'YYYY-MM-DD' 字符串。"""
-    if isinstance(d, datetime):
-        return d.strftime("%Y-%m-%d")
-    if isinstance(d, date):
-        return d.strftime("%Y-%m-%d")
-    s = str(d).replace("/", "-").replace(".", "-")
-    if len(s) == 8 and s.isdigit():
-        return f"{s[:4]}-{s[4:6]}-{s[6:]}"
+    """date/datetime/YYYYMMDD/YYYY-MM-DD → 'YYYY-MM-DD'（委托统一日期工具；非法回退截断，保持原约定）。"""
+    from app.utils.date_utils import normalize_date
+    norm = normalize_date(d)
+    if norm is not None:
+        return norm
+    s = str(d).strip()
     return s[:10] if len(s) >= 10 else s
 
 
