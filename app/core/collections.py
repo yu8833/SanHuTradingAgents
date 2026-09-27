@@ -67,6 +67,8 @@ class Collections:
     macro_daily_snapshots = "macro_daily_snapshots"
     etf_radar_snapshot = "etf_radar_snapshot"
     weekly_reviews = "weekly_reviews"
+    # 交易日历（统一事实来源：Tushare trade_cal 入库）
+    trade_calendar = "trade_calendar"
 
     # 配置/任务
     system_configs = "system_configs"

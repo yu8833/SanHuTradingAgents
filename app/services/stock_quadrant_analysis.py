@@ -308,10 +308,12 @@ async def _build_today_frame(today_mf: dict[str, float | None],
 # ---------------------------------------------------------------------------
 
 async def _recent_dates(count: int) -> list[str]:
-    """最近 count 个已收盘交易日（stock_daily_quotes distinct，兼容两种日期存储格式）。
+    """最近 count 个已收盘交易日（官方日历候选 + 实收交叉校验，24h 缓存）。
 
-    全表 distinct 约 20-25s，结果做 24h 进程内缓存（交易日序列一天只变一次）；
-    刷新失败回退旧缓存，避免后台预热/首刷周期性卡顿。
+    优先走统一交易日历（trade_calendar = Tushare trade_cal）候选开市日，
+    剔除 stock_daily_quotes 实际无数据的日期（实收口径，兼容两种日期存储格式），
+    替代原全表 distinct（冷建 20s+ → 毫秒级）；任一环节失败回退旧 distinct。
+    结果做 24h 进程内缓存（交易日序列一天只变一次）。
     """
     global _TRADE_DATES_CACHE
     import time
@@ -321,21 +323,42 @@ async def _recent_dates(count: int) -> list[str]:
             return _TRADE_DATES_CACHE["dates"][-count:]
         # 过期：后台刷新一次；失败则沿用旧序列，不影响本次构建
         try:
-            raw = await col("stock_daily_quotes").distinct("trade_date", {"period": "daily"})
+            days = await _fetch_effective_dates()
         except Exception as e:
             logger.warning(f"刷新交易日序列失败，沿用旧缓存: {e}")
             return _TRADE_DATES_CACHE["dates"][-count:]
-        days = sorted({_dash(x) for x in raw if len(_dash(x)) == 10})
         if days:
             _TRADE_DATES_CACHE = {"ts": time.time(), "dates": days}
         return _TRADE_DATES_CACHE["dates"][-count:]
 
-    # 首次构建（启动后首个 build）：distinct 较慢但不可回避，交给预热后台承担
-    raw = await col("stock_daily_quotes").distinct("trade_date", {"period": "daily"})
-    days = sorted({_dash(x) for x in raw if len(_dash(x)) == 10})
+    # 首次构建（启动后首个 build）：日历+实收（快）；回退 distinct（较慢，交给预热后台承担）
+    try:
+        days = await _fetch_effective_dates()
+    except Exception as e:
+        logger.warning(f"首次构建交易日序列（日历+实收）失败，回退 distinct: {e}")
+        days = []
+    if not days:
+        raw = await col("stock_daily_quotes").distinct("trade_date", {"period": "daily"})
+        days = sorted({_dash(x) for x in raw if len(_dash(x)) == 10})
     if days:
         _TRADE_DATES_CACHE = {"ts": time.time(), "dates": days}
     return days[-count:] if len(days) >= count else days
+
+
+async def _fetch_effective_dates() -> list[str]:
+    """统一交易日历候选 + 实收校验 → 本库实际有数据的交易日（升序，YYYY-MM-DD）。
+
+    候选区间最近 240 个自然日（覆盖 30 帧 + 5 日涨跌前置需求）。
+    """
+    from app.services.trade_calendar_service import effective_trade_days, query_trade_days
+
+    today = _today()
+    start = (datetime.strptime(today, "%Y-%m-%d").date() - timedelta(days=240)).strftime("%Y-%m-%d")
+    candidates = await query_trade_days(start, today)
+    if not candidates:
+        return []
+    days = await effective_trade_days(candidates)
+    return [_dash(x) for x in sorted({_dash(d) for d in days})]
 
 
 async def _fetch_quotes_map(start: str, end: str) -> dict[str, dict[str, dict]]:

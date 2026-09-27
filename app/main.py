@@ -1173,6 +1173,41 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"❌ 市场数据预热任务注册失败（忽略）: {e}", exc_info=True)
 
+        # 统一交易日历：每日刷新 + 启动装载（is_trading_day / 交易日序列统一走权威日历）
+        try:
+            import asyncio as _asyncio
+
+            from app.services.trade_calendar_service import ensure_trade_calendar_loaded
+
+            async def _refresh_trade_calendar():
+                try:
+                    await ensure_trade_calendar_loaded(refresh=True)
+                except Exception as e:
+                    logger.error(f"❌ 交易日历刷新失败（忽略）: {e}")
+
+            scheduler.add_job(
+                _refresh_trade_calendar,
+                CronTrigger(hour=2, minute=5, timezone=get_tz()),
+                id="trade_calendar_refresh",
+                name="交易日历每日刷新（Tushare trade_cal）",
+                replace_existing=True,
+            )
+
+            async def _load_trade_calendar_startup():
+                await _asyncio.sleep(5)
+                try:
+                    await ensure_trade_calendar_loaded()
+                except Exception as e:
+                    logger.warning(f"交易日历启动装载失败（降级规则判定）: {type(e).__name__}: {str(e)[:100]}")
+
+            import contextlib as _contextlib
+
+            with _contextlib.suppress(RuntimeError):
+                _asyncio.get_running_loop().create_task(_load_trade_calendar_startup())
+            logger.info("📅 交易日历刷新任务已注册（每日 02:05，启动 5s 装载）")
+        except Exception as e:
+            logger.error(f"❌ 交易日历任务注册失败（忽略）: {e}", exc_info=True)
+
         # 设置调度器实例到服务中，以便API可以管理任务
         # 注意：必须在 scheduler.start() 之前设置，避免 start 与 set 之间的窗口期 API 无可用实例
         set_scheduler_instance(scheduler)

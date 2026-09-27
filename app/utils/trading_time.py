@@ -32,9 +32,11 @@ def _parse_date_arg(d) -> date:
 
 def is_trading_day(date) -> bool:
     """
-    判断指定日期是否为交易日（排除周末和中国法定节假日）。
+    判断指定日期是否为交易日。
 
-    使用 chinese_calendar 库判断节假日，如果未安装则退化为仅排除周末。
+    优先使用统一交易日历的内存视图（trade_calendar 集合 = Tushare trade_cal 权威数据，
+    见 app.services.trade_calendar_service）；视图未装载（进程冷启动早期）时降级
+    为 chinese_calendar 规则（未安装则仅排除周末）。
 
     Args:
         date: 日期对象（datetime / date / 字符串 YYYY-MM-DD 或 YYYYMMDD）
@@ -50,6 +52,15 @@ def is_trading_day(date) -> bool:
 
     if d.weekday() >= 5:
         return False
+    # 统一权威日历（内存 O(1)，无 DB/网络）；未装载时返回 None 走降级
+    try:
+        from app.services.trade_calendar_service import is_open_day
+
+        authoritative = is_open_day(d)
+        if authoritative is not None:
+            return authoritative
+    except Exception as e:
+        logger.warning(f"交易日历视图不可用，降级规则判定: {type(e).__name__}: {str(e)[:100]}")
     try:
         import chinese_calendar
 
