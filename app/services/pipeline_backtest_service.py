@@ -26,7 +26,9 @@ PIPELINE_STRATEGY_NAME = "三买三卖回测"
 
 
 def _prev_day(date_str: str) -> str:
-    return (datetime.strptime(date_str, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+    """前一交易日（升级为交易日语义，节假日取最近有效日）→ YYYY-MM-DD。"""
+    from app.utils.trading_time import prev_trading_day
+    return prev_trading_day(date_str).strftime("%Y-%m-%d")
 
 
 def _build_schedule(db, start: str, end: str, freq: str, top_industries: int,

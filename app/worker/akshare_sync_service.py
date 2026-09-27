@@ -847,14 +847,13 @@ class AKShareSyncService:
                 # 获取特定股票的最新日期
                 latest_date = await self.historical_service.get_latest_date(symbol, "akshare")
                 if latest_date:
-                    # 返回最后日期的下一天（避免重复同步）
-                    try:
-                        last_date_obj = datetime.strptime(latest_date, '%Y-%m-%d')
-                        next_date = last_date_obj + timedelta(days=1)
-                        return next_date.strftime('%Y-%m-%d')
-                    except ValueError:
+                    # 返回最后日期的下一天（避免重复同步，日期解析统一走 date_utils）
+                    from app.utils.date_utils import parse_date
+                    last_date_obj = parse_date(latest_date)
+                    if last_date_obj is None:
                         # 如果日期格式不对，直接返回
                         return latest_date
+                    return (last_date_obj + timedelta(days=1)).strftime('%Y-%m-%d')
                 else:
                     # 🔥 没有历史数据时，从上市日期开始全量同步
                     stock_info = await self.db.stock_basic_info.find_one(

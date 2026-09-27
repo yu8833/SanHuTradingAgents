@@ -31,11 +31,9 @@ def _week_bounds() -> tuple[str, str]:
 
 
 def _last_friday_before(week_start: date) -> date:
-    """week_start 之前的最近一个周五（基准日）。"""
-    d = week_start - timedelta(days=1)
-    while d.weekday() != 4:  # 4 = Friday
-        d -= timedelta(days=1)
-    return d
+    """week_start 之前的最近一个交易日（基准日，升级为交易日语义，节假日取最近有效日）。"""
+    from app.utils.trading_time import prev_trading_day
+    return prev_trading_day(week_start)
 
 
 def _fetch_hs300_weekly_return(week_start_str: str, today_str: str) -> dict:

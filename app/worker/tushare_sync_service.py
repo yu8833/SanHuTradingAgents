@@ -862,14 +862,13 @@ class TushareSyncService:
                 # 获取特定股票的最新日期
                 latest_date = await self.historical_service.get_latest_date(symbol, "tushare")
                 if latest_date:
-                    # 返回最后日期的下一天（避免重复同步）
-                    try:
-                        last_date_obj = datetime.strptime(latest_date, '%Y-%m-%d')
-                        next_date = last_date_obj + timedelta(days=1)
-                        return next_date.strftime('%Y-%m-%d')
-                    except Exception:
+                    # 返回最后日期的下一天（避免重复同步，日期解析统一走 date_utils）
+                    from app.utils.date_utils import parse_date
+                    last_date_obj = parse_date(latest_date)
+                    if last_date_obj is None:
                         # 如果日期格式不对，直接返回
                         return latest_date
+                    return (last_date_obj + timedelta(days=1)).strftime('%Y-%m-%d')
                 else:
                     # 🔥 没有历史数据时，从上市日期开始全量同步
                     stock_info = await self.db.stock_basic_info.find_one(
@@ -910,16 +909,13 @@ class TushareSyncService:
         格式统一为 YYYY-MM-DD，可直接与 _get_last_sync_date 返回的字符串做字典序比较。
         """
         try:
-            from app.utils.trading_time import get_latest_trade_day, is_trading_day
+            from app.utils.trading_time import get_latest_trade_day, is_trading_day, prev_trading_day
 
             now = now_tz()
             target = get_latest_trade_day(now)
-            # 交易日当日 18:30 前，当日K线未落地，回退到上一交易日
+            # 交易日当日 18:30 前，当日K线未落地，回退到上一交易日（统一 prev_trading_day）
             if is_trading_day(now) and (now.hour, now.minute) < (18, 30):
-                cursor = target - timedelta(days=1)
-                while not is_trading_day(cursor):
-                    cursor -= timedelta(days=1)
-                target = cursor
+                target = prev_trading_day(target)
             return target.strftime('%Y-%m-%d')
         except Exception as e:
             logger.warning(f"⚠️ 计算最近应有数据交易日失败，退化为不跳过: {e}")

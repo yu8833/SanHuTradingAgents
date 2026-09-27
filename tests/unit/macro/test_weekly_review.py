@@ -27,18 +27,29 @@ class TestWeekBounds:
 
 class TestLastFriday:
     def test_friday_before_monday(self):
-        """2026-08-31 是周一，之前最近周五是 2026-08-28。"""
+        """2026-08-31 是周一，之前最近交易日 2026-08-28（上周五，普通周=周五）。"""
         monday = date(2026, 8, 31)
         assert wrs._last_friday_before(monday) == date(2026, 8, 28)
 
-    def test_friday_before_tuesday(self):
-        friday = wrs._last_friday_before(date(2026, 8, 25))
-        assert friday.weekday() == 4  # Friday
+    def test_before_tuesday_is_trade_day(self):
+        """升级交易日语义：返回输入之前最近一个交易日(节假日可非周五)。"""
+        from app.utils.trading_time import is_trading_day
 
-    def test_always_friday(self):
+        d = wrs._last_friday_before(date(2026, 8, 25))
+        assert d < date(2026, 8, 25)
+        assert is_trading_day(d)
+
+    def test_always_recent_trade_day(self):
+        """任意输入均返回其之前最近交易日。"""
+        from datetime import timedelta
+
+        from app.utils.trading_time import is_trading_day
+
         for day_offset in range(7):
             d = date(2026, 9, 1) + timedelta(days=day_offset)
-            assert wrs._last_friday_before(d).weekday() == 4
+            r = wrs._last_friday_before(d)
+            assert r < d
+            assert is_trading_day(r)
 
 
 class TestAllRedRate:

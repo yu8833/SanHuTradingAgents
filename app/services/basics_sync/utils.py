@@ -102,21 +102,27 @@ def find_latest_trade_date() -> str:
     探测最近可用的交易日（YYYYMMDD）。
     - 从今天起回溯最多 5 天；
     - 如都不可用，回退为昨天日期。
+
+    仅统一日期生成格式（委托 date_utils.compact_date），API 探测本质与回退策略不变。
     """
+    from app.utils.date_utils import compact_date
+
     api = get_pro()
     if api is None:
         raise RuntimeError("Tushare API unavailable")
 
     today = now_tz()
     for delta in range(0, 6):
-        d = (today - timedelta(days=delta)).strftime("%Y%m%d")
+        d = compact_date(today - timedelta(days=delta))
+        if not d:
+            continue
         try:
             db = api.daily_basic(trade_date=d, fields="ts_code,total_mv")
             if db is not None and not db.empty:
                 return d
         except Exception:
             continue
-    return (today - timedelta(days=1)).strftime("%Y%m%d")
+    return compact_date(today - timedelta(days=1)) or ""
 
 
 def fetch_daily_basic_mv_map(trade_date: str) -> dict[str, dict[str, float]]:
