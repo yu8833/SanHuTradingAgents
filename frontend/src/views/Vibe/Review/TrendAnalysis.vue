@@ -48,6 +48,7 @@ import IndustryPanorama from './IndustryPanorama.vue'
 import StockQuadrant from './StockQuadrant.vue'
 import BoardQuadrant from './BoardQuadrant.vue'
 import { vibeApi } from '@/api/vibe'
+import { formatBeijingDateTimeMinute } from '@/utils/datetime'
 
 defineOptions({ name: 'TrendAnalysis' })
 
@@ -56,10 +57,13 @@ const activeTab = ref<'industry' | 'concept' | 'stock'>('industry')
 // 页头日期：最新交易日（轻量接口预取，首屏即正确，不闪非交易日当天）
 const titleDate = ref('')
 
-// 页头「更新于」：当前激活 tab 的数据获取时刻（由子组件数据返回后上报）
+// 页头「更新于」：当前激活 tab 的数据获取时刻（由子组件数据返回后上报），格式与其他页面统一（YYYY-MM-DD HH:MM）
 const tabUpdatedAt = ref<Record<string, string>>({})
 const onTabUpdated = (tab: string, time: string) => { if (time) tabUpdatedAt.value[tab] = time }
-const updatedAt = computed(() => tabUpdatedAt.value[activeTab.value] || '')
+const updatedAt = computed(() => {
+  const t = tabUpdatedAt.value[activeTab.value]
+  return t ? formatBeijingDateTimeMinute(t) : ''
+})
 
 // 页头刷新：key 变化强制重建当前 tab（保持 KeepAlive 缓存语义，仅重建激活组件）
 const refreshKey = ref(0)
