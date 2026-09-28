@@ -154,13 +154,17 @@ _GLOBAL_FAMOUS_STOCKS = [
 def famous_stocks() -> list[dict]:
     """全球著名股票涨跌（美股/港股蓝筹）：push2 并行抓取，单只失败跳过。
 
+    与 global_indices 行为一致：行情取不到的个股整体跳过（不返回
+    price/change_pct 为 null 的占位行），全失败时返回 []。
     该数据变化频率低且东财 push2 在当前网络较慢，调用方应加 Redis 缓存
     （见 market_overview.get_global_famous_stocks），避免每次并发抓取堆叠延迟。
     """
     def _fetch(item: dict) -> dict | None:
         try:
             d = _push2_stock_get(item["secid"], "f43,f57,f58,f59,f60,f170")
-            q = _quote_from(d or {})
+            if not d:
+                return None
+            q = _quote_from(d)
             return {
                 "secid": item["secid"],
                 "name": q.get("name") or item["name"],

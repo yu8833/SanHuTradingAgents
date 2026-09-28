@@ -276,7 +276,14 @@ async def get_global_famous_stocks() -> list[dict]:
     东财 push2 行情在当前网络环境较慢/受限，单次 13 只并发抓取可能 20s+。
     该数据变化频率低，与全球指数同一缓存策略（交易 5 分钟 / 非交易 1 小时），
     避免大盘看板每次打开都实时抓取导致数秒到数十秒等待。空结果不缓存。
+
+    valid 校验「至少一条取到价格」才写入：源不可达时 famous_stocks 返回全 null
+    占位行列表（或空列表），若按 bool 判断非空会把占位数据误缓存，导致页面
+    长期显示「—」且刷新无效。
     """
+    def _has_quote(v: list) -> bool:
+        return bool(v) and any(x.get("price") is not None for x in v)
+
     return await cached(
-        "vibe:global_famous_stocks", gstock.famous_stocks, category="news", valid=bool
+        "vibe:global_famous_stocks", gstock.famous_stocks, category="news", valid=_has_quote
     )
