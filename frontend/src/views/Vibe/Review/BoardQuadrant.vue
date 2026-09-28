@@ -4,7 +4,6 @@
     <section class="block">
       <div class="block-head">
         <span class="block-title"><el-icon><Odometer /></el-icon> {{ unitName }}宽度 · {{ boardDate }}</span>
-        <span v-if="data?.as_of" class="block-hint">数据更新于 {{ data.as_of }}</span>
       </div>
       <div class="kpi-row">
         <div class="kpi-cell">
@@ -103,6 +102,9 @@ import { makeQuadrantOption, computeMatchPoints, type QuadrantCfg } from '@/util
 import { fmtPct, clsByVal } from '@/utils/format'
 
 defineOptions({ name: 'BoardQuadrant' })
+
+// 向趋势分析外层页头上报数据获取时刻
+const emit = defineEmits<{ (e: 'data-updated', time: string): void }>()
 
 echartsUse([CanvasRenderer, ScatterChart, GridComponent, TooltipComponent, DataZoomComponent, MarkAreaComponent, MarkLineComponent])
 
@@ -273,6 +275,8 @@ async function loadAll() {
   try {
     const res = await vibeApi.getBoardQuadrant()
     data.value = (res as any)?.data ?? null
+    // 上报数据获取时刻（概念帧构建时刻），供趋势分析外层页头「更新于」展示
+    emit('data-updated', String(data.value?.updated_at || data.value?.as_of || ''))
   } catch (e) {
     console.error('加载概念趋势失败', e)
   } finally {

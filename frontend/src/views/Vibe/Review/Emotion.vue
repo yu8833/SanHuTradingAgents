@@ -12,6 +12,7 @@
         </div>
       </div>
       <div class="page-hero-meta">
+        <span class="page-hero-tag">更新于 {{ updatedAt }}</span>
         <el-button type="primary" plain :icon="Refresh" :loading="loading" @click="load">
           刷新
         </el-button>
@@ -27,7 +28,6 @@
           <span class="block-title">
             <el-icon><DataLine /></el-icon> 关键计数
           </span>
-          <span v-if="emotion.date" class="block-hint">数据日期：{{ emotion.date }}</span>
         </div>
         <div class="grid grid-6">
           <el-card shadow="never" class="count-card">
@@ -173,6 +173,7 @@ import {
 } from '@element-plus/icons-vue'
 import { vibeApi, type ShortTermEmotion } from '@/api/vibe'
 import { fmtPrice, fmtYi, fmtPctFromFraction, fmtPct } from '@/utils/format'
+import { formatBeijingDateTimeMinute } from '@/utils/datetime'
 
 const today = computed(() => {
   const d = new Date()
@@ -183,6 +184,9 @@ const today = computed(() => {
 // 标题日期：优先情绪数据日期（最新交易日）；数据未回前用轻量接口预取的最新交易日（首屏即正确，不闪非交易日当天）
 const tradeDate = ref('')
 const titleDate = computed(() => emotion.value?.date || tradeDate.value || '')
+
+// 页头「更新于」：数据获取时刻（涨停池构建时刻）
+const updatedAt = computed(() => emotion.value?.updated ? formatBeijingDateTimeMinute(emotion.value.updated) : '')
 
 const loading = ref(false)
 const emotion = ref<ShortTermEmotion | null>(null)

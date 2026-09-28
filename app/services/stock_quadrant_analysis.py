@@ -662,6 +662,8 @@ async def build_stock_quadrant() -> dict[str, Any]:
     avg_pct = round(sum(pcts) / len(pcts), 2) if pcts else 0
 
     return {
+        # 数据获取时刻（帧构建时刻），供页头「更新于」展示；
+        # 数据交易日由 dates 时间轴最新帧承载，二者分开不再混用
         "as_of": datetime.now(BEIJING).strftime("%Y-%m-%d %H:%M"),
         "total": len(latest_frame),
         "breadth": {"up": up, "down": down, "avg_pct": avg_pct},

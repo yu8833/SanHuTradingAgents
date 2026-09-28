@@ -10,6 +10,9 @@
           <p class="page-hero-sub">12赛道全球公开RSS资讯</p>
         </div>
       </div>
+      <div class="page-hero-meta">
+        <span class="page-hero-tag">更新于 {{ updatedAt }}</span>
+      </div>
     </div>
 
     <div class="status-bar">
@@ -17,8 +20,6 @@
         <span class="status-num">{{ stats.total_sources || '--' }}</span> 个公开源
         <span class="status-sep">·</span>
         近 <span class="status-num">{{ radarData?.recent_days ?? '-' }}</span> 天
-        <span class="status-sep">·</span>
-        更新于 <span class="status-time">{{ radarData?.generated_at || '-' }}</span>
       </div>
       <div class="status-actions">
         <el-button :loading="refreshing" :disabled="refreshing" @click="refresh">
@@ -365,7 +366,7 @@ import {
 } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 import { sanitizeHtml } from '@/utils/sanitize'
-import { toTimestamp } from '@/utils/datetime'
+import { toTimestamp, formatBeijingDateTimeMinute } from '@/utils/datetime'
 import { vibeApi } from '@/api/vibe'
 import type { RadarData, Industry, RadarItem, SectorNode, SectorLink, BottleneckLevel, Note } from '@/api/vibe'
 
@@ -381,6 +382,9 @@ const loadingError = ref(false)
 const refreshing = ref(false)
 const radarData = ref<RadarData | null>(null)
 const activeTab = ref('news')
+
+// 页头「更新于」：数据获取时刻（RSS 抓取生成时刻）
+const updatedAt = computed(() => radarData.value?.generated_at ? formatBeijingDateTimeMinute(radarData.value.generated_at) : '')
 
 const currentKey = ref('')
 const industries = computed<Industry[]>(() => radarData.value?.industries ?? [])

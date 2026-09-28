@@ -13,6 +13,7 @@
         </div>
       </div>
       <div class="page-hero-meta">
+        <span class="page-hero-tag">更新于 {{ updatedAt || '—' }}</span>
         <el-button type="primary" plain :icon="Refresh" @click="refresh">
           刷新
         </el-button>
@@ -23,17 +24,17 @@
     <el-tabs v-model="activeTab" type="border-card" class="trend-tabs">
       <el-tab-pane label="行业全景" name="industry">
         <KeepAlive>
-          <IndustryPanorama v-if="activeTab === 'industry'" :key="`industry-${refreshKey}`" />
+          <IndustryPanorama v-if="activeTab === 'industry'" :key="`industry-${refreshKey}`" @data-updated="onTabUpdated('industry', $event)" />
         </KeepAlive>
       </el-tab-pane>
       <el-tab-pane label="概念趋势" name="concept">
         <KeepAlive>
-          <BoardQuadrant v-if="activeTab === 'concept'" :key="`concept-${refreshKey}`" />
+          <BoardQuadrant v-if="activeTab === 'concept'" :key="`concept-${refreshKey}`" @data-updated="onTabUpdated('concept', $event)" />
         </KeepAlive>
       </el-tab-pane>
       <el-tab-pane label="个股趋势" name="stock">
         <KeepAlive>
-          <StockQuadrant v-if="activeTab === 'stock'" :key="`stock-${refreshKey}`" />
+          <StockQuadrant v-if="activeTab === 'stock'" :key="`stock-${refreshKey}`" @data-updated="onTabUpdated('stock', $event)" />
         </KeepAlive>
       </el-tab-pane>
     </el-tabs>
@@ -41,7 +42,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { DataLine, Refresh } from '@element-plus/icons-vue'
 import IndustryPanorama from './IndustryPanorama.vue'
 import StockQuadrant from './StockQuadrant.vue'
@@ -54,6 +55,11 @@ const activeTab = ref<'industry' | 'concept' | 'stock'>('industry')
 
 // 页头日期：最新交易日（轻量接口预取，首屏即正确，不闪非交易日当天）
 const titleDate = ref('')
+
+// 页头「更新于」：当前激活 tab 的数据获取时刻（由子组件数据返回后上报）
+const tabUpdatedAt = ref<Record<string, string>>({})
+const onTabUpdated = (tab: string, time: string) => { if (time) tabUpdatedAt.value[tab] = time }
+const updatedAt = computed(() => tabUpdatedAt.value[activeTab.value] || '')
 
 // 页头刷新：key 变化强制重建当前 tab（保持 KeepAlive 缓存语义，仅重建激活组件）
 const refreshKey = ref(0)

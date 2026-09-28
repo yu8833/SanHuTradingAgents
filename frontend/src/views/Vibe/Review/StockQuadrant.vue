@@ -4,7 +4,7 @@
     <section class="block">
       <div class="block-head">
         <span class="block-title"><el-icon><Odometer /></el-icon> 市场宽度 · {{ currentDate }}</span>
-        <span v-if="data?.as_of" class="block-hint">数据更新于 {{ data.as_of }} · 共 {{ dates.length }} 个交易日</span>
+        <span class="block-hint">共 {{ dates.length }} 个交易日</span>
       </div>
       <div class="kpi-row">
         <div class="kpi-cell">
@@ -204,6 +204,9 @@ import { makeQuadrantOption, computeMatchPoints, type QuadrantCfg } from '@/util
 import { fmtPct, clsByVal } from '@/utils/format'
 
 defineOptions({ name: 'StockQuadrant' })
+
+// 向趋势分析外层页头上报数据获取时刻
+const emit = defineEmits<{ (e: 'data-updated', time: string): void }>()
 
 echartsUse([CanvasRenderer, ScatterChart, GridComponent, TooltipComponent, DataZoomComponent, MarkAreaComponent, MarkLineComponent])
 
@@ -622,6 +625,8 @@ async function loadAll() {
     const latest = datesArr[datesArr.length - 1] || ''
     frameCache.value = latest && slim?.frame ? { [latest]: slim.frame } : {}
     currentIndex.value = Math.max(0, datesArr.length - 1)
+    // 上报数据获取时刻（帧构建时刻），供趋势分析外层页头「更新于」展示
+    emit('data-updated', String(slim?.as_of || ''))
     // 静默补齐全部历史帧：首次进入即后台预取（分片并发），播放/拖动时全缓存命中零空白
     prefetchAll()
   } catch (e) {

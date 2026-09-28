@@ -131,9 +131,13 @@ def _sectors() -> list[dict]:
 async def get_overview() -> dict:
     """市场情绪 + 板块资金（Redis缓存，大盘/板块级 TTL）。资金轮动由前端从 sectors 头尾取。"""
     def build():
+        from app.utils.trading_time import get_latest_trade_day
+
         return {
             "sentiment": _sentiment(),
             "sectors": _sectors(),
+            # 数据日期＝最近已完成交易日（权威日历）；updated 是构建时刻，不能当数据日
+            "trade_date": get_latest_trade_day().strftime("%Y-%m-%d"),
             "updated": datetime.now(BEIJING).strftime("%Y-%m-%d %H:%M"),
         }
     return await cached(
@@ -150,15 +154,22 @@ def _emotion() -> dict:
     **不输出任何个股 code/name**——守产品「零标的」红线（个股清单是甩名单，不做）。
     """
     # 定位最近交易日：从今天往前回溯，第一日有涨停池即取（非交易日/盘前返空则继续回溯）。
-    # 注意：东财涨停池在非交易日也可能回吐数据（非交易日请求返回最近一份池子），
-    # 必须先按权威交易日历过滤，否则会把周末/节假日误当成数据日期。
+    # 注意：东财涨停池在非交易日/盘前也会回吐数据（请求当日返回最近一份池子），
+    # 必须先按权威交易日历过滤，且「今天」在未收盘(15:00)前不接受——否则会把
+    # 尚未产生的当日数据误当成数据日期（盘前显示 09-28 而最近已完成交易日是 09-24）。
+    from datetime import time as dtime
+
     from app.utils.trading_time import is_trading_day
 
-    today = datetime.now(BEIJING).date()
+    now = datetime.now(BEIJING)
+    today = now.date()
     resolved, zt = "", []
     for back in range(8):
         d = (today - timedelta(days=back)).strftime("%Y%m%d")
         if not is_trading_day(d):
+            continue
+        # 今天未收盘（<15:00，含盘前/盘中）：跳过，保证数据日期=最近已完成交易日
+        if d == today.strftime("%Y%m%d") and now.time() < dtime(15, 0):
             continue
         zt = astock.em_zt_topic_pool("getTopicZTPool", d, "fbt:asc")
         if zt:
@@ -216,6 +227,8 @@ def _emotion() -> dict:
 
     return {
         "date": f"{resolved[:4]}-{resolved[4:6]}-{resolved[6:]}",
+        # 数据获取时刻（东财涨停池构建时刻），供页头「更新于」展示
+        "updated": datetime.now(BEIJING).strftime("%Y-%m-%d %H:%M"),
         "zt_count": zt_count,
         "dt_count": len(dt),
         "zt_real": zt_real,

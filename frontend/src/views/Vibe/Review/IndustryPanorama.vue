@@ -4,7 +4,7 @@
     <section class="block">
       <div class="block-head">
         <span class="block-title"><el-icon><Odometer /></el-icon> 行业宽度 · {{ trendDate }}</span>
-        <span v-if="trendAsOf" class="block-hint">数据更新于 {{ trendAsOf }} · 同花顺行业资金流</span>
+        <span class="block-hint">同花顺行业资金流</span>
       </div>
       <div class="kpi-row">
         <div class="kpi-cell">
@@ -93,7 +93,7 @@
     <section v-if="periodMatrixReady" class="block">
       <div class="block-head">
         <span class="block-title"><el-icon><TrendCharts /></el-icon> 行业资金 · 多周期</span>
-        <span class="block-hint">资金轮动矩阵 · 每格颜色 = 区间主力净流入（红流入/绿流出，颜色越深额越大）· 按 20 日净额排序 · 点击跳转同花顺板块 · 更新于 {{ periodFlows?.as_of || '—' }}</span>
+        <span class="block-hint">资金轮动矩阵 · 每格颜色 = 区间主力净流入（红流入/绿流出，颜色越深额越大）· 按 20 日净额排序 · 点击跳转同花顺板块</span>
       </div>
       <div class="period-matrix">
         <VChart :option="periodMatrixOption ?? {}" autoresize class="period-matrix-chart" @click="onMatrixClick" />
@@ -178,6 +178,9 @@ import { vibeApi, type IndustryPeriodFlows } from '@/api/vibe'
 import { fmtSigned, fmtPct, fmtAbs, clsByVal } from '@/utils/format'
 
 defineOptions({ name: 'IndustryPanorama' })
+
+// 向趋势分析外层页头上报数据获取时刻
+const emit = defineEmits<{ (e: 'data-updated', time: string): void }>()
 
 echartsUse([CanvasRenderer, TreemapChart, ScatterChart, HeatmapChart, TooltipComponent, GridComponent, MarkAreaComponent, MarkLineComponent])
 
@@ -818,6 +821,9 @@ const loadAll = async () => {
     if (periodRes.status === 'fulfilled') {
       periodFlows.value = (periodRes.value as any).data || null
     }
+    // 上报数据获取时刻（优先多周期构建时刻，回退总览构建时刻），供外层页头「更新于」展示
+    const ovUpdated = (ovRes.status === 'fulfilled' && (ovRes.value as any)?.data?.updated) || ''
+    emit('data-updated', String(periodFlows.value?.updated_at || ovUpdated || ''))
     const failed = results.filter(r => r.status === 'rejected')
     if (failed.length > 0) {
       const msg = failed.map(r => (r as PromiseRejectedResult).reason.message).join(', ')

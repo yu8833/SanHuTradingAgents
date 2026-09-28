@@ -12,6 +12,7 @@
         </div>
       </div>
       <div class="page-hero-meta">
+        <span class="page-hero-tag">更新于 {{ updatedAt }}</span>
         <el-button type="primary" plain :icon="Refresh" :loading="loading" @click="loadAll">
           刷新
         </el-button>
@@ -216,7 +217,7 @@
             <div class="block-head">
               <span class="block-title"><el-icon><Position /></el-icon> 外围市场快照</span>
               <div class="block-actions">
-                <span class="block-hint">美股 · 港股 · 亚太 · VIX · 期货 · A50 · 商品 · 更新于 {{ fmtClock(overseas.generated_at) }}</span>
+                <span class="block-hint">美股 · 港股 · 亚太 · VIX · 期货 · A50 · 商品</span>
                 <el-button size="small" :icon="Refresh" :loading="overseasRefreshing || foreignLoading" @click="refreshOverseas">刷新</el-button>
               </div>
             </div>
@@ -296,6 +297,7 @@ import {
 import { vibeApi, type IndexQuote, type MarketDashboard } from '@/api/vibe'
 import { warRoomApi } from '@/api/warRoom'
 import { fmtPrice, fmtPct, fmtAbsPct, fmtAmount, fmtSigned, clsByVal } from '@/utils/format'
+import { formatBeijingDateTimeMinute } from '@/utils/datetime'
 
 const loading = ref(false)
 const activeTab = ref('ashare')
@@ -313,6 +315,9 @@ const today = computed(() => {
 // 标题日期：优先后端数据返回的交易日；数据未回前用轻量接口预取的最新交易日（首屏即正确，不闪非交易日当天）
 const tradeDate = ref('')
 const titleDate = computed(() => dashboard.value?.trade_date || tradeDate.value || '')
+
+// 页头「更新于」：数据获取时刻（看板构建时刻）
+const updatedAt = computed(() => dashboard.value?.updated ? formatBeijingDateTimeMinute(dashboard.value.updated) : '')
 
 // ── 外围市场 tab（分类快照：美股/港股/亚太/VIX/股指期货/A50/商品 + 个股行情）──
 const overseasLoading = ref(false)
@@ -377,24 +382,6 @@ const refreshOverseas = async () => {
   } finally {
     overseasRefreshing.value = false
   }
-}
-
-// 快照生成时间格式化：今日显示「今日 HH:MM」，否则「M/D HH:MM」
-function fmtClock(iso?: string): string {
-  if (!iso) return '—'
-  let s = String(iso).trim()
-  // 统一截断多余小数秒到 3 位（后端微秒 .898000，部分浏览器解析 >3 位微秒失败）
-  s = s.replace(/\.(\d{3})\d+/, '.$1')
-  // 时区判定：Z / ±HH:MM（可带括号注释，如 "+08:00 (CST)"）都视为带时区；
-  // 无时区的 naive ISO（如旧缓存）一律按 UTC 补 Z，避免按本地时区解析导致时间倒退
-  if (!/([Z]|[+-]\d{2}:?\d{2}( ?\(.+\))?)$/.test(s)) s += 'Z'
-  const d = new Date(s)
-  if (isNaN(d.getTime())) return '—'
-  const pad = (n: number) => String(n).padStart(2, '0')
-  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`
-  return d.toDateString() === new Date().toDateString()
-    ? `今日 ${hm}`
-    : `${d.getMonth() + 1}/${d.getDate()} ${hm}`
 }
 
 const colorClass = (v: number | null | undefined) => {

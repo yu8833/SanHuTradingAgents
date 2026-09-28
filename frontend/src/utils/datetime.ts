@@ -160,6 +160,31 @@ export function formatTime(dateStr: string | number | null | undefined): string 
 }
 
 /**
+ * 北京时间「YYYY-MM-DD HH:MM」（分钟级，无秒）——用于页头「更新于」等统一时间标签。
+ * 自拼而非 toLocaleString('zh-CN')（后者输出斜杠/不补零），保证与后端时间文案一致。
+ * @param dateStr - 时间字符串/时间戳/Date；缺省视为当前时刻
+ * @returns '2026-09-28 05:59'；解析失败返回 ''
+ */
+export function formatBeijingDateTimeMinute(
+  dateStr: string | number | Date | null | undefined
+): string {
+  const date = dateStr == null ? new Date() : parseToInstant(dateStr)
+  if (!date) return ''
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date)
+  const m: Record<string, string> = {}
+  for (const p of parts) if (p.type !== 'literal') m[p.type] = p.value
+  return `${m.year}-${m.month}-${m.day} ${m.hour}:${m.minute}`
+}
+
+/**
  * 格式化相对时间（距离现在多久）
  * @param dateStr - 时间字符串或时间戳
  * @returns 相对时间描述

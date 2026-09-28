@@ -129,6 +129,7 @@ export interface IndustryPeriodRow {
 
 export interface IndustryPeriodFlows {
   as_of: string
+  updated_at?: string
   /** key: '3' | '5' | '10' | '20' */
   periods: Record<string, IndustryPeriodRow[]>
 }
@@ -226,6 +227,7 @@ export interface LianbanStock {
 
 export interface ShortTermEmotion {
   date: string
+  updated?: string
   zt_count: number
   dt_count: number
   zt_real: number
@@ -306,6 +308,7 @@ export interface StockQuadrantSlim {
 export interface BoardQuadrant {
   total: number
   as_of: string
+  updated_at?: string
   breadth: { up: number; down: number; avg_pct: number }
   meta: Record<string, { name: string; industry: string; link: string }>
   frame: Record<string, number[]>

@@ -300,7 +300,8 @@ async function loadSectors() {
       pct: Number(s.pct) ?? null,
       net: s.net != null ? Number(s.net) : null,
     }))
-    marketDate.value = String(data?.updated || '').slice(0, 10)
+    // 数据日＝后端权威最新交易日（trade_date）；缺失回退 updated 前 10 位（仅时间戳兼容）
+    marketDate.value = (data?.trade_date || String(data?.updated || '')).slice(0, 10)
   } catch (e) {
     console.warn('加载行业列表失败', e)
     sectors.value = []

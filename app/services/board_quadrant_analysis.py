@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import logging
 import math
-from datetime import timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.services.cache_layer import cached
@@ -103,6 +103,8 @@ async def _build_concept_quadrant() -> dict[str, Any]:
         }
     return {
         "as_of": data.get("as_of") or "",
+        # 数据获取时刻（概念帧构建时刻），供页头「更新于」展示
+        "updated_at": datetime.now(BEIJING).strftime("%Y-%m-%d %H:%M"),
         "total": len(frame),
         "breadth": _breadth(frame),
         "meta": meta,

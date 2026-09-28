@@ -12,6 +12,7 @@
         </div>
       </div>
       <div class="page-hero-meta">
+        <span class="page-hero-tag">更新于 {{ updatedAt }}</span>
         <el-button type="primary" plain :icon="Refresh" :loading="loading" @click="loadAll(true)">
           AI 重新研判
         </el-button>
@@ -48,7 +49,6 @@
           <div class="syn-tags">
             <el-tag v-if="syn?.llm_available" size="small" type="danger" effect="dark">AI 研判</el-tag>
             <el-tag v-else size="small" type="warning" effect="plain">规则兜底</el-tag>
-            <span class="syn-asof">更新于 {{ syn?.as_of ? fmtClock(syn.as_of) : '—' }}</span>
           </div>
         </div>
 
@@ -137,6 +137,7 @@ import {
   vibeApi,
   type MarketSynthesis,
 } from '@/api/vibe'
+import { formatBeijingDateTimeMinute } from '@/utils/datetime'
 import {
   Refresh, Loading, Aim, Opportunity, WarnTriangleFilled, View, Guide,
   DataLine, InfoFilled, StarFilled,
@@ -156,6 +157,9 @@ const today = computed(() => {
 // 标题日期：优先后端数据返回的交易日；数据未回前用轻量接口预取的最新交易日（首屏即正确，不闪非交易日当天）
 const tradeDate = ref('')
 const titleDate = computed(() => syn.value?.trade_date || tradeDate.value || '')
+
+// 页头「更新于」：数据获取时刻（LLM 研判完成时刻）
+const updatedAt = computed(() => syn.value?.as_of ? formatBeijingDateTimeMinute(syn.value.as_of) : '')
 
 const verdict = computed(() => {
   const v = syn.value?.verdict
@@ -201,18 +205,6 @@ const confRingStyle = computed(() => {
   const color = v?.dirClass === 'bull' ? '#f56c6c' : v?.dirClass === 'bear' ? '#67c23a' : '#2b6cb0'
   return { '--pct': `${c != null ? c : 0}%`, '--ring-color': color }
 })
-
-function fmtClock(s: string | null | undefined): string {
-  if (!s) return '—'
-  try {
-    const d = new Date(s)
-    if (isNaN(d.getTime())) return s
-    const p = (n: number) => String(n).padStart(2, '0')
-    return `${p(d.getHours())}:${p(d.getMinutes())}`
-  } catch {
-    return s
-  }
-}
 
 const loadAll = async (refresh = false) => {
   loading.value = true
@@ -369,11 +361,7 @@ onActivated(() => {
   gap: 10px;
   margin-left: auto;
 }
-.syn-asof {
-  font-size: 11px;
-  color: var(--el-text-color-placeholder);
-  font-family: var(--app-font-mono);
-}
+
 
 .syn-hero-concl .syn-concl-text {
   font-size: 15px;
