@@ -117,7 +117,7 @@ async def get_industry_period_flows() -> dict:
     def build():
         return {
             "as_of": _latest_trade_date(),
-            "updated_at": datetime.now(BEIJING).strftime("%Y-%m-%d %H:%M"),
+            "updated_at": datetime.now(BEIJING).replace(microsecond=0).isoformat(),
             "periods": _build_period_flows(),
         }
     return await cached(

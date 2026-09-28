@@ -116,6 +116,26 @@ def get_latest_trade_day(now: datetime | None = None) -> datetime:
     return cursor
 
 
+def get_market_trade_date(now: datetime | None = None) -> datetime:
+    """市场页面当前参考交易日（标题/数据日口径）。
+
+    与 get_latest_trade_day（最近已完成交易日，用于过期计算/数据完整性）不同，
+    本函数面向「页面现在应该看哪一天」：交易日一旦开盘（≥9:30，行情实时数据
+    已开始产生），就直接取当日；盘前（<9:30）与休息日回退到最近已完成交易日。
+
+    Args:
+        now: 指定时间，默认为当前时间
+
+    Returns:
+        datetime: 市场当前参考交易日
+    """
+    now = now or now_tz()
+    pre_open = dtime(9, 30)
+    if is_trading_day(now) and now.time() >= pre_open:
+        return now
+    return get_latest_trade_day(now)
+
+
 def count_trading_days_between(start, end) -> int:
     """
     计算两个日期之间的交易日数量（不含 start，含 end）。

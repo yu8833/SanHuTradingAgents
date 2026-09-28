@@ -119,7 +119,10 @@
         </el-card>
 
         <el-card shadow="never" class="dash-card">
-          <div class="card-title">涨跌分布 / 广度</div>
+          <div class="card-title">
+            涨跌分布 / 广度
+            <span class="dist-note">涨停/跌停按涨跌幅阈值判定，含接近未封死（东财口径）</span>
+          </div>
           <div class="dist-bars">
             <div v-for="b in distDisplay" :key="b.label" class="dist-col">
               <div class="dist-count">{{ b.count || '' }}</div>
@@ -127,7 +130,7 @@
                 class="dist-bar"
                 :class="distBarClass(b.dir)"
                 :style="{ height: distHeight(b.count) + '%' }"
-                :title="`${b.label}: ${b.count}只`"
+                :title="distTip(b)"
               />
               <div class="dist-label">{{ b.label }}</div>
             </div>
@@ -470,6 +473,15 @@ const distBarClass = (dir: -1 | 0 | 1 | undefined) => {
   if (dir === 0) return 'dist-flat'
   if (dir === 1) return 'dist-up'
   return 'dist-down'
+}
+
+// 涨跌分布 tooltip：涨停/跌停按涨跌幅阈值判定（跌幅≤-限制价+容差即计入），
+// 与东财/乐谷「真实封板」口径不同，含接近跌停未封死个股
+const distTip = (b: { label: string; count: number }) => {
+  const note = (b.label === '涨停' || b.label === '跌停')
+    ? '（按涨跌幅阈值判定：达到板块涨跌幅限制，含接近未封死）'
+    : ''
+  return `${b.label}: ${b.count}只${note}`
 }
 
 const breadthUpW = computed(() => {
@@ -968,6 +980,15 @@ onActivated(() => {
 .dist-up { background: var(--app-up); }
 .dist-flat { background: var(--app-flat); }
 .dist-down { background: var(--app-down); }
+
+/* 分布图口径说明（标题旁小字，常显） */
+.dist-note {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--el-text-color-placeholder);
+}
 
 .dist-label {
   font-size: 9px;

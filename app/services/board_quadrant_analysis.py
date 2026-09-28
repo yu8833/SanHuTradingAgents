@@ -103,8 +103,8 @@ async def _build_concept_quadrant() -> dict[str, Any]:
         }
     return {
         "as_of": data.get("as_of") or "",
-        # 数据获取时刻（概念帧构建时刻），供页头「更新于」展示
-        "updated_at": datetime.now(BEIJING).strftime("%Y-%m-%d %H:%M"),
+        # 数据获取时刻（概念帧构建时刻），带 +08:00 便于前端按瞬时解析
+        "updated_at": datetime.now(BEIJING).replace(microsecond=0).isoformat(),
         "total": len(frame),
         "breadth": _breadth(frame),
         "meta": meta,

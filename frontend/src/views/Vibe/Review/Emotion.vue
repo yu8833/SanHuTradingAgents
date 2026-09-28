@@ -34,13 +34,11 @@
             <div class="cnt-label">涨停</div>
             <div class="cnt-num up">{{ emotion.zt_count }}</div>
             <div class="cnt-sub">家</div>
-            <div class="cnt-real" v-if="emotion.zt_real > 0">真实 {{ emotion.zt_real }}</div>
           </el-card>
           <el-card shadow="never" class="count-card">
             <div class="cnt-label">跌停</div>
             <div class="cnt-num down">{{ emotion.dt_count }}</div>
             <div class="cnt-sub">家</div>
-            <div class="cnt-real" v-if="emotion.dt_real > 0">真实 {{ emotion.dt_real }}</div>
           </el-card>
           <el-card shadow="never" class="count-card">
             <div class="cnt-label">最高连板</div>
@@ -301,13 +299,6 @@ onMounted(() => {
   color: var(--el-text-color-placeholder);
 }
 
-.cnt-real {
-  font-size: 12px;
-  color: var(--el-color-primary);
-  margin-top: 4px;
-  opacity: 0.8;
-}
-
 .ratio-card {
   border-radius: 8px;
 }
@@ -399,11 +390,6 @@ onMounted(() => {
     font-size: 26px;
     margin: 4px 0 2px;
     line-height: 1;
-    word-break: break-all;
-  }
-  .cnt-real {
-    font-size: 11px;
-    line-height: 1.3;
     word-break: break-all;
   }
   .rt-num {

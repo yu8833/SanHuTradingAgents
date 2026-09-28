@@ -25,7 +25,7 @@ from app.core.database import get_mongo_db_sync
 from app.services import vibe_astock as astock
 from app.services.cache_layer import cached
 from app.services.market_overview import get_short_term_emotion, _sentiment
-from app.utils.trading_time import get_latest_trade_day
+from app.utils.trading_time import get_market_trade_date
 
 logger = logging.getLogger("webapi")
 
@@ -304,9 +304,10 @@ async def _build() -> dict:
     # 避免情绪雷达「量能」维度恒为 0。
     high_amount_pct = (sum(1 for r in rows if r["amount"] >= 1e8) / total * 100) if total else 0
 
-    # 涨停/跌停/封板率/最高连板/梯队（短线情绪，失败时降级为空）
-    zt_count = int(_num(sentiment.get("zt_real"))) if sentiment else 0
-    dt_count = int(_num(sentiment.get("dt_real"))) if sentiment else 0
+    # 涨停/跌停/封板率/最高连板/梯队（短线情绪，统一东财涨停板四池口径；
+    # 失败时降级为空；不再用乐谷「真实」数，保证看板与短线情绪页数字一致）
+    zt_count = int(_num(emotion.get("zt_count"))) if emotion else 0
+    dt_count = int(_num(emotion.get("dt_count"))) if emotion else 0
     seal_rate = emotion.get("seal_rate") if emotion else None
     max_boards = int(_num(emotion.get("max_boards"))) if emotion else 0
     ladder = emotion.get("ladder") or []
@@ -365,9 +366,9 @@ async def _build() -> dict:
 
     return {
         "as_of": sentiment.get("date") or "",
-        # 权威最新交易日（trading_time.get_latest_trade_day → 统一交易日历），
-        # 供前端页面标题展示「X月X日 · 大盘看板」，非交易日出最近交易日
-        "trade_date": get_latest_trade_day().strftime("%Y-%m-%d"),
+        # 市场当前参考交易日（交易时段=当日，盘前=最近已完成交易日），
+        # 供前端页面标题展示「X月X日 · 大盘看板」
+        "trade_date": get_market_trade_date().strftime("%Y-%m-%d"),
         "regime": regime,
         "indices": indices,
         "breadth": {
@@ -395,7 +396,7 @@ async def _build() -> dict:
         "turnover_leaders": _top_rows(rows, "amount", True),
         "active_leaders": _top_rows(rows, "turnover_rate", True),
         "industry_rank": ind_rank,
-        "updated": datetime.now(BEIJING).strftime("%Y-%m-%d %H:%M"),
+        "updated": datetime.now(BEIJING).replace(microsecond=0).isoformat(),
     }
 
 

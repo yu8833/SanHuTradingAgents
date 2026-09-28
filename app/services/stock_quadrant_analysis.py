@@ -564,7 +564,7 @@ async def build_stock_quadrant() -> dict[str, Any]:
     """构建个股四象限帧数据（30 历史帧 + 1 当日帧 + meta + dates）。"""
     fetch_dates = await _recent_dates(FRAME_COUNT + CHG5D_LOOKBACK + 4)  # 含 chg5d 前置交易日
     if not fetch_dates:
-        return {"as_of": datetime.now(BEIJING).strftime("%Y-%m-%d %H:%M"), "total": 0,
+        return {"as_of": datetime.now(BEIJING).replace(microsecond=0).isoformat(), "total": 0,
                 "breadth": {"up": 0, "down": 0, "avg_pct": 0}, "dates": [], "meta": {}, "frames": {}}
 
     # 最近 30 个历史交易日为时间轴主体（前置 5~10 个仅用于算 5 日涨跌）
@@ -662,9 +662,9 @@ async def build_stock_quadrant() -> dict[str, Any]:
     avg_pct = round(sum(pcts) / len(pcts), 2) if pcts else 0
 
     return {
-        # 数据获取时刻（帧构建时刻），供页头「更新于」展示；
+        # 数据获取时刻（帧构建时刻），带 +08:00 便于前端按瞬时解析；
         # 数据交易日由 dates 时间轴最新帧承载，二者分开不再混用
-        "as_of": datetime.now(BEIJING).strftime("%Y-%m-%d %H:%M"),
+        "as_of": datetime.now(BEIJING).replace(microsecond=0).isoformat(),
         "total": len(latest_frame),
         "breadth": {"up": up, "down": down, "avg_pct": avg_pct},
         "dates": dates,

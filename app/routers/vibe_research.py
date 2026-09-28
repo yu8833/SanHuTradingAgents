@@ -111,11 +111,12 @@ async def market_dashboard(current_user: dict = Depends(get_optional_current_use
 
 @router.get("/market/trade-date")
 async def market_trade_date(current_user: dict = Depends(get_optional_current_user)):
-    """最新交易日（统一权威交易日历），轻量接口供各页面标题首屏即显示正确日期，避免先显示当天再纠正。"""
+    """市场页当前参考交易日（交易时段=当日，盘前=最近已完成交易日），
+    轻量接口供各页面标题首屏即显示正确日期。"""
     try:
-        from app.utils.trading_time import get_latest_trade_day
+        from app.utils.trading_time import get_market_trade_date
 
-        return ok({"trade_date": get_latest_trade_day().strftime("%Y-%m-%d")})
+        return ok({"trade_date": get_market_trade_date().strftime("%Y-%m-%d")})
     except Exception as e:
         logger.error(f"最新交易日查询异常: {e}")
         return ok({"trade_date": ""})

@@ -7,14 +7,12 @@
           <el-icon :size="26"><Aim /></el-icon>
         </div>
         <div class="page-hero-text">
-          <h2 class="page-hero-title">股票筛选</h2>
+          <h2 class="page-hero-title">{{ marketDate }} · 股票筛选</h2>
           <p class="page-hero-sub">① 选行业（与趋势分析同口径） → ② 看候选（三买三卖） → ③ 操作（自选 / AI 分析）</p>
         </div>
       </div>
       <div class="page-hero-meta">
-        <span v-if="asOfText" class="page-hero-tag">
-          <el-icon :size="14"><Calendar /></el-icon> {{ asOfText }}
-        </span>
+        <span class="page-hero-tag">更新于 {{ updatedAt }}</span>
         <el-button :icon="Refresh" :loading="refreshingAll" @click="refreshAll">刷新</el-button>
       </div>
     </div>
@@ -25,7 +23,7 @@
         <span class="flow-step">①</span>
         <div class="flow-title">
           选择行业
-          <span class="flow-sub">与「趋势分析-行业全景」同口径（{{ sectorTotal }} 个同花顺行业）{{ marketDate ? ' · ' + marketDate : '' }}</span>
+          <span class="flow-sub">与「趋势分析-行业全景」同口径（{{ sectorTotal }} 个同花顺行业）</span>
         </div>
         <div class="flow-actions">
           <el-input
@@ -251,7 +249,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Refresh, Aim, Calendar, Cpu, Loading } from '@element-plus/icons-vue'
+import { Refresh, Aim, Cpu, Loading } from '@element-plus/icons-vue'
 import { candidateApi, type CandidateStock } from '@/api/candidate'
 import { vibeApi, SQ } from '@/api/vibe'
 import {
@@ -260,6 +258,7 @@ import {
   fmtPctFromFraction,
   fmtSigned as fmtSign,
 } from '@/utils/format'
+import { formatBeijingDateTimeMinute } from '@/utils/datetime'
 /** 候选股/动量等"小数"口径（0.0123 → +1.23%）；趋势帧/行业口径用 fmtPct（百分数） */
 const fmtPctF = fmtPctFromFraction
 import { use as echartsUse } from 'echarts/core'
@@ -278,13 +277,14 @@ const sectors = ref<Array<{ name: string; pct: number | null; net: number | null
 const sectorKw = ref('')
 const sectorTotal = computed(() => sectors.value.length)
 const marketDate = ref('')
+// 页头「更新于」：行情/行业数据构建时刻（overview.updated，带 +08:00）
+const updatedAt = ref('')
 const filteredSectors = computed(() => {
   const kw = sectorKw.value.trim()
   if (!kw) return sectors.value
   return sectors.value.filter(s => s.name.includes(kw))
 })
 const visibleSectors = computed(() => (sectorKw.value.trim() ? filteredSectors.value : sectors.value))
-const asOfText = computed(() => (marketDate.value ? `数据日 ${marketDate.value}` : ''))
 
 /** 行业 chip 红涨绿跌（净额为负绿涨无所谓，按涨跌幅） */
 function chipCls(s: { name: string; pct: number | null }) {
@@ -302,6 +302,8 @@ async function loadSectors() {
     }))
     // 数据日＝后端权威最新交易日（trade_date）；缺失回退 updated 前 10 位（仅时间戳兼容）
     marketDate.value = (data?.trade_date || String(data?.updated || '')).slice(0, 10)
+    // 「更新于」＝数据构建时刻（页头展示）
+    updatedAt.value = formatBeijingDateTimeMinute(data?.updated)
   } catch (e) {
     console.warn('加载行业列表失败', e)
     sectors.value = []

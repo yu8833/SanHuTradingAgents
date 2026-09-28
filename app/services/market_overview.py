@@ -131,14 +131,15 @@ def _sectors() -> list[dict]:
 async def get_overview() -> dict:
     """市场情绪 + 板块资金（Redis缓存，大盘/板块级 TTL）。资金轮动由前端从 sectors 头尾取。"""
     def build():
-        from app.utils.trading_time import get_latest_trade_day
+        from app.utils.trading_time import get_market_trade_date
 
         return {
             "sentiment": _sentiment(),
             "sectors": _sectors(),
-            # 数据日期＝最近已完成交易日（权威日历）；updated 是构建时刻，不能当数据日
-            "trade_date": get_latest_trade_day().strftime("%Y-%m-%d"),
-            "updated": datetime.now(BEIJING).strftime("%Y-%m-%d %H:%M"),
+            # 数据日期＝市场当前参考交易日（交易时段=当日，盘前=最近已完成交易日）；
+            # updated 是构建时刻（带 +08:00），不能当数据日
+            "trade_date": get_market_trade_date().strftime("%Y-%m-%d"),
+            "updated": datetime.now(BEIJING).replace(microsecond=0).isoformat(),
         }
     return await cached(
         "vibe:market_overview", build,
@@ -153,9 +154,9 @@ def _emotion() -> dict:
     数据源＝东财涨停板四池（push2ex）。只把池子聚合成计数与比率，
     **不输出任何个股 code/name**——守产品「零标的」红线（个股清单是甩名单，不做）。
     """
-    # 定位最近交易日：从今天往前回溯，第一日有涨停池即取（非交易日/盘前返空则继续回溯）。
-    # 注意：东财涨停池在非交易日/盘前也会回吐数据（请求当日返回最近一份池子），
-    # 必须先按权威交易日历过滤，且「今天」在未收盘(15:00)前不接受——否则会把
+    # 定位最近交易日：从今天往前回溯，第一日有涨停池即取（休息日/盘前返空则继续回溯）。
+    # 注意：东财涨停池在休息日/盘前也会回吐数据（请求当日返回最近一份池子），
+    # 必须先按权威交易日历过滤，且「今天」在未开盘(9:30)前不接受——否则会把
     # 尚未产生的当日数据误当成数据日期（盘前显示 09-28 而最近已完成交易日是 09-24）。
     from datetime import time as dtime
 
@@ -168,8 +169,8 @@ def _emotion() -> dict:
         d = (today - timedelta(days=back)).strftime("%Y%m%d")
         if not is_trading_day(d):
             continue
-        # 今天未收盘（<15:00，含盘前/盘中）：跳过，保证数据日期=最近已完成交易日
-        if d == today.strftime("%Y%m%d") and now.time() < dtime(15, 0):
+        # 今天未开盘（<9:30）：跳过，保证数据日期在盘前=最近已完成交易日、盘中=当日
+        if d == today.strftime("%Y%m%d") and now.time() < dtime(9, 30):
             continue
         zt = astock.em_zt_topic_pool("getTopicZTPool", d, "fbt:asc")
         if zt:
@@ -227,8 +228,8 @@ def _emotion() -> dict:
 
     return {
         "date": f"{resolved[:4]}-{resolved[4:6]}-{resolved[6:]}",
-        # 数据获取时刻（东财涨停池构建时刻），供页头「更新于」展示
-        "updated": datetime.now(BEIJING).strftime("%Y-%m-%d %H:%M"),
+        # 数据获取时刻（东财涨停池构建时刻），带 +08:00 便于前端按瞬时解析
+        "updated": datetime.now(BEIJING).replace(microsecond=0).isoformat(),
         "zt_count": zt_count,
         "dt_count": len(dt),
         "zt_real": zt_real,
