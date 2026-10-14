@@ -422,6 +422,20 @@ const advanceToNextPhase = async (_syncStartTime: number) => {
   // 先重新加载新鲜度（静默模式，避免 UI 闪烁）
   await loadFreshness(true)
 
+  // 🔥 修复：验证刚完成的阶段是否真正生效。
+  // 之前仅凭任务状态记 success 就继续推进，若该阶段被时段门控跳过或数据源返回 0 条，
+  // 任务同样记 success（耗时 0.00s），最终误报"全部数据同步完成"。
+  // 这里在阶段结束后重新读取新鲜度，若该阶段数据仍未变新鲜，如实报告失败而非误报成功。
+  const finishedPhase = syncPhase.value
+  if (finishedPhase > 0 && finishedPhase <= 4 && !isPhaseFresh(finishedPhase)) {
+    syncError.value = true
+    syncFinished.value = true
+    const failLabel = syncPhases.find(p => p.id === finishedPhase)?.label || ''
+    syncStatusMessage.value = `${failLabel}同步任务已结束但数据仍未更新（数据源可能异常或返回 0 条），请在「数据同步/任务中心」查看详情后重试`
+    ElMessage.error(syncStatusMessage.value)
+    return false
+  }
+
   for (let nextPhase = syncPhase.value + 1; nextPhase <= 4; nextPhase++) {
     if (isPhaseFresh(nextPhase)) {
       // 该数据类型已最新，跳过
@@ -580,6 +594,15 @@ const doSync = async () => {
             const advanced = await advanceToNextPhase(syncStartTime)
             if (!advanced) {
               stopSyncPoll()
+              // 阶段完成但数据未变新鲜（advanceToNextPhase 已置 syncError 并提示），不再误报成功
+              if (syncError.value) {
+                syncFinished.value = true
+                await loadFreshness(true)
+                closeSyncTimer.value = setTimeout(() => {
+                  syncConfirmVisible.value = false
+                }, 2500)
+                return
+              }
               syncProgress.value = 100
               syncStatusMessage.value = '数据同步完成'
               syncFinished.value = true
@@ -616,10 +639,30 @@ const doSync = async () => {
           } else {
             const result = await checkJobCompleted(phase.job, syncStartTime)
             if (result.done) {
+              // 任务执行失败（failed）：如实报告，不再误当成功推进
+              if (result.failed) {
+                stopSyncPoll()
+                syncError.value = true
+                syncFinished.value = true
+                syncStatusMessage.value = `${phase.label}同步任务执行失败，请在任务中心查看详情`
+                ElMessage.error(syncStatusMessage.value)
+                await loadFreshness(true)
+                return
+              }
               // 当前阶段完成，尝试跳到下一个
               const advanced = await advanceToNextPhase(syncStartTime)
               if (!advanced) {
                 stopSyncPoll()
+                // 阶段完成但数据未变新鲜（advanceToNextPhase 已置 syncError 并提示），
+                // 不再误报"全部数据同步完成"
+                if (syncError.value) {
+                  syncFinished.value = true
+                  await loadFreshness(true)
+                  closeSyncTimer.value = setTimeout(() => {
+                    syncConfirmVisible.value = false
+                  }, 2500)
+                  return
+                }
                 syncProgress.value = 100
                 syncStatusMessage.value = '全部数据同步完成'
                 syncFinished.value = true

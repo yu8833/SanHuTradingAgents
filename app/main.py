@@ -744,13 +744,12 @@ async def lifespan(app: FastAPI):
         async def run_news_sync():
             """运行新闻同步任务 - 同步自选股新闻和市场新闻（统一使用NewsDataSyncService）"""
             try:
-                # 🔧 时段门控：仅 8:00-20:00 有效新闻时段执行，凌晨同步无新闻价值，
-                # 在不改 cron（.env 保持每2小时）的前提下减少约一半的无意义抓取 I/O。
-                from datetime import datetime as _dt
-                _hour = _dt.now().hour
-                if not (8 <= _hour < 20):
-                    logger.debug(f"⏭️ 非有效新闻时段（{_hour}时），跳过新闻同步")
-                    return
+                # 🔥 修复：移除「8:00-20:00 时段门控」。
+                # 原门控在非有效时段直接 return，但 apscheduler/scheduler_service 仍将其记录为
+                # success（耗时 0.00s），导致「一键更新」误报"所有数据都已更新"而新闻实际未同步。
+                # 若改为抛异常记 failed，又会被连续失败 3 次的自动停用机制误停任务。
+                # 故直接移除门控，让定时（每2小时）与手动触发都真实执行抓取（抓取有 per-source
+                # 数量上限与超时保护，去重幂等，I/O 可控）。
                 logger.info("📰 开始新闻数据同步（自选股 + 市场新闻）...")
                 
                 sync_service = await get_news_data_sync_service()
