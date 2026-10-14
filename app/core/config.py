@@ -303,6 +303,26 @@ class Settings(BaseSettings):
         description="moneyflow 单交易日完整覆盖阈值（条数，低于视为覆盖不足）",
     )
 
+    # 数据健康卡片「近段完整性」配置（逐日覆盖度窗口）
+    # 窗口取近 N 个已完成交易日，判定单日为「完整」的阈值 = 窗口内条数中位数 × MIN_RATIO
+    DATA_COMPLETENESS_WINDOW_TRADING_DAYS: int = Field(
+        default=30,
+        ge=5,
+        le=120,
+        description="完整性统计窗口（交易日数，默认近30个交易日）",
+    )
+    DATA_COMPLETENESS_MIN_RATIO: float = Field(
+        default=0.95,
+        ge=0.5,
+        le=1.0,
+        description="单日完整阈值比例（当日条数 ≥ 窗口中位数 × 该比例 视为完整）",
+    )
+    DATA_COMPLETENESS_CACHE_TTL: int = Field(
+        default=600,
+        ge=60,
+        description="完整性检查结果缓存秒数",
+    )
+
     # Tushare数据初始化配置
     TUSHARE_INIT_HISTORICAL_DAYS: int = Field(default=365, ge=1, le=3650, description="初始化历史数据天数")
     TUSHARE_INIT_BATCH_SIZE: int = Field(default=100, ge=10, le=1000, description="初始化批处理大小")

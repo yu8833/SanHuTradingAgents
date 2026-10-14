@@ -410,5 +410,41 @@ export const screeningApi = {
   // ===== 数据新鲜度检查 =====
   checkDataFreshness: () =>
     ApiClient.get<{ latest_data_date: string | null; expected_date: string; is_fresh: boolean; stale_days: number; total_stocks: number; expected_total: number; message: string }>('/api/screening/data-freshness'),
+
+  // ===== 数据完整性检查（近段逐日覆盖度） =====
+  checkDataCompleteness: () =>
+    ApiClient.get<DataCompletenessResp>('/api/screening/data-completeness'),
+}
+
+// ===== 数据完整性检查类型 =====
+export interface CompletenessDayPoint {
+  date: string
+  count: number
+  complete: boolean
+}
+
+export interface DatasetCompleteness {
+  key: string
+  label: string
+  baseline: number
+  threshold: number
+  total_days: number
+  complete_days: number
+  completeness_pct: number
+  min_count: number
+  missing_days: { date: string; count: number }[]
+  series: CompletenessDayPoint[]
+}
+
+export interface DataCompletenessResp {
+  success: boolean
+  data: {
+    window_trading_days: number
+    window_start: string | null
+    window_end: string | null
+    min_ratio: number
+    overall_is_complete: boolean
+    datasets: DatasetCompleteness[]
+  }
 }
 

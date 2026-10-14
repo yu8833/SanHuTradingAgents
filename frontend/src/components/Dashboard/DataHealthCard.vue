@@ -8,7 +8,7 @@
         </div>
         <div class="card-actions">
           <el-button
-            v-if="!overallIsFresh"
+            v-if="!overallHealthy"
             type="warning"
             size="small"
             @click="$emit('open-sync')"
@@ -66,12 +66,17 @@
         </div>
       </div>
 
-      <!-- 总览状态 -->
+      <!-- 综合状态：新鲜度 + 完整性 -->
       <div class="overall-row">
         <div :class="['health-badge', overallIsFresh ? 'fresh' : 'stale']">
           <el-icon v-if="overallIsFresh"><CircleCheck /></el-icon>
           <el-icon v-else><WarningFilled /></el-icon>
-          {{ overallIsFresh ? '全部最新' : '有数据需要更新' }}
+          新鲜度 {{ overallIsFresh ? '最新' : '需更新' }}
+        </div>
+        <div :class="['health-badge', overallIsComplete ? 'fresh' : 'stale']">
+          <el-icon v-if="overallIsComplete"><CircleCheck /></el-icon>
+          <el-icon v-else><WarningFilled /></el-icon>
+          完整性 {{ overallIsComplete ? '完整' : '有缺口' }}
         </div>
         <span class="health-message">{{ freshness.message || '' }}</span>
       </div>
@@ -103,6 +108,54 @@
         <span>数据新鲜度：{{ freshCount }}/{{ freshnessItems.length }} 项最新</span>
       </div>
 
+      <!-- 完整性：近 N 交易日逐日覆盖度 -->
+      <div class="completeness-block">
+        <div class="cb-header">
+          <span class="cb-title">数据完整性</span>
+          <span class="cb-window" v-if="completeness.window_trading_days">
+            近 {{ completeness.window_trading_days }} 交易日
+            <template v-if="completeness.window_start && completeness.window_end">
+              · {{ completeness.window_start }} ~ {{ completeness.window_end }}
+            </template>
+          </span>
+        </div>
+
+        <div v-if="completenessDatasets.length > 0" class="cb-list">
+          <div
+            v-for="ds in completenessDatasets"
+            :key="ds.key"
+            class="cb-item"
+            :class="{ incomplete: ds.missing_days.length > 0 }"
+          >
+            <div class="cb-item-head">
+              <span class="cb-label">{{ ds.label }}</span>
+              <span class="cb-stat">
+                完整 {{ ds.complete_days }}/{{ ds.total_days }} 天（{{ ds.completeness_pct }}%）
+              </span>
+            </div>
+            <div class="cb-heat">
+              <span
+                v-for="pt in ds.series"
+                :key="pt.date"
+                class="cb-cell"
+                :class="pt.complete ? 'ok' : 'bad'"
+                :title="`${pt.date} · ${pt.count} 条`"
+              ></span>
+            </div>
+            <div v-if="ds.missing_days.length > 0" class="cb-missing">
+              <span
+                v-for="m in ds.missing_days.slice(0, 8)"
+                :key="m.date"
+                class="cb-chip"
+              >{{ m.date.slice(5) }}({{ m.count }})</span>
+              <span v-if="ds.missing_days.length > 8" class="cb-more">+{{ ds.missing_days.length - 8 }}</span>
+            </div>
+            <div v-else class="cb-none">无缺口</div>
+          </div>
+        </div>
+        <div v-else class="all-fresh-hint">完整性数据加载中…</div>
+      </div>
+
       <!-- 同步状态 -->
       <div v-if="syncStatus" class="sync-status">
         <el-tag size="small" :type="syncType" effect="plain">{{ syncStatusText }}</el-tag>
@@ -124,7 +177,7 @@ import {
   DataBoard, Refresh, ArrowRight, SuccessFilled,
   CircleCloseFilled, CircleCheck, WarningFilled,
 } from '@element-plus/icons-vue'
-import { screeningApi } from '@/api/screening'
+import { screeningApi, type DatasetCompleteness } from '@/api/screening'
 import { getDataSourcesStatus, getSyncStatus, type DataSourceStatus, type SyncStatus } from '@/api/sync'
 import { subscribeQuotesUpdate } from '@/utils/quotesSSE'
 import { formatDateTime, toTimestamp } from '@/utils/datetime'
@@ -176,9 +229,21 @@ const freshness = ref<{
   }[]
 }>({ overall_is_fresh: false, message: '', items: [] })
 
+// 🔥 新增：完整性（近 N 交易日逐日覆盖度）
+const completeness = ref<{
+  window_trading_days: number
+  window_start: string | null
+  window_end: string | null
+  overall_is_complete: boolean
+  datasets: DatasetCompleteness[]
+}>({ window_trading_days: 0, window_start: null, window_end: null, overall_is_complete: true, datasets: [] })
+
 const overallIsFresh = computed(() => freshness.value.overall_is_fresh ?? false)
 const freshnessItems = computed(() => freshness.value.items || [])
 const freshCount = computed(() => freshnessItems.value.filter((i) => i.is_fresh).length)
+const completenessDatasets = computed(() => completeness.value.datasets || [])
+const overallIsComplete = computed(() => completeness.value.overall_is_complete ?? true)
+const overallHealthy = computed(() => overallIsFresh.value && overallIsComplete.value)
 
 const syncType = computed(() => {
   const map: Record<string, 'info' | 'warning' | 'success' | 'danger'> = {
@@ -202,6 +267,16 @@ const loadFreshness = async () => {
     freshness.value = data
   } catch (e) {
     console.warn('加载数据新鲜度失败', e)
+  }
+}
+
+const loadCompleteness = async () => {
+  try {
+    const res = await screeningApi.checkDataCompleteness()
+    const data = (res as any)?.data?.data || (res as any)?.data || {}
+    completeness.value = data
+  } catch (e) {
+    console.warn('加载数据完整性失败', e)
   }
 }
 
@@ -229,7 +304,7 @@ const loadSyncStatus = async () => {
 
 const loadAll = async () => {
   loading.value = true
-  await Promise.all([loadFreshness(), loadDataSources(), loadSyncStatus(), loadSystemStatus()])
+  await Promise.all([loadFreshness(), loadCompleteness(), loadDataSources(), loadSyncStatus(), loadSystemStatus()])
   loading.value = false
 }
 
@@ -516,6 +591,117 @@ onBeforeUnmount(() => {
           overflow: hidden;
           text-overflow: ellipsis;
         }
+      }
+    }
+  }
+
+  /* 🔥 完整性（近 N 交易日）区块 */
+  .completeness-block {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--el-border-color-lighter);
+
+    .cb-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+
+      .cb-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--el-text-color-primary);
+      }
+
+      .cb-window {
+        font-size: 11px;
+        color: var(--el-text-color-placeholder);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+    }
+
+    .cb-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .cb-item {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 6px 10px;
+      background: var(--el-fill-color-light);
+      border-radius: 6px;
+
+      &.incomplete {
+        background: var(--el-color-warning-light-9);
+      }
+
+      .cb-item-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 8px;
+
+        .cb-label {
+          font-size: 12px;
+          font-weight: 500;
+          color: var(--el-text-color-primary);
+          white-space: nowrap;
+        }
+
+        .cb-stat {
+          font-size: 11px;
+          color: var(--el-text-color-secondary);
+          white-space: nowrap;
+        }
+      }
+
+      .cb-heat {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 2px;
+
+        .cb-cell {
+          width: 8px;
+          height: 12px;
+          border-radius: 2px;
+          cursor: help;
+
+          &.ok { background: var(--el-color-success); }
+          &.bad { background: var(--el-color-danger); }
+        }
+      }
+
+      .cb-missing {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 4px;
+
+        .cb-chip {
+          font-size: 10px;
+          line-height: 1;
+          padding: 2px 6px;
+          border-radius: 8px;
+          background: var(--el-color-danger-light-9);
+          color: var(--el-color-danger);
+        }
+
+        .cb-more {
+          font-size: 10px;
+          color: var(--el-text-color-secondary);
+        }
+      }
+
+      .cb-none {
+        font-size: 11px;
+        color: var(--el-color-success);
       }
     }
   }

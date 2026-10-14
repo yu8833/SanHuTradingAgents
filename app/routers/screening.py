@@ -1142,3 +1142,127 @@ async def check_data_freshness(user: dict = Depends(get_current_user)):
     except Exception as e:
         logger.error(f"数据新鲜度检查失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"检查失败: {str(e)}") from e
+
+
+@router.get("/data-completeness")
+async def check_data_completeness(user: dict = Depends(get_current_user)):
+    """近段数据完整性检查（逐日覆盖度）。
+
+    对体量最大的 3 个「每股每日」数据集（历史K线 / 主力资金 / 每日指标），
+    统计近 N 个已完成交易日的逐日条数，以窗口内条数「中位数」为基线，
+    标出低于阈值（中位数 × DATA_COMPLETENESS_MIN_RATIO）的缺口日期。
+    结果按 DATA_COMPLETENESS_CACHE_TTL 秒缓存，避免前端轮询时重复聚合。
+    """
+    try:
+        import json
+        from datetime import datetime, timedelta
+        from statistics import median
+
+        from app.core.config import settings as _settings
+        from app.core.database import get_mongo_db
+        from app.core.redis_client import get_redis
+        from app.services.trade_calendar_service import query_trade_days
+        from app.utils.date_utils import normalize_date
+        from app.utils.trading_time import get_latest_trade_day
+
+        window_n = _settings.DATA_COMPLETENESS_WINDOW_TRADING_DAYS
+        ratio = _settings.DATA_COMPLETENESS_MIN_RATIO
+        ttl = _settings.DATA_COMPLETENESS_CACHE_TTL
+        cache_key = f"screening:data-completeness:v1:n{window_n}"
+
+        redis = None
+        try:
+            redis = get_redis()
+        except Exception:
+            redis = None
+        if redis is not None:
+            try:
+                cached = await redis.get(cache_key)
+                if cached:
+                    return {"success": True, "data": json.loads(cached)}
+            except Exception as e:
+                logger.warning(f"完整性缓存读取失败（忽略）: {e}")
+
+        db = get_mongo_db()
+        today = now_tz()
+        # 窗口终点 = 最近已完成交易日（不含今日盘中，避免盘中误报）
+        end_dt = get_latest_trade_day(datetime.combine(today.date(), datetime.min.time()))
+        end_str = end_dt.strftime("%Y-%m-%d")
+        start_str = (end_dt - timedelta(days=window_n * 2 + 10)).strftime("%Y-%m-%d")
+
+        window_days = await query_trade_days(start_str, end_str)
+        if window_days:
+            window_days = window_days[-window_n:]
+        else:
+            # 降级：官方日历不可用时，用 stock_daily_quotes 实收日期序列
+            raw = await db.stock_daily_quotes.distinct("trade_date", {"period": "daily"})
+            days = sorted({normalize_date(x) for x in raw if normalize_date(x)})
+            window_days = days[-window_n:]
+
+        specs = [
+            {"key": "quotes", "label": "历史K线", "coll": "stock_daily_quotes", "extra": {"period": "daily"}},
+            {"key": "moneyflow", "label": "主力资金", "coll": "stock_daily_moneyflow", "extra": {}},
+            {"key": "daily_basic", "label": "每日指标", "coll": "stock_daily_basic", "extra": {}},
+        ]
+
+        datasets_out = []
+        for spec in specs:
+            counts: dict[str, int] = {}
+            if window_days:
+                match = {"trade_date": {"$gte": window_days[0], "$lte": window_days[-1]}}
+                match.update(spec["extra"])
+                try:
+                    async for doc in db[spec["coll"]].aggregate([
+                        {"$match": match},
+                        {"$group": {"_id": "$trade_date", "count": {"$sum": 1}}},
+                    ]):
+                        d = normalize_date(doc.get("_id"))
+                        if d:
+                            counts[d] = counts.get(d, 0) + int(doc.get("count") or 0)
+                except Exception as e:
+                    logger.warning(f"完整性聚合失败({spec['coll']}): {e}")
+
+            present = [counts.get(d, 0) for d in window_days]
+            baseline = int(median(present)) if present else 0
+            threshold = int(round(baseline * ratio))
+
+            series = []
+            for d in window_days:
+                c = counts.get(d, 0)
+                series.append({"date": d, "count": c, "complete": c > 0 and c >= threshold})
+            complete_days = sum(1 for s in series if s["complete"])
+            missing_days = [{"date": s["date"], "count": s["count"]} for s in series if not s["complete"]]
+            total = len(window_days)
+
+            datasets_out.append({
+                "key": spec["key"],
+                "label": spec["label"],
+                "baseline": baseline,
+                "threshold": threshold,
+                "total_days": total,
+                "complete_days": complete_days,
+                "completeness_pct": round(complete_days / total * 100, 1) if total else 0.0,
+                "min_count": min(present) if present else 0,
+                "missing_days": missing_days,
+                "series": series,
+            })
+
+        data = {
+            "window_trading_days": len(window_days),
+            "window_start": window_days[0] if window_days else None,
+            "window_end": window_days[-1] if window_days else None,
+            "min_ratio": ratio,
+            "overall_is_complete": all(not d["missing_days"] for d in datasets_out),
+            "datasets": datasets_out,
+        }
+
+        if redis is not None and window_days:
+            try:
+                await redis.set(cache_key, json.dumps(data, ensure_ascii=False), ex=ttl)
+            except Exception as e:
+                logger.warning(f"完整性缓存写入失败（忽略）: {e}")
+
+        return {"success": True, "data": data}
+    except Exception as e:
+        logger.error(f"数据完整性检查失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"检查失败: {str(e)}") from e
