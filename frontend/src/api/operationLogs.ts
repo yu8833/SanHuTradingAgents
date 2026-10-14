@@ -152,7 +152,7 @@ export class OperationLogsApi {
   static clearOperationLogs(data: ClearLogsRequest = {}): Promise<ClearLogsResponse> {
     // 注意：不能 unwrap（res.data 会丢掉 success/message 顶层字段），
     // 调用方依赖 response.success 判断结果，需返回完整 ClearLogsResponse。
-    return ApiClient.post<ClearLogsResponse>('/api/system/logs/clear', data)
+    return ApiClient.post<ClearLogsResponse['data']>('/api/system/logs/clear', data)
   }
 
   /**

@@ -546,7 +546,7 @@ export const vibeApi = {
     try {
       const res = await ApiClient.get<any>('/api/vibe/market/trade-date', undefined, { timeout: 8000 })
       return (res?.data?.trade_date as string) || ''
-    } catch (e) {
+    } catch (e: any) {
       console.warn('[getLatestTradeDate] 获取最新交易日失败:', e?.message || e)
       return ''
     }

@@ -307,14 +307,6 @@ const activeTab = ref('ashare')
 const indices = ref<IndexQuote[]>([])
 const dashboard = ref<MarketDashboard | null>(null)
 
-const today = computed(() => {
-  const d = new Date()
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
-})
-
 // 标题日期：优先后端数据返回的交易日；数据未回前用轻量接口预取的最新交易日（首屏即正确，不闪非交易日当天）
 const tradeDate = ref('')
 const titleDate = computed(() => dashboard.value?.trade_date || tradeDate.value || '')

@@ -148,12 +148,6 @@ defineOptions({ name: 'VibeSynthesis' })
 const loading = ref(false)
 const syn = ref<MarketSynthesis | null>(null)
 
-const today = computed(() => {
-  const d = new Date()
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
-})
-
 // 标题日期：优先后端数据返回的交易日；数据未回前用轻量接口预取的最新交易日（首屏即正确，不闪非交易日当天）
 const tradeDate = ref('')
 const titleDate = computed(() => syn.value?.trade_date || tradeDate.value || '')

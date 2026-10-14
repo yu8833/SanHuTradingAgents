@@ -89,7 +89,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Search, DataAnalysis, TrendCharts, Odometer } from '@element-plus/icons-vue'
+import { Search, TrendCharts, Odometer } from '@element-plus/icons-vue'
 import { use as echartsUse } from 'echarts/core'
 import { ScatterChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, DataZoomComponent, MarkAreaComponent, MarkLineComponent } from 'echarts/components'

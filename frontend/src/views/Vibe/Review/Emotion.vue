@@ -173,12 +173,6 @@ import { vibeApi, type ShortTermEmotion } from '@/api/vibe'
 import { fmtPrice, fmtYi, fmtPctFromFraction, fmtPct } from '@/utils/format'
 import { formatBeijingDateTimeMinute } from '@/utils/datetime'
 
-const today = computed(() => {
-  const d = new Date()
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
-})
-
 // 标题日期：优先情绪数据日期（最新交易日）；数据未回前用轻量接口预取的最新交易日（首屏即正确，不闪非交易日当天）
 const tradeDate = ref('')
 const titleDate = computed(() => emotion.value?.date || tradeDate.value || '')
