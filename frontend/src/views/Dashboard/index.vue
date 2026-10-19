@@ -324,7 +324,7 @@ const syncInserted = ref(0)
 const syncUpdated = ref(0)
 const syncErrors = ref(0)
 
-// 同步阶段：1=基础信息 2=历史K线 3=财务数据 4=新闻数据
+// 同步阶段：1=基础信息 2=历史K线 3=财务数据 4=新闻数据 5=主力资金
 const syncPhase = ref(0)
 // 触发失败标记（供轮询检测）
 const triggerFailed = ref(false)
@@ -334,9 +334,10 @@ const phase1WaitCount = ref(0)
 const skippedPhases = ref<Set<number>>(new Set())
 const syncPhases = [
   { id: 1, label: '股票基础信息', job: 'basics_sync_service', freshnessKey: 'basics', range: [0, 15] },
-  { id: 2, label: '历史K线数据', job: 'tushare_historical_sync', freshnessKey: 'quotes', range: [15, 70] },
-  { id: 3, label: '财务数据', job: 'tushare_financial_sync', freshnessKey: 'financial', range: [70, 90] },
-  { id: 4, label: '新闻数据', job: 'news_sync', freshnessKey: 'news', range: [90, 100] },
+  { id: 2, label: '历史K线数据', job: 'tushare_historical_sync', freshnessKey: 'quotes', range: [15, 62] },
+  { id: 3, label: '财务数据', job: 'tushare_financial_sync', freshnessKey: 'financial', range: [62, 80] },
+  { id: 4, label: '新闻数据', job: 'news_sync', freshnessKey: 'news', range: [80, 90] },
+  { id: 5, label: '主力资金', job: 'tushare_daily_moneyflow_sync', freshnessKey: 'moneyflow', range: [90, 100] },
 ]
 const syncPhaseLabel = computed(() => {
   const p = syncPhases.find(p => p.id === syncPhase.value)
@@ -427,7 +428,7 @@ const advanceToNextPhase = async (_syncStartTime: number) => {
   // 任务同样记 success（耗时 0.00s），最终误报"全部数据同步完成"。
   // 这里在阶段结束后重新读取新鲜度，若该阶段数据仍未变新鲜，如实报告失败而非误报成功。
   const finishedPhase = syncPhase.value
-  if (finishedPhase > 0 && finishedPhase <= 4 && !isPhaseFresh(finishedPhase)) {
+  if (finishedPhase > 0 && finishedPhase <= syncPhases.length && !isPhaseFresh(finishedPhase)) {
     syncError.value = true
     syncFinished.value = true
     const failLabel = syncPhases.find(p => p.id === finishedPhase)?.label || ''
@@ -436,7 +437,7 @@ const advanceToNextPhase = async (_syncStartTime: number) => {
     return false
   }
 
-  for (let nextPhase = syncPhase.value + 1; nextPhase <= 4; nextPhase++) {
+  for (let nextPhase = syncPhase.value + 1; nextPhase <= syncPhases.length; nextPhase++) {
     if (isPhaseFresh(nextPhase)) {
       // 该数据类型已最新，跳过
       skippedPhases.value.add(nextPhase)
@@ -459,7 +460,7 @@ const advanceToNextPhase = async (_syncStartTime: number) => {
         triggerFailed.value = true
       })
     } else {
-      // 阶段2-4：触发调度任务（triggerJob 是非阻塞的，立即返回）
+      // 阶段2-5：触发调度任务（triggerJob 是非阻塞的，立即返回）
       try {
         await schedulerApi.triggerJob(phase.job, true)
       } catch (e) {
@@ -493,7 +494,7 @@ const doSync = async () => {
 
     // 找到第一个需要同步的阶段
     let firstPhase = 0
-    for (let i = 1; i <= 4; i++) {
+    for (let i = 1; i <= syncPhases.length; i++) {
       if (!isPhaseFresh(i)) {
         firstPhase = i
         break
@@ -531,7 +532,7 @@ const doSync = async () => {
         triggerFailed.value = true
       })
     } else {
-      // 阶段2-4：triggerJob 是非阻塞的，立即返回
+      // 阶段2-5：triggerJob 是非阻塞的，立即返回
       try {
         await schedulerApi.triggerJob(firstPhaseInfo.job, true)
       } catch (e) {
@@ -629,8 +630,8 @@ const doSync = async () => {
           return
         }
 
-        // 阶段2-4：轮询调度任务状态
-        if (syncPhase.value >= 2 && syncPhase.value <= 4) {
+        // 阶段2-5：轮询调度任务状态
+        if (syncPhase.value >= 2 && syncPhase.value <= syncPhases.length) {
           const phase = syncPhases.find(p => p.id === syncPhase.value)!
           const running = await checkJobRunning(phase.job)
           if (running) {
