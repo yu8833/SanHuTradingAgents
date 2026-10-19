@@ -925,12 +925,14 @@ async def check_data_freshness(user: dict = Depends(get_current_user)):
     - quotes: 历史K线数据（stock_daily_quotes）
     - financial: 财务数据（stock_financial_data）
     - news: 新闻数据（stock_news）
+    - moneyflow: 主力资金（stock_daily_moneyflow，盘后 19:30 发布）
     - overall: 整体新鲜度（任一数据不新鲜则整体不新鲜）
     """
     try:
-        from datetime import datetime
+        from datetime import datetime, time as dtime
 
         from app.core.database import get_mongo_db
+        from app.utils.date_utils import normalize_date
 
         db = get_mongo_db()
         today = now_tz()
@@ -1074,9 +1076,29 @@ async def check_data_freshness(user: dict = Depends(get_current_user)):
         else:
             news_updated_at_str = None
 
+        # --- 5. 主力资金（stock_daily_moneyflow，Tushare 盘后 19:30 发布）---
+        # 期望基准用「已发布资金流的最新交易日」（19:30 后含当日），避免交易日
+        # 15:00-19:30 之间把当日资金流误判为缺失。
+        mf_expected_date = get_latest_trade_day(today, dtime(19, 30))
+        mf_expected_str = mf_expected_date.strftime("%Y-%m-%d")
+        latest_mf_doc = await db.stock_daily_moneyflow.find().sort("trade_date", -1).limit(1).to_list(length=1)
+        mf_latest_raw = latest_mf_doc[0].get("trade_date") if latest_mf_doc else None
+        mf_latest_date = normalize_date(mf_latest_raw) if mf_latest_raw else None
+        if mf_latest_date:
+            mf_count = await db.stock_daily_moneyflow.count_documents({"trade_date": mf_latest_date})
+        else:
+            mf_count = 0
+        mf_is_fresh = False
+        mf_stale_days = 999
+        if mf_latest_date:
+            mf_stale_days = count_trading_days_between(mf_latest_date, mf_expected_str)
+            mf_is_fresh = mf_stale_days <= 0
+
         # --- 整体新鲜度 ---
-        overall_is_fresh = basics_is_fresh and quotes_is_fresh and fin_is_fresh and news_is_fresh
-        overall_stale_days = max(basics_stale_days, quotes_stale_days, fin_stale_days, news_stale_days)
+        overall_is_fresh = (basics_is_fresh and quotes_is_fresh and fin_is_fresh
+                            and news_is_fresh and mf_is_fresh)
+        overall_stale_days = max(basics_stale_days, quotes_stale_days, fin_stale_days,
+                                 news_stale_days, mf_stale_days)
 
         data_items = [
             {
@@ -1114,6 +1136,15 @@ async def check_data_freshness(user: dict = Depends(get_current_user)):
                 "latest": news_updated_at_str or "无数据",
                 "count": news_count,
                 "threshold": "每日更新",
+            },
+            {
+                "key": "moneyflow",
+                "label": "主力资金",
+                "is_fresh": mf_is_fresh,
+                "stale_days": mf_stale_days,
+                "latest": mf_latest_date or "无数据",
+                "count": mf_count,
+                "threshold": "每个交易日 19:30 后更新",
             },
         ]
 

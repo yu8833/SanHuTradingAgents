@@ -530,6 +530,16 @@ async def create_database_indexes(db):
         if await _safe_create_index(daily_basic, [("symbol", 1), ("trade_date", 1)], background=True):
             index_count += 1
 
+        # stock_daily_moneyflow 的索引（每日主力资金流，Tushare 同步按 (code, trade_date) upsert）
+        # 与 stock_dividend 同因：缺失该索引时每次 upsert 全表扫描（26 万+ 文档），
+        # 单日 5500+ 只的批量写入会触发 MongoDB NetworkTimeout，导致同步任务失败、
+        # 对应交易日的资金流永久缺失。写入端 filter 为 (code, trade_date)，故建同键唯一索引。
+        daily_moneyflow = db["stock_daily_moneyflow"]
+        if await _safe_create_index(daily_moneyflow, [("trade_date", 1), ("code", 1)], background=True):
+            index_count += 1
+        if await _safe_create_index(daily_moneyflow, [("code", 1), ("trade_date", 1)], unique=True, background=True):
+            index_count += 1
+
         # stock_dividend 的索引（分红送配，Tushare 同步按 code+end_date 高频 upsert；
         # end_date 报告期为分红事件唯一键——同报告期的预案/实施公告合并为一条）
         # 缺失该索引时每次 upsert 全表扫描，曾导致 MongoDB 容器 CPU 打满（~760%）

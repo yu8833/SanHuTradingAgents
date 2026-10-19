@@ -88,25 +88,28 @@ def prev_trading_day(ref) -> date:
     return probe
 
 
-def get_latest_trade_day(now: datetime | None = None) -> datetime:
+def get_latest_trade_day(now: datetime | None = None, cutoff: dtime = dtime(15, 0)) -> datetime:
     """
     获取最近已完成的交易日。
 
     规则：
-    - 如果今天是交易日且已过 15:00（收盘），返回今天
-    - 如果今天是交易日但未到 15:00，返回上一个交易日
+    - 如果今天是交易日且已过 cutoff（默认 15:00 收盘），返回今天
+    - 如果今天是交易日但未到 cutoff，返回上一个交易日
     - 如果今天不是交易日（周末/节假日），向前找到最近的交易日
 
     Args:
         now: 指定时间，默认为当前时间
+        cutoff: 当日数据「可用」时间点，默认 15:00（收盘）。
+            盘后发布的数据（如主力资金 19:30）可传入更晚的时间点，
+            避免发布前把当日误判为缺失。
 
     Returns:
         datetime: 最近的交易日
     """
     now = now or now_tz()
 
-    # 今天是交易日且已收盘
-    if is_trading_day(now) and now.time() >= dtime(15, 0):
+    # 今天是交易日且已过 cutoff（数据可用）
+    if is_trading_day(now) and now.time() >= cutoff:
         return now
 
     # 往前找交易日

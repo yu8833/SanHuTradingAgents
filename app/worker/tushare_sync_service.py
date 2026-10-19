@@ -1604,11 +1604,30 @@ class TushareSyncService:
                 ))
 
             if ops:
-                # 分批写入（每批 500），避免大 bulk 在数据库瞬忙时超时（NetworkTimeout）
-                for i in range(0, len(ops), 500):
-                    await self.db.stock_daily_moneyflow.bulk_write(ops[i:i + 500], ordered=False)
-                stats["success_count"] += 1
-                stats["total_records"] += len(ops)
+                # 分批写入（每批 500）；单批瞬时超时（NetworkTimeout）不应中断整日同步，
+                # 重试耗尽后才计为该日失败，避免一次抖动丢掉整个交易日的资金流（下次同步会重拉补齐）。
+                write_ok = True
+                for bi in range(0, len(ops), 500):
+                    batch = ops[bi:bi + 500]
+                    for attempt in range(3):
+                        try:
+                            await self.db.stock_daily_moneyflow.bulk_write(batch, ordered=False)
+                            break
+                        except Exception as e:
+                            if attempt == 2:
+                                write_ok = False
+                                stats["error_count"] += 1
+                                stats["errors"].append({"date": td, "error": f"bulk_write: {e}"})
+                                logger.error(f"❌ {td} 资金流写入失败（批次 {bi // 500 + 1}，已重试3次）: {e}")
+                            else:
+                                await asyncio.sleep(2 * (attempt + 1))
+                    if not write_ok:
+                        break
+                if write_ok:
+                    stats["success_count"] += 1
+                    stats["total_records"] += len(ops)
+                else:
+                    logger.warning(f"⚠️ {td} 资金流写入未完成，该日暂缺（下次同步将重拉补齐）")
 
             if job_id and ((i + 1) % 5 == 0 or (i + 1) == len(trade_days)):
                 await self._update_progress(
