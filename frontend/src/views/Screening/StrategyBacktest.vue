@@ -48,7 +48,17 @@
     <!-- 策略回测 -->
     <template v-if="activeTab === 'strategy'">
       <el-card class="form-panel" shadow="never">
-        <template #header><span class="panel-title">策略回测参数</span></template>
+        <template #header>
+          <div class="panel-head">
+            <span class="panel-title">策略回测参数</span>
+            <div class="preset-row">
+              <span class="preset-label">快速预设</span>
+              <el-button size="small" @click="applyPreset('steady')">稳健</el-button>
+              <el-button size="small" @click="applyPreset('balanced')">均衡</el-button>
+              <el-button size="small" @click="applyPreset('aggressive')">激进</el-button>
+            </div>
+          </div>
+        </template>
         <el-form :inline="true" label-width="110px" class="bt-form">
           <el-form-item label="策略">
             <el-select v-model="btForm.strategy_id" placeholder="选择策略" style="width: 200px">
@@ -64,28 +74,33 @@
           <el-form-item label="最大持仓">
             <el-input-number v-model="btForm.max_positions" :min="1" :max="50" style="width: 120px" />
           </el-form-item>
-          <el-form-item label="仓位方式">
-            <el-select v-model="btForm.position_sizing" style="width: 140px">
-              <el-option label="等权" value="equal" />
-              <el-option label="评分加权" value="score_weight" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="费率">
-            <el-input-number v-model="btForm.fees_pct" :min="0" :max="0.01" :step="0.0001" :precision="4" style="width: 120px" />
-          </el-form-item>
-          <el-form-item label="滑点(bp)">
-            <el-input-number v-model="btForm.slippage_bps" :min="0" :max="100" style="width: 120px" />
-          </el-form-item>
-          <el-form-item label="止损%">
-            <el-input-number v-model="btForm.stop_loss_pct" :min="0" :max="0.5" :step="0.01" :precision="2" style="width: 120px" />
-          </el-form-item>
-          <el-form-item label="止盈%">
-            <el-input-number v-model="btForm.take_profit_pct" :min="0" :max="1" :step="0.01" :precision="2" style="width: 120px" />
-          </el-form-item>
-          <el-form-item label="最大持有(天)">
-            <el-input-number v-model="btForm.max_hold_days" :min="0" :max="365" style="width: 120px" />
-          </el-form-item>
+          <template v-if="showAdvanced">
+            <el-form-item label="仓位方式">
+              <el-select v-model="btForm.position_sizing" style="width: 140px">
+                <el-option label="等权" value="equal" />
+                <el-option label="评分加权" value="score_weight" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="费率">
+              <el-input-number v-model="btForm.fees_pct" :min="0" :max="0.01" :step="0.0001" :precision="4" style="width: 120px" />
+            </el-form-item>
+            <el-form-item label="滑点(bp)">
+              <el-input-number v-model="btForm.slippage_bps" :min="0" :max="100" :step="1" style="width: 120px" />
+            </el-form-item>
+            <el-form-item label="止损%">
+              <el-input-number v-model="btForm.stop_loss_pct" :min="0" :max="0.5" :step="0.01" :precision="2" style="width: 120px" />
+            </el-form-item>
+            <el-form-item label="止盈%">
+              <el-input-number v-model="btForm.take_profit_pct" :min="0" :max="1" :step="0.01" :precision="2" style="width: 120px" />
+            </el-form-item>
+            <el-form-item label="最大持有(天)">
+              <el-input-number v-model="btForm.max_hold_days" :min="0" :max="365" style="width: 120px" />
+            </el-form-item>
+          </template>
           <el-form-item>
+            <el-button @click="showAdvanced = !showAdvanced">
+              {{ showAdvanced ? '收起高级参数' : '高级参数' }}
+            </el-button>
             <el-button type="primary" :loading="strategyLoading" @click="runStrategyBacktest">
               <el-icon><Search /></el-icon>
               开始回测
@@ -103,6 +118,15 @@
               <div class="result-title">
                 <span class="result-strategy-name">{{ strategyResult.strategy_info?.name || '策略回测' }}</span>
                 <el-tag size="small" type="success" effect="light" class="result-tag">回测完成</el-tag>
+              </div>
+              <!-- 结果出口：把结论直接接到下一步动作，避免手工跳页重配 -->
+              <div class="result-actions">
+                <el-button size="small" @click="gotoScreenerWithStrategy">
+                  用该策略选股
+                </el-button>
+                <el-button size="small" @click="exportTradesCsv" :disabled="!strategyResult.trades?.length">
+                  导出交易明细
+                </el-button>
               </div>
               <div class="result-meta">
                 <div class="meta-item">
@@ -658,6 +682,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch, h, defineComponent, type PropType } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Histogram, Search, Loading, DataAnalysis, Right } from '@element-plus/icons-vue'
 import { use as echartsUse } from 'echarts/core'
@@ -747,6 +772,19 @@ const btForm = ref({
 })
 const strategyLoading = ref(false)
 const strategyResult = ref<BacktestResult | null>(null)
+const showAdvanced = ref(false)
+
+// 快速预设：把新手最常调的几个参数一次填好，避免面对 11 个字段无从下手
+const PRESETS: Record<'steady' | 'balanced' | 'aggressive', Partial<typeof btForm.value>> = {
+  steady: { max_positions: 20, position_sizing: 'equal', fees_pct: 0.0002, slippage_bps: 3, stop_loss_pct: 0.05, take_profit_pct: 0.15, max_hold_days: 60 },
+  balanced: { max_positions: 10, position_sizing: 'equal', fees_pct: 0.0003, slippage_bps: 5, stop_loss_pct: 0.08, take_profit_pct: 0.20, max_hold_days: 30 },
+  aggressive: { max_positions: 5, position_sizing: 'score_weight', fees_pct: 0.0005, slippage_bps: 10, stop_loss_pct: 0.12, take_profit_pct: 0.30, max_hold_days: 10 },
+}
+const applyPreset = (key: keyof typeof PRESETS) => {
+  Object.assign(btForm.value, PRESETS[key])
+  showAdvanced.value = true
+  ElMessage.success(`已应用「${{ steady: '稳健', balanced: '均衡', aggressive: '激进' }[key]}」预设参数`)
+}
 
 // 因子回测表单
 const factorRange = ref<[string, string] | null>(null)
@@ -1106,6 +1144,37 @@ const loadStrategies = async () => {
   }
 }
 
+const router = useRouter()
+const route = useRoute()
+
+// 用当前回测的策略直接跳到常用策略并自动运行
+const gotoScreenerWithStrategy = () => {
+  const sid = btForm.value.strategy_id || (strategyResult.value?.config as any)?.strategy_id || ''
+  router.push({ path: '/screening/common', query: sid ? { strategy: String(sid) } : {} })
+}
+
+// 交易明细导出（前端由已加载结果生成，无需后端接口）
+const exportTradesCsv = () => {
+  const trades = strategyResult.value?.trades || []
+  if (!trades.length) return
+  const header = ['代码', '买入日期', '买入价', '卖出日期', '卖出价', '数量', '盈亏额', '收益率']
+  const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
+  const lines = trades.map((t: any) => [
+    t.symbol, t.entry_date, t.entry_price, t.exit_date, t.exit_price, t.quantity, t.pnl, t.pnl_pct,
+  ].map(esc).join(','))
+  const csv = '\uFEFF' + [header.map(esc).join(','), ...lines].join('\n')
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `strategy_trades_${Date.now()}.csv`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+  ElMessage.success(`已导出 ${trades.length} 条交易明细`)
+}
+
 const runStrategyBacktest = async () => {
   if (!btForm.value.strategy_id) return void ElMessage.warning('请选择策略')
   if (!btRange.value?.[0]) return void ElMessage.warning('请选择回测区间')
@@ -1370,6 +1439,12 @@ const icOption = computed(() => {
 
 onMounted(async () => {
   loadStrategies()
+  // 从常用策略结果页带入 ?strategy=xxx 时预选该策略
+  const presetStrategy = String(route.query.strategy || '')
+  if (presetStrategy) {
+    btForm.value.strategy_id = presetStrategy
+    activeTab.value = 'strategy'
+  }
   // 加载「结果对比」收录数据
   loadStrategyResults()
   // 恢复上次保存的回测结果（离开页面/刷新后仍可查看）
@@ -1434,6 +1509,25 @@ onBeforeUnmount(() => {
 
     .panel-title { font-size: 15px; font-weight: 600; color: var(--el-text-color-primary); }
 
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .preset-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .preset-label {
+      font-size: 12px;
+      color: var(--el-text-color-secondary);
+    }
+
     .bt-form { padding: 16px; }
 
     .pipe-divider {
@@ -1457,6 +1551,12 @@ onBeforeUnmount(() => {
       linear-gradient(135deg, var(--el-color-primary-light-9) 0%, var(--el-bg-color) 55%);
 
     .result-header-inner { padding: 18px 20px; }
+
+    .result-actions {
+      display: flex;
+      gap: 8px;
+      margin: -4px 0 12px;
+    }
 
     .result-title {
       display: flex;

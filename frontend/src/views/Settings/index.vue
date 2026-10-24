@@ -15,72 +15,30 @@
       </div>
     </div>
 
+    <!-- 顶部标签：唯一导航入口（侧边栏只负责进入设置分组，不再与页内菜单重复） -->
+    <el-card class="settings-nav-card" shadow="never">
+      <el-tabs v-model="activeTab" @tab-change="handleMenuSelect">
+        <template v-if="currentSection === 'personal'">
+          <el-tab-pane label="通用设置" name="general" />
+          <el-tab-pane label="外观设置" name="appearance" />
+          <el-tab-pane label="通知设置" name="notifications" />
+          <el-tab-pane label="安全设置" name="security" />
+        </template>
+        <template v-else-if="currentSection === 'config'">
+          <el-tab-pane label="配置管理" name="config" />
+        </template>
+        <template v-else-if="currentSection === 'admin'">
+          <el-tab-pane label="用户管理" name="users" />
+          <el-tab-pane label="数据库管理" name="database" />
+          <el-tab-pane label="日志" name="logs" />
+          <el-tab-pane label="多数据源同步" name="sync" />
+        </template>
+      </el-tabs>
+    </el-card>
+
     <el-row :gutter="24">
-      <!-- 左侧：设置菜单 -->
-      <el-col :span="6">
-        <el-card class="settings-menu" shadow="never">
-          <el-menu
-            :default-active="activeTab"
-            @select="handleMenuSelect"
-            class="settings-nav"
-          >
-            <!-- 个人设置菜单 -->
-            <template v-if="currentSection === 'personal'">
-              <el-menu-item index="general">
-                <el-icon><User /></el-icon>
-                <span>通用设置</span>
-              </el-menu-item>
-              <el-menu-item index="appearance">
-                <el-icon><Brush /></el-icon>
-                <span>外观设置</span>
-              </el-menu-item>
-              <el-menu-item index="notifications">
-                <el-icon><Bell /></el-icon>
-                <span>通知设置</span>
-              </el-menu-item>
-              <el-menu-item index="security">
-                <el-icon><Lock /></el-icon>
-                <span>安全设置</span>
-              </el-menu-item>
-            </template>
-
-            <!-- 系统配置菜单 -->
-            <template v-else-if="currentSection === 'config'">
-              <el-menu-item index="config">
-                <el-icon><Tools /></el-icon>
-                <span>配置管理</span>
-              </el-menu-item>
-            </template>
-
-            <!-- 系统管理菜单 -->
-            <template v-else-if="currentSection === 'admin'">
-              <el-menu-item index="users">
-                <el-icon><User /></el-icon>
-                <span>用户管理</span>
-              </el-menu-item>
-              <el-menu-item index="database">
-                <el-icon><Monitor /></el-icon>
-                <span>数据库管理</span>
-              </el-menu-item>
-              <el-menu-item index="logs">
-                <el-icon><Document /></el-icon>
-                <span>操作日志</span>
-              </el-menu-item>
-              <el-menu-item index="system-logs">
-                <el-icon><Document /></el-icon>
-                <span>系统日志</span>
-              </el-menu-item>
-              <el-menu-item index="sync">
-                <el-icon><Refresh /></el-icon>
-                <span>多数据源同步</span>
-              </el-menu-item>
-            </template>
-          </el-menu>
-        </el-card>
-      </el-col>
-
       <!-- 右侧：设置内容 -->
-      <el-col :span="18">
+      <el-col :span="24">
         <!-- 通用设置 -->
         <el-card v-show="activeTab === 'general'" class="settings-content" shadow="never">
           <template #header>
@@ -237,43 +195,28 @@
           </div>
         </el-card>
 
-        <!-- 操作日志 -->
+        <!-- 日志：操作日志（审计）与系统日志（运行输出）合并为一个入口，按用途区分 -->
         <el-card v-show="activeTab === 'logs'" class="settings-content" shadow="never">
           <template #header>
-            <h3>操作日志</h3>
+            <h3>日志</h3>
           </template>
 
           <div class="logs-content">
-            <el-alert
-              title="操作日志"
-              type="info"
-              description="查看系统操作日志和审计记录"
-              :closable="false"
-              style="margin-bottom: 20px;"
-            />
-            <el-button type="primary" @click="goToOperationLogs">
-              查看操作日志
-            </el-button>
-          </div>
-        </el-card>
-
-        <!-- 系统日志 -->
-        <el-card v-show="activeTab === 'system-logs'" class="settings-content" shadow="never">
-          <template #header>
-            <h3>系统日志</h3>
-          </template>
-
-          <div class="system-logs-content">
-            <el-alert
-              title="系统日志"
-              type="info"
-              description="查看和管理系统运行日志文件"
-              :closable="false"
-              style="margin-bottom: 20px;"
-            />
-            <el-button type="primary" @click="goToSystemLogs">
-              查看系统日志
-            </el-button>
+            <div class="log-entry">
+              <div class="log-entry-text">
+                <b>操作日志</b>
+                <span>记录"谁在什么时候做了什么"，用于审计与追溯。</span>
+              </div>
+              <el-button type="primary" @click="goToOperationLogs">查看操作日志</el-button>
+            </div>
+            <el-divider />
+            <div class="log-entry">
+              <div class="log-entry-text">
+                <b>系统日志</b>
+                <span>服务运行输出与错误堆栈，用于排查故障。</span>
+              </div>
+              <el-button @click="goToSystemLogs">查看系统日志</el-button>
+            </div>
           </div>
         </el-card>
 
@@ -380,15 +323,7 @@ import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import type { UserPreferences } from '@/types/auth'
 import {
-  Setting,
-  User,
-  Brush,
-  Bell,
-  Lock,
-  Tools,
-  Monitor,
-  Document,
-  Refresh
+  Setting
 } from '@element-plus/icons-vue'
 
 const router = useRouter()
@@ -449,7 +384,8 @@ const updateSectionFromRoute = () => {
   } else if (path === '/settings/database') {
     currentSection.value = 'admin'
     activeTab.value = 'database'
-  } else if (path === '/settings/logs') {
+  } else if (path === '/settings/logs' || path === '/settings/system-logs') {
+    // 操作日志与系统日志已合并到「日志」标签
     currentSection.value = 'admin'
     activeTab.value = 'logs'
   } else if (path === '/settings/sync') {
@@ -520,8 +456,13 @@ watch(() => authStore.user, (newUser) => {
 }, { deep: true })
 
 // 方法
-const handleMenuSelect = (index: string) => {
-  activeTab.value = index
+const handleMenuSelect = (index: string | number) => {
+  const tab = String(index)
+  activeTab.value = tab
+  // 个人设置的子页用 query 表达，写入地址栏后侧边栏高亮与刷新都能还原
+  if (currentSection.value === 'personal') {
+    void router.replace({ path: '/settings', query: tab === 'general' ? {} : { tab } })
+  }
 }
 
 const handleThemeChange = (theme: string | number | boolean | undefined) => {
@@ -698,9 +639,33 @@ onMounted(() => {
 
 <style lang="scss" scoped>
 .settings {
-  .settings-menu {
-    .settings-nav {
-      border: none;
+  .settings-nav-card {
+    margin-bottom: 20px;
+
+    :deep(.el-tabs__header) {
+      margin-bottom: 0;
+    }
+    :deep(.el-tabs__nav-wrap::after) {
+      display: none;
+    }
+  }
+
+  .logs-content {
+    .log-entry {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      flex-wrap: wrap;
+    }
+    .log-entry-text {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      max-width: 560px;
+
+      b { font-size: 14px; color: var(--el-text-color-primary); }
+      span { font-size: 12.5px; color: var(--el-text-color-secondary); }
     }
   }
 

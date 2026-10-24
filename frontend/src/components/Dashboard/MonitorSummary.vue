@@ -4,11 +4,15 @@
       <div class="card-header">
         <div class="card-title">
           <el-icon><Odometer /></el-icon>
-          <span>监控中心</span>
+          <span>监控动态</span>
+          <el-tag v-if="unreadCount > 0" size="small" type="danger" effect="plain">{{ unreadCount }} 条未读</el-tag>
         </div>
-        <el-button type="text" size="small" @click="goToStockAlerts">
-          查看详情 <el-icon><ArrowRight /></el-icon>
-        </el-button>
+        <div class="card-actions">
+          <el-button v-if="unreadCount > 0" type="text" size="small" @click="markAllRead">标记已读</el-button>
+          <el-button type="text" size="small" @click="goToStockAlerts">
+            查看详情 <el-icon><ArrowRight /></el-icon>
+          </el-button>
+        </div>
       </div>
     </template>
 
@@ -35,7 +39,7 @@
           <el-empty description="暂无触发记录" :image-size="60" />
         </div>
         <div v-else class="summary-list">
-          <div v-for="a in recentAlerts" :key="a.ts" class="summary-item">
+          <div v-for="a in recentAlerts" :key="a.ts" :class="['summary-item', { unread: isUnread(a) }]">
             <span :class="['sev-dot', a.severity || 'info']" />
             <div class="summary-link">
               <router-link
@@ -87,7 +91,19 @@ const enabledRules = computed(() =>
 )
 const totalRules = computed(() => rules.value.length)
 
-const recentAlerts = computed(() => alerts.value.slice(0, 5))
+const recentAlerts = computed(() =>
+  [...alerts.value].sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0)).slice(0, 8)
+)
+
+// 已读锚点：本地记录最近一次"标记已读"的时间，比它新的记录视为未读
+const READ_KEY = 'monitor_alerts_read_ts'
+const readTs = ref(Number(localStorage.getItem(READ_KEY) || 0))
+const unreadCount = computed(() => alerts.value.filter(a => Number(a.ts || 0) > readTs.value).length)
+const isUnread = (a: MonitorAlert) => Number(a.ts || 0) > readTs.value
+const markAllRead = () => {
+  readTs.value = Date.now()
+  localStorage.setItem(READ_KEY, String(readTs.value))
+}
 
 const formatTs = (ts: number) => {
   if (!ts) return ''
@@ -133,12 +149,29 @@ const stopPolling = () => {
   }
 }
 
+const startPolling = () => {
+  if (pollTimer) return
+  pollTimer = window.setInterval(loadAll, 30000)
+}
+
+// 页面隐藏时暂停轮询，回到前台立即刷新并恢复，避免后台重复堆积请求
+const onVisibilityChange = () => {
+  if (document.hidden) {
+    stopPolling()
+  } else {
+    loadAll()
+    startPolling()
+  }
+}
+
 onMounted(() => {
   loadAll()
-  pollTimer = window.setInterval(loadAll, 30000)
+  if (!document.hidden) startPolling()
+  document.addEventListener('visibilitychange', onVisibilityChange)
 })
 onBeforeUnmount(() => {
   stopPolling()
+  document.removeEventListener('visibilitychange', onVisibilityChange)
 })
 </script>
 
@@ -155,6 +188,16 @@ onBeforeUnmount(() => {
       gap: 6px;
       font-weight: 600;
     }
+
+    .card-actions {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+  }
+
+  .summary-item.unread {
+    background: var(--el-color-primary-light-9) !important;
   }
 
   .summary-stats {

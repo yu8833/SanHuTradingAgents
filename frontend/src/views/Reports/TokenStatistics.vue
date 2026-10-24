@@ -244,6 +244,25 @@
       />
     </el-card>
 
+    <!-- Token 记录详情 -->
+    <el-dialog v-model="detailVisible" title="Token 使用详情" width="560px">
+      <el-descriptions v-if="detailRecord" :column="2" border>
+        <el-descriptions-item label="时间">{{ formatDateTime(detailRecord.timestamp) }}</el-descriptions-item>
+        <el-descriptions-item label="供应商">{{ getProviderName(detailRecord.provider) }}</el-descriptions-item>
+        <el-descriptions-item label="模型">{{ detailRecord.model_name }}</el-descriptions-item>
+        <el-descriptions-item label="股票代码">{{ detailRecord.stock_symbol || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="输入 Token">{{ fmtVol(detailRecord.input_tokens) }}</el-descriptions-item>
+        <el-descriptions-item label="输出 Token">{{ fmtVol(detailRecord.output_tokens) }}</el-descriptions-item>
+        <el-descriptions-item label="总 Token">{{ fmtVol(detailRecord.total_tokens) }}</el-descriptions-item>
+        <el-descriptions-item label="成本">¥{{ fmtAmount(detailRecord.cost) }}</el-descriptions-item>
+        <el-descriptions-item label="耗时">{{ detailRecord.duration != null ? `${detailRecord.duration} ms` : '-' }}</el-descriptions-item>
+        <el-descriptions-item label="币种">{{ detailRecord.currency || 'CNY' }}</el-descriptions-item>
+      </el-descriptions>
+      <template #footer>
+        <el-button @click="detailVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 空状态 -->
     <el-empty
       v-if="!loading && overview.totalRequests === 0"
@@ -522,12 +541,45 @@ const renderCharts = () => {
   }
 }
 
+const detailVisible = ref(false)
+const detailRecord = ref<TokenRecord | null>(null)
+
 const exportData = () => {
-  ElMessage.info('导出功能开发中...')
+  const rows = filteredRecords.value
+  if (rows.length === 0) {
+    ElMessage.warning('当前没有可导出的记录')
+    return
+  }
+  const header = ['时间', '供应商', '模型', '股票代码', '输入Token', '输出Token', '总Token', '成本(¥)', '耗时(ms)']
+  const escapeCell = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
+  const lines = rows.map((r) => [
+    formatDateTime(r.timestamp),
+    getProviderName(r.provider),
+    r.model_name,
+    r.stock_symbol,
+    r.input_tokens,
+    r.output_tokens,
+    r.total_tokens,
+    r.cost,
+    r.duration ?? ''
+  ].map(escapeCell).join(','))
+  // BOM 保证 Excel 打开中文不乱码
+  const csv = '\uFEFF' + [header.map(escapeCell).join(','), ...lines].join('\n')
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `token_records_${Date.now()}.csv`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+  ElMessage.success(`已导出 ${rows.length} 条记录`)
 }
 
-const viewDetails = (_row: TokenRecord) => {
-  ElMessage.info('详情功能开发中...')
+const viewDetails = (row: TokenRecord) => {
+  detailRecord.value = row
+  detailVisible.value = true
 }
 
 // 生命周期

@@ -14,7 +14,15 @@
       <div class="page-hero-meta">
         <el-button :icon="Refresh" text size="small" :loading="synLoading" @click="loadAll">刷新信号</el-button>
         <el-button type="primary" :icon="Plus" @click="openOrderDialog">下市场单</el-button>
-        <el-button type="danger" plain :icon="Delete" @click="confirmReset">重置账户</el-button>
+        <el-dropdown trigger="click" @command="onHeroCommand">
+          <el-button text size="small">更多<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="reset">重置账户</el-dropdown-item>
+              <el-dropdown-item command="portfolio">查看持仓</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </div>
     </div>
 
@@ -113,7 +121,7 @@
               <el-tag v-if="sells.length" size="small" type="success" effect="plain">{{ realSells.length }}</el-tag>
               <span v-else class="col-empty-note">暂无信号</span>
             </div>
-            <el-table v-if="sells.length" :data="sortedSells" size="small" class="ms-table" :row-class-name="sellRowClass">
+            <el-table v-if="realSells.length" :data="realSells" size="small" class="ms-table">
               <el-table-column label="股票" min-width="120">
                 <template #default="{ row }">
                   <div class="stk">
@@ -145,12 +153,38 @@
               </el-table-column>
               <el-table-column label="" width="76" align="right">
                 <template #default="{ row }">
-                  <el-button size="small" class="act act-sell" :disabled="isHoldSell(row)" @click="sellFromSignal(row)">卖出</el-button>
+                  <el-button size="small" class="act act-sell" @click="sellFromSignal(row)">卖出</el-button>
                 </template>
               </el-table-column>
             </el-table>
-            <div v-if="holdSells.length" class="hold-hint">置灰行 = 卖出信号外的持仓评估（继续持有），不参与卖出操作</div>
-            <el-empty v-else description="暂无卖出建议" :image-size="56" />
+
+            <!-- 继续持有：仅持仓评估，不参与卖出操作 -->
+            <el-collapse v-if="holdSells.length" class="hold-collapse">
+              <el-collapse-item :title="`继续持有（${holdSells.length}）· 仅评估，不参与卖出`" name="hold">
+                <el-table :data="holdSells" size="small" class="ms-table">
+                  <el-table-column label="股票" min-width="120">
+                    <template #default="{ row }">
+                      <div class="stk">
+                        <span class="stk-name">{{ row.name || row.code }}</span>
+                        <span class="stk-code">{{ row.code }}</span>
+                      </div>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="盈亏" width="82" align="right">
+                    <template #default="{ row }">
+                      <span class="pct" :class="pctClass(row.profit_loss_rate)">{{ fmtPct(row.profit_loss_rate) }}</span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="建议" min-width="136">
+                    <template #default="{ row }">
+                      <div class="advice">{{ row.advice_text || row.advice || '继续持有' }}</div>
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </el-collapse-item>
+            </el-collapse>
+
+            <el-empty v-if="!sells.length" description="暂无卖出建议" :image-size="56" />
             <p class="col-note" v-if="!sells.length">持仓暂无卖点触达，止损/止盈建议将在此汇总。</p>
           </div>
         </div>
@@ -206,34 +240,62 @@
         </el-form-item>
         <el-form-item label="市场" v-if="detectedMarket">
           <div>
-            <el-tag v-if="detectedMarket === 'CN'" type="success">🇨🇳 A股市场 (CNY)</el-tag>
-            <el-tag v-else-if="detectedMarket === 'HK'" type="warning">🇭🇰 港股市场 (HKD)</el-tag>
-            <el-tag v-else-if="detectedMarket === 'US'" type="info">🇺🇸 美股市场 (USD)</el-tag>
+            <el-tag v-if="detectedMarket === 'CN'" type="success">A股市场 (CNY)</el-tag>
+            <el-tag v-else-if="detectedMarket === 'HK'" type="warning">港股市场 (HKD)</el-tag>
+            <el-tag v-else-if="detectedMarket === 'US'" type="info">美股市场 (USD)</el-tag>
             <div class="t0-hint">
-              <span v-if="detectedMarket === 'CN'">💡 A股T+1，今天买入明天可卖</span>
-              <span v-else-if="detectedMarket === 'HK'">💡 港股T+0，买入后立即可卖</span>
-              <span v-else-if="detectedMarket === 'US'">💡 美股T+0，买入后立即可卖 | 零佣金</span>
+              <span v-if="detectedMarket === 'CN'">A股 T+1，今天买入明天可卖</span>
+              <span v-else-if="detectedMarket === 'HK'">港股 T+0，买入后立即可卖</span>
+              <span v-else-if="detectedMarket === 'US'">美股 T+0，买入后立即可卖</span>
             </div>
           </div>
         </el-form-item>
         <el-form-item label="数量">
-          <el-input-number v-model="order.qty" :min="1" />
+          <el-input-number v-model="order.qty" :min="1" :step="preview?.lot_size || 1" />
+          <span v-if="preview" class="qty-hint">
+            <template v-if="order.side === 'buy'">最大可买 {{ preview.max_qty }} 股</template>
+            <template v-else>可用持仓 {{ preview.available_qty }} 股</template>
+            · 每手 {{ preview.lot_size }} 股
+          </span>
+        </el-form-item>
+        <el-form-item label="预览" v-if="order.code">
+          <div class="order-preview" v-loading="previewLoading">
+            <template v-if="preview">
+              <div class="op-row"><span>最新价</span><b>{{ preview.price ? `${preview.price} ${preview.currency}` : '—' }}</b></div>
+              <div class="op-row"><span>预估金额</span><b>{{ fmtMoney(preview.notional) }}</b></div>
+              <div class="op-row"><span>预估费用</span><b>{{ fmtMoney(preview.fee) }}</b></div>
+              <div class="op-row">
+                <span>{{ order.side === 'buy' ? '预估总支出' : '预估净收入' }}</span>
+                <b>{{ fmtMoney(order.side === 'buy' ? preview.total_cost : preview.net_proceeds) }}</b>
+              </div>
+              <el-alert
+                v-for="err in preview.errors"
+                :key="err"
+                :title="err"
+                type="error"
+                :closable="false"
+                show-icon
+                class="op-alert"
+              />
+            </template>
+            <span v-else-if="!previewLoading" class="op-empty">输入完整信息后显示预估</span>
+          </div>
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="orderDialog=false">取消</el-button>
-        <el-button type="primary" @click="submitOrder">提交</el-button>
+        <el-button type="primary" :disabled="submitDisabled" :loading="submitting" @click="submitOrder">提交</el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, computed } from 'vue'
+import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { CreditCard, Refresh, Plus, Delete, ArrowRight } from '@element-plus/icons-vue'
-import { paperApi } from '@/api/paper'
+import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
+import { CreditCard, Refresh, Plus, ArrowRight, ArrowDown } from '@element-plus/icons-vue'
+import { paperApi, type OrderPreview } from '@/api/paper'
 import { analysisApi } from '@/api/analysis'
 import { vibeApi, type MarketSynthesis } from '@/api/vibe'
 import { monitorApi, type StrategyMonitorStatus } from '@/api/monitor'
@@ -285,12 +347,6 @@ function isHoldSell(row: any): boolean {
 /** 持仓卖出排序：真实卖出信号在前，非卖出的「继续持有」置灰并排在最低部 */
 const realSells = computed(() => (sells.value || []).filter(s => !isHoldSell(s)))
 const holdSells = computed(() => (sells.value || []).filter(isHoldSell))
-const sortedSells = computed(() => [...realSells.value, ...holdSells.value])
-
-/** 置灰行样式（非卖出内容） */
-function sellRowClass({ row }: any): string {
-  return isHoldSell(row) ? 'sell-row-hold' : ''
-}
 
 /** 买入信号来源徽标（来源类型，信号名由顶部 sig-badge 单独展示，避免重复） */
 function buySource(b: any): { type: string; text: string; full: string } {
@@ -433,16 +489,85 @@ function detectMarket() {
 function openOrderDialog() {
   order.value.code = ''
   orderName.value = ''
+  preview.value = null
   orderDialog.value = true
 }
 
-async function submitOrder() {
+// ── 下单预览（价格/金额/费用/最大可买，提交前拦截错误） ──
+const preview = ref<OrderPreview | null>(null)
+const previewLoading = ref(false)
+const submitting = ref(false)
+let previewTimer: ReturnType<typeof setTimeout> | null = null
+
+const submitDisabled = computed(() => {
+  if (!order.value.code.trim()) return true
+  if (previewLoading.value || !preview.value) return true
+  return preview.value.errors.length > 0
+})
+
+const fmtMoney = (v: number | null | undefined) => {
+  if (v == null) return '—'
+  return v.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+async function fetchPreview() {
+  const code = order.value.code.trim()
+  if (!code || !orderDialog.value) {
+    preview.value = null
+    return
+  }
+  previewLoading.value = true
   try {
+    const res: any = await paperApi.previewOrder({
+      side: order.value.side as 'buy' | 'sell',
+      code,
+      quantity: Number(order.value.qty) || 0
+    })
+    preview.value = (res?.data || null) as OrderPreview | null
+  } catch {
+    preview.value = null
+  } finally {
+    previewLoading.value = false
+  }
+}
+
+watch(
+  [() => order.value.code, () => order.value.side, () => order.value.qty, orderDialog],
+  () => {
+    if (previewTimer) clearTimeout(previewTimer)
+    previewTimer = setTimeout(fetchPreview, 300)
+  }
+)
+
+async function submitOrder() {
+  if (submitDisabled.value) return
+  try {
+    submitting.value = true
     const payload: any = { side: order.value.side as 'buy' | 'sell', code: order.value.code, quantity: Number(order.value.qty) }
     if ((order.value as any).analysis_id) payload.analysis_id = (order.value as any).analysis_id
-    const res = await paperApi.placeOrder(payload)
+    const res: any = await paperApi.placeOrder(payload)
     if (res.success) {
-      ElMessage.success('下单成功')
+      const placed = res?.data?.order
+      let cashText = ''
+      try {
+        const acc: any = await paperApi.getAccount()
+        const currency = placed?.currency || preview.value?.currency || 'CNY'
+        const cash = acc?.data?.account?.cash
+        const remain = cash && typeof cash === 'object' ? cash[currency] : undefined
+        if (remain != null) cashText = `，剩余可用 ${currency} ${fmtMoney(Number(remain))}`
+      } catch {
+        // 回执缺少余额不影响成交结果
+      }
+      const receipt = placed
+        ? `已成交 ${placed.quantity} 股 @ ${placed.price}${cashText}`
+        : `下单成功${cashText}`
+      ElNotification({
+        title: '成交回执',
+        message: `${receipt}（点击查看持仓）`,
+        type: 'success',
+        duration: 6000,
+        onClick: () => router.push('/portfolio')
+      })
       orderDialog.value = false
       loadAll()
     } else {
@@ -450,20 +575,32 @@ async function submitOrder() {
     }
   } catch (e: any) {
     ElMessage.error(e?.message || '下单失败')
+  } finally {
+    submitting.value = false
   }
+}
+
+function onHeroCommand(cmd: string) {
+  if (cmd === 'reset') confirmReset()
+  else if (cmd === 'portfolio') router.push('/portfolio')
 }
 
 async function confirmReset() {
   try {
-    await ElMessageBox.confirm('将清空所有订单与持仓，并重置账户为初始现金，确认重置？', '重置账户', { type: 'warning' })
+    await ElMessageBox.confirm('将清空所有持仓与交易记录，并把账户恢复为初始现金，确认重置？', '重置账户', { type: 'warning' })
     const res = await paperApi.resetAccount()
     if (res.success) {
       ElMessage.success('账户已重置')
+      loadAll()
     }
   } catch (e) {
     // 取消或失败
   }
 }
+
+onUnmounted(() => {
+  if (previewTimer) clearTimeout(previewTimer)
+})
 
 // 查看报告详情
 function viewReport(analysisId: string) {
@@ -789,19 +926,6 @@ onMounted(() => {
   font-weight: 600;
   background: var(--el-fill-color-lighter);
 }
-/* 非卖出内容置灰（继续持有类持仓评估，排在最低部） */
-.ms-table :deep(.sell-row-hold) {
-  opacity: .45;
-  background: var(--el-fill-color-lighter);
-}
-.ms-table :deep(.sell-row-hold .el-button.is-disabled) {
-  opacity: .55;
-}
-.hold-hint {
-  margin-top: 8px;
-  font-size: 11.5px;
-  color: var(--el-text-color-placeholder);
-}
 .stk {
   display: flex;
   flex-direction: column;
@@ -928,6 +1052,51 @@ onMounted(() => {
   margin-top: 8px;
   font-size: 12px;
   color: #909399;
+}
+.qty-hint {
+  margin-left: 10px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.order-preview {
+  width: 100%;
+  min-height: 32px;
+  padding: 8px 12px;
+  border-radius: var(--app-radius);
+  background: var(--el-fill-color-lighter);
+}
+.op-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 12.5px;
+  line-height: 22px;
+  color: var(--el-text-color-secondary);
+}
+.op-row b {
+  font-family: var(--app-font-mono);
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+}
+.op-alert {
+  margin-top: 6px;
+}
+.op-empty {
+  font-size: 12px;
+  color: var(--el-text-color-placeholder);
+}
+.hold-collapse {
+  margin-top: 8px;
+  border-top: 1px dashed var(--el-border-color-lighter);
+  border-bottom: none;
+}
+.hold-collapse :deep(.el-collapse-item__header) {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  background: transparent;
+}
+.hold-collapse :deep(.el-collapse-item__wrap) {
+  background: transparent;
 }
 .analysis-context {
   margin-bottom: 12px;

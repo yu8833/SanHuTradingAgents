@@ -4,10 +4,21 @@
       <template #header>
         <div style="display: flex; justify-content: space-between; align-items: center;">
           <span>标签管理</span>
-          <el-button type="primary" @click="openCreate">新建标签</el-button>
+          <div style="display: flex; gap: 8px;">
+            <el-button
+              v-if="selectedRows.length > 0"
+              type="danger"
+              plain
+              @click="handleBatchDelete"
+            >
+              删除选中（{{ selectedRows.length }}）
+            </el-button>
+            <el-button type="primary" @click="openCreate">新建标签</el-button>
+          </div>
         </div>
       </template>
-      <el-table :data="tags" v-loading="loading" class="app-table app-table--compact" empty-text="暂无标签">
+      <el-table :data="tags" v-loading="loading" class="app-table app-table--compact" empty-text="暂无标签" @selection-change="onSelectionChange">
+        <el-table-column type="selection" width="46" />
         <el-table-column label="标签名" prop="name" width="200">
           <template #default="{ row }">
             <el-tag :color="row.color" effect="dark" size="small">{{ row.name }}</el-tag>
@@ -121,6 +132,39 @@ async function handleDelete(row: TagItem) {
   } catch (e) {
     // 取消删除
   }
+}
+
+// 批量删除：逐条调用现有删除接口，统计成功/失败
+const selectedRows = ref<TagItem[]>([])
+const onSelectionChange = (rows: TagItem[]) => { selectedRows.value = rows }
+async function handleBatchDelete() {
+  const rows = [...selectedRows.value]
+  if (!rows.length) return
+  try {
+    await ElMessageBox.confirm(
+      `确定删除选中的 ${rows.length} 个标签吗？已使用该标签的自选股会失去标签。`,
+      '批量删除标签',
+      { type: 'warning' }
+    )
+  } catch {
+    return
+  }
+  loading.value = true
+  let ok = 0
+  let failed = 0
+  for (const row of rows) {
+    try {
+      await tagsApi.remove(row.id)
+      ok += 1
+    } catch {
+      failed += 1
+    }
+  }
+  loading.value = false
+  if (failed === 0) ElMessage.success(`已删除 ${ok} 个标签`)
+  else ElMessage.warning(`已删除 ${ok} 个，${failed} 个失败`)
+  selectedRows.value = []
+  await loadData()
 }
 
 function formatTime(time: string): string {

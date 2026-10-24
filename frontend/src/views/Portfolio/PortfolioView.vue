@@ -92,7 +92,15 @@
     <div class="app-table-card">
       <div class="app-table-toolbar">
         <div class="toolbar-left">
-          <span class="toolbar-count">共 <strong>{{ positions.length }}</strong> 只持仓</span>
+          <span class="toolbar-count">共 <strong>{{ displayPositions.length }}</strong> 只持仓</span>
+          <el-select v-model="sourceFilter" size="small" style="width: 118px">
+            <el-option label="全部来源" value="all" />
+            <el-option label="策略落仓" value="strategy" />
+            <el-option label="模拟成交" value="trade" />
+            <el-option label="手动添加" value="manual" />
+            <el-option label="CSV导入" value="import" />
+            <el-option label="未标注" value="unknown" />
+          </el-select>
           <el-tag v-if="loading" size="small" type="info" effect="plain">加载中...</el-tag>
         </div>
         <div class="toolbar-actions">
@@ -114,7 +122,7 @@
       <div v-if="loading && positions.length === 0" class="pos-skeleton">
         <el-skeleton :rows="5" animated></el-skeleton>
       </div>
-      <el-table v-else :data="positions" v-loading="loading" stripe class="app-table app-table--trades">
+      <el-table v-else :data="displayPositions" v-loading="loading" stripe class="app-table app-table--trades">
         <el-table-column label="代码" width="100" prop="symbol">
           <template #default="{ row }">
             <router-link target="_blank" rel="noopener" :to="`/stocks/${row.symbol}`" class="stock-code">{{ row.symbol }}</router-link>
@@ -123,6 +131,11 @@
         <el-table-column label="名称" width="100" prop="stock_name">
           <template #default="{ row }">
             <router-link target="_blank" rel="noopener" :to="`/stocks/${row.symbol}`" class="stock-name">{{ row.stock_name }}</router-link>
+          </template>
+        </el-table-column>
+        <el-table-column label="来源" width="96">
+          <template #default="{ row }">
+            <el-tag size="small" effect="plain" :type="sourceTagType(row.source)">{{ sourceLabel(row.source) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="策略" width="120">
@@ -348,6 +361,30 @@ defineOptions({ name: 'PortfolioView' })
 const loading = ref(false)
 const positions = ref<PositionItem[]>([])
 const summary = ref<PositionSummary | null>(null)
+
+// 来源筛选：区分策略/监控落仓、模拟成交、手动添加与 CSV 导入
+const sourceFilter = ref<'all' | 'strategy' | 'trade' | 'manual' | 'import' | 'unknown'>('all')
+const SOURCE_LABEL: Record<string, string> = {
+  strategy: '策略落仓',
+  trade: '模拟成交',
+  manual: '手动添加',
+  import: 'CSV导入',
+  unknown: '未标注',
+}
+const sourceLabel = (s?: string) => SOURCE_LABEL[s || 'unknown'] || s || '未标注'
+const sourceTagType = (s?: string) => {
+  switch (s || 'unknown') {
+    case 'strategy': return 'warning'
+    case 'trade': return 'success'
+    case 'manual': return 'info'
+    default: return 'info'
+  }
+}
+const displayPositions = computed(() =>
+  sourceFilter.value === 'all'
+    ? positions.value
+    : positions.value.filter(p => (p.source || 'unknown') === sourceFilter.value)
+)
 
 const loadPositions = async () => {
   loading.value = true

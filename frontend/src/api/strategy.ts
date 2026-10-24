@@ -300,11 +300,12 @@ export const strategyApi = {
    * 轮询等待任务完成，返回任务对象（status=success 时含 result）。
    * 失败/超时抛错，由调用方提示。
    */
-  waitTask: async (taskId: string, options?: { intervalMs?: number; timeoutMs?: number }) => {
+  waitTask: async (taskId: string, options?: { intervalMs?: number; timeoutMs?: number; shouldStop?: () => boolean }) => {
     const intervalMs = options?.intervalMs ?? 2000
     const timeoutMs = options?.timeoutMs ?? 600000
     const deadline = Date.now() + timeoutMs
     for (;;) {
+      if (options?.shouldStop?.()) throw new Error('TASK_WAIT_CANCELLED')
       const res = await strategyApi.getTask(taskId)
       const data = (res as any)?.data ?? res
       if (data?.status === 'success') return data

@@ -34,6 +34,15 @@
       </div>
     </div>
 
+    <!-- 运行进度：全部策略为一个后端任务，无法按策略回填；
+         这里给出已运行时长 + 停止等待，避免"卡死还是没跑"的猜测 -->
+    <div v-if="runningAll" class="run-progress">
+      <el-icon class="rp-spin"><Loading /></el-icon>
+      <span class="rp-text">正在计算全部策略（包含行情与评分），已运行 {{ fmtElapsed(runElapsed) }}</span>
+      <span class="rp-hint">通常 10~60 秒，最多等待 10 分钟</span>
+      <el-button size="small" text type="primary" @click="stopWaiting">停止等待</el-button>
+    </div>
+
     <!-- 收盘定格窗口：15:00-15:30 数据已定格、可按收盘价成交的决策黄金期 -->
     <div v-if="decisionWindow" class="close-window-banner">
       <div class="cw-orbit">
@@ -96,6 +105,8 @@
           :class="{
             active: activeStrategy === s.id,
             loading: runningAll,
+            // 非内置策略不参与策略池筛选，置为不可点并给出原因
+            disabled: s.source !== 'builtin',
             // 仅当存在矩阵画像上下文（盘中预警开启）时才做适配高亮/未适配半透明；
             // 平时无画像 → 全部正常显示，避免策略池整体变灰
             dimmed: !!matrixPortrait && !isAdapted(s.id),
@@ -138,6 +149,7 @@
                 :model-value="monitorOn(s.id)"
                 size="small"
                 :loading="monitorSaving === s.id"
+                :disabled="s.source !== 'builtin'"
                 data-monitor
                 @change="(v: string | number | boolean) => toggleMonitor(s, v as boolean)"
                 @click.stop
@@ -145,6 +157,7 @@
               <span class="monitor-label" :class="{ on: monitorOn(s.id) }">监控</span>
             </div>
             <span v-if="monitorOn(s.id)" class="monitor-hint">命中自动入自选 · 触发买卖待确认</span>
+            <span v-else-if="s.source !== 'builtin'" class="monitor-hint">非内置策略，仅展示规则</span>
           </div>
         </div>
       </div>
@@ -172,6 +185,10 @@
             <el-button size="small" @click="batchAddToFavorites" :disabled="displayRows.length === 0">
               <el-icon><Star /></el-icon>
               批量加自选
+            </el-button>
+            <el-button v-if="!showAll && activeStrategy" size="small" @click="gotoBacktest">
+              <el-icon><Histogram /></el-icon>
+              回测该策略
             </el-button>
           </div>
         </div>
@@ -247,6 +264,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import StrategyExplainPanel from '@/components/Strategy/StrategyExplainPanel.vue'
 import {
@@ -272,6 +290,8 @@ echartsUse([BarChart, GridComponent, TooltipComponent, CanvasRenderer])
 defineOptions({ name: 'StrategyScreener' })
 
 const authStore = useAuthStore()
+const route = useRoute()
+const router = useRouter()
 const currentUserId = computed(() => authStore.user?.id ?? null)
 
 // 策略卡片配色画板（通过 --sc 变量注入，保证深浅色主题下都清晰）
@@ -559,9 +579,25 @@ const loadStrategies = async () => {
   }
 }
 
+// 运行全部：已运行时长与停止等待（后端任务无法中断，停止仅放弃本次等待）
+const runElapsed = ref(0)
+let runTimer: number | undefined
+let stopRequested = false
+const fmtElapsed = (sec: number) => sec < 60 ? `${sec} 秒` : `${Math.floor(sec / 60)} 分 ${sec % 60} 秒`
+const stopWaiting = () => {
+  stopRequested = true
+  runningAll.value = false
+  if (runTimer) { window.clearInterval(runTimer); runTimer = undefined }
+  ElMessage.info('已停止等待，后台任务仍会继续，可稍后刷新查看结果')
+}
+
 const runAll = async (refresh = false) => {
   if (runningAll.value) return
   runningAll.value = true
+  stopRequested = false
+  runElapsed.value = 0
+  if (runTimer) window.clearInterval(runTimer)
+  runTimer = window.setInterval(() => { runElapsed.value += 1 }, 1000)
   try {
     const res = await strategyApi.runAll({
       as_of: asOf.value || null, limit: 30, refresh,
@@ -571,7 +607,11 @@ const runAll = async (refresh = false) => {
     const task = (res as any)?.data ?? res
     if (!task?.task_id) throw new Error('提交筛选任务失败')
     // 后端缓存命中时任务秒完成（同交易日幂等），否则后台计算后轮询取回
-    const done = await strategyApi.waitTask(task.task_id, { timeoutMs: 600000 })
+    const done = await strategyApi.waitTask(task.task_id, {
+      timeoutMs: 600000,
+      shouldStop: () => stopRequested,
+    })
+    if (stopRequested) return
     const data = done.result
     isRealtimeResult.value = !!data?.realtime
     // 收盘定格窗口仅对「今日/实时」生效：历史交易日查询一律不显示
@@ -618,9 +658,10 @@ const runAll = async (refresh = false) => {
         }
       }
     }
-  } catch (e) {
-    ElMessage.error('运行全部策略失败')
+  } catch (e: any) {
+    if (e?.message !== 'TASK_WAIT_CANCELLED') ElMessage.error('运行全部策略失败')
   } finally {
+    if (runTimer) { window.clearInterval(runTimer); runTimer = undefined }
     runningAll.value = false
   }
 }
@@ -678,6 +719,12 @@ const handleRun = (s: StrategyMeta) => {
   runSingle(s.id)
 }
 
+// 跳到回测页并预选当前策略
+const gotoBacktest = () => {
+  if (!activeStrategy.value) return
+  router.push({ path: '/screening/backtest', query: { strategy: activeStrategy.value } })
+}
+
 const onAsOfChange = () => {
   // 切换交易日：清空当前明细并重新加载该交易日结果（后端缓存命中则秒回）
   result.value = null
@@ -720,7 +767,15 @@ const batchAddToFavorites = async () => {
 onMounted(() => {
   // 标题日期：最新交易日（轻量接口预取，首屏即正确）
   vibeApi.getLatestTradeDate().then((d) => { if (d) titleDate.value = d })
-  loadStrategies()
+  // 支持从策略回测结果页带 ?strategy=xxx 直接预选并运行该策略
+  loadStrategies().then(() => {
+    const sid = String(route.query.strategy || '')
+    if (sid && strategies.value.some(s => s.id === sid)) {
+      activeStrategy.value = sid
+      activeStrategyName.value = strategies.value.find(s => s.id === sid)?.name || ''
+      runSingle(sid)
+    }
+  })
   loadMonitorStatus()
   loadMarketRegime()
   // 盘中预警开启时，交易时段内每 5 分钟自动刷新一次选股结果（个人分析用，不需要秒级；15:00 后自动定格）。
@@ -734,6 +789,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   if (realtimeTimer) window.clearInterval(realtimeTimer)
+  if (runTimer) window.clearInterval(runTimer)
   stopRegimeLivePoll()
 })
 
@@ -760,6 +816,35 @@ let realtimeTimer: number | undefined
       font-size: 13px;
       color: var(--el-text-color-secondary);
     }
+  }
+
+  /* ===== 运行全部进度条 ===== */
+  .run-progress {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+    padding: 10px 16px;
+    border-radius: 12px;
+    background: var(--el-color-primary-light-9);
+    border: 1px solid var(--el-color-primary-light-7);
+  }
+  .rp-spin {
+    color: var(--el-color-primary);
+    animation: rp-rotate 1.2s linear infinite;
+  }
+  @keyframes rp-rotate {
+    to { transform: rotate(360deg); }
+  }
+  .rp-text {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--el-text-color-primary);
+  }
+  .rp-hint {
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
   }
 
   /* ===== 收盘定格窗口横幅（15:00-15:30 可成交决策黄金期） ===== */
@@ -995,6 +1080,20 @@ let realtimeTimer: number | undefined
           var(--el-bg-color);
 
         &::before { opacity: 1; }
+      }
+
+      /* 非内置策略：不可运行，仅展示规则 */
+      &.disabled {
+        cursor: not-allowed;
+        opacity: 0.62;
+
+        &:hover {
+          transform: none;
+          box-shadow: none;
+          border-color: transparent;
+          background: var(--el-fill-color-light);
+          &::before { opacity: 0; }
+        }
       }
 
       /* 未适配当前大盘画像：半透明显示，与适配策略区分（仍可点击运行） */

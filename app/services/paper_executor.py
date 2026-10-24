@@ -180,7 +180,7 @@ async def _get_market_rules(market: str) -> dict[str, Any] | None:
     return fallback
 
 
-def _calculate_commission(market: str, side: str, amount: float, rules: dict[str, Any]) -> float:
+def _calculate_commission(market: str, side: str, amount: float, rules: dict[str, Any] | None) -> float:
     """计算手续费"""
     if not rules or "commission" not in rules:
         return 0.0
@@ -211,6 +211,97 @@ def _calculate_commission(market: str, side: str, amount: float, rules: dict[str
         commission += amount * commission_config["sec_fee_rate"]
 
     return round(commission, 2)
+
+
+def get_lot_size(market: str, rules: dict[str, Any] | None) -> int:
+    """返回市场最小交易单位。优先读 paper_market_rules.lot_size，缺失时按市场兜底。"""
+    if rules:
+        lot = rules.get("lot_size")
+        if isinstance(lot, (int, float)) and lot > 0:
+            return int(lot)
+    return {"CN": 100, "HK": 1, "US": 1}.get(market, 1)
+
+
+async def preview_market_order(
+    user_id: str,
+    code: str,
+    side: str,
+    quantity: int,
+    market: str | None = None,
+) -> dict[str, Any]:
+    """下单前置预览：价格、金额、费用、最大可买/可卖与校验错误。
+
+    与 `execute_market_order` 共用市场识别、市场规则与费用计算，避免前端
+    "提交后才知道失败"。不落任何数据。
+    """
+    if market:
+        market = market.upper()
+        normalized_code = code
+    else:
+        market, normalized_code = detect_market_and_code(code)
+
+    side = str(side).lower()
+    qty = int(quantity)
+    currency = {"CN": "CNY", "HK": "HKD", "US": "USD"}.get(market, "CNY")
+
+    errors: list[str] = []
+    rules = await _get_market_rules(market)
+    lot = get_lot_size(market, rules)
+
+    price = await get_last_price(normalized_code, market)
+    if price is None or price <= 0:
+        errors.append("无法获取最新价格，暂不能下单")
+        price = 0.0
+
+    notional = round(price * qty, 2)
+    commission = _calculate_commission(market, side, notional, rules) if price > 0 else 0.0
+
+    acc = await get_or_create_account(user_id)
+    cash = acc.get("cash") or {}
+    available_cash = float(cash.get(currency, 0.0)) if isinstance(cash, dict) else 0.0
+    available_qty = 0
+    max_qty = 0
+
+    if side == "buy":
+        if lot > 1 and qty % lot != 0:
+            errors.append(f"买入数量必须为 {lot} 的整数倍（当前 {qty}）")
+        if price > 0:
+            comm_rate = 0.0
+            if rules and isinstance(rules.get("commission"), dict):
+                comm_rate = float(rules["commission"].get("rate", 0.0) or 0.0)
+            unit_cost = price * (1 + comm_rate)
+            max_qty = int(available_cash // unit_cost) if unit_cost > 0 else 0
+            if lot > 1:
+                max_qty = (max_qty // lot) * lot
+        total_cost = round(notional + commission, 2)
+        if price > 0 and total_cost > available_cash:
+            errors.append(f"可用{currency}不足：需要 {total_cost:.2f}，可用 {available_cash:.2f}")
+        net_proceeds = None
+    else:
+        available_qty = await _get_available_quantity(user_id, normalized_code, market)
+        max_qty = available_qty
+        total_cost = None
+        net_proceeds = round(notional - commission, 2)
+        if qty > available_qty:
+            errors.append(f"可用持仓不足：需要 {qty}，可用 {available_qty}")
+
+    return {
+        "code": normalized_code,
+        "market": market,
+        "currency": currency,
+        "side": side,
+        "quantity": qty,
+        "price": round(price, 4),
+        "notional": notional,
+        "fee": round(commission, 2),
+        "total_cost": total_cost,
+        "net_proceeds": net_proceeds,
+        "lot_size": lot,
+        "max_qty": int(max_qty),
+        "available_cash": round(available_cash, 2),
+        "available_qty": int(available_qty),
+        "errors": errors,
+    }
 
 
 async def _get_available_quantity(user_id: str, code: str, market: str) -> int:
@@ -398,23 +489,29 @@ async def execute_market_order(
     side = str(side).lower()
     qty = int(quantity)
 
-    # 2. 确定货币
+    # 2. 整手校验：仅买入侧强制最小交易单位（卖出允许零股，A股规则如此）
+    _rules_for_lot = await _get_market_rules(market)
+    _lot = get_lot_size(market, _rules_for_lot)
+    if side == "buy" and _lot > 1 and qty % _lot != 0:
+        raise ValueError(f"{market} 买入数量必须为 {_lot} 的整数倍（当前 {qty}）")
+
+    # 3. 确定货币
     currency_map = {"CN": "CNY", "HK": "HKD", "US": "USD"}
     currency = currency_map.get(market, "CNY")
 
-    # 3. 获取账户
+    # 4. 获取账户
     acc = await get_or_create_account(user_id)
 
-    # 4. 获取价格
+    # 5. 获取价格
     price = await get_last_price(normalized_code, market)
     if price is None or price <= 0:
         raise ValueError(f"无法获取股票 {normalized_code} ({market}) 的最新价格")
 
-    # 5. 计算金额
+    # 6. 计算金额
     notional = round(price * qty, 2)
 
     # 6. 获取市场规则并计算手续费
-    rules = await _get_market_rules(market)
+    rules = _rules_for_lot
     commission = _calculate_commission(market, side, notional, rules) if rules else 0.0
     total_cost = notional + commission
 
@@ -467,6 +564,7 @@ async def execute_market_order(
                     "created_at": now,
                     "updated_at": now,
                     "strategy": strategy or "default",
+                    "source": "strategy" if strategy else "trade",
                     "stop_loss_price": stop_loss_price,
                     "take_profit_price": take_profit_price,
                     "thesis": thesis,
@@ -493,6 +591,7 @@ async def execute_market_order(
                 }
                 if strategy:
                     update_set["strategy"] = strategy
+                    update_set["source"] = "strategy"
                 if stop_loss_price is not None:
                     update_set["stop_loss_price"] = stop_loss_price
                 if take_profit_price is not None:

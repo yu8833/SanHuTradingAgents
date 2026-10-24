@@ -1456,6 +1456,7 @@ async def get_user_analysis_history(
     end_date: str | None = Query(None, description="结束日期，YYYY-MM-DD"),
     symbol: str | None = Query(None, description="股票代码"),
     stock_code: str | None = Query(None, description="股票代码(已废弃,使用symbol)"),
+    keyword: str | None = Query(None, description="关键词，模糊匹配股票代码/名称/任务ID"),
     market_type: str | None = Query(None, description="市场类型"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页大小")
@@ -1511,6 +1512,17 @@ async def get_user_analysis_history(
         query_symbol = symbol or stock_code
         if query_symbol:
             conditions.append({"$or": [{"symbol": query_symbol}, {"stock_code": query_symbol}]})
+
+        # 关键词过滤（模糊匹配股票代码/名称/任务ID，供任务中心跨页搜索）
+        if keyword and keyword.strip():
+            import re as _re
+            kw = _re.escape(keyword.strip())
+            conditions.append({"$or": [
+                {"symbol": {"$regex": kw, "$options": "i"}},
+                {"stock_code": {"$regex": kw, "$options": "i"}},
+                {"stock_name": {"$regex": kw, "$options": "i"}},
+                {"task_id": {"$regex": kw, "$options": "i"}},
+            ]})
 
         # 日期范围过滤（北京时间日期 -> UTC 区间；MongoDB 内部按 UTC 存储）
         # ⚠️ 语义契约：start_date/end_date 是前端输入的"北京日历日"（API 边界，属用户意图），

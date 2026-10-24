@@ -9,9 +9,14 @@
         <div class="page-hero-text">
           <h2 class="page-hero-title">操作日志</h2>
           <p class="page-hero-sub">
-            系统操作日志查看、过滤和分析
+            记录"谁在什么时候做了什么"，用于审计与追溯；排查故障请查看系统日志
           </p>
         </div>
+      </div>
+      <div class="page-hero-meta">
+        <el-button text size="small" @click="router.push('/settings/system-logs')">
+          系统日志 <el-icon><ArrowRight /></el-icon>
+        </el-button>
       </div>
     </div>
 
@@ -318,8 +323,10 @@ import {
   Search,
   Refresh,
   Download,
-  Delete
+  Delete,
+  ArrowRight
 } from '@element-plus/icons-vue'
+import { useRouter } from 'vue-router'
 import * as echarts from 'echarts'
 import {
   OperationLogsApi,
@@ -331,6 +338,8 @@ import {
 } from '@/api/operationLogs'
 
 type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
+
+const router = useRouter()
 
 // 响应式数据
 const loading = ref(false)

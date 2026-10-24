@@ -98,8 +98,7 @@
         <template #title>系统管理</template>
         <el-menu-item index="/settings/users">用户管理</el-menu-item>
         <el-menu-item index="/settings/database">数据库管理</el-menu-item>
-        <el-menu-item index="/settings/logs">操作日志</el-menu-item>
-        <el-menu-item index="/settings/system-logs">系统日志</el-menu-item>
+        <el-menu-item index="/settings/logs">日志</el-menu-item>
         <el-menu-item index="/settings/sync">多数据源同步</el-menu-item>
       </el-sub-menu>
     </el-sub-menu>
@@ -131,7 +130,13 @@ import {
 const route = useRoute()
 const appStore = useAppStore()
 
-const activeMenu = computed(() => route.path)
+const activeMenu = computed(() => {
+  // 个人设置的四个子项用 /settings?tab=xxx 区分，仅靠 route.path 无法高亮
+  if (route.path === '/settings' && route.query.tab) {
+    return `/settings?tab=${String(route.query.tab)}`
+  }
+  return route.path
+})
 </script>
 
 <style lang="scss" scoped>

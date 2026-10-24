@@ -54,9 +54,30 @@ export interface PlaceOrderPayload {
   stock_name?: string
 }
 
+export interface OrderPreview {
+  code: string
+  market: string
+  currency: string
+  side: 'buy' | 'sell'
+  quantity: number
+  price: number
+  notional: number
+  fee: number
+  total_cost: number | null
+  net_proceeds: number | null
+  lot_size: number
+  max_qty: number
+  available_cash: number
+  available_qty: number
+  errors: string[]
+}
+
 export const paperApi = {
   async getAccount() {
     return ApiClient.get<GetAccountResponse>('/api/paper/account')
+  },
+  async previewOrder(data: PlaceOrderPayload) {
+    return ApiClient.post<OrderPreview>('/api/paper/order/preview', data)
   },
   async placeOrder(data: PlaceOrderPayload) {
     return ApiClient.post<{ order: PaperOrderItem }>('/api/paper/order', data, { showLoading: true })

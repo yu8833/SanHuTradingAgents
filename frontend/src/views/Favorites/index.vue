@@ -52,28 +52,15 @@
       <el-row :gutter="16" align="middle">
         <el-col :span="24">
           <div class="action-buttons">
-            <el-button @click="refreshData">
-              <el-icon><Refresh /></el-icon>
-              刷新
-            </el-button>
-            <!-- 只有有A股自选股时才显示同步实时行情按钮 -->
+            <!-- 一个“更新行情”覆盖增量/全量：有选中A股走批量同步，否则走高A股实时同步 -->
             <el-button
               v-if="hasAStocks"
               type="success"
-              @click="syncAllRealtime"
               :loading="syncRealtimeLoading"
+              @click="updateQuotes"
             >
               <el-icon><Refresh /></el-icon>
-              同步实时行情
-            </el-button>
-            <!-- 只有选中的股票都是A股时才显示批量同步按钮 -->
-            <el-button
-              v-if="selectedStocksAreAllAShares"
-              type="primary"
-              @click="showBatchSyncDialog"
-            >
-              <el-icon><Download /></el-icon>
-              批量同步数据
+              更新行情
             </el-button>
             <el-button
               v-if="selectedStocks.length > 0"
@@ -84,9 +71,20 @@
               <el-icon><Delete /></el-icon>
               删除选中（{{ selectedStocks.length }}）
             </el-button>
-            <el-button @click="openTagManager">
-              标签管理
-            </el-button>
+            <el-dropdown trigger="click" @command="onMoreCommand">
+              <el-button>
+                更多<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="batch-sync" :disabled="!selectedStocksAreAllAShares">
+                    批量同步历史数据
+                  </el-dropdown-item>
+                  <el-dropdown-item command="refresh">仅刷新列表</el-dropdown-item>
+                  <el-dropdown-item command="tags" divided>标签管理</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
             <el-button type="primary" @click="showAddDialog">
               <el-icon><Plus /></el-icon>
               添加自选股
@@ -346,84 +344,6 @@
       </template>
     </el-dialog>
 
-    <!-- 标签管理对话框 -->
-    <el-dialog v-model="tagDialogVisible" title="标签管理" width="560px">
-      <el-table class="app-table app-table--compact" :data="tagList" v-loading="tagLoading" size="small" style="width: 100%; margin-bottom: 12px;">
-        <el-table-column label="名称" min-width="220">
-          <template #default="{ row }">
-            <template v-if="row._editing">
-              <el-input v-model="row._name" placeholder="标签名称" size="small" />
-            </template>
-            <template v-else>
-              <el-tag :color="row.color" effect="dark" style="margin-right:6px"></el-tag>
-              {{ row.name }}
-            </template>
-          </template>
-        </el-table-column>
-        <el-table-column label="颜色" width="140">
-          <template #default="{ row }">
-            <template v-if="row._editing">
-              <el-select v-model="row._color" placeholder="选择颜色" size="small" style="width: 200px">
-                <el-option v-for="c in COLOR_PALETTE" :key="c" :label="c" :value="c">
-                  <span :style="{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }">
-                    <span>{{ c }}</span>
-                    <span :style="{ display: 'inline-block', width: '12px', height: '12px', border: '1px solid #ddd', borderRadius: '2px', marginLeft: '8px', background: c }"></span>
-                  </span>
-                </el-option>
-              </el-select>
-              <span class="color-dot-preview" :style="{ background: row._color }"></span>
-            </template>
-            <template v-else>
-              <span :style="{display:'inline-block',width:'14px',height:'14px',background: row.color,border:'1px solid #ddd',marginRight:'6px'}"></span>
-              {{ row.color }}
-
-            </template>
-          </template>
-        </el-table-column>
-        <el-table-column label="排序" width="100" align="center">
-          <template #default="{ row }">
-            <template v-if="row._editing">
-              <el-input v-model.number="row._sort" type="number" size="small" />
-            </template>
-            <template v-else>
-              {{ row.sort_order }}
-            </template>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="160" fixed="right">
-          <template #default="{ row }">
-            <template v-if="row._editing">
-              <el-button type="text" size="small" @click="saveTag(row)">保存</el-button>
-              <el-button type="text" size="small" @click="cancelEditTag(row)">取消</el-button>
-            </template>
-            <template v-else>
-              <el-button type="text" size="small" @click="editTag(row)">编辑</el-button>
-              <el-button type="text" size="small" style="color:#f56c6c" @click="deleteTag(row)">删除</el-button>
-            </template>
-          </template>
-        </el-table-column>
-      </el-table>
-
-      <div style="display:flex; gap:8px; align-items:center;">
-        <el-input v-model="newTag.name" placeholder="新标签名" style="flex:1" />
-        <el-select v-model="newTag.color" placeholder="选择颜色" style="width:200px">
-          <el-option v-for="c in COLOR_PALETTE" :key="c" :label="c" :value="c">
-            <span :style="{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }">
-              <span>{{ c }}</span>
-              <span :style="{ display: 'inline-block', width: '12px', height: '12px', border: '1px solid #ddd', borderRadius: '2px', marginLeft: '8px', background: c }"></span>
-            </span>
-          </el-option>
-        </el-select>
-        <span class="color-dot-preview" :style="{ background: newTag.color }"></span>
-        <el-input v-model.number="newTag.sort_order" type="number" placeholder="排序" style="width:120px" />
-        <el-button type="primary" @click="createTag" :loading="tagLoading">新增</el-button>
-      </div>
-
-      <template #footer>
-        <el-button @click="tagDialogVisible=false">关闭</el-button>
-      </template>
-    </el-dialog>
-
     <!-- 批量同步对话框 -->
     <el-dialog
       v-model="batchSyncDialogVisible"
@@ -533,7 +453,7 @@ import {
   Search,
   Refresh,
   Plus,
-  Download,
+  ArrowDown,
   Delete
 } from '@element-plus/icons-vue'
 import { favoritesApi } from '@/api/favorites'
@@ -553,15 +473,6 @@ echartsUse([BarChart, GridComponent, TooltipComponent, CanvasRenderer])
 
 import type { FavoriteItem } from '@/api/favorites'
 import { useAuthStore } from '@/stores/auth'
-
-
-// 颜色可选项（20种预设颜色）
-const COLOR_PALETTE = [
-  '#2b6cb0', '#2c5282', '#5c90c2', '#52C41A', '#67C23A',
-  '#13C2C2', '#FA8C16', '#E6A23C', '#F56C6C', '#EB2F96',
-  '#722ED1', '#8E44AD', '#00BFBF', '#1F2D3D', '#606266',
-  '#909399', '#C0C4CC', '#FF7F50', '#A0CFFF', '#2C3E50'
-]
 
 const router = useRouter()
 
@@ -871,6 +782,21 @@ const syncAllRealtime = async () => {
   }
 }
 
+// 更新行情：有选中A股时走批量历史同步，否则只同步实时行情
+const updateQuotes = () => {
+  if (selectedStocksAreAllAShares.value && selectedStocks.value.length > 0) {
+    showBatchSyncDialog()
+  } else {
+    syncAllRealtime()
+  }
+}
+
+const onMoreCommand = (cmd: string) => {
+  if (cmd === 'batch-sync') showBatchSyncDialog()
+  else if (cmd === 'refresh') refreshData()
+  else if (cmd === 'tags') openTagManager()
+}
+
 const loadUserTags = async () => {
   try {
     const [customRes, favoritesRes] = await Promise.allSettled([
@@ -908,99 +834,10 @@ const loadUserTags = async () => {
   }
 }
 
-// 标签管理对话框 - 脚本
-const tagDialogVisible = ref(false)
-const tagLoading = ref(false)
-const tagList = ref<any[]>([])
-const newTag = ref({ name: '', color: '#2b6cb0', sort_order: 0 })
-
-const loadTagList = async () => {
-  tagLoading.value = true
-  try {
-    const res = await tagsApi.list()
-    tagList.value = (res as any)?.data || []
-  } catch (e) {
-    console.error('加载标签列表失败:', e)
-  } finally {
-    tagLoading.value = false
-  }
+// 标签管理统一走设置页，避免与设置→标签管理形成双入口
+const openTagManager = () => {
+  router.push('/settings/tags')
 }
-
-const openTagManager = async () => {
-  tagDialogVisible.value = true
-  await loadTagList()
-}
-
-const createTag = async () => {
-  if (!newTag.value.name || !newTag.value.name.trim()) {
-    ElMessage.warning('请输入标签名')
-    return
-  }
-  tagLoading.value = true
-  try {
-    await tagsApi.create({ ...newTag.value })
-    ElMessage.success('创建成功')
-    newTag.value = { name: '', color: '#2b6cb0', sort_order: 0 }
-    await loadTagList()
-    await loadUserTags()
-  } catch (e: any) {
-    console.error('创建标签失败:', e)
-    ElMessage.error(e?.message || '创建失败')
-  } finally {
-    tagLoading.value = false
-  }
-}
-
-const editTag = (row: any) => {
-  row._editing = true
-  row._name = row.name
-  row._color = row.color
-  row._sort = row.sort_order
-}
-
-const cancelEditTag = (row: any) => {
-  row._editing = false
-}
-
-const saveTag = async (row: any) => {
-  tagLoading.value = true
-  try {
-    await tagsApi.update(row.id, {
-      name: row._name ?? row.name,
-      color: row._color ?? row.color,
-      sort_order: row._sort ?? row.sort_order,
-    })
-    ElMessage.success('保存成功')
-    row._editing = false
-    await loadTagList()
-    await loadUserTags()
-  } catch (e: any) {
-    console.error('保存标签失败:', e)
-    ElMessage.error(e?.message || '保存失败')
-  } finally {
-    tagLoading.value = false
-  }
-}
-
-const deleteTag = async (row: any) => {
-  try {
-    await ElMessageBox.confirm(`确定删除标签 ${row.name} 吗？`, '删除标签', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      type: 'warning'
-    })
-    tagLoading.value = true
-    await tagsApi.remove(row.id)
-    ElMessage.success('已删除')
-    await loadTagList()
-    await loadUserTags()
-  } catch (e) {
-    // 用户取消或失败
-  } finally {
-    tagLoading.value = false
-  }
-}
-
 
 
 const refreshData = () => {

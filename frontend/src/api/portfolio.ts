@@ -14,6 +14,7 @@ export interface PositionItem {
   buy_date: string
   notes?: string | null
   strategy?: string
+  source?: string
   stop_loss_price?: number | null
   take_profit_price?: number | null
   thesis?: string | null

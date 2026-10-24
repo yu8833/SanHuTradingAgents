@@ -13,7 +13,15 @@
             size="small"
             @click="$emit('open-sync')"
           >
-            <el-icon><Refresh /></el-icon> 一键更新
+            <el-icon><Refresh /></el-icon> 补最新缺口
+          </el-button>
+          <el-button
+            v-if="!overallHealthy"
+            type="text"
+            size="small"
+            @click="$emit('open-full-sync')"
+          >
+            全量同步
           </el-button>
           <el-button type="text" size="small" @click="goToSyncPage">
             管理 <el-icon><ArrowRight /></el-icon>
@@ -183,7 +191,7 @@ import { subscribeQuotesUpdate } from '@/utils/quotesSSE'
 import { formatDateTime, toTimestamp } from '@/utils/datetime'
 
 defineOptions({ name: 'DataHealthCard' })
-defineEmits<{ (e: 'open-sync'): void }>()
+defineEmits<{ (e: 'open-sync'): void; (e: 'open-full-sync'): void }>()
 
 const router = useRouter()
 

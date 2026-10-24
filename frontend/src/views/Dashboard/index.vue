@@ -13,13 +13,35 @@
       </div>
     </div>
 
+    <!-- 今日待办：先告诉用户"今天有什么要处理"，再展示各模块 -->
+    <div class="todo-bar" v-loading="todoLoading">
+      <div class="todo-head">
+        <span class="todo-title">今日待办</span>
+        <span class="todo-sub" v-if="todoTotal === 0">今天没有需要处理的事项</span>
+      </div>
+      <div class="todo-items">
+        <button class="todo-item" :class="{ active: todos.pendingOrders > 0 }" @click="router.push('/stock-alerts')">
+          <span class="todo-label">待确认指令</span>
+          <b class="todo-num">{{ todos.pendingOrders }}</b>
+        </button>
+        <button class="todo-item" :class="{ danger: todos.criticalAlerts > 0 }" @click="router.push('/stock-alerts')">
+          <span class="todo-label">重要告警</span>
+          <b class="todo-num">{{ todos.criticalAlerts }}</b>
+        </button>
+        <button class="todo-item" :class="{ warn: todos.staleData > 0 }" @click="openSyncConfirm">
+          <span class="todo-label">数据待更新</span>
+          <b class="todo-num">{{ todos.staleData }} 项</b>
+        </button>
+      </div>
+    </div>
+
     <!-- 监控中心（简要触发记录，查看详情跳转监控中心） -->
     <MonitorSummary style="margin-bottom: 24px;" />
 
     <!-- 顶部核心监控：数据健康 + 模拟账户 + 自选股行情 -->
     <el-row :gutter="24" class="monitor-top">
       <el-col :xs="24" :md="8">
-        <DataHealthCard @open-sync="openSyncConfirm" />
+        <DataHealthCard @open-sync="openSyncConfirm" @open-full-sync="openFullSyncConfirm" />
       </el-col>
 
       <el-col :xs="24" :md="8">
@@ -138,20 +160,21 @@
     <!-- 全量同步对话框 -->
     <el-dialog
       v-model="syncConfirmVisible"
-      title="一键更新所有数据"
+      :title="forceFullSync ? '全量同步全部数据' : '补齐最新数据缺口'"
       width="520px"
       :close-on-click-modal="false"
     >
       <div v-if="!syncRunning" class="confirm-body">
         <el-alert
-          title="系统将按顺序同步所有过期数据，预计耗时 10~30 分钟"
-          type="warning"
+          :title="forceFullSync ? '全量同步：忽略新鲜度判断，重新拉取所有数据类型，预计耗时 10~30 分钟' : '增量同步：只补齐已过期的数据，通常数秒到数分钟'"
+          :type="forceFullSync ? 'warning' : 'info'"
           :closable="false"
           show-icon
         />
         <div class="confirm-tip" style="margin-top: 16px;">
           <div class="tip-line"><el-icon><List /></el-icon><span>同步顺序：股票基础信息 → 历史K线 → 财务数据 → 新闻数据</span></div>
-          <div class="tip-line"><el-icon><Timer /></el-icon><span>预估耗时：10 ~ 30 分钟</span></div>
+          <div class="tip-line" v-if="forceFullSync"><el-icon><Timer /></el-icon><span>预估耗时：10 ~ 30 分钟</span></div>
+          <div class="tip-line" v-else><el-icon><Timer /></el-icon><span>预估耗时：数秒到数分钟，只处理过期项</span></div>
           <div class="tip-line"><el-icon><Refresh /></el-icon><span>同步完成后会自动刷新数据新鲜度</span></div>
           <div class="tip-line"><el-icon><Warning /></el-icon><span>历史K线同步耗时较长，请耐心等待</span></div>
         </div>
@@ -188,7 +211,7 @@
       <template #footer>
         <el-button v-if="!syncRunning" @click="syncConfirmVisible = false">取消</el-button>
         <el-button v-if="!syncRunning" type="primary" :loading="syncStarting" @click="doSync">
-          确认同步
+          {{ forceFullSync ? '开始全量同步' : '开始补齐' }}
         </el-button>
         <el-button v-if="syncRunning" :disabled="!syncFinished" @click="syncConfirmVisible = false">
           {{ syncFinished ? '关闭' : '同步中...' }}
@@ -223,6 +246,7 @@ import { favoritesApi } from '@/api/favorites'
 import { paperApi, type PaperAccountSummary } from '@/api/paper'
 import * as syncApi from '@/api/sync'
 import * as schedulerApi from '@/api/scheduler'
+import { monitorApi } from '@/api/monitor'
 import { screeningApi } from '@/api/screening'
 import { subscribeQuotesUpdate } from '@/utils/quotesSSE'
 import { fmtPct, fmtMoney } from '@/utils/format'
@@ -296,6 +320,38 @@ const quotesStale = ref(false)
 // 模拟交易账户数据
 const paperAccount = ref<PaperAccountSummary | null>(null)
 
+// ---------- 今日待办（数据异常 / 待确认指令 / 重要告警） ----------
+const todoLoading = ref(false)
+const todos = reactive({ pendingOrders: 0, criticalAlerts: 0, staleData: 0 })
+const todoTotal = computed(() => todos.pendingOrders + todos.criticalAlerts + todos.staleData)
+
+const loadTodos = async () => {
+  todoLoading.value = true
+  const [ordersRes, alertsRes, freshnessRes] = await Promise.allSettled([
+    monitorApi.listTbsOrders({ status: 'pending', limit: 100 }),
+    monitorApi.listAlerts({ days: 1, limit: 100 }),
+    screeningApi.checkDataFreshness(),
+  ])
+  if (ordersRes.status === 'fulfilled') {
+    const orders = (ordersRes.value as any)?.data?.orders || []
+    todos.pendingOrders = orders.filter((o: any) => o.status === 'pending').length
+  }
+  if (alertsRes.status === 'fulfilled') {
+    const alerts = (alertsRes.value as any)?.data?.alerts || []
+    const dayStart = new Date().setHours(0, 0, 0, 0)
+    todos.criticalAlerts = alerts.filter(
+      (a: any) => a.severity === 'critical' && Number(a.ts || 0) >= dayStart
+    ).length
+  }
+  if (freshnessRes.status === 'fulfilled') {
+    const data = (freshnessRes.value as any)?.data?.data || (freshnessRes.value as any)?.data || {}
+    Object.assign(freshness, data)
+    const items = data.items || []
+    todos.staleData = items.filter((i: any) => i.is_fresh === false).length
+  }
+  todoLoading.value = false
+}
+
 // ---------- 数据新鲜度（供全量同步对话框判断跳过阶段） ----------
 const freshness = reactive({
   overall_is_fresh: false,
@@ -352,7 +408,16 @@ const isPhaseFresh = (phaseId: number): boolean => {
   return item?.is_fresh === true
 }
 
+const forceFullSync = ref(false)
 const openSyncConfirm = () => {
+  forceFullSync.value = false
+  resetSyncDialog()
+}
+const openFullSyncConfirm = () => {
+  forceFullSync.value = true
+  resetSyncDialog()
+}
+const resetSyncDialog = () => {
   syncRunning.value = false
   syncFinished.value = false
   syncError.value = false
@@ -438,7 +503,7 @@ const advanceToNextPhase = async (_syncStartTime: number) => {
   }
 
   for (let nextPhase = syncPhase.value + 1; nextPhase <= syncPhases.length; nextPhase++) {
-    if (isPhaseFresh(nextPhase)) {
+    if (!forceFullSync.value && isPhaseFresh(nextPhase)) {
       // 该数据类型已最新，跳过
       skippedPhases.value.add(nextPhase)
       const nextRange = syncPhases.find(p => p.id === nextPhase + 1)?.range?.[0] ?? 100
@@ -805,8 +870,7 @@ let favSseUnsubscribe: (() => void) | null = null
 
 // 生命周期
 onMounted(async () => {
-  await loadFavoriteStocks()
-  await loadPaperAccount()
+  await Promise.all([loadFavoriteStocks(), loadPaperAccount(), loadTodos()])
   // 收到行情更新信号立即刷新自选股（延迟约 0-2 秒）。
   // P3-6：信号若带值则原地 patch 对应股票，避免全量重拉与陈旧读取；未带值才兜底全量刷新。
   favSseUnsubscribe = subscribeQuotesUpdate((signal) => {
@@ -839,6 +903,7 @@ onActivated(() => {
   if (dashInited) {
     loadFavoriteStocks()
     loadPaperAccount()
+    loadTodos()
   }
   dashInited = true
 })
@@ -847,6 +912,63 @@ onActivated(() => {
 <style lang="scss" scoped>
 .dashboard {
   // 页面容器交给全局 .app-page；顶部横幅由全局 .page-hero 提供
+
+  // 今日待办
+  .todo-bar {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+    padding: 12px 18px;
+    border-radius: 14px;
+    background: var(--el-bg-color);
+    border: 1px solid var(--el-border-color-light);
+  }
+  .todo-head {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 140px;
+  }
+  .todo-title {
+    font-size: 14px;
+    font-weight: 700;
+  }
+  .todo-sub {
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+  }
+  .todo-items {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .todo-item {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 7px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--el-border-color-lighter);
+    background: var(--el-fill-color-lighter);
+    cursor: pointer;
+    transition: border-color .2s, background .2s;
+    &:hover { border-color: var(--el-color-primary-light-5); }
+    &.active { border-color: var(--el-color-primary-light-3); background: var(--el-color-primary-light-9); }
+    &.danger { border-color: var(--el-color-danger-light-5); background: var(--el-color-danger-light-9); }
+    &.warn { border-color: var(--el-color-warning-light-5); background: var(--el-color-warning-light-9); }
+  }
+  .todo-label {
+    font-size: 12.5px;
+    color: var(--el-text-color-secondary);
+  }
+  .todo-num {
+    font-size: 16px;
+    font-weight: 700;
+    font-family: var(--app-font-mono, monospace);
+    color: var(--el-text-color-primary);
+  }
 
   // 顶部卡片统一样式
   .monitor-top {

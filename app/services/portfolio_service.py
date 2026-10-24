@@ -42,6 +42,8 @@ class Position(BaseModel):
     notes: str | None = None      # 备注
     # 散户策略扩展字段（作为元数据存储在 paper_positions 上）
     strategy: str | None = "default"
+    # 持仓来源：manual（手动添加）/ import（CSV导入）/ trade（模拟成交）/ strategy（策略/监控落仓）
+    source: str | None = "manual"
     stop_loss_price: float | None = None
     take_profit_price: float | None = None
     thesis: str | None = None
@@ -162,6 +164,8 @@ class PortfolioService:
         # 兼容字段
         result.setdefault("position_ratio", 0.0)
         result.setdefault("strategy", "default")
+        # 历史持仓没有来源字段：标为 unknown，避免把手工/导入仓误标成"模拟成交"
+        result.setdefault("source", "unknown")
         result.setdefault("exit_price", None)
         result.setdefault("exit_date", None)
         result.setdefault("exit_reason", None)
@@ -206,6 +210,7 @@ class PortfolioService:
                     ),
                     "buy_date": position.buy_date or existing.get("buy_date"),
                     "strategy": position.strategy or existing.get("strategy", "default"),
+                    "source": position.source or existing.get("source", "manual"),
                     "stop_loss_price": position.stop_loss_price or existing.get("stop_loss_price"),
                     "take_profit_price": position.take_profit_price or existing.get("take_profit_price"),
                     "thesis": position.thesis or existing.get("thesis"),
@@ -234,6 +239,7 @@ class PortfolioService:
                 "position_ratio": position.position_ratio,
                 "notes": position.notes,
                 "strategy": position.strategy or "default",
+                "source": position.source or "manual",
                 "stop_loss_price": position.stop_loss_price,
                 "take_profit_price": position.take_profit_price,
                 "thesis": position.thesis,
@@ -553,6 +559,7 @@ class PortfolioService:
                     "position_ratio": position.position_ratio,
                     "notes": position.notes,
                     "strategy": position.strategy or "default",
+                    "source": position.source or "import",
                     "stop_loss_price": position.stop_loss_price,
                     "take_profit_price": position.take_profit_price,
                     "thesis": position.thesis,

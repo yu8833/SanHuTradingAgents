@@ -280,6 +280,34 @@ const viewReport = (report: ReportListItem) => {
   router.push(`/reports/view/${report.id}`)
 }
 
+// 拉取并保存单份报告（不弹提示，供单个/批量导出复用）
+const downloadReportFile = async (report: ReportListItem, format: string = 'markdown') => {
+  const response = await fetch(`/api/reports/${report.id}/download?format=${format}`, {
+    headers: {
+      'Authorization': `Bearer ${authStore.token}`
+    }
+  })
+
+  if (!response.ok) {
+    const errorText = await response.text()
+    throw new Error(errorText || `HTTP ${response.status}`)
+  }
+
+  const blob = await response.blob()
+  const url = window.URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+
+  // 根据格式设置文件扩展名
+  const ext = getFileExtension(format)
+  a.download = `${report.stock_code}_分析报告_${report.analysis_date}.${ext}`
+
+  document.body.appendChild(a)
+  a.click()
+  window.URL.revokeObjectURL(url)
+  document.body.removeChild(a)
+}
+
 const downloadReport = async (report: ReportListItem, format: string = 'markdown') => {
   try {
     // 显示加载提示
@@ -289,32 +317,9 @@ const downloadReport = async (report: ReportListItem, format: string = 'markdown
       duration: 0
     })
 
-    const response = await fetch(`/api/reports/${report.id}/download?format=${format}`, {
-      headers: {
-        'Authorization': `Bearer ${authStore.token}`
-      }
-    })
+    await downloadReportFile(report, format)
 
     loadingMsg.close()
-
-    if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(errorText || `HTTP ${response.status}`)
-    }
-
-    const blob = await response.blob()
-    const url = window.URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-
-    // 根据格式设置文件扩展名
-    const ext = getFileExtension(format)
-    a.download = `${report.stock_code}_分析报告_${report.analysis_date}.${ext}`
-
-    document.body.appendChild(a)
-    a.click()
-    window.URL.revokeObjectURL(url)
-    document.body.removeChild(a)
 
     ElMessage.success(`${getFormatName(format)}报告下载成功`)
   } catch (error) {
@@ -397,8 +402,33 @@ const deleteReport = async (report: ReportListItem) => {
   }
 }
 
-const exportSelected = () => {
-  ElMessage.info('批量导出功能开发中...')
+const exportSelected = async () => {
+  const list = [...selectedReports.value]
+  if (list.length === 0) return
+  const loadingMsg = ElMessage({
+    message: `正在导出 ${list.length} 份报告（Markdown）...`,
+    type: 'info',
+    duration: 0
+  })
+  let ok = 0
+  let failed = 0
+  for (const report of list) {
+    try {
+      await downloadReportFile(report, 'markdown')
+      ok += 1
+    } catch (error) {
+      console.error('批量导出失败:', report.stock_code, error)
+      failed += 1
+    }
+    // 浏览器对连续下载有节流，留出间隔避免被拦截
+    await new Promise((resolve) => setTimeout(resolve, 300))
+  }
+  loadingMsg.close()
+  if (failed === 0) {
+    ElMessage.success(`已导出 ${ok} 份报告`)
+  } else {
+    ElMessage.warning(`已导出 ${ok} 份，${failed} 份失败（可重试或单份下载）`)
+  }
 }
 
 const refreshReports = () => {

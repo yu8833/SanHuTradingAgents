@@ -11,6 +11,7 @@ from app.services.paper_executor import (
     INITIAL_CASH_BY_MARKET,
     _fetch_live_price,
     execute_market_order,
+    preview_market_order,
 )
 from app.services.portfolio_service import portfolio_service
 from app.utils.timezone import now_tz
@@ -301,6 +302,26 @@ async def get_account(current_user: dict = Depends(get_current_user)):
     return ok({"account": summary, "positions": detailed_positions})
 
 
+@router.post("/order/preview", response_model=dict)
+async def preview_order(payload: PlaceOrderRequest, current_user: dict = Depends(get_current_user)):
+    """下单前置校验与预览：返回价格、金额、费用、最大可买/可卖与错误列表。
+
+    只读，不落任何数据。前端在数量变化时防抖调用，把"提交后才知道失败"
+    提前到提交前。
+    """
+    try:
+        preview = await preview_market_order(
+            user_id=current_user["id"],
+            code=payload.code,
+            side=payload.side,
+            quantity=payload.quantity,
+            market=payload.market,
+        )
+        return ok(preview)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
 @router.post("/order", response_model=dict)
 async def place_order(payload: PlaceOrderRequest, current_user: dict = Depends(get_current_user)):
     """提交市价单，按最新价即时成交（支持多市场）。
@@ -374,6 +395,8 @@ async def list_positions(
             "unrealized_pnl": None if last is None else round((last - avg_cost) * qty, 2),
             # 策略与平仓元数据（用于交易复盘）
             "strategy": p.get("strategy", "default"),
+            # 持仓来源：manual/import/trade/strategy；历史数据无该字段 → unknown
+            "source": p.get("source") or "unknown",
             "stock_name": stock_name,
             "buy_date": p.get("buy_date"),
             "thesis": p.get("thesis"),

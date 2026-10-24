@@ -544,7 +544,8 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
+import { useRouter } from 'vue-router'
 import {
   Lightning, Refresh, Bell, List, Plus, Delete, EditPen, InfoFilled,
   Connection, Star, ShoppingCart, Wallet, Sell, CircleCheck, MagicStick,
@@ -577,6 +578,7 @@ function stockHref(code?: string): string {
 }
 
 // ── 状态 ────────────────────────────────────────────────
+const router = useRouter()
 const checking = ref(false)
 const loading = ref(false)
 const saving = ref(false)
@@ -757,8 +759,19 @@ const executeOrder = async (o: TbsOrder) => {
 const doExecute = async (o: TbsOrder) => {
   executingId.value = o.id
   try {
-    await monitorApi.executeTbsOrder(o.id, o.direction === 'buy' ? execQty.value : undefined)
-    ElMessage.success(`已执行 ${o.symbol} 指令`)
+    const res: any = await monitorApi.executeTbsOrder(o.id, o.direction === 'buy' ? execQty.value : undefined)
+    // 执行回执：明确告知成交数量/价格与落仓结果，并可一键查看持仓
+    const filled = res?.data?.order || {}
+    const qty = filled?.quantity ?? filled?.executed_qty
+    const price = filled?.price ?? filled?.executed_price
+    const detail = qty && price ? `${qty} 股 @ ${price}` : `${o.symbol} ${o.direction === 'buy' ? '买入' : '卖出'}`
+    ElNotification({
+      title: '指令已执行 · 已同步持仓',
+      message: `${o.name || o.symbol} ${detail}（点击查看持仓）`,
+      type: 'success',
+      duration: 6000,
+      onClick: () => router.push('/portfolio'),
+    })
     execConfirmVisible.value = false
     await loadTbsOrders(); await loadFlowCounts()
   } catch (e: any) {

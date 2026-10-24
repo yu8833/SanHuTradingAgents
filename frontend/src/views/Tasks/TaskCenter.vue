@@ -85,7 +85,12 @@
     <el-card class="list-card" shadow="never">
       <div class="list-header">
         <div class="left">
-          <el-input v-model="keyword" placeholder="搜索股票代码/名称" clearable style="width: 220px" />
+          <el-input
+            v-model="keyword"
+            placeholder="搜索股票代码/名称/任务ID"
+            clearable
+            style="width: 240px"
+          />
           <el-button @click="refreshList" :loading="loading">
             <el-icon><Refresh /></el-icon>
             刷新
@@ -99,7 +104,7 @@
         </div>
       </div>
 
-      <el-table :data="filteredList" v-loading="loading" class="app-table app-table--compact" @selection-change="onSelectionChange">
+      <el-table :data="list" v-loading="loading" class="app-table app-table--compact" @selection-change="onSelectionChange">
         <el-table-column type="selection" width="50" />
         <el-table-column prop="task_id" label="任务ID" width="220" />
         <el-table-column prop="stock_code" label="股票代码" width="120">
@@ -132,7 +137,7 @@
             <el-button v-if="row.status==='completed'" type="text" size="small" @click="openResult(row)">查看结果</el-button>
             <el-button v-if="row.status==='completed'" type="text" size="small" @click="openReport(row)">报告详情</el-button>
             <el-button v-if="row.status==='failed'" type="text" size="small" @click="showErrorDetail(row)">查看错误</el-button>
-            <el-button v-if="row.status==='failed'" type="text" size="small" @click="retryTask(row)">重试</el-button>
+            <el-button v-if="row.status==='failed'" type="text" size="small" @click="rerunTask(row)">重新分析</el-button>
             <el-button v-if="row.status==='processing' || row.status==='running' || row.status==='pending'" type="text" size="small" @click="markAsFailed(row)">标记失败</el-button>
             <el-button type="text" size="small" @click="deleteTask(row)" style="color: #f56c6c;">删除</el-button>
           </template>
@@ -193,7 +198,7 @@ echartsUse([PieChart, TooltipComponent, TitleComponent, CanvasRenderer])
 const router = useRouter()
 const route = useRoute()
 
-const topTab = ref<'analysis' | 'scheduled'>('scheduled')
+const topTab = ref<'analysis' | 'scheduled'>('analysis')
 const activeTab = ref<'running'|'completed'|'failed'|'all'>('running')
 const loading = ref(false)
 const keyword = ref('')
@@ -326,7 +331,8 @@ const loadList = async () => {
       page: currentPage.value,
       page_size: pageSize.value,
       status: filters.value.status || statusParam.value,
-      stock_code: filters.value.stock || undefined
+      stock_code: filters.value.stock || undefined,
+      keyword: keyword.value.trim() || undefined
     }
     if (filters.value.market) params.market_type = filters.value.market
     if (filters.value.dateRange && filters.value.dateRange.length === 2) {
@@ -339,7 +345,7 @@ const loadList = async () => {
     let tasks = body.tasks || body.analyses || []
 
     // 当无筛选条件且历史接口为空时，兜底用任务列表接口（保证能看到数据）
-    const noExtraFilters = !filters.value.market && !filters.value.stock && (!filters.value.dateRange || filters.value.dateRange.length === 0)
+    const noExtraFilters = !filters.value.market && !filters.value.stock && (!filters.value.dateRange || filters.value.dateRange.length === 0) && !keyword.value.trim()
     if (tasks.length === 0 && noExtraFilters) {
       try {
         const res2 = await analysisApi.getTaskList({
@@ -398,20 +404,26 @@ const loadList = async () => {
 
 // 查询/重置
 const applyFilters = () => { currentPage.value = 1; loadList() }
-const resetFilters = () => { filters.value = { dateRange: [], market: '', status: '', stock: '' }; currentPage.value = 1; loadList() }
+const resetFilters = () => {
+  filters.value = { dateRange: [], market: '', status: '', stock: '' }
+  keyword.value = ''
+  currentPage.value = 1
+  loadList()
+}
+
+// 搜索下沉到后端（前端只加载当前页，避免"搜不到第 2 页数据"）
+let keywordTimer: ReturnType<typeof setTimeout> | null = null
+watch(keyword, () => {
+  if (keywordTimer) clearTimeout(keywordTimer)
+  keywordTimer = setTimeout(() => {
+    currentPage.value = 1
+    loadList()
+  }, 350)
+})
 
 // 报告弹窗状态
 const reportVisible = ref(false)
 const reportSections = ref<Array<{ key?: string; title: string; content: any }>>([])
-
-const filteredList = computed(() => {
-  let arr = list.value
-  if (keyword.value) {
-    const k = keyword.value.toLowerCase()
-    arr = arr.filter((x:any) => (x.stock_code||'').toLowerCase().includes(k) || (x.stock_name||'').toLowerCase().includes(k) || (x.task_id||'').toLowerCase().includes(k))
-  }
-  return arr
-})
 
 const handleSizeChange = (size:number) => { pageSize.value = size; currentPage.value = 1; loadList() }
 const handleCurrentChange = (page:number) => { currentPage.value = page; loadList() }
@@ -421,6 +433,7 @@ const onTabChange = () => {
     currentPage.value = 1
     loadList()
     setupPolling()
+    syncQueryTab()
   })
 }
 const refreshList = () => loadList()
@@ -452,7 +465,42 @@ const openReport = (row:any): void => {
   void router.push({ name: 'ReportDetail', params: { id } })
 }
 
-const retryTask = (_row:any) => { ElMessage.info('重试功能待实现') }
+// 失败任务"重新分析"：复用原任务参数重新提交（后端无 retry 端点）
+const rerunTask = async (row: any) => {
+  const symbol = row.stock_code || row.symbol || row.stock_symbol
+  if (!symbol) {
+    ElMessage.warning('缺少股票代码，无法重新分析')
+    return
+  }
+  try {
+    loading.value = true
+    const p = row.parameters || {}
+    await analysisApi.startSingleAnalysis({
+      symbol,
+      parameters: {
+        market_type: p.market_type,
+        analysis_date: p.analysis_date,
+        mode: p.mode,
+        selected_analysts: p.selected_analysts,
+        custom_prompt: p.custom_prompt,
+        include_sentiment: p.include_sentiment,
+        include_risk: p.include_risk,
+        language: p.language,
+        quick_analysis_model: p.quick_analysis_model,
+        deep_analysis_model: p.deep_analysis_model
+      }
+    })
+    ElMessage.success('已重新提交分析任务')
+    activeTab.value = 'running'
+    currentPage.value = 1
+    syncQueryTab()
+    await loadList()
+  } catch (e: any) {
+    ElMessage.error(e?.message || '重新提交失败')
+  } finally {
+    loading.value = false
+  }
+}
 
 // 显示错误详情
 const showErrorDetail = async (row: any) => {
@@ -574,11 +622,23 @@ const exportSelected = () => {
   }
 }
 
+const ANALYSIS_TABS = ['running', 'completed', 'failed', 'all'] as const
+
+// 一级 Tab 与 query.tab 双向同步：保证深链（/analysis/history → ?tab=completed）
+// 与浏览器回退都能落到正确的 Tab；地址栏始终反映当前视图。
+const syncQueryTab = () => {
+  const next = topTab.value === 'scheduled' ? 'scheduled' : activeTab.value
+  if (String((route.query as any)?.tab || '') === next) return
+  void router.replace({ query: { ...route.query, tab: next } })
+}
+
 onMounted(() => {
   // 根据路由 query 初始化标签页
   const tab = String((route.query as any)?.tab || '').toLowerCase()
-  const validTabs = ['running', 'completed', 'failed', 'all']
-  if (validTabs.includes(tab)) {
+  if (tab === 'scheduled') {
+    topTab.value = 'scheduled'
+  } else if ((ANALYSIS_TABS as readonly string[]).includes(tab)) {
+    topTab.value = 'analysis'
     activeTab.value = tab as any
   }
   loadList(); setupPolling()
@@ -592,15 +652,21 @@ onActivated(() => {
   setupPolling()
 })
 
-// 监听路由 query 的 tab 变化，动态切换标签页
+// 监听路由 query 的 tab 变化：既支持分析任务子 Tab，也支持定时任务一级 Tab
 watch(() => (route.query as any)?.tab, (newVal) => {
   const tab = String(newVal || '').toLowerCase()
-  const validTabs = ['running', 'completed', 'failed', 'all']
-  if (validTabs.includes(tab)) {
-    activeTab.value = tab as any
-    currentPage.value = 1
-    loadList()
-    setupPolling()
+  if (tab === 'scheduled') {
+    topTab.value = 'scheduled'
+    return
+  }
+  if ((ANALYSIS_TABS as readonly string[]).includes(tab)) {
+    topTab.value = 'analysis'
+    if (activeTab.value !== tab) {
+      activeTab.value = tab as any
+      currentPage.value = 1
+      loadList()
+      setupPolling()
+    }
   }
 })
 
@@ -612,9 +678,11 @@ watch(topTab, (newVal) => {
   } else {
     setupPolling()
   }
+  syncQueryTab()
 })
 onUnmounted(() => {
   clearInterval(timer)
+  if (keywordTimer) clearTimeout(keywordTimer)
   disconnectAllWebSockets()
 })
 
