@@ -1,44 +1,69 @@
 <template>
   <div class="stock-detail app-page">
-    <!-- 顶部横幅（全局统一） -->
+    <!-- 顶部：股票身份 + 主操作 -->
     <div class="page-hero">
       <div class="page-hero-main">
         <div class="page-hero-icon">
           <el-icon :size="26"><TrendCharts /></el-icon>
         </div>
         <div class="page-hero-text">
-          <h2 class="page-hero-title">{{ code }}</h2>
+          <h2 class="page-hero-title">{{ stockName || code }}</h2>
           <p class="page-hero-sub">
-            {{ stockName || '-' }}
+            <span class="hero-code">{{ code }}</span>
             <el-tag size="small" style="margin-left: 6px;">{{ market || '-' }}</el-tag>
+            <el-tag v-if="isFav" type="warning" size="small" style="margin-left: 6px;">自选</el-tag>
           </p>
         </div>
       </div>
       <div class="page-hero-meta">
+        <el-button type="primary" @click="onAnalyze">
+          <el-icon><TrendCharts /></el-icon> {{ lastAnalysis ? '重新分析' : '发起分析' }}
+        </el-button>
         <el-button @click="onToggleFavorite">
-          <el-icon><Star /></el-icon> {{ isFav ? '已自选' : '加自选' }}
+          <el-icon><Star /></el-icon> {{ isFav ? '移出自选' : '加自选' }}
         </el-button>
-        <!-- 🔥 港股和美股不显示"同步数据"按钮 -->
-        <el-button
-          v-if="market !== 'HK' && market !== 'US'"
-          type="primary"
-          @click="showSyncDialog"
-          :loading="syncLoading"
-        >
-          <el-icon><Refresh /></el-icon> 同步数据
-        </el-button>
-        <el-button type="warning" @click="clearCache" :loading="clearCacheLoading">
-          <el-icon><Delete /></el-icon> 清除缓存
-        </el-button>
-        <el-button type="success" @click="goPaperTrading">
-          <el-icon><CreditCard /></el-icon> 模拟交易
-        </el-button>
+        <el-dropdown trigger="click" @command="onHeaderCommand">
+          <el-button>
+            更多<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="paper">
+                <el-icon><CreditCard /></el-icon> 模拟交易
+              </el-dropdown-item>
+              <el-dropdown-item
+                v-if="market !== 'HK' && market !== 'US'"
+                command="sync"
+                :disabled="syncLoading"
+              >
+                <el-icon><Refresh /></el-icon> 同步数据
+              </el-dropdown-item>
+              <el-dropdown-item command="clear" divided :disabled="clearCacheLoading">
+                <el-icon><Delete /></el-icon> 清除缓存
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </div>
     </div>
 
     <!-- 报价条 -->
     <el-card class="quote-card" shadow="hover">
       <div class="quote">
+        <!-- 一句话研判 + 四类信号 -->
+        <div class="verdict-bar">
+          <div class="verdict-main">
+            <el-tooltip content="由技术信号、资金趋势、风险评分、估值分档规则合成，仅供参考。" placement="top">
+              <span class="verdict-label">研判</span>
+            </el-tooltip>
+            <span class="verdict-text">{{ summaryVerdict }}</span>
+          </div>
+          <div class="verdict-chips">
+            <el-tooltip v-for="chip in signalChips" :key="chip.key" :content="chip.tip" placement="top">
+              <el-tag :type="chip.type" size="small" effect="light">{{ chip.label }}</el-tag>
+            </el-tooltip>
+          </div>
+        </div>
         <div class="price-row">
           <div class="price" :class="changeClass">{{ fmtPrice(quote.price) }}</div>
           <div class="change" :class="changeClass">
@@ -122,7 +147,7 @@
           <div class="item">
             <span>
               换手率
-              <el-tooltip content="今日成交量占流通股本的比例。换手率高（>5%）说明交投活跃，低（<1%）说明关注度高但交易清淡。" placement="top">
+              <el-tooltip content="今日成交量占流通股本的比例。换手率高（>5%）说明交投活跃、筹码换手充分；换手率低（<1%）说明关注度低、交易清淡。" placement="top">
                 <el-icon class="help-icon-inline"><QuestionFilled /></el-icon>
               </el-tooltip>
             </span>
@@ -160,7 +185,7 @@
             ⚠️ 数据已过期 {{ getDataExpiredDays(quote.tradeDate) }} 个交易日（数据日期：{{ quote.tradeDate }}）
           </template>
           <div style="font-size: 12px;">
-            当前显示的数据可能不是最新的，建议点击"同步数据"获取最新行情。
+            当前显示的数据可能不是最新的，可在右上角「更多 → 同步数据」获取最新行情。
           </div>
         </el-alert>
         <!-- 同步状态提示 -->
@@ -188,8 +213,19 @@
       </div>
     </el-card>
 
+    <!-- K线主图 -->
+    <StockKlinePanel
+      ref="klinePanelRef"
+      :key="code"
+      class="kline-panel"
+      :code="code"
+      :signals="tbsSignals"
+      :trigger-date="tbsTriggerDate"
+      :stop-loss="tbsStopLoss"
+    />
+
     <el-row :gutter="16" class="body">
-      <el-col :span="18">
+      <el-col :xs="24" :sm="24" :md="24" :lg="18">
         <!-- 详细分析结果：超链接到分析报告（移到K线上方） -->
         <el-card v-if="analysisStatus==='running' || lastAnalysis" shadow="hover" class="analysis-detail-card" id="analysis-detail">
           <template #header><div class="card-hd">详细分析结果</div></template>
@@ -201,65 +237,83 @@
             <!-- 决策建议（仅呈现结果标签，不显示内容） -->
             <div v-if="decisionRecommendation" class="decision-box">
               <div class="decision-header">
-                <span class="decision-icon">🎯</span>
                 <span class="decision-label">决策建议</span>
                 <el-tag :type="recommendationTagType" effect="dark" size="small">{{ recommendationLabel }}</el-tag>
               </div>
             </div>
 
-            <!-- 短线博弈 -->
-            <div v-if="shortTermScores.length" class="score-section">
-              <div class="score-section-title">⚡ 短线博弈</div>
-              <div class="score-grid">
-                <el-tooltip
-                  v-for="item in shortTermScores"
-                  :key="item.field"
-                  placement="top"
-                  effect="dark"
-                >
-                  <template #content>
-                    <div style="max-width: 250px; line-height: 1.6;">
-                      <div style="font-weight: bold; margin-bottom: 6px;">{{ item.analyst }} · {{ item.max_score }}分制</div>
-                      <div style="font-size: 12px; opacity: 0.9;">{{ item.basis }}</div>
+            <!-- 全部分数：默认折叠，仅展示最高/最低两项，避免首屏被 7 个评分卡撑高 -->
+            <div v-if="showAllScores">
+              <!-- 短线博弈 -->
+              <div v-if="shortTermScores.length" class="score-section">
+                <div class="score-section-title">短线博弈</div>
+                <div class="score-grid">
+                  <el-tooltip
+                    v-for="item in shortTermScores"
+                    :key="item.field"
+                    placement="top"
+                    effect="dark"
+                  >
+                    <template #content>
+                      <div style="max-width: 250px; line-height: 1.6;">
+                        <div style="font-weight: bold; margin-bottom: 6px;">{{ item.analyst }} · {{ item.max_score }}分制</div>
+                        <div style="font-size: 12px; opacity: 0.9;">{{ item.basis }}</div>
+                      </div>
+                    </template>
+                    <div class="score-card" :class="scoreClass(item.score)">
+                      <div class="score-name">{{ item.name }}</div>
+                      <div class="score-value">{{ formatScore(item.score) }}<span class="score-unit">分</span></div>
+                      <div class="score-bar">
+                        <div class="score-bar-fill" :style="{ width: getScorePercent(item.score) + '%' }"></div>
+                      </div>
                     </div>
-                  </template>
-                  <div class="score-card" :class="scoreClass(item.score)">
-                    <div class="score-name">{{ item.name }}</div>
-                    <div class="score-value">{{ formatScore(item.score) }}<span class="score-unit">分</span></div>
-                    <div class="score-bar">
-                      <div class="score-bar-fill" :style="{ width: getScorePercent(item.score) + '%' }"></div>
+                  </el-tooltip>
+                </div>
+              </div>
+
+              <!-- 长线博弈 -->
+              <div v-if="longTermScores.length" class="score-section">
+                <div class="score-section-title">长线博弈</div>
+                <div class="score-grid">
+                  <el-tooltip
+                    v-for="item in longTermScores"
+                    :key="item.field"
+                    placement="top"
+                    effect="dark"
+                  >
+                    <template #content>
+                      <div style="max-width: 250px; line-height: 1.6;">
+                        <div style="font-weight: bold; margin-bottom: 6px;">{{ item.analyst }} · {{ item.max_score }}分制</div>
+                        <div style="font-size: 12px; opacity: 0.9;">{{ item.basis }}</div>
+                      </div>
+                    </template>
+                    <div class="score-card" :class="scoreClass(item.score)">
+                      <div class="score-name">{{ item.name }}</div>
+                      <div class="score-value">{{ formatScore(item.score) }}<span class="score-unit">分</span></div>
+                      <div class="score-bar">
+                        <div class="score-bar-fill" :style="{ width: getScorePercent(item.score) + '%' }"></div>
+                      </div>
                     </div>
-                  </div>
-                </el-tooltip>
+                  </el-tooltip>
+                </div>
               </div>
             </div>
 
-            <!-- 长线博弈 -->
-            <div v-if="longTermScores.length" class="score-section">
-              <div class="score-section-title">💎 长线博弈</div>
-              <div class="score-grid">
-                <el-tooltip
-                  v-for="item in longTermScores"
-                  :key="item.field"
-                  placement="top"
-                  effect="dark"
-                >
-                  <template #content>
-                    <div style="max-width: 250px; line-height: 1.6;">
-                      <div style="font-weight: bold; margin-bottom: 6px;">{{ item.analyst }} · {{ item.max_score }}分制</div>
-                      <div style="font-size: 12px; opacity: 0.9;">{{ item.basis }}</div>
-                    </div>
-                  </template>
-                  <div class="score-card" :class="scoreClass(item.score)">
-                    <div class="score-name">{{ item.name }}</div>
-                    <div class="score-value">{{ formatScore(item.score) }}<span class="score-unit">分</span></div>
-                    <div class="score-bar">
-                      <div class="score-bar-fill" :style="{ width: getScorePercent(item.score) + '%' }"></div>
-                    </div>
-                  </div>
-                </el-tooltip>
-              </div>
+            <!-- 评分概览（折叠态） -->
+            <div v-if="!showAllScores && scoreExtremes.strong" class="score-summary">
+              <span class="score-summary-item">
+                最高 <b>{{ scoreExtremes.strong.name }}</b> {{ formatScore(scoreExtremes.strong.score) }}分
+              </span>
+              <span class="score-summary-item">
+                最低 <b>{{ scoreExtremes.weak.name }}</b> {{ formatScore(scoreExtremes.weak.score) }}分
+              </span>
+              <el-button link type="primary" size="small" @click="showAllScores = true">
+                查看全部 {{ dimensionScoreList.length }} 项评分
+              </el-button>
             </div>
+            <el-button v-else-if="showAllScores" link type="primary" size="small" class="score-toggle" @click="showAllScores = false">
+              收起评分
+            </el-button>
 
             <!-- 分析时间和信心度（放在最后） -->
             <div class="analysis-meta">
@@ -269,7 +323,7 @@
               </span>
               <span class="confidence">
                 <el-icon><TrendCharts /></el-icon>
-                信心度：{{ fmtConf(lastAnalysis?.confidence_score ?? lastAnalysis?.overall_score) }}
+                {{ lastAnalysis?.confidence_score != null ? '信心度' : '综合评分' }}：{{ confidenceDisplay }}
                 <!-- 🔥 分析透明卡按钮 -->
                 <el-tooltip v-if="lastAnalysis?.explanation" content="查看分析透明卡" placement="top">
                   <el-button type="primary" link size="small" @click="showExplanationDialog = true">
@@ -289,8 +343,11 @@
           </div>
         </el-card>
 
+        <el-tabs v-model="activeTab" class="detail-tabs">
+          <el-tab-pane name="signals" label="交易信号">
+
         <!-- 🔥 三买三卖买卖点检查（检测当前股价处于三买三卖哪个阶段） -->
-        <el-card shadow="hover" class="tbs-check-card" style="margin-top: 16px;">
+        <el-card shadow="hover" class="tbs-check-card">
           <template #header>
             <div class="card-hd">
               <div>
@@ -303,7 +360,7 @@
             </div>
           </template>
 
-          <el-empty v-if="buySellCheckLoading" description="检查中..." :image-size="60" />
+          <el-skeleton v-if="buySellCheckLoading" :rows="2" animated />
           <el-alert
             v-else-if="!buySellCheckData"
             type="info"
@@ -339,30 +396,104 @@
           </div>
         </el-card>
 
+
+        <!-- 🔥 辅助检查点（MACD辅助确认/抄底信号/上影洗筹模型/密集成交突破模型/大盘-个股联动分析） -->
+        <el-card shadow="hover" class="checkpoint-card">
+          <template #header>
+            <div class="card-hd">
+              <div>
+                辅助检查点
+                <el-tooltip content="基于三买三卖交易系统（教材第三章辅助信号系统），滚动验证主信号的可靠性：MACD辅助确认、抄底信号、上影洗筹模型、密集成交突破模型、大盘-个股联动分析。辅助信号不独立产生买卖，只对三买三卖主信号做确认/降权/预警。" placement="top">
+                  <el-icon class="help-icon-inline"><QuestionFilled /></el-icon>
+                </el-tooltip>
+              </div>
+              <el-tag v-if="buySellCheckData && buySellCheckData.aux_score != null" type="info" size="small">
+                辅助综合分 {{ buySellCheckData.aux_score }}/100
+              </el-tag>
+            </div>
+          </template>
+
+          <el-skeleton v-if="buySellCheckLoading" :rows="3" animated />
+          <el-alert
+            v-else-if="!buySellCheckData || !buySellCheckData.checkpoints"
+            type="info"
+            :closable="false"
+            title="辅助检查点暂不可用"
+          >
+            仅A股支持，或历史数据不足。
+          </el-alert>
+            <div v-else>
+              <!-- 只默认展示已触发的检查点，正常项折叠起来 -->
+              <div class="cp-grid">
+                <div
+                  v-for="item in abnormalCheckpoints"
+                  :key="item.key"
+                  class="cp-item"
+                  :class="'cp-level-' + item.value?.level"
+                >
+                  <div class="cp-head">
+                    <span class="cp-title">{{ checkpointTitle(item.key) }}</span>
+                    <el-tag :type="checkpointLevelType(item.value?.level)" size="small" effect="dark">
+                      {{ checkpointLevelLabel(item.value?.level) }}
+                    </el-tag>
+                  </div>
+                  <div class="cp-label">{{ item.value?.label || '无信号' }}</div>
+                  <div class="cp-detail">{{ item.value?.detail || '—' }}</div>
+                </div>
+              </div>
+              <div v-if="normalCheckpoints.length" class="cp-normal">
+                <span>{{ normalCheckpoints.length }} 项正常</span>
+                <el-button link type="primary" size="small" @click="showAllCheckpoints = !showAllCheckpoints">
+                  {{ showAllCheckpoints ? '收起' : '查看全部' }}
+                </el-button>
+              </div>
+              <div v-if="showAllCheckpoints" class="cp-grid cp-grid-normal">
+                <div
+                  v-for="item in normalCheckpoints"
+                  :key="item.key"
+                  class="cp-item"
+                  :class="'cp-level-' + item.value?.level"
+                >
+                  <div class="cp-head">
+                    <span class="cp-title">{{ checkpointTitle(item.key) }}</span>
+                    <el-tag :type="checkpointLevelType(item.value?.level)" size="small">
+                      {{ checkpointLevelLabel(item.value?.level) }}
+                    </el-tag>
+                  </div>
+                  <div class="cp-label">{{ item.value?.label || '无信号' }}</div>
+                  <div class="cp-detail">{{ item.value?.detail || '—' }}</div>
+                </div>
+              </div>
+              <div v-if="buySellCheckData.aux_warnings && buySellCheckData.aux_warnings.length" class="cp-warnings">
+                <div class="cp-warnings-title">预警提示</div>
+                <div v-for="(w, i) in buySellCheckData.aux_warnings" :key="i" class="cp-warning">
+                  <el-icon class="cp-warning-icon"><Warning /></el-icon>
+                  {{ w }}
+                </div>
+              </div>
+            </div>
+        </el-card>
+
+        </el-tab-pane>
+
+        <el-tab-pane name="volume" label="量价分析">
+
+
         <!-- 🔥 量价分析（价格K线+成交量融合图 + 五步分析法 + 综合结论） -->
-        <el-card shadow="hover" class="volume-price-card" style="margin-top: 16px;">
+        <el-card shadow="hover" class="volume-price-card">
           <template #header>
             <div class="card-hd">
               <div>
                 量价分析
-                <el-tooltip content="价格K线与成交量同图联动，支持日/周/月切换；下方为五步量价分析。" placement="top">
+                <el-tooltip content="基于量价关系的五步分析：位置、趋势、量能、象限、关键位。K线主图见上方。" placement="top">
                   <el-icon class="help-icon-inline"><QuestionFilled /></el-icon>
                 </el-tooltip>
-              </div>
-              <div class="periods">
-                <el-segmented v-model="period" :options="periodOptions" size="small" />
               </div>
               <el-tag v-if="volumePriceData" type="info" size="small">{{ volumePriceData.date }}</el-tag>
             </div>
           </template>
 
-          <!-- 价格K线+成交量 融合图（数据来自 getKline，随周期切换） -->
-          <div v-if="klineItems.length" class="vp-chart-wrap">
-            <v-chart class="vp-chart" :option="vpOption" autoresize />
-            <div class="legend">当前周期：{{ period }} · 数据源：{{ klineSource || '-' }} · 最近：{{ lastKTime || '-' }} · 收：{{ fmtPrice(lastKClose) }}</div>
-          </div>
-
-          <el-empty v-if="volumePriceLoading" description="分析中..." :image-size="60" />
+          <el-skeleton v-if="volumePriceLoading" :rows="4" animated />
           <el-alert
             v-else-if="!volumePriceData"
             type="info"
@@ -527,178 +658,13 @@
           </div>
         </el-card>
 
-        <!-- 🔥 辅助检查点（MACD辅助确认/抄底信号/上影洗筹模型/密集成交突破模型/大盘-个股联动分析） -->
-        <el-card shadow="hover" class="checkpoint-card" style="margin-top: 16px;">
-          <template #header>
-            <div class="card-hd">
-              <div>
-                辅助检查点
-                <el-tooltip content="基于三买三卖交易系统（教材第三章辅助信号系统），滚动验证主信号的可靠性：MACD辅助确认、抄底信号、上影洗筹模型、密集成交突破模型、大盘-个股联动分析。辅助信号不独立产生买卖，只对三买三卖主信号做确认/降权/预警。" placement="top">
-                  <el-icon class="help-icon-inline"><QuestionFilled /></el-icon>
-                </el-tooltip>
-              </div>
-              <el-tag v-if="buySellCheckData && buySellCheckData.aux_score != null" type="info" size="small">
-                辅助综合分 {{ buySellCheckData.aux_score }}
-              </el-tag>
-            </div>
-          </template>
+        </el-tab-pane>
 
-          <el-empty v-if="buySellCheckLoading" description="检查中..." :image-size="60" />
-          <el-alert
-            v-else-if="!buySellCheckData || !buySellCheckData.checkpoints"
-            type="info"
-            :closable="false"
-            title="辅助检查点暂不可用"
-          >
-            仅A股支持，或历史数据不足。
-          </el-alert>
-          <div v-else>
-            <div class="cp-grid">
-              <div
-                v-for="item in auxCheckpoints"
-                :key="item.key"
-                class="cp-item"
-                :class="'cp-level-' + item.value?.level"
-              >
-                <div class="cp-head">
-                  <span class="cp-title">{{ checkpointTitle(item.key) }}</span>
-                  <el-tag :type="checkpointLevelType(item.value?.level)" size="small" effect="dark">
-                    {{ checkpointLevelLabel(item.value?.level) }}
-                  </el-tag>
-                </div>
-                <div class="cp-label">{{ item.value?.label || '无信号' }}</div>
-                <div class="cp-detail">{{ item.value?.detail || '—' }}</div>
-              </div>
-            </div>
-            <div v-if="buySellCheckData.aux_warnings && buySellCheckData.aux_warnings.length" class="cp-warnings">
-              <div class="cp-warnings-title">预警提示</div>
-              <div v-for="(w, i) in buySellCheckData.aux_warnings" :key="i" class="cp-warning">
-                <el-icon class="cp-warning-icon"><Warning /></el-icon>
-                {{ w }}
-              </div>
-            </div>
-          </div>
-        </el-card>
+        <el-tab-pane name="money" label="资金·板块">
 
-        <!-- 🔥 通达信风险扫描（放在K线下方） -->
-        <el-card shadow="hover" class="risk-scan-card" style="margin-top: 16px;">
-          <template #header>
-            <div class="card-hd">
-              <div>
-                通达信风险扫描
-                <el-tooltip content="数据来源：通达信，包含财务风险、经营风险、市场风险等多个维度的扫描结果。" placement="top">
-                  <el-icon class="help-icon-inline"><QuestionFilled /></el-icon>
-                </el-tooltip>
-              </div>
-              <div v-if="riskAnalysisData" style="display: flex; gap: 8px; align-items: center;">
-                <span class="risk-score" :style="{color: getRiskScoreColor(riskAnalysisData.score)}">
-                  风险评分: {{ riskAnalysisData.score }}分
-                </span>
-                <el-tag :type="getRiskLevelTagType(riskAnalysisData.score)" size="small">
-                  {{ getRiskLevelText(riskAnalysisData.score) }}
-                </el-tag>
-              </div>
-            </div>
-          </template>
-          <el-empty v-if="riskAnalysisLoading" description="加载中..." :image-size="60" />
-          <el-alert
-            v-else-if="!riskAnalysisData"
-            type="info"
-            :closable="false"
-            title="风险分析数据暂不可用"
-          >
-            仅A股支持风险扫描，或通达信接口临时不可用。
-          </el-alert>
-          <div v-else>
-            <!-- 风险概览 -->
-            <el-descriptions :column="4" border size="small" style="margin-bottom: 16px;">
-              <el-descriptions-item label="总检查项">
-                <span class="risk-stat">{{ riskAnalysisData.total }}</span>
-              </el-descriptions-item>
-              <el-descriptions-item label="风险项">
-                <span class="risk-stat risk">{{ riskAnalysisData.risk_count }}</span>
-              </el-descriptions-item>
-              <el-descriptions-item label="安全项">
-                <span class="risk-stat safe">{{ riskAnalysisData.safe_count }}</span>
-              </el-descriptions-item>
-              <el-descriptions-item label="数据来源">
-                <el-tag type="success" size="small">{{ riskAnalysisData.source }}</el-tag>
-              </el-descriptions-item>
-            </el-descriptions>
-
-            <!-- 风险分类详情 -->
-            <div v-for="(cat, idx) in riskAnalysisData.categories" :key="idx" class="risk-category">
-              <div class="risk-category-header">
-                <span class="risk-category-name">{{ cat.name }}</span>
-                <span class="risk-category-count">
-                  <span v-if="cat.risk_count > 0" class="risk-badge">{{ cat.risk_count }}风险</span>
-                  <span v-if="cat.safe_count > 0" class="safe-badge">{{ cat.safe_count }}安全</span>
-                </span>
-              </div>
-              <div v-if="cat.risk_items && cat.risk_items.length > 0" class="risk-items">
-                <div v-for="(item, i) in cat.risk_items" :key="i" class="risk-item">
-                  <el-icon class="risk-icon"><Warning /></el-icon>
-                  <div class="risk-item-content">
-                    <div class="risk-item-name">{{ item.name }}</div>
-                    <div v-if="item.reason" class="risk-item-reason">{{ item.reason }}</div>
-                    <div v-if="item.sub_items && item.sub_items.length > 0" class="risk-sub-items">
-                      <div v-for="(sub, si) in item.sub_items" :key="si" class="risk-sub-item">
-                        <el-icon :class="sub.trig ? 'sub-risk-icon' : 'sub-safe-icon'">
-                          <Warning v-if="sub.trig" />
-                          <CircleCheckFilled v-else />
-                        </el-icon>
-                        <span>{{ sub.name }}</span>
-                        <span v-if="sub.reason" class="sub-reason">{{ sub.reason }}</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div v-else class="risk-no-items">
-                <el-icon class="safe-icon"><CircleCheckFilled /></el-icon>
-                <span>该分类暂无风险项</span>
-              </div>
-            </div>
-          </div>
-        </el-card>
-
-        <!-- 新闻与公告 -->
-        <el-card shadow="hover" class="news-card" style="margin-top: 16px;">
-          <template #header>
-            <div class="card-hd">
-              <div>近期新闻与公告</div>
-              <el-select v-model="newsFilter" size="small" style="width: 160px">
-                <el-option label="全部" value="all" />
-                <el-option label="新闻" value="news" />
-                <el-option label="公告" value="announcement" />
-              </el-select>
-            </div>
-          </template>
-          <el-empty v-if="newsItems.length === 0" description="暂无新闻" />
-          <div v-else class="news-list">
-            <div v-for="(n, i) in filteredNews" :key="i" class="news-item">
-              <div class="row">
-                <div class="left">
-                  <el-tag size="small" effect="plain" :type="n.type==='announcement' ? 'warning' : 'info'" class="tag">{{ n.type==='announcement' ? '公告' : '新闻' }}</el-tag>
-                  <div class="title">
-                    <template v-if="n.url && n.url !== '#'">
-                      <a :href="n.url" target="_blank" rel="noopener">{{ n.title || '查看详情' }}</a>
-                      <el-icon class="ext"><Link /></el-icon>
-                    </template>
-                    <template v-else>
-                      <span>{{ n.title || '（无标题）' }}</span>
-                    </template>
-                  </div>
-                </div>
-                <div class="right">{{ formatNewsTime(n.time) }}</div>
-              </div>
-              <div class="meta">{{ n.source || '-' }} · {{ newsSource || '-' }}</div>
-            </div>
-          </div>
-        </el-card>
 
         <!-- 🔥 板块联动分析 -->
-        <el-card shadow="hover" class="sector-card" style="margin-top: 16px;">
+        <el-card shadow="hover" class="sector-card">
           <template #header>
             <div class="card-hd">
               <div>
@@ -710,11 +676,11 @@
               <el-tag v-if="sectorData?.sector_name" type="info" size="small">{{ sectorData.sector_name }}</el-tag>
             </div>
           </template>
-          <el-empty v-if="!sectorData || !sectorData.sector_name" description="暂无板块数据（该股票行业信息未同步）" :image-size="60" />
+          <el-skeleton v-if="sectorLoading" :rows="3" animated />
+          <el-empty v-else-if="!sectorData || !sectorData.sector_name" description="暂无板块数据（该股票行业信息未同步）" :image-size="60" />
           <div v-else>
             <!-- 板块概况 -->
-            <el-descriptions :column="3" border size="small" style="margin-bottom: 12px;">
-              <el-descriptions-item label="板块名称">{{ sectorData.sector_name }}</el-descriptions-item>
+            <el-descriptions :column="2" border size="small" style="margin-bottom: 12px;">
               <el-descriptions-item label="板块均涨幅">
                 <span :style="{color: sectorData.sector_avg_change >= 0 ? 'var(--app-up)' : 'var(--app-down)', fontWeight: 'bold'}">
                   {{ sectorData.sector_avg_change >= 0 ? '+' : '' }}{{ sectorData.sector_avg_change }}%
@@ -752,7 +718,7 @@
         </el-card>
 
         <!-- 🔥 主力资金追踪 -->
-        <el-card shadow="hover" class="money-flow-card" style="margin-top: 16px;">
+        <el-card shadow="hover" class="money-flow-card">
           <template #header>
             <div class="card-hd">
               <div>
@@ -762,22 +728,26 @@
                 </el-tooltip>
               </div>
               <div style="display: flex; gap: 6px; align-items: center;">
+                <span v-if="moneyFlowData?.realtime?.date" class="mf-asof">
+                  截至 {{ moneyFlowData.realtime.date }} · 数据源 {{ moneyFlowData.data_source || '-' }}
+                </span>
                 <el-tag v-if="moneyFlowData?.trend" :type="moneyFlowData.trend === 'inflow' ? 'danger' : moneyFlowData.trend === 'outflow' ? 'success' : 'info'" size="small">
                   {{ moneyFlowData.trend === 'inflow' ? '资金流入' : moneyFlowData.trend === 'outflow' ? '资金流出' : '资金均衡' }}
                 </el-tag>
               </div>
             </div>
           </template>
+          <el-skeleton v-if="moneyFlowLoading" :rows="4" animated />
           <!-- 数据不可用：展示明确的错误信息，不再用估算数据伪装 -->
           <el-alert
-            v-if="moneyFlowData?.data_source === 'unavailable'"
+            v-else-if="moneyFlowData?.data_source === 'unavailable'"
             type="warning"
             :closable="false"
-            :title="moneyFlowData.error_message || '资金流向数据暂时不可用，请稍后重试'"
+            title="资金流向数据暂时不可用"
           >
             <template #default>
               <div style="font-size: 12px; line-height: 1.6;">
-                {{ moneyFlowData.error_message || '资金流向数据暂时不可用' }}
+                <div v-if="moneyFlowData.error_message">{{ moneyFlowData.error_message }}</div>
                 <div style="margin-top: 4px; color: var(--el-text-color-secondary);">
                   数据源（AKShare）可能临时不可用。真实资金流向数据对交易决策至关重要，系统不会用估算值替代。
                 </div>
@@ -787,7 +757,7 @@
           <el-empty v-else-if="!moneyFlowData || !moneyFlowData.realtime || Object.keys(moneyFlowData.realtime).length === 0" description="暂无资金流向数据" :image-size="60" />
           <div v-else>
             <!-- 实时资金流向 -->
-            <el-descriptions :column="3" border size="small" style="margin-bottom: 12px;">
+            <el-descriptions :column="2" border size="small" style="margin-bottom: 12px;">
               <el-descriptions-item label="主力净流入">
                 <span :style="{color: moneyFlowData.realtime.main_net_inflow >= 0 ? 'var(--app-up)' : 'var(--app-down)', fontWeight: 'bold'}">
                   {{ fmtAmount(moneyFlowData.realtime.main_net_inflow) }} 元
@@ -798,61 +768,197 @@
                   {{ fmtNum(moneyFlowData.realtime.main_net_inflow_pct, 2) }}%
                 </span>
               </el-descriptions-item>
-              <el-descriptions-item label="超大单净流入">
-                <span :style="{color: moneyFlowData.realtime.super_large_net >= 0 ? 'var(--app-up)' : 'var(--app-down)'}">
-                  {{ fmtAmount(moneyFlowData.realtime.super_large_net) }}
-                </span>
-              </el-descriptions-item>
-              <el-descriptions-item label="大单净流入">
-                <span :style="{color: moneyFlowData.realtime.large_net >= 0 ? 'var(--app-up)' : 'var(--app-down)'}">
-                  {{ fmtAmount(moneyFlowData.realtime.large_net) }}
-                </span>
-              </el-descriptions-item>
-              <el-descriptions-item label="中单净流入">
-                <span :style="{color: moneyFlowData.realtime.medium_net >= 0 ? 'var(--app-up)' : 'var(--app-down)'}">
-                  {{ fmtAmount(moneyFlowData.realtime.medium_net) }}
-                </span>
-              </el-descriptions-item>
-              <el-descriptions-item label="小单净流入">
-                <span :style="{color: moneyFlowData.realtime.small_net >= 0 ? 'var(--app-up)' : 'var(--app-down)'}">
-                  {{ fmtAmount(moneyFlowData.realtime.small_net) }}
-                </span>
-              </el-descriptions-item>
             </el-descriptions>
             <!-- 实时订单结构图（超大/大/中/小单净流入） -->
             <div v-if="moneyFlowOrderChartItems.length > 0" class="mf-chart-block">
               <v-chart class="mf-chart" :option="moneyFlowOrderOption" autoresize />
             </div>
-            <!-- 近期资金流向趋势 -->
+            <!-- 近期资金流向趋势：图表已含日期与数值，不再重复渲染表格 -->
             <div v-if="moneyFlowData.history && moneyFlowData.history.length > 0">
-              <div style="font-size: 12px; color: var(--el-text-color-secondary); margin-bottom: 8px;">近{{ moneyFlowData.days }}日资金流向</div>
+              <div class="mf-history-title">近{{ moneyFlowData.days }}日主力净流入</div>
               <v-chart v-if="moneyFlowHistoryOption && Object.keys(moneyFlowHistoryOption).length" class="mf-chart mf-chart--history" :option="moneyFlowHistoryOption" autoresize />
-              <el-table :data="moneyFlowData.history" size="small" border style="width: 100%">
-                <el-table-column label="日期" prop="date" min-width="140"></el-table-column>
-                <el-table-column label="主力净占比" min-width="140" align="right">
-                  <template #default="{ row: h }">
-                    <span :style="{color: h.main_net_inflow_pct >= 0 ? 'var(--app-up)' : 'var(--app-down)', fontWeight: 'bold'}">
-                      {{ fmtPercent(h.main_net_inflow_pct, 2) }}
-                    </span>
-                  </template>
-                </el-table-column>
-                <el-table-column label="主力净流入" min-width="160" align="right">
-                  <template #default="{ row: h }">
-                    <span :style="{color: h.main_net_inflow >= 0 ? 'var(--app-up)' : 'var(--app-down)'}">
-                      {{ h.main_net_inflow >= 0 ? '+' : '' }}{{ fmtAmount(h.main_net_inflow) }}
-                    </span>
-                  </template>
-                </el-table-column>
-              </el-table>
             </div>
           </div>
         </el-card>
 
+        </el-tab-pane>
+
+        <el-tab-pane name="risk" label="风险扫描">
+
+        <!-- 🔥 通达信风险扫描（放在K线下方） -->
+        <el-card shadow="hover" class="risk-scan-card">
+          <template #header>
+            <div class="card-hd">
+              <div>
+                通达信风险扫描
+                <el-tooltip content="数据来源：通达信，包含财务风险、经营风险、市场风险等多个维度的扫描结果。" placement="top">
+                  <el-icon class="help-icon-inline"><QuestionFilled /></el-icon>
+                </el-tooltip>
+              </div>
+              <div v-if="riskAnalysisData" style="display: flex; gap: 8px; align-items: center;">
+                <span class="risk-score" :style="{color: getRiskScoreColor(riskAnalysisData.score)}">
+                  风险评分: {{ riskAnalysisData.score }}分
+                </span>
+                <el-tag :type="getRiskLevelTagType(riskAnalysisData.score)" size="small">
+                  {{ getRiskLevelText(riskAnalysisData.score) }}
+                </el-tag>
+              </div>
+            </div>
+          </template>
+          <el-skeleton v-if="riskAnalysisLoading" :rows="4" animated />
+          <el-alert
+            v-else-if="!riskAnalysisData"
+            type="info"
+            :closable="false"
+            title="风险分析数据暂不可用"
+          >
+            仅A股支持风险扫描，或通达信接口临时不可用。
+          </el-alert>
+          <div v-else>
+            <!-- 风险概览 -->
+            <el-descriptions :column="4" border size="small" style="margin-bottom: 16px;">
+              <el-descriptions-item label="总检查项">
+                <span class="risk-stat">{{ riskAnalysisData.total }}</span>
+              </el-descriptions-item>
+              <el-descriptions-item label="风险项">
+                <span class="risk-stat risk">{{ riskAnalysisData.risk_count }}</span>
+              </el-descriptions-item>
+              <el-descriptions-item label="安全项">
+                <span class="risk-stat safe">{{ riskAnalysisData.safe_count }}</span>
+              </el-descriptions-item>
+              <el-descriptions-item label="数据来源">
+                <el-tag type="success" size="small">{{ riskAnalysisData.source }}</el-tag>
+              </el-descriptions-item>
+            </el-descriptions>
+
+            <!-- 风险分类详情：默认只展开含风险项的分类，纯安全分类折叠 -->
+            <div v-if="riskCategoriesWithRisk.length === 0" class="risk-safe-fold">
+              <el-icon class="safe-icon"><CircleCheckFilled /></el-icon>
+              <span>本次扫描未发现风险项</span>
+            </div>
+            <div v-for="(cat, idx) in riskCategoriesWithRisk" :key="idx" class="risk-category">
+              <div class="risk-category-header">
+                <span class="risk-category-name">{{ cat.name }}</span>
+                <span class="risk-category-count">
+                  <span v-if="cat.risk_count > 0" class="risk-badge">{{ cat.risk_count }}风险</span>
+                  <span v-if="cat.safe_count > 0" class="safe-badge">{{ cat.safe_count }}安全</span>
+                </span>
+              </div>
+              <div v-if="cat.risk_items && cat.risk_items.length > 0" class="risk-items">
+                <div v-for="(item, i) in cat.risk_items" :key="i" class="risk-item">
+                  <el-icon class="risk-icon"><Warning /></el-icon>
+                  <div class="risk-item-content">
+                    <div class="risk-item-name">{{ item.name }}</div>
+                    <div v-if="item.reason" class="risk-item-reason">{{ item.reason }}</div>
+                    <div v-if="item.sub_items && item.sub_items.length > 0" class="risk-sub-items">
+                      <div v-for="(sub, si) in item.sub_items" :key="si" class="risk-sub-item">
+                        <el-icon :class="sub.trig ? 'sub-risk-icon' : 'sub-safe-icon'">
+                          <Warning v-if="sub.trig" />
+                          <CircleCheckFilled v-else />
+                        </el-icon>
+                        <span>{{ sub.name }}</span>
+                        <span v-if="sub.reason" class="sub-reason">{{ sub.reason }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div v-else class="risk-no-items">
+                <el-icon class="safe-icon"><CircleCheckFilled /></el-icon>
+                <span>该分类暂无风险项</span>
+              </div>
+            </div>
+
+            <div v-if="safeRiskCategories.length" class="risk-safe-fold">
+              <span>{{ safeRiskCategories.length }} 个分类无风险（共 {{ safeRiskItemCount }} 项安全）</span>
+              <el-button link type="primary" size="small" @click="showSafeRisk = !showSafeRisk">
+                {{ showSafeRisk ? '收起' : '查看全部' }}
+              </el-button>
+            </div>
+            <div v-if="showSafeRisk">
+              <div v-for="(cat, idx) in safeRiskCategories" :key="'safe-' + idx" class="risk-category">
+                <div class="risk-category-header">
+                  <span class="risk-category-name">{{ cat.name }}</span>
+                  <span class="risk-category-count">
+                    <span v-if="cat.safe_count > 0" class="safe-badge">{{ cat.safe_count }}安全</span>
+                  </span>
+                </div>
+                <div v-if="cat.risk_items && cat.risk_items.length > 0" class="risk-items">
+                  <div v-for="(item, i) in cat.risk_items" :key="i" class="risk-item">
+                    <el-icon class="risk-icon"><Warning /></el-icon>
+                    <div class="risk-item-content">
+                      <div class="risk-item-name">{{ item.name }}</div>
+                      <div v-if="item.reason" class="risk-item-reason">{{ item.reason }}</div>
+                    </div>
+                  </div>
+                </div>
+                <div v-else class="risk-no-items">
+                  <el-icon class="safe-icon"><CircleCheckFilled /></el-icon>
+                  <span>该分类暂无风险项</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </el-card>
+
+        </el-tab-pane>
+
+        <el-tab-pane name="news" label="资讯公告">
+
+        <!-- 新闻与公告 -->
+        <el-card shadow="hover" class="news-card">
+          <template #header>
+            <div class="card-hd">
+              <div>近期新闻与公告</div>
+              <el-select v-model="newsFilter" size="small" style="width: 160px">
+                <el-option label="全部" value="all" />
+                <el-option label="新闻" value="news" />
+                <el-option label="公告" value="announcement" />
+              </el-select>
+            </div>
+          </template>
+          <el-skeleton v-if="newsLoading && newsItems.length === 0" :rows="5" animated />
+          <el-empty v-else-if="newsItems.length === 0" description="暂无新闻" />
+          <div v-else>
+            <div class="news-list">
+              <div v-for="(n, i) in visibleNews" :key="i" class="news-item">
+                <div class="row">
+                  <div class="left">
+                    <el-tag size="small" effect="plain" :type="n.type==='announcement' ? 'warning' : 'info'" class="tag">{{ n.type==='announcement' ? '公告' : '新闻' }}</el-tag>
+                    <div class="title">
+                      <template v-if="n.url && n.url !== '#'">
+                        <a :href="n.url" target="_blank" rel="noopener">{{ n.title || '查看详情' }}</a>
+                        <el-icon class="ext"><Link /></el-icon>
+                      </template>
+                      <template v-else>
+                        <span>{{ n.title || '（无标题）' }}</span>
+                      </template>
+                    </div>
+                  </div>
+                  <div class="right">{{ formatNewsTime(n.time) }}</div>
+                </div>
+                <div class="meta">{{ n.source || '-' }} · {{ newsSource || '-' }}</div>
+              </div>
+            </div>
+            <div v-if="visibleNews.length < filteredNews.length" class="news-more">
+              <el-button link type="primary" size="small" @click="newsLimit += 10">
+                加载更多（剩余 {{ filteredNews.length - visibleNews.length }} 条）
+              </el-button>
+            </div>
+            <div v-else class="news-more">
+              <span>共 {{ filteredNews.length }} 条，已全部显示</span>
+            </div>
+          </div>
+        </el-card>
+
+        </el-tab-pane>
+      </el-tabs>
+
         </el-col>
 
-      <el-col :span="6">
+      <el-col :xs="24" :sm="24" :md="24" :lg="6" class="side-col">
         <!-- 基本面快照 -->
-        <el-card shadow="hover" style="margin-top: 16px;">
+        <el-card shadow="hover" class="side-card">
           <template #header><div class="card-hd">基本面快照</div></template>
           <div class="facts">
             <div class="fact"><span>行业</span><b>{{ basics.industry }}</b></div>
@@ -873,8 +979,8 @@
               </b>
             </div>
             <div class="fact"><span>PS(TTM)</span><b>{{ Number.isFinite(basics.ps) ? fmtNum(basics.ps, 2) : '-' }}</b></div>
-            <div class="fact"><span>ROE</span><b>{{ fmtPercent(basics.roe) }}</b></div>
-            <div class="fact"><span>负债率</span><b>{{ fmtPercent(basics.debtRatio) }}</b></div>
+            <div class="fact" v-if="!financialDetail"><span>ROE</span><b>{{ fmtPercent(basics.roe) }}</b></div>
+            <div class="fact" v-if="!financialDetail"><span>负债率</span><b>{{ fmtPercent(basics.debtRatio) }}</b></div>
           </div>
           <div class="data-source-footer" v-if="basics.peSource || basics.peUpdatedAt">
             <el-icon><InfoFilled /></el-icon>
@@ -887,7 +993,7 @@
         </el-card>
 
         <!-- 主要财务指标 -->
-        <el-card v-if="financialDetail" shadow="hover" class="financial-card" style="margin-top: 16px;">
+        <el-card v-if="financialDetail" shadow="hover" class="financial-card">
           <template #header>
             <div class="card-hd">
               <span>主要财务指标</span>
@@ -967,22 +1073,14 @@
 
 
 
-        <!-- 快捷操作 -->
-        <el-card shadow="hover" class="actions-card" style="margin-top: 16px;">
-          <template #header><div class="card-hd">快捷操作</div></template>
-          <div class="quick-actions">
-            <el-button type="primary" @click="onAnalyze" :icon="TrendCharts" plain>发起分析</el-button>
-            <el-button @click="onToggleFavorite" :icon="Star">{{ isFav ? '移出自选' : '加入自选' }}</el-button>
-            <el-button type="success" :icon="CreditCard" @click="goPaperTrading">模拟交易</el-button>
-          </div>
-        </el-card>
+        <!-- 快捷操作已合并到顶部，避免重复入口 -->
       </el-col>
     </el-row>
 
     <!-- 详细报告对话框 -->
     <el-dialog
       v-model="showReportsDialog"
-      title="📊 详细分析报告"
+      title="详细分析报告"
       width="80%"
       :close-on-click-modal="false"
       class="reports-dialog"
@@ -1091,7 +1189,7 @@
         </div>
 
         <div class="exp-section">
-          <div class="exp-title">🎯 信心度构成</div>
+          <div class="exp-title">信心度构成</div>
           <div class="exp-content">
             <div class="conf-breakdown">
               <div class="breakdown-item">
@@ -1111,7 +1209,7 @@
         </div>
 
         <div class="exp-section">
-          <div class="exp-title">⚡ 执行元信息</div>
+          <div class="exp-title">执行元信息</div>
           <div class="exp-content">
             <div>执行耗时: {{ lastAnalysis.explanation.execution_metadata?.execution_time != null ? fmtNum(lastAnalysis.explanation.execution_metadata?.execution_time, 2) : 'N/A' }} 秒</div>
             <div>Token 消耗: {{ lastAnalysis.explanation.execution_metadata?.tokens_used || 0 }}</div>
@@ -1127,7 +1225,7 @@ import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useWindowSize } from '@vueuse/core'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { TrendCharts, Star, Refresh, Link, Document, Clock, CreditCard, Delete, Warning, CircleCheckFilled, QuestionFilled, InfoFilled } from '@element-plus/icons-vue'
+import { TrendCharts, Star, Refresh, Link, Document, Clock, CreditCard, Delete, Warning, CircleCheckFilled, QuestionFilled, InfoFilled, ArrowDown } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 import { sanitizeHtml } from '@/utils/sanitize'
 import { stocksApi } from '@/api/stocks'
@@ -1141,9 +1239,9 @@ import { CandlestickChart, LineChart, BarChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, DataZoomComponent, LegendComponent, TitleComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
-import type { EChartsOption } from 'echarts'
 import { favoritesApi } from '@/api/favorites'
 import { subscribeQuotesUpdate } from '@/utils/quotesSSE'
+import StockKlinePanel from './components/StockKlinePanel.vue'
 
 
 echartsUse([CandlestickChart, LineChart, BarChart, GridComponent, TooltipComponent, DataZoomComponent, LegendComponent, TitleComponent, CanvasRenderer])
@@ -1199,9 +1297,6 @@ const market = ref('')
 const isFav = ref(false)
 
 // K线原始数据（价格K线+成交量融合图的数据源，来自 getKline）
-const klineItems = ref<any[]>([])
-const lastKTime = ref<string | null>(null)
-const lastKClose = ref<number | null>(null)
 
 // 报价（初始化）
 const quote = reactive({
@@ -1452,7 +1547,7 @@ async function clearCache() {
     await Promise.all([
       fetchQuote(),
       fetchFundamentals(),
-      fetchKline(),
+      klinePanelRef.value?.reload(),
       fetchNews(),
       fetchSectorInfo(),  // 🔥 板块联动
       fetchMoneyFlow()    // 🔥 主力资金
@@ -1469,15 +1564,21 @@ async function clearCache() {
   }
 }
 
+// 切换股票后，旧请求的响应必须丢弃，避免数据串台
+function isCurrentCode(reqCode: string): boolean {
+  return reqCode === code.value
+}
+
 async function fetchQuote(forceRefresh = false) {
-  // 🔥 参数验证：确保股票代码不为空
-  if (!code.value) {
+  const reqCode = code.value
+  if (!reqCode) {
     console.warn('股票代码为空，跳过获取报价')
     return
   }
 
   try {
-    const res = await stocksApi.getQuote(code.value, forceRefresh)
+    const res = await stocksApi.getQuote(reqCode, forceRefresh)
+    if (!isCurrentCode(reqCode)) return
     const d: any = (res as any)?.data || {}
     // 后端为 snake_case，前端状态为 camelCase，这里进行映射
     quote.price = Number(d.price ?? d.close ?? quote.price)
@@ -1512,8 +1613,11 @@ async function fetchQuote(forceRefresh = false) {
 }
 
 async function fetchFundamentals() {
+  const reqCode = code.value
+  if (!reqCode) return
   try {
-    const res = await stocksApi.getFundamentals(code.value)
+    const res = await stocksApi.getFundamentals(reqCode)
+    if (!isCurrentCode(reqCode)) return
     const f: any = (res as any)?.data || {}
     // 基本面快照映射（以后台为准）
     if (f.name) stockName.value = f.name
@@ -1560,8 +1664,11 @@ async function fetchSyncStatus() {
 let timer: any = null
 let sseUnsubscribe: (() => void) | null = null
 async function checkFavorite() {
+  const reqCode = code.value
+  if (!reqCode) return
   try {
-    const res: any = await favoritesApi.check(code.value)
+    const res: any = await favoritesApi.check(reqCode)
+    if (!isCurrentCode(reqCode)) return
     const d: any = (res as any)?.data || {}
     isFav.value = !!d.is_favorite
   } catch (e) {
@@ -1570,20 +1677,17 @@ async function checkFavorite() {
 }
 
 async function loadPageData() {
-  // 所有数据请求并行发起，避免串行等待拖慢页面加载
+  // 首屏需要：报价、分析、三买三卖、资金/量价/风险（用于顶部研判）、右栏基本面
   await Promise.allSettled([
-    fetchKline(),
-    fetchNews(),
     checkFavorite(),
     fetchLatestAnalysis(),
     fetchSyncStatus(),
-    fetchSectorInfo(),
-    fetchMoneyFlow(),
     fetchQuote(),
     fetchFundamentals(),
+    fetchBuySellCheck(),
     fetchVolumePriceAnalysis(),
-    fetchRiskAnalysis(),
-    fetchBuySellCheck()
+    fetchMoneyFlow(),
+    fetchRiskAnalysis()
   ])
 }
 
@@ -1601,23 +1705,71 @@ function resetPageState() {
   analysisMessage.value = ''
   currentTaskId.value = null
   volumePriceData.value = null
-  klineItems.value = []
   buySellCheckData.value = null
+  sectorData.value = null
+  moneyFlowData.value = null
+  riskAnalysisData.value = null
+  financialDetail.value = null
+
+  newsLoading.value = false
+  sectorLoading.value = false
+  moneyFlowLoading.value = false
+  riskAnalysisLoading.value = false
+  volumePriceLoading.value = false
+  buySellCheckLoading.value = false
+
+  // 行情与基本面重置为空，避免切换股票时短暂显示上一只股票的数据
+  quote.price = NaN
+  quote.changePercent = NaN
+  quote.open = NaN
+  quote.high = NaN
+  quote.low = NaN
+  quote.prevClose = NaN
+  quote.volume = NaN
+  quote.amount = NaN
+  quote.turnover = NaN
+  quote.amplitude = NaN
+  quote.tradeDate = null
+  quote.turnoverDate = null
+  quote.amplitudeDate = null
+  quote.updatedAt = null
+  quote.staleDays = 0
+  quote.fetchedAt = null
+  quote.dataSource = 'unknown'
+  quote.ageSeconds = 0
+  lastRefreshAt.value = null
+
+  basics.industry = '-'
+  basics.sector = '-'
+  basics.marketCap = NaN
+  basics.pe = NaN
+  basics.pb = NaN
+  basics.ps = NaN
+  basics.roe = NaN
+  basics.debtRatio = NaN
+  basics.peIsRealtime = false
+  basics.peSource = ''
+  basics.peUpdatedAt = null
+
+  activeTab.value = 'signals'
+  loadedTabs.value = new Set(['signals', 'volume', 'risk'])
+  showAllScores.value = false
+  showAllCheckpoints.value = false
+  showSafeRisk.value = false
+  newsLimit.value = 10
 }
 
 onMounted(async () => {
+  // SSE 立即订阅，不等首屏请求结束，保证行情更新尽早到达
+  sseUnsubscribe = subscribeQuotesUpdate((_signal) => {
+    fetchQuote(false)
+    if (loadedTabs.value.has('volume')) fetchVolumePriceAnalysis()
+    fetchBuySellCheck()
+  })
   // 首次加载：打通后端（并行）
   await loadPageData()
   // 每30秒刷新一次报价（兜底机制）
   timer = setInterval(fetchQuote, 30000)
-  // 订阅实时行情 SSE 信号（后端入库后立即推送，延迟约 0-2 秒）
-  sseUnsubscribe = subscribeQuotesUpdate((_signal) => {
-    // 收到行情更新信号，立即拉取最新报价（SSE 优先，轮询兜底）
-    fetchQuote(false)
-    // 🔥 盘中即时：行情更新时同步刷新量价分析与三买三卖（后端有交易30s/非交易5min结果缓存，不会高频打库）
-    fetchVolumePriceAnalysis()
-    fetchBuySellCheck()
-  })
 })
 
 // ── 详细分析结果：决策建议 + 短线/长线博弈各面分数 ──
@@ -1673,6 +1825,14 @@ const shortTermFields = ['技术面评分', '情绪面评分', '消息面评分'
 const longTermFields = ['基本面评分', '政策面评分', '解禁面评分']
 const shortTermScores = computed(() => dimensionScoreList.value.filter(i => shortTermFields.includes(i.field)))
 const longTermScores = computed(() => dimensionScoreList.value.filter(i => longTermFields.includes(i.field)))
+
+// 信心度与综合评分口径不同：有 confidence_score 才叫信心度，否则显示综合评分（分制）
+const confidenceDisplay = computed(() => {
+  const a = lastAnalysis.value
+  if (a?.confidence_score != null) return fmtConf(a.confidence_score)
+  if (a?.overall_score != null) return `${Math.round(Number(a.overall_score))} 分`
+  return '-'
+})
 
 // 决策建议
 const decisionRecommendation = computed(() => {
@@ -1733,72 +1893,26 @@ watch(() => route.params.code, async (newCode, oldCode) => {
 
 
 
-// K线占位相关
-const periodOptions = ['日K','周K','月K']
-const period = ref('日K')
-
-const klineSource = ref<string | undefined>(undefined)
-
-function periodLabelToParam(p: string): string {
-  if (p.includes('5')) return '5m'
-  if (p.includes('15')) return '15m'
-  if (p.includes('60')) return '60m'
-  if (p.includes('日')) return 'day'
-  if (p.includes('周')) return 'week'
-  if (p.includes('月')) return 'month'
-  return '5m'
-}
-
-// 当周期切换时刷新K线
-watch(period, () => { fetchKline() })
-
-async function fetchKline() {
-  try {
-    const param = periodLabelToParam(period.value)
-    const res = await stocksApi.getKline(code.value, param as any, 200, 'none')
-    const d: any = (res as any)?.data || {}
-    klineSource.value = d.source
-    const items: any[] = Array.isArray(d.items) ? d.items : []
-
-    // 🔥 检查是否有有效数据
-    if (items.length === 0) {
-      console.warn('K线数据为空，可能数据源超时或无数据')
-      ElMessage.warning('K线数据暂时不可用，请稍后重试或刷新页面')
-      return
-    }
-
-    klineItems.value = items
-    const last = items[items.length - 1]
-    lastKTime.value = String(last.time || last.trade_time || last.trade_date || '')
-    lastKClose.value = Number(last.close ?? NaN)
-
-    // 重建融合图（价格K线+成交量）
-    buildVpOption()
-  } catch (e: any) {
-    console.error('获取K线失败', e)
-    // 🔥 增强错误提示
-    if (e.message?.includes('timeout') || e.message?.includes('超时')) {
-      ElMessage.error('K线数据获取超时，请稍后重试')
-    } else {
-      ElMessage.error('获取K线数据失败，请刷新页面重试')
-    }
-  }
-}
-
-
 // 新闻
 const newsFilter = ref('all')
+const newsLimit = ref(10)
 const newsItems = ref<any[]>([])
 const newsSource = ref<string | undefined>(undefined)
+watch(newsFilter, () => { newsLimit.value = 10 })
 
 function cleanTitle(s: any): string {
   const t = String(s || '')
   return t.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim()
 }
 
+const newsLoading = ref(false)
 async function fetchNews() {
+  const reqCode = code.value
+  if (!reqCode) return
+  newsLoading.value = true
   try {
-    const res = await stocksApi.getNews(code.value, 30, 50, true)
+    const res = await stocksApi.getNews(reqCode, 30, 50, true)
+    if (!isCurrentCode(reqCode)) return
     const d: any = (res as any)?.data || {}
     const itemsRaw: any[] = Array.isArray(d.items) ? d.items : []
     newsItems.value = itemsRaw.map((it: any) => {
@@ -1812,28 +1926,44 @@ async function fetchNews() {
     newsSource.value = d.source
   } catch (e) {
     console.error('获取新闻失败', e)
+  } finally {
+    if (isCurrentCode(reqCode)) newsLoading.value = false
   }
 }
 
 // 🔥 板块联动数据
 const sectorData = ref<any>(null)
+const sectorLoading = ref(false)
 async function fetchSectorInfo() {
+  const reqCode = code.value
+  if (!reqCode) return
+  sectorLoading.value = true
   try {
-    const res = await stocksApi.getSectorInfo(code.value)
+    const res = await stocksApi.getSectorInfo(reqCode)
+    if (!isCurrentCode(reqCode)) return
     sectorData.value = (res as any)?.data || null
   } catch (e) {
     console.error('获取板块信息失败', e)
+  } finally {
+    if (isCurrentCode(reqCode)) sectorLoading.value = false
   }
 }
 
 // 🔥 主力资金流向数据
 const moneyFlowData = ref<any>(null)
+const moneyFlowLoading = ref(false)
 async function fetchMoneyFlow() {
+  const reqCode = code.value
+  if (!reqCode) return
+  moneyFlowLoading.value = true
   try {
-    const res = await stocksApi.getMoneyFlow(code.value, 5)
+    const res = await stocksApi.getMoneyFlow(reqCode, 5)
+    if (!isCurrentCode(reqCode)) return
     moneyFlowData.value = (res as any)?.data || null
   } catch (e) {
     console.error('获取资金流向失败', e)
+  } finally {
+    if (isCurrentCode(reqCode)) moneyFlowLoading.value = false
   }
 }
 
@@ -1882,7 +2012,10 @@ const moneyFlowHistoryOption = computed(() => {
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: (params: any) => {
       const p = params[0]
       if (!p) return ''
-      return `${p.name}<br/>主力净流入：${p.value >= 0 ? '+' : ''}${fmtAmount(p.value)}`
+      const row = items[p.dataIndex] || {}
+      const pct = Number(row.main_net_inflow_pct)
+      const pctText = Number.isFinite(pct) ? `，净占比 ${fmtPercent(pct, 2)}` : ''
+      return `${p.name}<br/>主力净流入：${p.value >= 0 ? '+' : ''}${fmtAmount(p.value)}${pctText}`
     } },
     grid: { left: 8, right: 20, top: 8, bottom: 4, containLabel: true },
     xAxis: { type: 'category', data: items.map((h: any) => String(h.date).slice(5)), axisLabel: { fontSize: 10 } },
@@ -1901,35 +2034,48 @@ const moneyFlowHistoryOption = computed(() => {
 // 🔥 通达信风险分析数据
 const riskAnalysisData = ref<any>(null)
 const riskAnalysisLoading = ref(false)
+const showSafeRisk = ref(false)
+const riskCategoriesWithRisk = computed<any[]>(() =>
+  (riskAnalysisData.value?.categories || []).filter((c: any) => Number(c.risk_count) > 0)
+)
+const safeRiskCategories = computed<any[]>(() =>
+  (riskAnalysisData.value?.categories || []).filter((c: any) => Number(c.risk_count) === 0)
+)
+const safeRiskItemCount = computed(() => safeRiskCategories.value.reduce((sum, c: any) => sum + Number(c.safe_count || 0), 0))
 async function fetchRiskAnalysis() {
+  const reqCode = code.value
+  if (!reqCode) return
   riskAnalysisLoading.value = true
   try {
-    const res = await stocksApi.getRiskAnalysis(code.value)
+    const res = await stocksApi.getRiskAnalysis(reqCode)
+    if (!isCurrentCode(reqCode)) return
     riskAnalysisData.value = (res as any)?.data || null
   } catch (e) {
     console.error('获取风险分析失败', e)
-    riskAnalysisData.value = null
+    if (isCurrentCode(reqCode)) riskAnalysisData.value = null
   } finally {
-    riskAnalysisLoading.value = false
+    if (isCurrentCode(reqCode)) riskAnalysisLoading.value = false
   }
 }
 
 // 🔥 量价分析（五步分析法）
 const volumePriceData = ref<any>(null)
 const volumePriceLoading = ref(false)
-const vpOption = ref<EChartsOption>({})
 // 五步分析明细默认折叠（综合判断常显），点击展开查看每一步明细
 const vpStepsActive = ref<string[]>([])
 async function fetchVolumePriceAnalysis() {
+  const reqCode = code.value
+  if (!reqCode) return
   volumePriceLoading.value = true
   try {
-    const res = await stocksApi.getVolumePriceAnalysis(code.value)
+    const res = await stocksApi.getVolumePriceAnalysis(reqCode)
+    if (!isCurrentCode(reqCode)) return
     volumePriceData.value = (res as any)?.data || null
   } catch (e) {
     console.error('获取量价分析失败', e)
-    volumePriceData.value = null
+    if (isCurrentCode(reqCode)) volumePriceData.value = null
   } finally {
-    volumePriceLoading.value = false
+    if (isCurrentCode(reqCode)) volumePriceLoading.value = false
   }
 }
 
@@ -1937,15 +2083,18 @@ async function fetchVolumePriceAnalysis() {
 const buySellCheckData = ref<any>(null)
 const buySellCheckLoading = ref(false)
 async function fetchBuySellCheck() {
+  const reqCode = code.value
+  if (!reqCode) return
   buySellCheckLoading.value = true
   try {
-    const res = await stocksApi.getBuySellCheck(code.value)
+    const res = await stocksApi.getBuySellCheck(reqCode)
+    if (!isCurrentCode(reqCode)) return
     buySellCheckData.value = (res as any)?.data || null
   } catch (e) {
     console.error('获取三买三卖检查失败', e)
-    buySellCheckData.value = null
+    if (isCurrentCode(reqCode)) buySellCheckData.value = null
   } finally {
-    buySellCheckLoading.value = false
+    if (isCurrentCode(reqCode)) buySellCheckLoading.value = false
   }
 }
 
@@ -2005,61 +2154,120 @@ const auxCheckpoints = computed(() => {
   return out
 })
 
-// 价格K线+成交量融合图：K线 + MA5/MA20/MA60 + 成交量（数据来自 getKline，随周期切换）
-function calculateMA(series: any[], n: number): Array<number | null> {
-  return series.map((_, i) => {
-    if (i < n - 1) return null
-    let sum = 0
-    for (let j = i - n + 1; j <= i; j++) sum += Number(series[j]?.close ?? 0)
-    return sum / n
-  })
-}
+// 辅助检查点：只默认展示已触发项，其余折叠
+const abnormalCheckpoints = computed(() => auxCheckpoints.value.filter(i => i.value?.level === 'confirm' || i.value?.level === 'warn'))
+const normalCheckpoints = computed(() => auxCheckpoints.value.filter(i => i.value?.level !== 'confirm' && i.value?.level !== 'warn'))
+const showAllCheckpoints = ref(false)
 
-function buildVpOption() {
-  const series = klineItems.value
-  if (!series || !series.length) return
-  const dates = series.map((s: any) => String(s.time || s.trade_time || s.trade_date || ''))
-  const klineData = series.map((s: any) => [Number(s.open ?? NaN), Number(s.close ?? NaN), Number(s.low ?? NaN), Number(s.high ?? NaN)])
-  const volData = series.map((s: any) => ({
-    value: Number(s.volume ?? 0),
-    itemStyle: { color: (Number(s.close ?? 0) >= Number(s.open ?? 0)) ? '#f56c6c' : '#67c23a' }
-  }))
-  const ma5 = calculateMA(series, 5)
-  const ma20 = calculateMA(series, 20)
-  const ma60 = calculateMA(series, 60)
-  vpOption.value = {
-    backgroundColor: 'transparent',
-    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
-    legend: { data: ['K线', 'MA5', 'MA20', 'MA60', '成交量'], top: 0, left: 0, textStyle: { fontSize: 11 } },
-    axisPointer: { link: [{ xAxisIndex: 'all' }] },
-    grid: [
-      { left: 48, right: 16, top: 24, height: '58%' },
-      { left: 48, right: 16, top: '72%', height: '18%' }
-    ],
-    xAxis: [
-      { type: 'category', data: dates, boundaryGap: true, axisLine: { onZero: false }, axisLabel: { fontSize: 10 } },
-      { type: 'category', gridIndex: 1, data: dates, boundaryGap: true, axisLabel: { show: false }, axisTick: { show: false } }
-    ],
-    yAxis: [
-      { scale: true, type: 'value', axisLabel: { fontSize: 10 } },
-      { gridIndex: 1, scale: true, type: 'value', axisLabel: { fontSize: 10, formatter: (v: number) => v >= 1e8 ? (v / 1e8).toFixed(1) + '亿' : v >= 1e4 ? (v / 1e4).toFixed(0) + '万' : String(v) } }
-    ],
-    dataZoom: [
-      { type: 'inside', xAxisIndex: [0, 1], start: 65, end: 100 },
-      { type: 'slider', xAxisIndex: [0, 1], start: 65, end: 100, height: 16, bottom: 4 }
-    ],
-    series: [
-      {
-        name: 'K线', type: 'candlestick', data: klineData,
-        itemStyle: { color: '#f56c6c', color0: '#67c23a', borderColor: '#f56c6c', borderColor0: '#67c23a' }
-      },
-      { name: 'MA5', type: 'line', data: ma5, smooth: true, showSymbol: false, lineStyle: { width: 1, color: '#f97316' } },
-      { name: 'MA20', type: 'line', data: ma20, smooth: true, showSymbol: false, lineStyle: { width: 1, color: '#f59e0b' } },
-      { name: 'MA60', type: 'line', data: ma60, smooth: true, showSymbol: false, lineStyle: { width: 1, color: '#2b6cb0' } },
-      { name: '成交量', type: 'bar', xAxisIndex: 1, yAxisIndex: 1, data: volData }
-    ]
+// 分析评分默认折叠，仅展示最高/最低两项
+const showAllScores = ref(false)
+const scoreExtremes = computed(() => {
+  const list = dimensionScoreList.value.filter(i => Number.isFinite(Number(i.score)))
+  if (!list.length) return { strong: null as any, weak: null as any }
+  const sorted = [...list].sort((a, b) => Number(b.score) - Number(a.score))
+  return { strong: sorted[0], weak: sorted[sorted.length - 1] }
+})
+const activeTab = ref<'signals' | 'volume' | 'money' | 'risk' | 'news'>('signals')
+const loadedTabs = ref<Set<string>>(new Set(['signals', 'volume', 'risk']))
+const klinePanelRef = ref<any>(null)
+
+const tbsSignals = computed<any[]>(() => buySellCheckData.value?.signals || [])
+const tbsTriggerDate = computed<string | null>(() => buySellCheckData.value?.trigger_date || null)
+const tbsStopLoss = computed<number | null>(() => {
+  const sig = tbsSignals.value.find((s: any) => Number(s?.stop_loss_price) > 0)
+  return sig ? Number(sig.stop_loss_price) : null
+})
+
+// 一句话研判：把技术/量价/资金/风险四路信号做规则合成，避免各卡片各说各话
+const summaryVerdict = computed(() => {
+  if (!quote.price) return '行情加载中，暂无法给出研判'
+  const sig = tbsSignals.value
+  const buys = sig.filter((s: any) => String(s.type || '').startsWith('B')).length
+  const sells = sig.filter((s: any) => !String(s.type || '').startsWith('B')).length
+  const trend = buySellCheckData.value?.stock_trend
+  const bias = String(volumePriceData.value?.overall?.bias || '')
+  const flow = moneyFlowData.value?.trend
+  const score = Number(riskAnalysisData.value?.score)
+
+  let s = 0
+  if (buys) s += 2
+  if (sells) s -= 2
+  if (trend === 'up') s += 1
+  else if (trend === 'down') s -= 1
+  if (bias === '偏多') s += 1
+  else if (bias === '偏空') s -= 1
+  if (flow === 'inflow') s += 1
+  else if (flow === 'outflow') s -= 1
+  if (Number.isFinite(score) && score >= 80) s += 1
+  else if (Number.isFinite(score) && score < 60) s -= 1
+
+  const reason: string[] = []
+  if (buys && !sells) reason.push('三买三卖触发买点')
+  else if (sells && !buys) reason.push('三买三卖触发卖点')
+  else if (!buys && !sells) reason.push('暂无三买三卖信号')
+  if (bias) reason.push(`量价${bias}`)
+  if (flow === 'inflow') reason.push('主力流入')
+  else if (flow === 'outflow') reason.push('主力流出')
+
+  const verdict = s >= 3 ? '偏多，可关注买点机会'
+    : s >= 1 ? '偏多但信号未共振，观察'
+      : s <= -3 ? '偏空，注意规避'
+        : s <= -1 ? '偏空但尚未共振，谨慎'
+          : '多空交织，观望'
+  return `${verdict}（${reason.join('，')}）`
+})
+
+type Chip = { key: string; label: string; type: 'danger' | 'success' | 'info' | 'warning'; tip: string }
+
+const signalChips = computed<Chip[]>(() => {
+  const chips: Chip[] = []
+  const d = buySellCheckData.value
+  if (d) {
+    const buys = (d.signals || []).filter((s: any) => String(s.type || '').startsWith('B'))
+    const sells = (d.signals || []).filter((s: any) => !String(s.type || '').startsWith('B'))
+    const trend = d.stock_trend
+    if (buys.length) chips.push({ key: 'tech', label: `技术 买点×${buys.length}`, type: 'danger', tip: buys.map((s: any) => s.type_label || s.type).join('、') })
+    else if (sells.length) chips.push({ key: 'tech', label: `技术 卖点×${sells.length}`, type: 'success', tip: sells.map((s: any) => s.type_label || s.type).join('、') })
+    else chips.push({
+      key: 'tech',
+      label: `技术 ${tbsTrendLabel(trend)}`,
+      type: tbsTrendTone(trend),
+      tip: '三买三卖主信号：当前未触发买卖点，仅展示个股趋势'
+    })
   }
+  const flow = moneyFlowData.value?.trend
+  if (flow) {
+    chips.push({
+      key: 'money',
+      label: flow === 'inflow' ? '资金 流入' : flow === 'outflow' ? '资金 流出' : '资金 均衡',
+      type: flow === 'inflow' ? 'danger' : flow === 'outflow' ? 'success' : 'info',
+      tip: '主力资金近 5 日净流入趋势'
+    })
+  }
+  const score = Number(riskAnalysisData.value?.score)
+  if (Number.isFinite(score) && riskAnalysisData.value) {
+    chips.push({
+      key: 'risk',
+      label: `风险 ${getRiskLevelText(score).replace('风险', '')}`,
+      type: getRiskLevelTagType(score),
+      tip: `通达信风险评分 ${score}/100，分数越高越安全`
+    })
+  }
+  if (Number.isFinite(Number(basics.pe))) {
+    chips.push({ key: 'valuation', label: `PE ${fmtNum(basics.pe, 1)}`, type: 'info', tip: '市盈率(TTM)，仅作参考，未做行业分位比较' })
+  }
+  return chips
+})
+
+const TAB_LOADERS: Record<string, Array<() => Promise<any>>> = {
+  money: [fetchSectorInfo],
+  news: [fetchNews]
 }
+watch(activeTab, (tab) => {
+  if (loadedTabs.value.has(tab)) return
+  loadedTabs.value.add(tab)
+  ;(TAB_LOADERS[tab] || []).forEach(fn => fn())
+})
 
 function vpBiasClass(bias?: string): string {
   if (bias === '偏多') return 'bull'
@@ -2103,6 +2311,7 @@ const filteredNews = computed(() => {
   if (newsFilter.value === 'announcement') return newsItems.value.filter(x => x.type === 'announcement')
   return newsItems.value
 })
+const visibleNews = computed(() => filteredNews.value.slice(0, newsLimit.value))
 
 // 基本面（mock）
 const basics = reactive({
@@ -2153,6 +2362,13 @@ function goPaperTrading() {
   router.push({ name: 'PaperTradingHome', query: { code: code.value } })
 }
 
+// 顶部「更多」菜单
+function onHeaderCommand(cmd: string) {
+  if (cmd === 'paper') goPaperTrading()
+  else if (cmd === 'sync') showSyncDialog()
+  else if (cmd === 'clear') clearCache()
+}
+
 // 跳转到分析报告详情页
 function goToReportPage() {
   const reportId = lastTaskInfo.value?.task_id || lastTaskInfo.value?._id
@@ -2165,6 +2381,8 @@ function goToReportPage() {
 
 // 获取最新的历史分析报告
 async function fetchLatestAnalysis() {
+  const reqCode = code.value
+  if (!reqCode) return
   try {
     console.log('🔍 [fetchLatestAnalysis] 开始获取历史分析报告, symbol:', symbol.value)
 
@@ -2175,6 +2393,7 @@ async function fetchLatestAnalysis() {
       page_size: 1,
       status: 'completed'
     })
+    if (!isCurrentCode(reqCode)) return
 
     console.log('🔍 [fetchLatestAnalysis] API响应:', resp)
     console.log('🔍 [fetchLatestAnalysis] resp.data:', resp?.data)
@@ -2224,6 +2443,7 @@ async function fetchLatestAnalysis() {
         console.log('🔍 [fetchLatestAnalysis] 通过task_id获取结果:', latestTask.task_id)
         try {
           const resultResp: any = await analysisApi.getTaskResult(latestTask.task_id)
+          if (!isCurrentCode(reqCode)) return
           console.log('🔍 [fetchLatestAnalysis] getTaskResult响应:', resultResp)
           lastAnalysis.value = resultResp?.data || resultResp
           analysisStatus.value = 'completed'
@@ -2469,6 +2689,102 @@ function exportReport() {
   background: linear-gradient(135deg, var(--el-bg-color-page) 0%, var(--el-fill-color-lighter) 100%);
 }
 
+.hero-code {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  letter-spacing: 0.5px;
+}
+
+/* 顶部一句话研判 + 信号 chip */
+.verdict-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 10px 20px;
+  background: var(--el-fill-color-lighter);
+  border-bottom: 1px dashed var(--el-border-color-light);
+}
+
+.verdict-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.verdict-label {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color);
+  cursor: help;
+}
+
+.verdict-text {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.verdict-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* 主区块 Tab */
+.detail-tabs {
+  margin-top: 0;
+}
+
+.detail-tabs :deep(.el-tabs__header) {
+  margin-bottom: 12px;
+}
+
+.detail-tabs :deep(.el-tabs__item) {
+  font-size: 14px;
+}
+
+.detail-tabs :deep(.el-tab-pane) > .el-card + .el-card {
+  margin-top: 16px;
+}
+
+@media (max-width: 768px) {
+  .verdict-bar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 1199px) {
+  .side-col .side-card {
+    margin-top: 16px;
+  }
+}
+
+/* 平板（769–1024）：侧栏两张卡片并排，避免整页被拉长 */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .side-col {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    align-items: start;
+  }
+  .side-col .side-card,
+  .side-col .financial-card {
+    margin-top: 0;
+  }
+  .page-hero-meta {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+}
+
 .title { display: flex; align-items: center; gap: 12px; }
 
 .quote-card {
@@ -2558,7 +2874,7 @@ function exportReport() {
 .help-icon-inline { font-size: 12px; color: var(--el-text-color-placeholder); cursor: help; }
 .help-icon-inline:hover { color: var(--el-color-primary); }
 
-.body { margin-top: 4px; }
+.body { margin-top: 0; }
 
 .card-hd {
   display: flex;
@@ -2581,6 +2897,13 @@ function exportReport() {
 }
 
 .news-card .news-list { display: flex; flex-direction: column; }
+
+.news-more {
+  padding: 10px 16px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
 
 .news-item {
   padding: 12px 16px;
@@ -2643,12 +2966,6 @@ function exportReport() {
   font-size: 11px;
   color: var(--el-text-color-placeholder);
   .source-sep { margin: 0 4px; }
-}
-
-.quick-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
 }
 
 /* 右侧栏卡片美化 */
@@ -2735,6 +3052,18 @@ function exportReport() {
   grid-template-columns: repeat(2, 1fr);
   gap: 10px;
 }
+.score-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--el-fill-color-lighter);
+  font-size: 13px;
+}
+.score-summary-item { color: var(--el-text-color-regular); }
+.score-toggle { margin-top: 8px; }
 .score-card {
   padding: 10px 12px;
   background: var(--el-bg-color);
@@ -2813,6 +3142,16 @@ function exportReport() {
 }
 .mf-chart--history {
   height: 160px;
+  margin-bottom: 8px;
+}
+.mf-asof {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
+}
+.mf-history-title {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
   margin-bottom: 8px;
 }
 
@@ -2915,6 +3254,19 @@ function exportReport() {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 12px;
+}
+.cp-grid-normal { margin-top: 12px; }
+.cp-normal,
+.risk-safe-fold {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-top: 12px;
+  border-radius: 8px;
+  background: var(--el-fill-color-lighter);
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
 }
 .cp-item {
   border: 1px solid var(--el-border-color-lighter);

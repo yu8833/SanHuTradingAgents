@@ -912,6 +912,416 @@ async def get_fundamentals(
     return ok(data)
 
 
+def _opt_float(v) -> float | None:
+    """可空浮点：过滤 None/空串/NaN，避免脏值进入 JSON。"""
+    try:
+        if v is None or v == "":
+            return None
+        f = float(v)
+        return None if f != f else f
+    except (TypeError, ValueError):
+        return None
+
+
+RAW_REPAIR_COLLECTION = "stock_daily_repair"
+
+
+async def _ensure_raw_daily(db, code6: str, start_date: str, end_date: str) -> bool:
+    """确保区间日线是「不复权原始价」。
+
+    历史同步曾把前复权价写进 stock_daily_quotes（同一只股票内还混有原始价），
+    若直接在这些价格上再做前复权会造成二次复权。这里按区间从 Tushare 拉取
+    原始日线覆盖写入，并记录已修复区间；区间已覆盖时不再请求外部接口。
+    """
+    try:
+        marker = await db[RAW_REPAIR_COLLECTION].find_one({"code": code6}, {"_id": 0})
+        if (
+            marker
+            and str(marker.get("covered_start") or "") <= start_date
+            and str(marker.get("covered_end") or "") >= end_date
+        ):
+            return True
+    except Exception as e:
+        logger.warning(f"⚠️ 读取原始行情修复标记失败: {e}")
+        marker = None
+
+    token = (os.getenv("TUSHARE_TOKEN") or "").strip().strip('"').strip("'")
+    if not token:
+        return False
+
+    def _fetch() -> "pd.DataFrame | None":
+        import tushare as ts
+
+        ts.set_token(token)
+        pro = ts.pro_api()
+        return pro.daily(
+            ts_code=_to_ts_code(code6),
+            start_date=start_date.replace("-", ""),
+            end_date=end_date.replace("-", ""),
+        )
+
+    try:
+        df = await asyncio.to_thread(_fetch)
+    except Exception as e:
+        logger.warning(f"⚠️ 拉取原始日线失败({code6}): {e}")
+        return False
+    if df is None or getattr(df, "empty", True):
+        return False
+
+    from pymongo import UpdateOne
+
+    now = now_tz()
+    ops = []
+    for _, row in df.iterrows():
+        raw = str(row.get("trade_date") or "")
+        if len(raw) != 8 or not raw.isdigit():
+            continue
+        d = f"{raw[:4]}-{raw[4:6]}-{raw[6:]}"
+        try:
+            ops.append(
+                UpdateOne(
+                    # 只更新/新建 tushare 行：同日可能已有其他数据源的记录，
+                    # 改其他源的行会撞 (symbol, trade_date, data_source, period) 唯一索引
+                    {
+                        "code": code6,
+                        "period": "daily",
+                        "trade_date": d,
+                        "data_source": "tushare",
+                    },
+                    {
+                        "$set": {
+                            "symbol": code6,
+                            "code": code6,
+                            "market": "CN",
+                            "period": "daily",
+                            "trade_date": d,
+                            "open": float(row.get("open")),
+                            "high": float(row.get("high")),
+                            "low": float(row.get("low")),
+                            "close": float(row.get("close")),
+                            "pre_close": _opt_float(row.get("pre_close")),
+                            "change": _opt_float(row.get("change")),
+                            "pct_chg": _opt_float(row.get("pct_chg")),
+                            # Tushare：vol=手，amount=千元；本地库统一为 股/元
+                            "volume": float(row.get("vol") or 0) * 100,
+                            "amount": float(row.get("amount") or 0) * 1000,
+                            "data_source": "tushare",
+                            "raw_price": True,
+                            "updated_at": now,
+                        }
+                    },
+                    upsert=True,
+                )
+            )
+        except (TypeError, ValueError):
+            continue
+
+    if not ops:
+        return False
+    await db["stock_daily_quotes"].bulk_write(ops, ordered=False)
+
+    covered_start = min([start_date] + ([marker.get("covered_start")] if marker and marker.get("covered_start") else []))
+    covered_end = max([end_date] + ([marker.get("covered_end")] if marker and marker.get("covered_end") else []))
+    try:
+        await db[RAW_REPAIR_COLLECTION].update_one(
+            {"code": code6},
+            {"$set": {"code": code6, "covered_start": covered_start, "covered_end": covered_end, "updated_at": now}},
+            upsert=True,
+        )
+    except Exception as e:
+        logger.warning(f"⚠️ 保存原始行情修复标记失败: {e}")
+    logger.info(f"✅ 原始行情修复完成: {code6} {covered_start}~{covered_end} ({len(ops)}条)")
+    return True
+
+
+ADJ_FACTOR_COLLECTION = "stock_adj_factor"
+# 复权因子拉取失败后短时间内的负缓存，避免连续请求反复等待外部接口
+_adj_factor_fail_at: dict[str, datetime] = {}
+
+
+def _to_ts_code(code6: str) -> str:
+    """6 位代码转 Tushare ts_code。"""
+    if code6.startswith(("6", "90")):
+        return f"{code6}.SH"
+    if code6.startswith(("8", "4", "92")):
+        return f"{code6}.BJ"
+    return f"{code6}.SZ"
+
+
+def _fetch_adj_factors(code6: str, start_date: str, end_date: str) -> dict[str, float]:
+    """从 Tushare 拉取复权因子，返回 {YYYY-MM-DD: factor}（同步函数，需在线程中调用）。"""
+    import tushare as ts
+
+    token = (os.getenv("TUSHARE_TOKEN") or "").strip().strip('"').strip("'")
+    if not token:
+        return {}
+    ts.set_token(token)
+    pro = ts.pro_api()
+    df = pro.adj_factor(
+        ts_code=_to_ts_code(code6),
+        start_date=start_date.replace("-", ""),
+        end_date=end_date.replace("-", ""),
+    )
+    if df is None or getattr(df, "empty", True):
+        return {}
+    result: dict[str, float] = {}
+    for _, row in df.iterrows():
+        raw = str(row.get("trade_date") or "")
+        if len(raw) != 8 or not raw.isdigit():
+            continue
+        try:
+            result[f"{raw[:4]}-{raw[4:6]}-{raw[6:]}"] = float(row.get("adj_factor"))
+        except (TypeError, ValueError):
+            continue
+    return result
+
+
+async def _save_adj_factors(db, code6: str, factors: dict[str, float]) -> None:
+    """把复权因子写入本地集合，后续请求直接读库。"""
+    if not factors:
+        return
+    try:
+        from pymongo import UpdateOne
+
+        ops = [
+            UpdateOne(
+                {"code": code6, "trade_date": d},
+                {"$set": {"code": code6, "trade_date": d, "adj_factor": f, "updated_at": now_tz()}},
+                upsert=True,
+            )
+            for d, f in factors.items()
+        ]
+        await db[ADJ_FACTOR_COLLECTION].bulk_write(ops, ordered=False)
+    except Exception as e:
+        logger.warning(f"⚠️ 保存复权因子失败: {e}")
+
+
+async def _load_adj_factors(db, code6: str, dates: list[str], since: str | None = None) -> dict[str, float]:
+    """获取区间复权因子：先读本地库，缺失或覆盖不足时整段补拉 Tushare。
+
+    复权因子按交易日发布且历史不变，因此缓存后无需过期；只在覆盖率不足
+    或区间末端尚未入库时触发外部拉取。since 可把读取区间前移（后复权需要
+    上市以来的首个因子作为基准，保证不同周期/窗口算出的后复权价一致）。
+    """
+    if not dates:
+        return {}
+    start, end = since or dates[0], dates[-1]
+    factors: dict[str, float] = {}
+    try:
+        cursor = db[ADJ_FACTOR_COLLECTION].find(
+            {"code": code6, "trade_date": {"$gte": start, "$lte": end}},
+            {"_id": 0, "trade_date": 1, "adj_factor": 1},
+        )
+        async for doc in cursor:
+            try:
+                factors[str(doc["trade_date"])] = float(doc["adj_factor"])
+            except (KeyError, TypeError, ValueError):
+                continue
+    except Exception as e:
+        logger.warning(f"⚠️ 读取复权因子失败: {e}")
+        return {}
+
+    # 覆盖率不足（头部缺失）或末端过期都要补拉，且必须拉完整区间：
+    # 只补末尾会永远补不齐早期因子，导致一直走涨跌幅链降级。
+    # 覆盖率只统计 K 线实际用到的日期，避免 since 前移带来的多余因子虚增覆盖率。
+    unique_dates = set(dates)
+    coverage = sum(1 for d in unique_dates if d in factors) / len(unique_dates)
+    need_fetch = coverage < 0.9
+    if factors:
+        latest = max(factors.keys())
+        try:
+            need_fetch = need_fetch or (
+                datetime.strptime(end, "%Y-%m-%d") - datetime.strptime(latest, "%Y-%m-%d")
+            ).days > 4
+        except ValueError:
+            pass
+    else:
+        need_fetch = True
+
+    if need_fetch:
+        failed_at = _adj_factor_fail_at.get(code6)
+        if failed_at and (datetime.now() - failed_at).total_seconds() < 600:
+            return factors
+
+        try:
+            fetched = await asyncio.to_thread(_fetch_adj_factors, code6, start, end)
+        except Exception as e:
+            logger.warning(f"⚠️ 拉取复权因子失败({code6}): {e}")
+            fetched = {}
+        if fetched:
+            await _save_adj_factors(db, code6, fetched)
+            factors.update(fetched)
+            _adj_factor_fail_at.pop(code6, None)
+        else:
+            _adj_factor_fail_at[code6] = datetime.now()
+    return factors
+
+
+def _apply_price_adjust(
+    items: list[dict], adj: str, factors: dict[str, float]
+) -> tuple[list[dict], str, str | None]:
+    """对日线做前/后复权，返回 (items, 实际复权方式, 降级说明)。
+
+    优先使用 Tushare 复权因子：qfq = price × factor / 最新 factor，
+    hfq = price × factor / 首个 factor。因子覆盖率不足 90% 时降级为
+    pre_close/pct_chg 链式重建，避免直接用未复权价冒充前复权。
+    """
+    if adj not in ("qfq", "hfq") or not items:
+        return items, "none", None
+
+    norm = [str(i.get("time") or "").replace("-", "") for i in items]
+    factor_series: list[float | None] = []
+    for d in norm:
+        key = f"{d[:4]}-{d[4:6]}-{d[6:]}" if len(d) == 8 else d
+        f = factors.get(key)
+        factor_series.append(f if isinstance(f, (int, float)) and f > 0 else None)
+    coverage = sum(1 for f in factor_series if f) / len(items)
+
+    if coverage >= 0.9:
+        # 用前向填充补齐缺失日（实时当天因子尚未发布时沿用最近一个因子）
+        filled: list[float] = []
+        last: float | None = None
+        for f in factor_series:
+            if f:
+                last = f
+            filled.append(last if last else 0.0)
+        # 开头缺失的因子用后一个有效因子回填
+        first_valid = next((f for f in filled if f > 0), 0.0)
+        filled = [f if f > 0 else first_valid for f in filled]
+
+        if adj == "qfq":
+            base = filled[-1]
+        else:
+            # 后复权以「上市以来首个因子」为基准，保证日/周/月以及不同 limit
+            # 算出的后复权价完全一致（若只用窗口首日因子，结果会随窗口漂移）
+            first_date = min(
+                (d for d in factors if isinstance(factors.get(d), (int, float)) and factors[d] > 0),
+                default=None,
+            )
+            base = factors[first_date] if first_date else next((f for f in filled if f > 0), 1.0)
+        if base <= 0:
+            base = 1.0
+
+        scaled: list[dict] = []
+        for it, f in zip(items, filled):
+            ratio = f / base
+            row = dict(it)
+            for k in ("open", "high", "low", "close"):
+                v = it.get(k)
+                if v is not None:
+                    try:
+                        row[k] = round(float(v) * ratio, 4)
+                    except (TypeError, ValueError):
+                        row[k] = v
+            scaled.append(row)
+        return scaled, adj, None
+
+    # 降级：用涨跌幅链重建（复权因子不可用）
+    growth: list[float] = []
+    for i, it in enumerate(items):
+        c = it.get("close")
+        pre = it.get("pre_close")
+        try:
+            if c and pre and float(pre) > 0:
+                growth.append(float(c) / float(pre))
+                continue
+        except (TypeError, ValueError):
+            pass
+        try:
+            pct = float(it.get("pct_chg"))
+            growth.append(1.0 + pct / 100.0)
+            continue
+        except (TypeError, ValueError):
+            pass
+        if i > 0:
+            try:
+                prev = float(items[i - 1].get("close"))
+                cur = float(c)
+                if prev > 0 and cur > 0:
+                    growth.append(cur / prev)
+                    continue
+            except (TypeError, ValueError):
+                pass
+        growth.append(1.0)
+
+    chain: list[float] = []
+    level = float(items[0].get("close") or 0) or 1.0
+    for i, g in enumerate(growth):
+        if i > 0:
+            level *= g if g > 0 else 1.0
+        chain.append(level)
+
+    raw_last = float(items[-1].get("close") or 0)
+    k = (raw_last / chain[-1]) if adj == "qfq" and chain[-1] > 0 else 1.0
+
+    scaled = []
+    for it, h in zip(items, chain):
+        ratio = (h * k) / float(it.get("close") or 1) if it.get("close") else 1.0
+        row = dict(it)
+        for key in ("open", "high", "low", "close"):
+            v = it.get(key)
+            if v is not None:
+                try:
+                    row[key] = round(float(v) * ratio, 4)
+                except (TypeError, ValueError):
+                    row[key] = v
+        scaled.append(row)
+    return scaled, adj, "复权因子缺失，已按涨跌幅链重建"
+
+
+def _aggregate_daily_to_period(items: list[dict], period: str, limit: int) -> list[dict]:
+    """把日K聚合为周K/月K。
+
+    周K按自然周（ISO 周）、月K按自然月聚合；每根K线用区间内最后一个交易日作为时间标记，
+    与 Tushare/AKShare 的周线、月线口径一致。
+    """
+    buckets: dict[str, dict] = {}
+    for it in items:
+        raw = str(it.get("time") or "")
+        digits = raw.replace("-", "")[:8]
+        if len(digits) != 8 or not digits.isdigit():
+            continue
+        try:
+            day = datetime.strptime(digits, "%Y%m%d").date()
+        except ValueError:
+            continue
+
+        if period == "week":
+            iso = day.isocalendar()
+            key = f"{iso[0]}-{iso[1]:02d}"
+        else:
+            key = day.strftime("%Y-%m")
+
+        o = _opt_float(it.get("open")) or 0.0
+        h = _opt_float(it.get("high")) or 0.0
+        lo = _opt_float(it.get("low")) or 0.0
+        c = _opt_float(it.get("close")) or 0.0
+        v = _opt_float(it.get("volume")) or 0.0
+        amt = _opt_float(it.get("amount")) or 0.0
+        time_label = f"{digits[:4]}-{digits[4:6]}-{digits[6:]}"
+
+        row = buckets.get(key)
+        if row is None:
+            buckets[key] = {
+                "time": time_label,
+                "open": o,
+                "high": h,
+                "low": lo,
+                "close": c,
+                "volume": v,
+                "amount": amt,
+            }
+        else:
+            row["high"] = max(row["high"], h)
+            row["low"] = min(row["low"], lo)
+            row["close"] = c
+            row["volume"] += v
+            row["amount"] += amt
+            row["time"] = time_label
+
+    return list(buckets.values())[-limit:]
+
+
 @router.get("/{code}/kline", response_model=dict)
 async def get_kline(
     code: str,
@@ -974,7 +1384,8 @@ async def get_kline(
     # 🔥 K线响应缓存（决策核心：反向共用 + 分级TTL，realtime分级TTL：交易30s/非交易5min）。
     #    MongoDB 已承担历史K线的落盘缓存，此层进一步缓存组装后的完整响应（含当天实时K线），
     #    命中即先用旧值立即返回，避免每次请求重复执行多路 MongoDB 读取与 JSON 组装。
-    kline_cache_key = f"stock:kline:{code_padded}:{period}:{limit}:{adj_norm or 'none'}"
+    #    口径版本 v3：历史缓存中的复权/周月线语义不同，旧键不再复用
+    kline_cache_key = f"stock:kline:{code_padded}:{period}:{limit}:{adj_norm or 'none'}:v3"
     if not force_refresh:
         try:
             cached_kline = await asyncio.to_thread(get_cache_sync, kline_cache_key)
@@ -1004,30 +1415,66 @@ async def get_kline(
     db = get_mongo_db()
 
     # 1. 优先从 MongoDB 缓存获取（支持多个集合）
+    #    周K/月K改为由日线聚合：周/月独立集合既没有调度任务持续更新，又与多周期同步服务的
+    #    写入集合（stock_daily_quotes.period）不一致，一旦读到旧集合就会永久停更；
+    #    聚合日线可保证周/月K与日K同源、始终最新。
+    pending_aggregate = False
+    local_repair_ok = True
     try:
         from tradingagents.dataflows.cache.mongodb_cache_adapter import get_mongodb_cache_adapter
         adapter = get_mongodb_cache_adapter()
 
         # 计算日期范围
         end_date = now.strftime("%Y-%m-%d")
-        start_date = (now - timedelta(days=limit * 2)).strftime("%Y-%m-%d")
-
-        logger.info(f"🔍 尝试从 MongoDB 获取 K 线数据: {code_padded}, period={period} (MongoDB: {mongodb_period}), limit={limit}")
-        df = adapter.get_historical_data(code_padded, start_date, end_date, period=mongodb_period)
+        if period in ("week", "month"):
+            # 多留 10 天缓冲，避免首尾周/月被截断
+            span_days = limit * (7 if period == "week" else 31) + 10
+            start_date = (now - timedelta(days=span_days)).strftime("%Y-%m-%d")
+            logger.info(f"🔍 从日线聚合 {period} K线: {code_padded}, limit={limit}")
+            try:
+                local_repair_ok = await asyncio.wait_for(
+                    _ensure_raw_daily(db, code_padded, start_date, end_date),
+                    timeout=12.0,
+                )
+            except Exception as e:
+                local_repair_ok = False
+                logger.warning(f"⚠️ 原始行情修复失败({code_padded}): {e}")
+            df = adapter.get_historical_data(code_padded, start_date, end_date, period="daily")
+        else:
+            start_date = (now - timedelta(days=limit * 2)).strftime("%Y-%m-%d")
+            logger.info(f"🔍 尝试从 MongoDB 获取 K 线数据: {code_padded}, period={period} (MongoDB: {mongodb_period}), limit={limit}")
+            if period == "day":
+                try:
+                    local_repair_ok = await asyncio.wait_for(
+                        _ensure_raw_daily(db, code_padded, start_date, end_date),
+                        timeout=12.0,
+                    )
+                except Exception as e:
+                    local_repair_ok = False
+                    logger.warning(f"⚠️ 原始行情修复失败({code_padded}): {e}")
+            df = adapter.get_historical_data(code_padded, start_date, end_date, period=mongodb_period)
 
         if df is not None and not df.empty:
             # 转换 DataFrame 为列表格式
             items = []
-            for _, row in df.tail(limit).iterrows():
+            for _, row in df.iterrows():
                 items.append({
                     "time": str(row.get("trade_date", row.get("date", ""))),  # 前端期望 time 字段
-                    "open": float(row.get("open", 0)),
-                    "high": float(row.get("high", 0)),
-                    "low": float(row.get("low", 0)),
-                    "close": float(row.get("close", 0)),
-                    "volume": float(row.get("volume", row.get("vol", 0))),
-                    "amount": float(row.get("amount", 0)) if "amount" in row else None,
+                    "open": _opt_float(row.get("open")) or 0.0,
+                    "high": _opt_float(row.get("high")) or 0.0,
+                    "low": _opt_float(row.get("low")) or 0.0,
+                    "close": _opt_float(row.get("close")) or 0.0,
+                    "volume": _opt_float(row.get("volume", row.get("vol"))) or 0.0,
+                    "amount": _opt_float(row.get("amount")),
+                    # 复权降级链需要：优先用 pre_close，其次 pct_chg
+                    "pre_close": _opt_float(row.get("pre_close")),
+                    "pct_chg": _opt_float(row.get("pct_chg")),
                 })
+            if period in ("week", "month"):
+                # 先保留日线（含当天实时补点），最后再聚合
+                pending_aggregate = True
+            else:
+                items = items[-limit:]
             source = "mongodb"
             logger.info(f"✅ 从 MongoDB 获取到 {len(items)} 条 K 线数据")
     except Exception as e:
@@ -1052,12 +1499,14 @@ async def get_kline(
                 for rec in records:
                     items.append({
                         "time": str(rec.get("trade_date", rec.get("date", ""))),
-                        "open": float(rec.get("open", 0) or 0),
-                        "high": float(rec.get("high", 0) or 0),
-                        "low": float(rec.get("low", 0) or 0),
-                        "close": float(rec.get("close", 0) or 0),
-                        "volume": float(rec.get("volume", 0) or 0),
-                        "amount": float(rec.get("amount", 0) or 0) if rec.get("amount") is not None else None,
+                        "open": _opt_float(rec.get("open")) or 0.0,
+                        "high": _opt_float(rec.get("high")) or 0.0,
+                        "low": _opt_float(rec.get("low")) or 0.0,
+                        "close": _opt_float(rec.get("close")) or 0.0,
+                        "volume": _opt_float(rec.get("volume")) or 0.0,
+                        "amount": _opt_float(rec.get("amount")),
+                        "pre_close": _opt_float(rec.get("pre_close")),
+                        "pct_chg": _opt_float(rec.get("pct_chg")),
                     })
                 source = "stock_daily_quotes"
                 logger.info(f"✅ 从 stock_daily_quotes 获取到 {len(items)} 条 K线数据")
@@ -1080,7 +1529,8 @@ async def get_kline(
             )
 
             # 🔥 外部API获取成功后，保存到MongoDB缓存（不阻塞返回）
-            if items and source:
+            #    周/月K由日线聚合，不再写入独立的周/月集合并，避免旧集合被重新生成
+            if items and source and period == "day" and adj_norm is None:
                 try:
                     adapter.save_historical_data(code_padded, mongodb_period, items, source)
                 except Exception as save_err:
@@ -1091,12 +1541,12 @@ async def get_kline(
         except Exception as e:
             logger.warning(f"⚠️ 外部 API 获取 K 线失败: {e}")
 
-    # 🔥 3. 检查是否需要添加当天实时数据（仅针对日线）
+    # 🔥 3. 检查是否需要添加当天实时数据（日线，以及聚合前的周/月线源数据）
     #    修复：原先用 is_trading_time（仅 9:30-15:30）判断，导致收盘后（15:30~历史同步18:30）
     #    时段内 K线不补当天实时数据，出现"K线滞后于 dashboard 实时快照"的矛盾。
     #    现改为：只要是交易日（含收盘后），就从 market_quotes 补当天实时K线，
     #    并以 market_quotes.trade_date 标记K线日期，避免把周末/节假日误当当天。
-    if period == "day" and items:
+    if (period == "day" or pending_aggregate) and items:
         try:
             from app.utils.trading_time import is_trading_day
 
@@ -1130,6 +1580,8 @@ async def get_kline(
                         "close": float(realtime_quote.get("close", 0)),
                         "volume": float(realtime_quote.get("volume", 0)),
                         "amount": float(realtime_quote.get("amount", 0)),
+                        "pre_close": _opt_float(realtime_quote.get("pre_close")),
+                        "pct_chg": _opt_float(realtime_quote.get("pct_chg")),
                     }
 
                     if has_rt:
@@ -1150,11 +1602,59 @@ async def get_kline(
         except Exception as e:
             logger.warning(f"⚠️ 获取当天实时数据失败（忽略）: {e}")
 
+    # 3.5 复权：本地库存的是不复权价，必须在聚合前统一换算
+    #     周/月K先复权日线再聚合，保证 OHLC 同口径；外部接口在取数时已按 adj 复权，不再二次处理。
+    adj_applied = "none"
+    adj_note: str | None = None
+    if items and adj_norm in ("qfq", "hfq") and period in ("day", "week", "month"):
+        from_local = str(source or "").startswith("mongodb") or source == "stock_daily_quotes"
+        if from_local:
+            if not local_repair_ok:
+                # 原始行情未确认（历史库混有复权价），宁可标注不复权，也不做可能二次复权的换算
+                adj_note = "原始行情暂不可校验，已按库内价格展示"
+            else:
+                dates = [str(i.get("time") or "").replace("-", "") for i in items]
+                dates = [f"{d[:4]}-{d[4:6]}-{d[6:]}" for d in dates if len(d) == 8]
+                factors: dict[str, float] = {}
+                try:
+                    factors = await asyncio.wait_for(
+                        _load_adj_factors(
+                            db,
+                            code_padded,
+                            dates,
+                            # 后复权需要上市以来的首个因子作基准
+                            since="1990-01-01" if adj_norm == "hfq" else None,
+                        ),
+                        timeout=12.0,
+                    )
+                except Exception as e:
+                    logger.warning(f"⚠️ 获取复权因子失败（降级为涨跌幅链）: {e}")
+                items, adj_applied, adj_note = _apply_price_adjust(items, adj_norm, factors)
+                logger.info(
+                    f"✅ K线复权完成: {code_padded} {period} {adj_applied} "
+                    f"因子覆盖={len(factors)}/{len(items)}"
+                )
+        else:
+            adj_applied = adj_norm
+
+    # 4. 周K/月K：把（已复权、含当天实时补点的）日线聚合为目标周期
+    if pending_aggregate and items:
+        items = _aggregate_daily_to_period(items, period, limit)
+        source = f"mongodb(daily→{period})"
+        logger.info(f"✅ 周/月K 由日线聚合完成: {code_padded} {period} {len(items)} 条")
+
+    # 辅助字段（复权计算用）不向前端暴露，保持响应精简
+    for it in items or []:
+        it.pop("pre_close", None)
+        it.pop("pct_chg", None)
+
     data = {
         "code": code_padded,
         "period": period,
         "limit": limit,
-        "adj": adj if adj else "none",
+        "adj": adj_applied,
+        "adj_requested": adj_norm or "none",
+        "adj_note": adj_note,
         "source": source,
         "items": items or []
     }

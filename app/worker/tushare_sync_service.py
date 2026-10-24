@@ -598,6 +598,22 @@ class TushareSyncService:
             同步结果统计
         """
         period_name = {"daily": "日线", "weekly": "周线", "monthly": "月线"}.get(period, period)
+
+        # 周线/月线统一由日线实时聚合（见 /stocks/{code}/kline），独立集合既会停更
+        # 又与日线口径分叉，还浪费 Tushare 配额，因此不再同步。
+        if period in ("weekly", "monthly"):
+            logger.info(f"ℹ️ 跳过{period_name}同步：周/月K由日线聚合，无需落库")
+            return {
+                "total_processed": 0,
+                "success_count": 0,
+                "error_count": 0,
+                "skipped_count": 0,
+                "total_records": 0,
+                "start_time": now_tz(),
+                "errors": [],
+                "skipped_reason": "周/月线由日线聚合",
+            }
+
         logger.info(f"🔄 开始同步{period_name}历史数据...")
 
         stats = {

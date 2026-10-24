@@ -101,7 +101,14 @@ class HistoricalDataService:
         """
         if self.collection is None:
             await self.initialize()
-        
+
+        # 周/月K统一由日线聚合（见 /stocks/{code}/kline），不再写入独立的周/月记录：
+        # 独立记录既没有调度持续更新（会停更），又会与日线口径分叉，且会污染
+        # stock_daily_quotes（该集合只存日线原始价）。此处集中拦截所有同步入口。
+        if market == "CN" and period in ("weekly", "monthly"):
+            logger.info(f"ℹ️ 跳过 {symbol} {period} 独立写入：周/月K由日线聚合")
+            return 0
+
         try:
             if data is None or data.empty:
                 logger.warning(f"⚠️ {symbol} 历史数据为空，跳过保存")

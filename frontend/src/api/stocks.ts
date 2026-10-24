@@ -58,6 +58,8 @@ export interface KlineResponse {
   period: 'day'|'week'|'month'|'5m'|'15m'|'30m'|'60m'
   limit: number
   adj: 'none'|'qfq'|'hfq'
+  adj_requested?: 'none'|'qfq'|'hfq'
+  adj_note?: string | null
   source?: string
   items: KlineBar[]
 }

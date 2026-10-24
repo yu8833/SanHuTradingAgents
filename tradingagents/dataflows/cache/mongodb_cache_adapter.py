@@ -137,6 +137,30 @@ class MongoCacheAdapter:
                         if col in df.columns:
                             df[col] = pd.to_numeric(df[col], errors="coerce")
 
+                    # 同一交易日可能同时存在多个数据源的记录（历史分段同步所致），
+                    # 按交易日去重：优先保留原始价修复行（raw_price），其次 tushare/akshare。
+                    # 不去重会导致日K出现重复蜡烛、周/月聚合时量额翻倍。
+                    if "trade_date" in df.columns:
+                        df["trade_date"] = df["trade_date"].astype(str)
+                        _src_rank = {
+                            "tushare": 1, "akshare": 2, "baostock": 3, "sina": 4,
+                        }
+                        if "data_source" in df.columns:
+                            rank = df["data_source"].map(
+                                lambda s: _src_rank.get(str(s), 9)
+                            )
+                        else:
+                            rank = pd.Series(9, index=df.index)
+                        if "raw_price" in df.columns:
+                            is_raw = df["raw_price"].fillna(False).astype(bool)
+                            rank = rank.where(~is_raw, 0)
+                        df = (
+                            df.assign(_src_rank=rank)
+                            .sort_values(["trade_date", "_src_rank"])
+                            .drop_duplicates(subset=["trade_date"], keep="first")
+                            .drop(columns=["_src_rank"])
+                        )
+
                     return df
 
             logger.info(f"📊 MongoDB缓存无K线数据: {code6}, period={period}")
