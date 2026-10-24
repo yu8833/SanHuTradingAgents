@@ -367,6 +367,9 @@ import { toTimestamp, formatBeijingDateTimeMinute } from '@/utils/datetime'
 import { vibeApi } from '@/api/vibe'
 import type { RadarData, Industry, RadarItem, SectorNode, SectorLink, BottleneckLevel, Note } from '@/api/vibe'
 
+// 显式声明组件名，供 <keep-alive :include> 匹配
+defineOptions({ name: 'Radar' })
+
 marked.setOptions({ breaks: true, gfm: true })
 
 const INDUSTRY_TO_SECTOR_MAP: Record<string, string> = {
