@@ -6,12 +6,15 @@
           <el-icon :size="26"><DataLine /></el-icon>
         </div>
         <div class="page-hero-text">
-          <h2 class="page-hero-title">资讯</h2>
+          <h2 class="page-hero-title">{{ titleDate }} · 资讯雷达</h2>
           <p class="page-hero-sub">12赛道全球公开RSS资讯</p>
         </div>
       </div>
       <div class="page-hero-meta">
-        <span class="page-hero-tag">更新于 {{ updatedAt }}</span>
+        <span class="page-hero-tag">更新于 {{ updatedAt || '—' }}</span>
+        <el-button type="primary" plain :icon="Refresh" :loading="refreshing" @click="refresh">
+          刷新
+        </el-button>
       </div>
     </div>
 
@@ -20,12 +23,6 @@
         <span class="status-num">{{ stats.total_sources || '--' }}</span> 个公开源
         <span class="status-sep">·</span>
         近 <span class="status-num">{{ radarData?.recent_days ?? '-' }}</span> 天
-      </div>
-      <div class="status-actions">
-        <el-button :loading="refreshing" :disabled="refreshing" @click="refresh">
-          <el-icon><Refresh /></el-icon>
-          刷新
-        </el-button>
       </div>
     </div>
 
@@ -350,7 +347,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onActivated } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   DataLine,
@@ -382,6 +379,9 @@ const loadingError = ref(false)
 const refreshing = ref(false)
 const radarData = ref<RadarData | null>(null)
 const activeTab = ref('news')
+
+// 标题日期：最新交易日（轻量接口预取，与其他市场页统一为「日期 · 页面名」）
+const titleDate = ref('')
 
 // 页头「更新于」：数据获取时刻（RSS 抓取生成时刻）
 const updatedAt = computed(() => radarData.value?.generated_at ? formatBeijingDateTimeMinute(radarData.value.generated_at) : '')
@@ -731,8 +731,16 @@ const removeNote = async (note: NoteRecord) => {
 }
 
 onMounted(() => {
+  vibeApi.getLatestTradeDate().then((d) => { if (d) titleDate.value = d })
   loadRadar()
   loadSectors()
+})
+
+// keep-alive 恢复：静默确认最新（cachedGet 命中缓存时零请求成本）
+let radarInited = false
+onActivated(() => {
+  if (radarInited) loadRadar()
+  radarInited = true
 })
 </script>
 

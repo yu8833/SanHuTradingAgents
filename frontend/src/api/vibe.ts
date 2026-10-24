@@ -225,6 +225,27 @@ export interface LianbanStock {
   industry: string
 }
 
+export interface EmotionPoolRow {
+  code: string
+  name: string
+  price: number
+  pct: number
+  amount: number | null
+  industry: string
+  /** 连板数（涨停池） */
+  boards?: number
+  /** 炸板次数（炸板池） */
+  break_times?: number
+  /** 连续跌停天数（跌停池） */
+  days?: number
+}
+
+export interface EmotionPools {
+  zt: EmotionPoolRow[]
+  zb: EmotionPoolRow[]
+  dt: EmotionPoolRow[]
+}
+
 export interface ShortTermEmotion {
   date: string
   updated?: string
@@ -237,10 +258,27 @@ export interface ShortTermEmotion {
   lianban_count: number
   ladder: { boards: number; count: number; plus: boolean }[]
   lianban_stocks: LianbanStock[]
+  pools?: EmotionPools
   seal_rate: number | null
   break_rate: number | null
   promotion_rate: number | null
   yzt_count: number
+}
+
+export interface EmotionHistoryPoint {
+  date: string
+  zt: number
+  zb: number
+  dt: number
+  max_boards: number
+  lianban: number
+  seal_rate: number | null
+}
+
+export interface EmotionHistory {
+  days: number
+  series: EmotionHistoryPoint[]
+  updated?: string
 }
 
 export interface TurnoverStock {
@@ -529,16 +567,27 @@ export const vibeApi = {
     return cachedGet<GlobalStock[]>('/api/vibe/global-stocks', undefined, 600000)
   },
 
-  async getMarketOverview() {
+  async getMarketOverview(refresh = false) {
+    if (refresh) clearCache('/api/vibe/market/overview')
     return cachedGet<MarketOverview>('/api/vibe/market/overview', undefined, 180000, { timeout: 15000 })
   },
 
-  async getDashboard() {
+  async getDashboard(refresh = false) {
+    if (refresh) clearCache('/api/vibe/market/dashboard')
     return cachedGet<MarketDashboard>('/api/vibe/market/dashboard', undefined, 180000, { timeout: 15000 })
   },
 
-  async getEmotion() {
+  async getEmotion(refresh = false) {
+    if (refresh) clearCache('/api/vibe/market/emotion')
     return cachedGet<ShortTermEmotion>('/api/vibe/market/emotion', undefined, 180000, { timeout: 15000 })
+  },
+
+  // 短线情绪 · 近 10 交易日序列（后端长缓存 1 小时；首屏不阻塞主情绪接口）
+  async getEmotionHistory(days = 10, refresh = false) {
+    if (refresh) clearCache('/api/vibe/market/emotion/history')
+    return cachedGet<EmotionHistory>(
+      '/api/vibe/market/emotion/history', { days }, 1800000, { timeout: 30000 }
+    )
   },
 
   // 最新交易日（权威交易日历轻量接口）：页面标题首屏即显示正确交易日，避免先显示当天再纠正
@@ -561,8 +610,9 @@ export const vibeApi = {
     return cachedGet<StockQuadrant>('/api/vibe/market/stock-quadrant', undefined, 120000, { timeout: 90000 })
   },
 
-  async getStockQuadrantSlim() {
+  async getStockQuadrantSlim(refresh = false) {
     // 首屏轻量：仅最新帧 + meta + dates（约 150KB gzip），弱网秒开；历史帧走 day 接口按需
+    if (refresh) clearCache('/api/vibe/market/stock-quadrant/slim')
     return cachedGet<StockQuadrantSlim>('/api/vibe/market/stock-quadrant/slim', undefined, 120000, { timeout: 20000 })
   },
 
@@ -595,14 +645,16 @@ export const vibeApi = {
   },
 
   // 板块象限（趋势分析）：概念当前帧（仅最新快照，轻量，秒回；行业趋势走 IndustryPanorama）
-  async getBoardQuadrant() {
+  async getBoardQuadrant(refresh = false) {
+    if (refresh) clearCache('/api/vibe/market/board-quadrant')
     return cachedGet<BoardQuadrant>(
       '/api/vibe/market/board-quadrant', undefined, 180000, { timeout: 20000 }
     )
   },
 
   // 大盘看板 · 行业多周期资金流（同花顺 3/5/10/20 日排行，market 级缓存）
-  async getIndustryPeriodFlows() {
+  async getIndustryPeriodFlows(refresh = false) {
+    if (refresh) clearCache('/api/vibe/market/industry-period-flows')
     return cachedGet<IndustryPeriodFlows>(
       '/api/vibe/market/industry-period-flows', undefined, 180000, { timeout: 20000 }
     )

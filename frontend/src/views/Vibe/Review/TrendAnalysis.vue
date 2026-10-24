@@ -14,27 +14,27 @@
       </div>
       <div class="page-hero-meta">
         <span class="page-hero-tag">更新于 {{ updatedAt || '—' }}</span>
-        <el-button type="primary" plain :icon="Refresh" @click="refresh">
+        <el-button type="primary" plain :icon="Refresh" :loading="refreshing" @click="refresh">
           刷新
         </el-button>
       </div>
     </div>
 
-    <!-- 三 Tab：行业全景 / 概念趋势 / 个股趋势（懒加载，仅激活时挂载并缓存） -->
-    <el-tabs v-model="activeTab" type="border-card" class="trend-tabs">
+    <!-- 三 Tab：行业全景 / 概念快照 / 个股趋势（懒加载，仅激活时挂载并缓存；Tab 样式与大盘看板一致） -->
+    <el-tabs v-model="activeTab" class="trend-tabs">
       <el-tab-pane label="行业全景" name="industry">
         <KeepAlive>
-          <IndustryPanorama v-if="activeTab === 'industry'" :key="`industry-${refreshKey}`" @data-updated="onTabUpdated('industry', $event)" />
+          <IndustryPanorama v-if="activeTab === 'industry'" ref="industryRef" @data-updated="onTabUpdated('industry', $event)" />
         </KeepAlive>
       </el-tab-pane>
-      <el-tab-pane label="概念趋势" name="concept">
+      <el-tab-pane label="概念快照" name="concept">
         <KeepAlive>
-          <BoardQuadrant v-if="activeTab === 'concept'" :key="`concept-${refreshKey}`" @data-updated="onTabUpdated('concept', $event)" />
+          <BoardQuadrant v-if="activeTab === 'concept'" ref="conceptRef" @data-updated="onTabUpdated('concept', $event)" />
         </KeepAlive>
       </el-tab-pane>
       <el-tab-pane label="个股趋势" name="stock">
         <KeepAlive>
-          <StockQuadrant v-if="activeTab === 'stock'" :key="`stock-${refreshKey}`" @data-updated="onTabUpdated('stock', $event)" />
+          <StockQuadrant v-if="activeTab === 'stock'" ref="stockRef" @data-updated="onTabUpdated('stock', $event)" />
         </KeepAlive>
       </el-tab-pane>
     </el-tabs>
@@ -65,9 +65,27 @@ const updatedAt = computed(() => {
   return t ? formatBeijingDateTimeMinute(t) : ''
 })
 
-// 页头刷新：key 变化强制重建当前 tab（保持 KeepAlive 缓存语义，仅重建激活组件）
-const refreshKey = ref(0)
-const refresh = () => { refreshKey.value++ }
+// 页头刷新：只刷新当前 Tab（调用子组件暴露的 refresh，失效该页自己的缓存；
+// 其它 Tab 的 KeepAlive 实例与缓存保持不变，避免整页重建与重复请求）
+const industryRef = ref<any>(null)
+const conceptRef = ref<any>(null)
+const stockRef = ref<any>(null)
+const refreshing = ref(false)
+const refresh = async () => {
+  const instMap: Record<string, any> = {
+    industry: industryRef.value,
+    concept: conceptRef.value,
+    stock: stockRef.value,
+  }
+  const inst = instMap[activeTab.value]
+  if (!inst?.refresh) return
+  refreshing.value = true
+  try {
+    await inst.refresh()
+  } finally {
+    refreshing.value = false
+  }
+}
 
 onMounted(() => {
   vibeApi.getLatestTradeDate().then((d) => { if (d) titleDate.value = d })
@@ -77,8 +95,9 @@ onMounted(() => {
 <style scoped lang="scss">
 .trend-analysis-page {
   .trend-tabs {
-    :deep(.el-tabs__content) {
-      padding: 4px;
+    margin-bottom: 8px;
+    :deep(.el-tabs__header) {
+      margin-bottom: 16px;
     }
     :deep(.el-tab-pane) {
       min-height: 200px;

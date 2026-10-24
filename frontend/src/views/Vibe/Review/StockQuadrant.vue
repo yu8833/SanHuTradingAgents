@@ -303,10 +303,10 @@ async function prefetchDates(batch: string[]) {
   }
 }
 
-// 一次性补齐全部缺失帧（首次加载后 + 播放开始前调用，确保播放时无空白）
+// 播放前补齐从当前帧到最新帧的缺失数据（首屏不预取：默认只加载当前帧 + 相邻帧）
 async function prefetchAll() {
   if (!dates.value.length) return
-  await prefetchDates(dates.value.slice())
+  await prefetchDates(dates.value.slice(currentIndex.value))
 }
 
 // 时间轴移动 → 确保当前帧 + 预取相邻帧（播放时衔接更顺）
@@ -325,8 +325,8 @@ function togglePlay() {
     playing.value = false
     return
   }
-  if (currentIndex.value >= dates.value.length - 1) currentIndex.value = dates.value.length - 1
-  // 播放前补齐全部缺失帧（不阻塞，后台预取；播放时每帧数据已就绪无空白）
+  if (currentIndex.value >= dates.value.length - 1) currentIndex.value = 0
+  // 播放前补齐从当前帧到最新帧的缺失数据（不阻塞，后台预取；播放时已就绪帧零空白）
   prefetchAll()
   playing.value = true
 }
@@ -614,27 +614,37 @@ function onChartClick(e: any) {
   window.open(`/stocks/${code}`, '_blank', 'noopener')
 }
 
-async function loadAll() {
+async function loadAll(refresh = false) {
   loading.value = true
   try {
     // 首屏走轻量接口（约 150KB gzip，秒开）；历史帧拖动/播放时按需加载
-    const res = await vibeApi.getStockQuadrantSlim()
+    const res = await vibeApi.getStockQuadrantSlim(refresh)
     const slim = (res as any)?.data ?? null
     data.value = slim
     const datesArr = slim?.dates || []
     const latest = datesArr[datesArr.length - 1] || ''
-    frameCache.value = latest && slim?.frame ? { [latest]: slim.frame } : {}
+    // 刷新只失效最新帧：历史帧不可变，保留已加载缓存，避免整页重建
+    const keep: Record<string, Record<string, number[]>> = {}
+    if (refresh) {
+      for (const [d, f] of Object.entries(frameCache.value)) {
+        if (d !== latest && datesArr.includes(d)) keep[d] = f
+      }
+    }
+    frameCache.value = latest && slim?.frame ? { ...keep, [latest]: slim.frame } : keep
     currentIndex.value = Math.max(0, datesArr.length - 1)
     // 上报数据获取时刻（帧构建时刻），供趋势分析外层页头「更新于」展示
     emit('data-updated', String(slim?.as_of || ''))
-    // 静默补齐全部历史帧：首次进入即后台预取（分片并发），播放/拖动时全缓存命中零空白
-    prefetchAll()
+    // 首屏只加载当前帧（slim 自带）+ 相邻帧（watch 触发），不再一次性预取 30 帧
   } catch (e) {
     console.error('加载个股趋势失败', e)
   } finally {
     loading.value = false
   }
 }
+
+// 页头刷新：只失效当前页数据（历史帧缓存保留），供趋势分析外层调用
+const refresh = () => loadAll(true)
+defineExpose({ refresh })
 
 onMounted(() => {
   loadAll()

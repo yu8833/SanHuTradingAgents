@@ -52,7 +52,7 @@
         </div>
       </div>
       <div class="panel-hint">
-        板块四象限 · 当前快照（无历史时间轴） · 点击圆点跳转外部详情 · 滚轮缩放
+        概念快照 · 仅最新一帧（数据源不提供概念历史序列 / 5日维度 / AI 研判，故不设时间轴） · 点击圆点跳转外部详情 · 滚轮缩放
         <span v-if="!mainAvailable" class="warn-hint">当前快照部分维度不可用（板块级暂无数据），对应图表以空态提示</span>
       </div>
     </section>
@@ -87,7 +87,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onActivated, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Search, TrendCharts, Odometer } from '@element-plus/icons-vue'
 import { use as echartsUse } from 'echarts/core'
@@ -270,23 +270,34 @@ function onChartClick(e: any) {
   if (link) window.open(link, '_blank', 'noopener')
 }
 
-async function loadAll() {
+async function loadAll(refresh = false) {
   loading.value = true
   try {
-    const res = await vibeApi.getBoardQuadrant()
+    const res = await vibeApi.getBoardQuadrant(refresh)
     data.value = (res as any)?.data ?? null
     // 上报数据获取时刻（概念帧构建时刻），供趋势分析外层页头「更新于」展示
     emit('data-updated', String(data.value?.updated_at || data.value?.as_of || ''))
   } catch (e) {
-    console.error('加载概念趋势失败', e)
+    console.error('加载概念快照失败', e)
   } finally {
     loading.value = false
   }
 }
 
+// 页头刷新：只失效概念快照缓存，供趋势分析外层调用
+const refresh = () => loadAll(true)
+defineExpose({ refresh })
+
 onMounted(() => {
   vibeApi.getLatestTradeDate().then((d) => { if (d) titleDate.value = d })
   loadAll()
+})
+
+// 概念快照在 KeepAlive 内恢复：3 分钟内命中本地缓存不产生请求
+let boardInited = false
+onActivated(() => {
+  if (boardInited) loadAll()
+  boardInited = true
 })
 
 onBeforeUnmount(() => {

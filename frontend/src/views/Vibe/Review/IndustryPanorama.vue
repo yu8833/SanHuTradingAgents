@@ -1,7 +1,18 @@
 <template>
   <div class="industry-panorama-page">
+    <!-- 锚点导航：四个分区快速跳转（页面较长，避免反复滚动） -->
+    <nav class="anchor-nav">
+      <button
+        v-for="a in ANCHORS"
+        :key="a.id"
+        class="anchor-item"
+        :disabled="a.needData && !heatmapReady"
+        @click="scrollToSection(a.id)"
+      >{{ a.label }}</button>
+    </nav>
+
     <!-- 行业宽度 KPI（当前快照，同概念/个股趋势风格） -->
-    <section class="block">
+    <section id="ip-kpi" class="block">
       <div class="block-head">
         <span class="block-title"><el-icon><Odometer /></el-icon> 行业宽度 · {{ trendDate }}</span>
         <span class="block-hint">同花顺行业资金流</span>
@@ -62,10 +73,10 @@
     </section>
 
     <!-- 大盘热力图：行业板块全景（左净流入 / 右净流出，中轴零线） -->
-    <section v-if="heatmapReady" class="block">
+    <section v-if="heatmapReady" id="ip-heatmap" class="block">
       <div class="block-head">
         <span class="block-title"><el-icon><DataAnalysis /></el-icon> 大盘热力图 · 行业板块全景</span>
-        <span class="block-hint">方块大小 = 资金量 · 左净流入 / 右净流出 · 红涨绿跌 · 点击跳转同花顺板块</span>
+        <span class="block-hint">方块大小 = 资金量 · 左净流入 / 右净流出 · 红涨绿跌 · 点击方块直接 AI 分析</span>
       </div>
       <div class="heatmap-wrap">
         <VChart :option="heatmapOption" autoresize class="heatmap-chart" @click="onHeatmapClick" />
@@ -74,10 +85,10 @@
     </section>
 
     <!-- 行业象限：涨跌 × 主力资金（与热力图同源 · 同花顺行业资金流） -->
-    <section v-if="heatmapReady" class="block">
+    <section v-if="heatmapReady" id="ip-quadrant" class="block">
       <div class="block-head">
         <span class="block-title"><el-icon><TrendCharts /></el-icon> 行业象限 · 涨跌 × 主力资金</span>
-        <span class="block-hint">X=涨跌幅(%) · Y=主力净流入(亿) · 圆点大小=资金量 · 红涨绿跌 · 点击跳转同花顺板块</span>
+        <span class="block-hint">X=涨跌幅(%) · Y=主力净流入(亿) · 圆点大小=资金量 · 点击圆点直接 AI 分析</span>
       </div>
       <div class="sector-quadrant">
         <VChart :option="sectorQuadrantOption" autoresize class="sector-quadrant-chart" @click="onSectorClick" />
@@ -90,10 +101,10 @@
     </section>
 
     <!-- 行业资金 · 多周期（3/5/10/20 日阶段涨跌幅 + 区间净额） -->
-    <section v-if="periodMatrixReady" class="block">
+    <section v-if="periodMatrixReady" id="ip-matrix" class="block">
       <div class="block-head">
         <span class="block-title"><el-icon><TrendCharts /></el-icon> 行业资金 · 多周期</span>
-        <span class="block-hint">资金轮动矩阵 · 每格颜色 = 区间主力净流入（红流入/绿流出，颜色越深额越大）· 按 20 日净额排序 · 点击跳转同花顺板块</span>
+        <span class="block-hint">资金轮动矩阵 · 每格颜色 = 区间主力净流入（红流入/绿流出）· 按 20 日净额排序 · 默认展示前 35 名，滚轮浏览 · 点击直接 AI 分析</span>
       </div>
       <div class="period-matrix">
         <VChart :option="periodMatrixOption ?? {}" autoresize class="period-matrix-chart" @click="onMatrixClick" />
@@ -123,6 +134,9 @@
             </div>
           </div>
           <p class="ai-summary">{{ aiResult.summary }}</p>
+          <a v-if="aiThsUrl" class="ai-ths-link" :href="aiThsUrl" target="_blank" rel="noopener">
+            在同花顺查看「{{ aiResult.name }}」行业板块 ↗
+          </a>
           <div v-if="aiResult.reasons?.length" class="ai-block">
             <div class="ai-block-title">判断要点</div>
             <ul class="ai-list">
@@ -185,6 +199,18 @@ const emit = defineEmits<{ (e: 'data-updated', time: string): void }>()
 echartsUse([CanvasRenderer, TreemapChart, ScatterChart, HeatmapChart, TooltipComponent, GridComponent, MarkAreaComponent, MarkLineComponent])
 
 const loading = ref(false)
+
+// ── 分区锚点导航（页面较长，提供快速跳转；不折叠以免隐藏信息） ──
+const ANCHORS = [
+  { id: 'ip-kpi', label: '行业宽度', needData: false },
+  { id: 'ip-heatmap', label: '大盘热力图', needData: true },
+  { id: 'ip-quadrant', label: '行业象限', needData: true },
+  { id: 'ip-matrix', label: '多周期矩阵', needData: true },
+]
+function scrollToSection(id: string) {
+  const el = document.getElementById(id)
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
 
 // 行业板块数据（/market/overview → sectors）
 const sectorMap = ref<any[]>([])
@@ -329,12 +355,11 @@ const heatmapOption = computed<EChartsOption>(() => {
   }
 })
 
-// 点击行业块 → 跳转同花顺行业板块详情页
+// 点击行业方块 → 直接对该行业做 AI 分析（无需先搜索；同花顺详情在结果弹窗内提供）
 function onHeatmapClick(e: any) {
   if (e?.componentType !== 'series') return
-  const code = e?.data?.ths_code
-  if (!code) return
-  window.open(`https://q.10jqka.com.cn/thshy/detail/code/${code}/`, '_blank', 'noopener')
+  const name = String(e?.data?.name || '')
+  if (name) analyzeIndustry(name)
 }
 
 // ── 行业象限（复用热力图 sectors = 同花顺 stock_fund_flow_industry 即时）──
@@ -545,11 +570,11 @@ const sectorQuadrantOption = computed<EChartsOption>(() => {
   return opt
 })
 
-// 点击象限散点 → 跳转同花顺板块
+// 点击象限散点 → 直接对该行业做 AI 分析
 function onSectorClick(e: any) {
   if (e?.componentType !== 'series') return
-  const code = e?.data?.ths_code
-  if (code) window.open(`https://q.10jqka.com.cn/thshy/detail/code/${code}/`, '_blank', 'noopener')
+  const name = String(e?.data?.name || '')
+  if (name) analyzeIndustry(name)
 }
 
 // ── 行业搜索：按名称查找，跨 热力图/象限/多周期矩阵 静态同步高亮 ──
@@ -580,6 +605,8 @@ function clearSectorMatch() {
 // ── 行业资金 · 多周期卡（3/5/10/20 日资金轮动矩阵热力图） ──
 const PERIOD_LABELS: Record<string, string> = { '3': '3日', '5': '5日', '10': '10日', '20': '20日' }
 const PERIOD_KEYS = ['3', '5', '10', '20']
+/** 矩阵默认可见行数（90 行业 → 一屏只放前 30，滚轮浏览其余） */
+const MATRIX_VISIBLE_ROWS = 30
 const periodFlows = ref<IndustryPeriodFlows | null>(null)
 const periodMatrixReady = computed(() => !!(periodFlows.value?.periods?.['20']?.length))
 
@@ -669,9 +696,9 @@ const periodMatrixOption = computed<EChartsOption | null>(() => {
       axisLine: { show: false },
     },
     dataZoom: [
-      // 行数多（90 行业），保留滚轮/拖拽缩放，便于放大看局部
-      { type: 'inside', yAxisIndex: 0 },
-      { type: 'slider', yAxisIndex: 0, right: 2, width: 14, showDetail: false },
+      // 90 行业一屏放不下：默认窗口显示前 30 名，滚轮/拖拽浏览其余（避免整页过长且格子过小）
+      { type: 'inside', yAxisIndex: 0, startValue: 0, endValue: MATRIX_VISIBLE_ROWS - 1 },
+      { type: 'slider', yAxisIndex: 0, right: 2, width: 14, showDetail: false, startValue: 0, endValue: MATRIX_VISIBLE_ROWS - 1 },
     ],
     series: [{
       type: 'heatmap',
@@ -684,11 +711,11 @@ const periodMatrixOption = computed<EChartsOption | null>(() => {
   }
 })
 
-// 点击矩阵格子 → 跳转同花顺板块
+// 点击矩阵格子 → 直接对该行业做 AI 分析
 function onMatrixClick(e: any) {
   if (e?.componentType !== 'series') return
-  const code = e?.data?.ths_code
-  if (code) window.open(`https://q.10jqka.com.cn/thshy/detail/code/${code}/`, '_blank', 'noopener')
+  const name = String(e?.data?.name || '')
+  if (name) analyzeIndustry(name)
 }
 
 // ── 行业 AI 分析（LLM 优先，规则兜底；结果弹窗参考个股趋势） ──
@@ -707,6 +734,11 @@ const AI_ACTION_COLOR: Record<string, string> = {
   avoid: '#13a8a8',
 }
 const aiActionColor = computed(() => AI_ACTION_COLOR[aiResult.value?.action as string] || '#909399')
+// 结果弹窗中的同花顺行业板块详情链接（由当前行业名反查 ths_code）
+const aiThsUrl = computed(() => {
+  const code = sectorByName.value.get(String(aiResult.value?.name || ''))?.ths_code
+  return code ? `https://q.10jqka.com.cn/thshy/detail/code/${code}/` : ''
+})
 const aiDialogTitle = computed(() => {
   const r = aiResult.value
   return r ? `AI 分析 · ${r.name} 行业` : 'AI 分析'
@@ -779,7 +811,18 @@ async function doIndustryAiAnalyze() {
     ElMessage.warning(`「${kw}」匹配到 ${hits.length} 个行业，请输入完整行业名后再分析`)
     return
   }
-  const name = hits[0]
+  analyzeIndustry(hits[0])
+}
+
+// 图内点击行业（方块/圆点/格子）直接分析：同步搜索词与高亮，再发起 AI 请求
+function analyzeIndustry(name: string) {
+  if (!name) return
+  sectorSearchKw.value = name
+  matchNames.value = [name]
+  runIndustryAi(name)
+}
+
+async function runIndustryAi(name: string) {
   aiError.value = ''
   aiResult.value = null
   aiDialog.value = true
@@ -807,12 +850,12 @@ const withTimeout = <T>(promise: Promise<T>, timeoutMs: number = 15000): Promise
   ])
 }
 
-const loadAll = async () => {
+const loadAll = async (refresh = false) => {
   loading.value = true
   try {
     const results = await Promise.allSettled([
-      withTimeout(vibeApi.getMarketOverview(), 20000),
-      withTimeout(vibeApi.getIndustryPeriodFlows(), 20000),
+      withTimeout(vibeApi.getMarketOverview(refresh), 20000),
+      withTimeout(vibeApi.getIndustryPeriodFlows(refresh), 20000),
     ])
     const [ovRes, periodRes] = results
     if (ovRes.status === 'fulfilled') {
@@ -841,7 +884,11 @@ onMounted(() => {
   loadAll()
 })
 
-// keep-alive 缓存恢复时刷新（行业资金随时变化）
+// 页头刷新：仅失效当前页两份数据（保留其它 Tab 缓存）
+const refresh = () => loadAll(true)
+defineExpose({ refresh })
+
+// keep-alive 缓存恢复时刷新（cachedGet 命中 3 分钟内不产生请求）
 let panoramaInited = false
 onActivated(() => {
   if (panoramaInited) loadAll()
@@ -978,7 +1025,37 @@ onActivated(() => {
 
   .period-matrix-chart {
     width: 100%;
-    height: 720px;
+    height: 560px;
+  }
+
+  /* 分区锚点导航 */
+  .anchor-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+
+    .anchor-item {
+      padding: 5px 12px;
+      font-size: 12px;
+      color: var(--el-text-color-regular);
+      background: var(--el-fill-color-blank);
+      border: 1px solid var(--el-border-color-lighter);
+      border-radius: 999px;
+      cursor: pointer;
+      transition: all .15s ease;
+
+      &:hover:not(:disabled) {
+        color: var(--el-color-primary);
+        border-color: var(--el-color-primary-light-5);
+        background: var(--el-color-primary-light-9);
+      }
+
+      &:disabled {
+        opacity: .45;
+        cursor: not-allowed;
+      }
+    }
   }
 
   .zero-axis {
@@ -1048,6 +1125,16 @@ onActivated(() => {
   font-size: 13px;
   line-height: 1.7;
   color: var(--el-text-color-primary);
+}
+.ai-dialog .ai-ths-link {
+  display: inline-block;
+  margin: -4px 0 10px;
+  font-size: 12px;
+  color: var(--el-color-primary);
+  text-decoration: none;
+}
+.ai-dialog .ai-ths-link:hover {
+  text-decoration: underline;
 }
 .ai-dialog .ai-block {
   margin-top: 12px;

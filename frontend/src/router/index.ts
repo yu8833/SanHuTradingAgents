@@ -208,7 +208,8 @@ const routes: RouteRecordRaw[] = [
         name: 'IntelRadar',
         component: () => import('@/views/Vibe/Intel/Radar.vue'),
         meta: {
-          title: '资讯',
+          title: '资讯雷达',
+          parentTitle: '市场',
           requiresAuth: true
         }
       }

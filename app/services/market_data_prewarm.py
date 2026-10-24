@@ -70,6 +70,18 @@ async def prewarm_market_data() -> None:
             except Exception as e:
                 logger.warning(f"🌡️ [prewarm] {desc} 失败（忽略）: {e}")
 
+        # 市场状态（趋势/波动/建议）：compute_market_context 冷启动要全市场扫描（约 35s），
+        # 超过看板内的 15s 步进超时 → 若与看板并发预热，看板首轮必然拿不到 regime。
+        # 必须先把这份进程级缓存加热，再预热看板。
+        try:
+            from app.core.database import get_mongo_db_sync
+            from app.strategy_system.screener import compute_market_context
+
+            await asyncio.to_thread(compute_market_context, get_mongo_db_sync())
+            logger.info("🌡️ [prewarm] 市场状态（趋势/波动）完成")
+        except Exception as e:
+            logger.warning(f"🌡️ [prewarm] 市场状态失败（忽略）: {e}")
+
         start = asyncio.get_event_loop().time()
         await asyncio.gather(
             _safe("大盘看板", get_dashboard()),
@@ -86,7 +98,7 @@ async def prewarm_market_data() -> None:
             _safe("个股趋势", get_stock_quadrant()),
         )
         el = asyncio.get_event_loop().time() - start
-        _last_prewarm_ts = el
+        _last_prewarm_ts = asyncio.get_event_loop().time()
         logger.info(f"🌡️ [prewarm] 市场数据预热完成，耗时 {el:.1f}s")
     except Exception as e:
         logger.warning(f"🌡️ [prewarm] 预热任务整体失败（忽略）: {e}")

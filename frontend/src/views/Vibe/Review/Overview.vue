@@ -13,7 +13,7 @@
       </div>
       <div class="page-hero-meta">
         <span class="page-hero-tag">更新于 {{ updatedAt }}</span>
-        <el-button type="primary" plain :icon="Refresh" :loading="loading" @click="loadAll">
+        <el-button type="primary" plain :icon="Refresh" :loading="headerRefreshing" @click="refreshActiveTab">
           刷新
         </el-button>
       </div>
@@ -46,6 +46,41 @@
         </el-card>
         <el-card v-if="!indices.length && !loading" shadow="never" class="idx-card empty-card">
           <el-empty :image-size="48" description="暂无指数数据" />
+        </el-card>
+      </div>
+    </section>
+
+    <!-- 市场状态 + 行业强弱（首屏：趋势/波动/建议 + 领涨领跌行业） -->
+    <section v-if="dashboard && (dashboard.regime || dashboard.industry_rank)" class="block">
+      <div class="block-head">
+        <span class="block-title"><el-icon><Compass /></el-icon> 市场状态与行业强弱</span>
+        <span class="block-hint">趋势 / 波动研判 · 行业按当日涨幅</span>
+      </div>
+      <div class="regime-grid">
+        <el-card v-if="dashboard.regime" shadow="never" class="regime-card">
+          <div class="regime-tags">
+            <el-tag :type="regimeTrendType" effect="plain">{{ dashboard.regime.trend_label }}</el-tag>
+            <el-tag :type="regimeVolType" effect="plain">{{ dashboard.regime.volatility_label }}</el-tag>
+          </div>
+          <p class="regime-advice">{{ dashboard.regime.advice || '暂无操作建议' }}</p>
+        </el-card>
+        <el-card v-if="dashboard.industry_rank" shadow="never" class="rank-card">
+          <div class="rank-title up">领涨行业</div>
+          <div v-for="(it, i) in dashboard.industry_rank.leading" :key="'lead' + it.name" class="rank-item">
+            <span class="rank-no">{{ i + 1 }}</span>
+            <span class="rank-name" :title="it.name">{{ it.name }}</span>
+            <span class="rank-pct up">{{ fmtPct(it.pct) }}</span>
+          </div>
+          <div v-if="!dashboard.industry_rank.leading?.length" class="rank-empty">暂无数据</div>
+        </el-card>
+        <el-card v-if="dashboard.industry_rank" shadow="never" class="rank-card">
+          <div class="rank-title down">领跌行业</div>
+          <div v-for="(it, i) in dashboard.industry_rank.lagging" :key="'lag' + it.name" class="rank-item">
+            <span class="rank-no">{{ i + 1 }}</span>
+            <span class="rank-name" :title="it.name">{{ it.name }}</span>
+            <span class="rank-pct down">{{ fmtPct(it.pct) }}</span>
+          </div>
+          <div v-if="!dashboard.industry_rank.lagging?.length" class="rank-empty">暂无数据</div>
         </el-card>
       </div>
     </section>
@@ -173,12 +208,12 @@
         <div class="kpi-cell">
           <div class="kpi-label">最高连板</div>
           <div class="kpi-value accent">{{ dashboard.limit.max_boards || 0 }}板</div>
-          <div class="kpi-sub">梯队 {{ dashboard.limit.tiers.length }}</div>
+          <div class="kpi-sub">梯队 {{ dashboard.limit.tiers.length }} 档</div>
         </div>
         <div class="kpi-cell">
           <div class="kpi-label">连板（2板+）</div>
-          <div class="kpi-value accent">{{ dashboard.limit.tiers.length }}层</div>
-          <div class="kpi-sub">连板梯队</div>
+          <div class="kpi-value accent">{{ lianbanCount }}家</div>
+          <div class="kpi-sub">2 板及以上家数</div>
         </div>
       </div>
     </section>
@@ -221,7 +256,7 @@
               <span class="block-title"><el-icon><Position /></el-icon> 外围市场快照</span>
               <div class="block-actions">
                 <span class="block-hint">美股 · 港股 · 亚太 · VIX · 期货 · A50 · 商品</span>
-                <el-button size="small" :icon="Refresh" :loading="overseasRefreshing || foreignLoading" @click="refreshOverseas">刷新</el-button>
+                <el-button size="small" :icon="Refresh" :loading="overseasRefreshing || overseasLoading || foreignLoading" @click="refreshOverseas">刷新</el-button>
               </div>
             </div>
 
@@ -270,7 +305,11 @@
             </div>
           </section>
         </template>
-        <el-empty v-else-if="!overseasLoading" :image-size="48" description="外围市场数据暂不可用，可点「刷新」或刷新页面重试" />
+        <div v-else-if="overseasLoading || foreignLoading" class="overseas-loading">
+          <el-icon class="is-loading"><Loading /></el-icon>
+          正在加载外围市场数据（首次加载可能较慢）…
+        </div>
+        <el-empty v-else :image-size="48" description="外围市场数据暂不可用，可点「刷新」或刷新页面重试" />
       </el-tab-pane>
     </el-tabs>
 
@@ -282,7 +321,7 @@
 <script setup lang="ts">
 // 显式声明组件名，供 <keep-alive :include> 匹配
 defineOptions({ name: 'ReviewOverview' })
-import { ref, computed, onMounted, onActivated } from 'vue'
+import { ref, computed, onMounted, onActivated, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   DataAnalysis,
@@ -296,6 +335,7 @@ import {
   Warning,
   Goods,
   ArrowRight,
+  Compass,
 } from '@element-plus/icons-vue'
 import { vibeApi, type IndexQuote, type MarketDashboard } from '@/api/vibe'
 import { warRoomApi } from '@/api/warRoom'
@@ -307,17 +347,39 @@ const activeTab = ref('ashare')
 const indices = ref<IndexQuote[]>([])
 const dashboard = ref<MarketDashboard | null>(null)
 
+// 市场状态标签配色：趋势（牛/震荡/熊）、波动（高/低/未知）
+const regimeTrendType = computed(() => {
+  const t = dashboard.value?.regime?.trend
+  return t === 'bull' ? 'danger' : t === 'bear' ? 'success' : 'warning'
+})
+const regimeVolType = computed(() => {
+  const v = dashboard.value?.regime?.volatility
+  return v === 'high' ? 'danger' : v === 'low' ? 'success' : 'info'
+})
+
 // 标题日期：优先后端数据返回的交易日；数据未回前用轻量接口预取的最新交易日（首屏即正确，不闪非交易日当天）
 const tradeDate = ref('')
 const titleDate = computed(() => dashboard.value?.trade_date || tradeDate.value || '')
 
-// 页头「更新于」：数据获取时刻（看板构建时刻）
-const updatedAt = computed(() => dashboard.value?.updated ? formatBeijingDateTimeMinute(dashboard.value.updated) : '')
+// 页头「更新于」：按当前 Tab 展示各自数据的生成时刻，避免跨 Tab 串台
+const ashareUpdatedAt = computed(() =>
+  dashboard.value?.updated ? formatBeijingDateTimeMinute(dashboard.value.updated) : ''
+)
+const overseasUpdatedAt = computed(() =>
+  overseas.value?.generated_at ? formatBeijingDateTimeMinute(overseas.value.generated_at) : ''
+)
+const updatedAt = computed(() => activeTab.value === 'overseas' ? overseasUpdatedAt.value : ashareUpdatedAt.value)
+
+// 连板（2板+）家数 = 各梯队家数之和（与短线情绪页 lianban_count 同口径）
+const lianbanCount = computed(() =>
+  (dashboard.value?.limit.tiers || []).reduce((sum, t) => sum + (t.count || 0), 0)
+)
 
 // ── 外围市场 tab（分类快照：美股/港股/亚太/VIX/股指期货/A50/商品 + 个股行情）──
 const overseasLoading = ref(false)
 const overseasRefreshing = ref(false)
 const foreignLoading = ref(false)
+const overseasLoaded = ref(false)
 const overseas = ref<Record<string, any> | null>(null)
 const foreignStocks = ref<any[]>([])
 const foreignUsStocks = computed(() => foreignStocks.value.filter(s => s.region === '美股'))
@@ -363,6 +425,34 @@ const loadGlobalStocks = async () => {
     foreignLoading.value = false
   }
 }
+
+/** 外围数据懒加载：首次切到该 Tab 才请求，之后由手动刷新/页面恢复刷新 */
+const loadOverseasTab = async () => {
+  if (overseasLoaded.value || overseasLoading.value || foreignLoading.value) return
+  await Promise.allSettled([loadOverseas(), loadGlobalStocks()])
+  if (overseas.value || foreignStocks.value.length) overseasLoaded.value = true
+}
+
+// 页头刷新只作用于当前 Tab，避免在 A 股 Tab 刷新时无谓等待外围源
+const headerRefreshing = computed(() =>
+  activeTab.value === 'overseas'
+    ? overseasLoading.value || foreignLoading.value || overseasRefreshing.value
+    : loading.value
+)
+const refreshActiveTab = async () => {
+  if (activeTab.value === 'overseas') {
+    if (!overseasLoaded.value) await loadOverseasTab()
+    else await refreshOverseas()
+  } else {
+    // 页头刷新：绕过前端缓存，确保拿到最新
+    await loadAshare(true)
+  }
+}
+
+watch(activeTab, (tab) => {
+  if (tab === 'overseas') loadOverseasTab()
+})
+
 const refreshOverseas = async () => {
   overseasRefreshing.value = true
   try {
@@ -370,6 +460,7 @@ const refreshOverseas = async () => {
       warRoomApi.getMacroReference(true).then(d => { overseas.value = d }),
       loadGlobalStocks(),
     ])
+    overseasLoaded.value = !!overseas.value
     ElMessage.success('外围市场已刷新')
   } catch (e) {
     console.warn('[Overview] 刷新外围市场失败', e)
@@ -516,15 +607,12 @@ const withTimeout = <T>(promise: Promise<T>, timeoutMs: number = 15000): Promise
   ])
 }
 
-const loadAll = async () => {
+const loadAshare = async (refresh = false) => {
   loading.value = true
   try {
     const results = await Promise.allSettled([
       withTimeout(vibeApi.getIndices(), 15000),
-      withTimeout(vibeApi.getDashboard(), 60000),
-      withTimeout(loadOverseas(), 20000),
-      // 外围美股/港股行情：后端已加 news 级缓存与预热，命中秒回；冷构建/外部源不可达可近 30s，超时放宽避免误杀
-      withTimeout(loadGlobalStocks(), 30000),
+      withTimeout(vibeApi.getDashboard(refresh), 60000),
     ])
 
     // 逐个处理结果，失败不影响其他数据显示
@@ -551,13 +639,13 @@ const loadAll = async () => {
 
 onMounted(() => {
   vibeApi.getLatestTradeDate().then((d) => { if (d) tradeDate.value = d })
-  loadAll()
+  loadAshare()
 })
 
-// keep-alive 缓存恢复时刷新（大盘/外围/日历数据会随时间变化）
+// keep-alive 恢复时只刷新当前 Tab（外围 Tab 未加载过才首次拉取）
 let overviewInited = false
 onActivated(() => {
-  if (overviewInited) loadAll()
+  if (overviewInited) refreshActiveTab()
   overviewInited = true
 })
 </script>
@@ -812,6 +900,15 @@ onActivated(() => {
   color: var(--el-text-color-placeholder);
   padding: 8px 0;
 }
+.overseas-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 48px 0;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
 
 .disclaimer {
   margin-top: 8px;
@@ -844,6 +941,89 @@ onActivated(() => {
   grid-template-columns: repeat(4, 1fr);
   gap: 12px;
   margin-bottom: 12px;
+}
+
+/* 市场状态 + 行业强弱 */
+.regime-grid {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr;
+  gap: 12px;
+}
+
+.regime-card,
+.rank-card {
+  border-radius: 8px;
+}
+
+.regime-card :deep(.el-card__body),
+.rank-card :deep(.el-card__body) {
+  padding: 14px 16px;
+}
+
+.regime-tags {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.regime-advice {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.8;
+  color: var(--el-text-color-regular);
+}
+
+.rank-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.rank-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px dashed var(--el-border-color-lighter);
+}
+
+.rank-item:last-child {
+  border-bottom: none;
+}
+
+.rank-no {
+  width: 16px;
+  font-size: 11px;
+  color: var(--el-text-color-placeholder);
+  font-family: var(--app-font-mono);
+}
+
+.rank-name {
+  flex: 1;
+  font-size: 12.5px;
+  color: var(--el-text-color-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rank-pct {
+  font-family: var(--app-font-mono);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.rank-empty {
+  font-size: 12px;
+  color: var(--el-text-color-placeholder);
+  padding: 8px 0;
+}
+
+@media (max-width: 992px) {
+  .regime-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .kpi-row--4 {

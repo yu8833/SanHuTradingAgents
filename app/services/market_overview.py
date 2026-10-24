@@ -209,6 +209,24 @@ def _emotion() -> dict:
         key=lambda x: (-x["boards"], -(x["amount"] or 0)),
     )
 
+    # 三池清单（涨停/炸板/跌停）：客观公开榜单，仅供查看，不推荐/不评分
+    def _pool_brief(pool: list[dict], extra: tuple[str, ...] = ()) -> list[dict]:
+        out = []
+        for p in pool:
+            row = {
+                "code": str(p.get("c", "")),
+                "name": p.get("n", ""),
+                "price": round((astock._numf(p.get("p")) or 0) / 1000, 2),
+                "pct": round(astock._numf(p.get("zdp")) or 0, 2),
+                "amount": astock._numf(p.get("amount")),
+                "industry": p.get("hybk", ""),
+            }
+            for k in extra:
+                src = {"boards": "lbc", "break_times": "zbc", "days": "days"}.get(k, k)
+                row[k] = _num(p.get(src)) if k != "days" else (_num(p.get(src)) or 1)
+            out.append(row)
+        return out
+
     zt_count, zb_count, yzt_count = len(zt), len(zb), len(yzt)
     attempts = zt_count + zb_count                       # 尝试涨停 = 封住 + 炸板
     seal_rate = round(zt_count / attempts, 3) if attempts else None      # 封板率
@@ -239,6 +257,12 @@ def _emotion() -> dict:
         "lianban_count": len(lianban),
         "ladder": ladder,
         "lianban_stocks": lianban_stocks,
+        "pools": {
+            "zt": sorted(_pool_brief(zt, ("boards",)),
+                         key=lambda x: (-x["boards"], -(x["amount"] or 0))),
+            "zb": _pool_brief(zb, ("break_times",)),
+            "dt": _pool_brief(dt, ("days",)),
+        },
         "seal_rate": seal_rate,
         "break_rate": break_rate,
         "promotion_rate": promotion_rate,
@@ -249,6 +273,78 @@ def _emotion() -> dict:
 async def get_short_term_emotion() -> dict:
     """短线情绪（Redis缓存，market级TTL）。"""
     return await cached("vibe:short_term_emotion", _emotion, category="market")
+
+
+def _emotion_history(days: int = 10) -> dict:
+    """近 N 个交易日的情绪序列（涨停/炸板/跌停家数、最高连板、封板率）。
+
+    东财四池无批量历史接口，逐日回放；仅在情绪页按需加载，独立缓存 1 小时，
+    不拖慢主情绪接口。单日三池并发抓取，避免串行等待。
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    from datetime import time as dtime
+
+    from app.utils.trading_time import is_trading_day
+
+    now = datetime.now(BEIJING)
+    today = now.date()
+    dates: list[str] = []
+    for back in range(days * 3 + 10):
+        if len(dates) >= days:
+            break
+        d = today - timedelta(days=back)
+        ds = d.strftime("%Y%m%d")
+        if not is_trading_day(ds):
+            continue
+        # 今日未开盘不接受（与 _emotion 同口径，避免把尚未产生的当日数据当成历史点）
+        if d == today and now.time() < dtime(9, 30):
+            continue
+        dates.append(ds)
+    dates.reverse()
+
+    def _fetch(ds: str) -> tuple[str, list, list, list]:
+        return (
+            ds,
+            astock.em_zt_topic_pool("getTopicZTPool", ds, "fbt:asc"),
+            astock.em_zt_topic_pool("getTopicZBPool", ds, "fbt:asc"),
+            astock.em_zt_topic_pool("getTopicDTPool", ds, "fund:asc"),
+        )
+
+    results = []
+    if dates:
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            results = list(pool.map(_fetch, dates))
+
+    series = []
+    for ds, zt, zb, dt in results:
+        if not zt and not zb and not dt:
+            continue  # 该日尚未产出数据（盘中早段/数据源缺失）
+        boards = [_num(p.get("lbc")) or 1 for p in zt]
+        attempts = len(zt) + len(zb)
+        series.append({
+            "date": f"{ds[:4]}-{ds[4:6]}-{ds[6:]}",
+            "zt": len(zt),
+            "zb": len(zb),
+            "dt": len(dt),
+            "max_boards": max(boards) if boards else 0,
+            "lianban": sum(1 for b in boards if b >= 2),
+            "seal_rate": round(len(zt) / attempts, 3) if attempts else None,
+        })
+
+    return {
+        "days": len(series),
+        "series": series,
+        "updated": datetime.now(BEIJING).replace(microsecond=0).isoformat(),
+    }
+
+
+async def get_emotion_history(days: int = 10) -> dict:
+    """近 N 交易日情绪序列（独立长缓存 1 小时，供情绪页曲线/周期判断）。"""
+    return await cached(
+        "vibe:emotion_history", lambda: _emotion_history(days),
+        category="market", ttl=3600,
+        valid=lambda v: bool(v.get("series")),
+    )
 
 
 async def get_turnover_top() -> dict:

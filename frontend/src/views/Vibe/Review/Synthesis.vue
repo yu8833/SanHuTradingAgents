@@ -13,18 +13,21 @@
       </div>
       <div class="page-hero-meta">
         <span class="page-hero-tag">更新于 {{ updatedAt }}</span>
+        <span v-if="loading && syn" class="syn-refresh-hint">
+          <el-icon class="is-loading"><Loading /></el-icon> 正在重新研判…
+        </span>
         <el-button type="primary" plain :icon="Refresh" :loading="loading" @click="loadAll(true)">
           AI 重新研判
         </el-button>
       </div>
     </div>
 
-    <!-- 加载中骨架 -->
-    <div v-if="loading" class="syn-loading">
+    <!-- 首次加载骨架（已有结论时保留旧内容，仅按钮显示刷新态） -->
+    <div v-if="loading && !syn" class="syn-loading">
       <el-skeleton :rows="6" animated />
       <div class="syn-loading-tip">
         <el-icon class="is-loading"><Loading /></el-icon>
-        AI 综合研判中（约需 10~60 秒），正在聚合四页市场数据…
+        正在加载综合研判（命中缓存秒开，冷启动需 10~60 秒）…
       </div>
     </div>
 
@@ -125,6 +128,65 @@
         </div>
       </section>
 
+      <div v-else class="syn-missing">
+        <el-empty :image-size="72" description="本次未获取到研判结论（AI 与规则兜底均不可用），可点「AI 重新研判」重试" />
+      </div>
+
+      <!-- 买卖清单：盘中实时计算，与上方 AI 文字研判相互独立 -->
+      <section v-if="syn" class="syn-guide">
+        <div class="syn-guide-head">
+          <span class="syn-guide-title"><el-icon><TrendCharts /></el-icon> 今日买卖清单</span>
+          <span class="syn-guide-hint">盘中实时计算 · 与上方文字研判相互独立</span>
+        </div>
+        <div class="syn-guide-grid">
+          <div class="syn-guide-col">
+            <div class="syn-guide-col-head">
+              <span class="buy">买入关注</span>
+              <span class="syn-guide-count">{{ buyList.length }} 只</span>
+            </div>
+            <div v-for="b in buyList" :key="'b-' + b.code" class="syn-guide-item">
+              <div class="syn-guide-row">
+                <router-link target="_blank" rel="noopener" :to="`/stocks/${b.code}`" class="syn-guide-name">{{ b.name || b.code }}</router-link>
+                <span class="syn-guide-code">{{ b.code }}</span>
+                <el-tag size="small" :type="buyTagType(b)" effect="plain">{{ buyStateLabel(b) }}</el-tag>
+              </div>
+              <div class="syn-guide-metrics">
+                <span>现价 <b class="mono">{{ fmtPrice(b.last_price) }}</b></span>
+                <span>触发价 <b class="mono">{{ fmtPrice(b.trigger_price) }}</b></span>
+                <span v-if="b.distance_pct != null" :class="{ 'is-near': isNear(b.distance_pct) }">
+                  偏离 <b class="mono">{{ fmtPct(b.distance_pct) }}</b>
+                </span>
+              </div>
+              <div class="syn-guide-advice">{{ b.advice || '等待实时价确认触发' }}</div>
+            </div>
+            <div v-if="!buyList.length" class="syn-guide-empty">暂无待触发的买入计划</div>
+          </div>
+
+          <div class="syn-guide-col">
+            <div class="syn-guide-col-head">
+              <span class="sell">持仓卖出</span>
+              <span class="syn-guide-count">{{ sellList.length }} 只</span>
+            </div>
+            <div v-for="s in sellList" :key="'s-' + s.code" class="syn-guide-item">
+              <div class="syn-guide-row">
+                <router-link target="_blank" rel="noopener" :to="`/stocks/${s.code}`" class="syn-guide-name">{{ s.name || s.code }}</router-link>
+                <span class="syn-guide-code">{{ s.code }}</span>
+                <el-tag size="small" :type="sellTagType(s)" effect="plain">{{ s.advice_label || s.advice || '持有' }}</el-tag>
+              </div>
+              <div class="syn-guide-metrics">
+                <span>现价 <b class="mono">{{ fmtPrice(s.last_price) }}</b></span>
+                <span>持仓 <b class="mono">{{ s.quantity ?? '—' }}</b></span>
+                <span v-if="s.profit_loss_rate != null" :class="clsByVal(s.profit_loss_rate)">
+                  盈亏 <b class="mono">{{ fmtPct(s.profit_loss_rate) }}</b>
+                </span>
+              </div>
+              <div class="syn-guide-advice">{{ s.advice_text || s.advice || '暂无卖出动作' }}</div>
+            </div>
+            <div v-if="!sellList.length" class="syn-guide-empty">暂无持仓卖出建议</div>
+          </div>
+        </div>
+      </section>
+
       <div class="disclaimer">以上内容由 AI 依据公开市场数据综合研判，仅供参考，不构成任何投资建议。股市有风险，投资需谨慎。</div>
     </template>
   </div>
@@ -136,11 +198,14 @@ import { ElMessage } from 'element-plus'
 import {
   vibeApi,
   type MarketSynthesis,
+  type SynthesisBuyItem,
+  type SynthesisSellItem,
 } from '@/api/vibe'
 import { formatBeijingDateTimeMinute } from '@/utils/datetime'
+import { fmtPrice, fmtPct, clsByVal } from '@/utils/format'
 import {
   Refresh, Loading, Aim, Opportunity, WarnTriangleFilled, View, Guide,
-  DataLine, InfoFilled, StarFilled,
+  DataLine, InfoFilled, StarFilled, TrendCharts,
 } from '@element-plus/icons-vue'
 
 defineOptions({ name: 'VibeSynthesis' })
@@ -200,11 +265,35 @@ const confRingStyle = computed(() => {
   return { '--pct': `${c != null ? c : 0}%`, '--ring-color': color }
 })
 
+/** 买卖清单（盘中实时计算，与 AI 文字研判相互独立） */
+const buyList = computed<SynthesisBuyItem[]>(() => syn.value?.buys || [])
+const sellList = computed<SynthesisSellItem[]>(() => syn.value?.sells || [])
+
+const isNear = (dist: number) => dist <= 2
+
+const buyStateLabel = (b: SynthesisBuyItem) => {
+  if (b.triggered) return '已触发'
+  if (b.confirmed === false) return '待确认'
+  if (b.distance_pct != null && b.distance_pct <= 2) return '接近触发'
+  return '等待回落'
+}
+type TagType = 'danger' | 'warning' | 'info' | 'success'
+const buyTagType = (b: SynthesisBuyItem): TagType => {
+  if (b.triggered) return 'danger'
+  if (b.confirmed === false) return 'info'
+  return b.distance_pct != null && b.distance_pct <= 2 ? 'warning' : 'info'
+}
+const sellTagType = (s: SynthesisSellItem): TagType => {
+  const text = `${s.advice_label || ''}${s.advice || ''}`
+  if (/清仓|止损|离场/.test(text)) return 'danger'
+  if (/减仓|止盈/.test(text)) return 'warning'
+  return /持有/.test(text) ? 'success' : 'info'
+}
+
 const loadAll = async (refresh = false) => {
   loading.value = true
   try {
-    // 页面打开传 refresh=true 强制重新研判（取最新市场数据，不再依赖后台定时 LLM）；
-    // 加载失败时后端降级为规则兜底结论，页面仍可展示。
+    // 默认走市场级缓存（秒开）；仅「AI 重新研判」按钮传 refresh=true 强制重算
     const res: any = await vibeApi.getSynthesis(refresh)
     if (res?.code === 401) {
       ElMessage.warning('登录已过期，请重新登录')
@@ -225,13 +314,13 @@ function prefetchTradeDate() {
 
 onMounted(() => {
   prefetchTradeDate()
-  loadAll(true)
+  loadAll(false)
 })
 
-// keep-alive 恢复时刷新（AI 研判随刷新重算；打开即取最新，不再依赖后台定时 LLM）
+// keep-alive 恢复时读缓存（避免每次切回都重跑 LLM 并等待 10~60 秒）
 let inited = false
 onActivated(() => {
-  if (inited) loadAll(true)
+  if (inited) loadAll(false)
   inited = true
 })
 </script>
@@ -251,6 +340,18 @@ onActivated(() => {
   margin-top: 16px;
   font-size: 13px;
   color: var(--el-text-color-secondary);
+}
+
+.syn-refresh-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.syn-missing {
+  padding: 8px 0;
 }
 
 /* ── ① 研判结论横幅 ── */
@@ -476,6 +577,120 @@ onActivated(() => {
   color: var(--el-text-color-regular);
 }
 
+/* ── 今日买卖清单 ── */
+.syn-guide {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border-radius: var(--app-radius-lg);
+  background: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color-light);
+  box-shadow: var(--app-shadow);
+}
+.syn-guide-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.syn-guide-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+}
+.syn-guide-hint {
+  font-size: 12px;
+  color: var(--el-text-color-placeholder);
+}
+.syn-guide-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.syn-guide-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.syn-guide-col-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12.5px;
+  font-weight: 700;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+.syn-guide-col-head .buy { color: var(--app-up); }
+.syn-guide-col-head .sell { color: var(--app-down); }
+.syn-guide-count {
+  font-weight: 500;
+  color: var(--el-text-color-placeholder);
+}
+.syn-guide-item {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--el-fill-color-lighter);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.syn-guide-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.syn-guide-name {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.syn-guide-name:hover { color: var(--el-color-primary); }
+.syn-guide-code {
+  font-family: var(--app-font-mono);
+  font-size: 11.5px;
+  color: var(--el-text-color-placeholder);
+}
+.syn-guide-row :deep(.el-tag) { margin-left: auto; flex: none; }
+.syn-guide-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.syn-guide-metrics .is-near { color: var(--el-color-warning); }
+.syn-guide-metrics .up { color: var(--app-up); }
+.syn-guide-metrics .down { color: var(--app-down); }
+.syn-guide-metrics .mono {
+  font-family: var(--app-font-mono);
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+.syn-guide-metrics .up .mono { color: var(--app-up); }
+.syn-guide-metrics .down .mono { color: var(--app-down); }
+.syn-guide-advice {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--el-text-color-regular);
+}
+.syn-guide-empty {
+  padding: 14px 0;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--el-text-color-placeholder);
+}
+
 .disclaimer {
   margin-top: 8px;
   font-size: 12px;
@@ -489,5 +704,6 @@ onActivated(() => {
   .syn-tags { margin-left: 0; }
   .syn-direc-main { font-size: 26px; }
   .syn-conf-wrap { padding: 0 12px; }
+  .syn-guide-grid { grid-template-columns: 1fr; }
 }
 </style>

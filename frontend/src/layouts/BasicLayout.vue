@@ -107,8 +107,11 @@ const keepAliveComponents = computed(() => [
   'TaskCenterHome',      // 任务中心
   'FavoritesHome',       // 自选股
   'ReportsHome',         // 历史报告
-  'Synthesis',           // 综合研判
-  'ReviewOverview'       // 大盘看板
+  'VibeSynthesis',       // 综合研判
+  'ReviewOverview',      // 大盘看板
+  'ReviewEmotion',       // 短线情绪
+  'TrendAnalysis',       // 趋势分析（内嵌三 Tab 各自 KeepAlive）
+  'Radar'                // 资讯雷达
 ])
 
 // 移动端判断

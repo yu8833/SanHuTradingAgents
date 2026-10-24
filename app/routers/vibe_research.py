@@ -320,13 +320,28 @@ async def market_industry_ai_analysis(name: str, current_user: dict = Depends(ge
 
 @router.get("/market/emotion")
 async def market_emotion(current_user: dict = Depends(get_optional_current_user)):
-    """短线情绪（连板梯队/封板率/炸板率/晋级率），分级TTL缓存"""
+    """短线情绪（连板梯队/封板率/炸板率/晋级率 + 涨停/炸板/跌停三池），分级TTL缓存"""
     try:
         data = await get_short_term_emotion()
         return ok(data)
     except Exception as e:
         logger.error(f"短线情绪异常: {e}")
         return ok({})
+
+
+@router.get("/market/emotion/history")
+async def market_emotion_history(days: int = 10,
+                                 current_user: dict = Depends(get_optional_current_user)):
+    """短线情绪 · 近 N 交易日序列（涨停/炸板/跌停家数、最高连板、封板率）。
+
+    东财池逐日回放，独立长缓存（1 小时），仅情绪页按需加载，不影响主情绪接口时延。
+    """
+    try:
+        from app.services.market_overview import get_emotion_history
+        return ok(await get_emotion_history(max(3, min(int(days or 10), 20))))
+    except Exception as e:
+        logger.error(f"短线情绪历史异常: {e}")
+        return ok({"days": 0, "series": []})
 
 
 @router.get("/market/synthesis")
