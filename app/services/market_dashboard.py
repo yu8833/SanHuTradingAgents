@@ -152,7 +152,7 @@ def _pct_band_rows(rows: list[dict]) -> list[dict]:
     return out
 
 
-def _top_rows(rows: list[dict], key: str, descending: bool, limit: int = 8) -> list[dict]:
+def _top_rows(rows: list[dict], key: str, descending: bool, limit: int = 10) -> list[dict]:
     filtered = [r for r in rows if r.get(key) is not None]
     filtered.sort(key=lambda r: r.get(key) or 0, reverse=descending)
     return [
@@ -168,7 +168,7 @@ def _top_rows(rows: list[dict], key: str, descending: bool, limit: int = 8) -> l
     ]
 
 
-def _etf_industry_rank(top_n: int = 5) -> dict:
+def _etf_industry_rank(top_n: int = 10) -> dict:
     """行业热度（与大屏三买三卖/候选池同源）：ETF 主题行业资金流。
 
     与「三买三卖·行业筛选」共用同一数据源（etf_radar_snapshot，按主题 ETF
@@ -197,10 +197,17 @@ def _etf_industry_rank(top_n: int = 5) -> dict:
             })
         leading = sorted(rows, key=lambda x: x["pct"], reverse=True)[:top_n]
         lagging = sorted(rows, key=lambda x: x["pct"])[:top_n]
-        return {"leading": leading, "lagging": lagging}
+        # 区块级数据时间：ETF 快照与全市场行情不同源、刷新节奏不同，前端需单独标注
+        raw_as_of = str(latest.get("as_of") or "")[:8]
+        as_of = f"{raw_as_of[:4]}-{raw_as_of[4:6]}-{raw_as_of[6:]}" if len(raw_as_of) == 8 else ""
+        return {
+            "leading": leading,
+            "lagging": lagging,
+            "as_of": as_of or str(latest.get("updated_at") or "")[:10],
+        }
     except Exception as e:
         logger.warning(f"ETF 行业热度构建失败（降级为空）: {e}")
-        return {"leading": [], "lagging": []}
+        return {"leading": [], "lagging": [], "as_of": ""}
 
 
 def _market_regime() -> dict | None:

@@ -210,7 +210,7 @@ export interface MarketDashboard {
   top_losers: MarketTopRow[]
   turnover_leaders: MarketTopRow[]
   active_leaders: MarketTopRow[]
-  industry_rank: { leading: MarketRankItem[]; lagging: MarketRankItem[] }
+  industry_rank: { leading: MarketRankItem[]; lagging: MarketRankItem[]; as_of?: string }
   updated: string
 }
 

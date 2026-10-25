@@ -28,35 +28,36 @@
           <span class="block-title">
             <el-icon><DataLine /></el-icon> 关键计数
           </span>
+          <span class="block-hint">数据日 {{ emotion.date }}</span>
         </div>
         <div class="grid grid-6">
           <el-card shadow="never" class="count-card">
-            <div class="cnt-label">涨停</div>
+            <div class="cnt-label" title="收盘涨停家数（东财涨停池口径）">涨停</div>
             <div class="cnt-num up">{{ emotion.zt_count }}</div>
             <div class="cnt-sub">家</div>
           </el-card>
           <el-card shadow="never" class="count-card">
-            <div class="cnt-label">跌停</div>
+            <div class="cnt-label" title="收盘跌停家数（东财跌停池口径）">跌停</div>
             <div class="cnt-num down">{{ emotion.dt_count }}</div>
             <div class="cnt-sub">家</div>
           </el-card>
           <el-card shadow="never" class="count-card">
-            <div class="cnt-label">最高连板</div>
+            <div class="cnt-label" title="当日连板高度最高的个股连板数">最高连板</div>
             <div class="cnt-num">{{ emotion.max_boards }}</div>
             <div class="cnt-sub">板</div>
           </el-card>
           <el-card shadow="never" class="count-card">
-            <div class="cnt-label">连板（2板+）</div>
+            <div class="cnt-label" title="连续 2 个及以上交易日涨停的家数">连板（2板+）</div>
             <div class="cnt-num">{{ emotion.lianban_count }}</div>
             <div class="cnt-sub">家</div>
           </el-card>
           <el-card shadow="never" class="count-card">
-            <div class="cnt-label">炸板</div>
+            <div class="cnt-label" title="盘中触及涨停但收盘未封住的个股家数">炸板</div>
             <div class="cnt-num neutral">{{ emotion.zb_count }}</div>
             <div class="cnt-sub">家</div>
           </el-card>
           <el-card shadow="never" class="count-card">
-            <div class="cnt-label">昨涨停</div>
+            <div class="cnt-label" title="昨日涨停家数，用作今日晋级率的分母">昨涨停</div>
             <div class="cnt-num">{{ emotion.yzt_count }}</div>
             <div class="cnt-sub">家</div>
           </el-card>
@@ -69,24 +70,25 @@
           <span class="block-title">
             <el-icon><MagicStick /></el-icon> 打板情绪比率
           </span>
+          <span class="block-hint">数据日 {{ emotion.date }}</span>
         </div>
         <div class="grid grid-3">
           <el-card shadow="never" class="ratio-card">
-            <div class="rt-label">封板率</div>
+            <div class="rt-label" title="封板率 = 涨停 ÷（涨停 + 炸板），越高说明封板越坚决">封板率</div>
             <div class="rt-num up">{{ fmtPctFromFraction(emotion.seal_rate, 1) }}</div>
             <div class="rt-bar">
               <div class="bar-fill up" :style="{ width: rateWidth(emotion.seal_rate) }"></div>
             </div>
           </el-card>
           <el-card shadow="never" class="ratio-card">
-            <div class="rt-label">炸板率</div>
+            <div class="rt-label" title="炸板率 = 炸板 ÷（涨停 + 炸板），越高说明封板承接越弱">炸板率</div>
             <div class="rt-num down">{{ fmtPctFromFraction(emotion.break_rate, 1) }}</div>
             <div class="rt-bar">
               <div class="bar-fill down" :style="{ width: rateWidth(emotion.break_rate) }"></div>
             </div>
           </el-card>
           <el-card shadow="never" class="ratio-card">
-            <div class="rt-label">晋级率</div>
+            <div class="rt-label" title="晋级率 = 今日连板家数 ÷ 昨日涨停家数，反映打板资金接力意愿">晋级率</div>
             <div class="rt-num">{{ fmtPctFromFraction(emotion.promotion_rate, 1) }}</div>
             <div class="rt-bar">
               <div class="bar-fill neutral" :style="{ width: rateWidth(emotion.promotion_rate) }"></div>
@@ -101,6 +103,7 @@
           <span class="block-title">
             <el-icon><TrendCharts /></el-icon> 情绪周期 · 近 {{ history?.series?.length || 0 }} 个交易日
           </span>
+          <span v-if="historyRange" class="block-hint">{{ historyRange }}</span>
           <span v-if="phase" class="phase-tag" :class="`phase-${phase.tone}`">{{ phase.label }}</span>
         </div>
         <el-card shadow="never" class="trend-card" v-loading="historyLoading">
@@ -118,7 +121,7 @@
           <span class="block-title">
             <el-icon><Sort /></el-icon> 连板梯队
           </span>
-          <span class="block-hint">点击梯队筛选下方连板股 · 再点「全部」取消</span>
+          <span class="block-hint">数据日 {{ emotion.date }} · 点击梯队筛选下方连板股 · 再点「全部」取消</span>
         </div>
         <el-card shadow="never" class="ladder-card">
           <div v-if="emotion.ladder.length" class="ladder-visual">
@@ -156,7 +159,7 @@
               {{ selectedTierLabel }}
             </el-tag>
           </span>
-          <span class="block-hint">共 {{ filteredLianbanStocks.length }} 只</span>
+          <span class="block-hint">数据日 {{ emotion.date }} · 共 {{ filteredLianbanStocks.length }} 只</span>
         </div>
         <el-card shadow="never" class="table-card">
           <el-table :data="filteredLianbanStocks" stripe size="default" class="app-table app-table--ranking">
@@ -198,7 +201,7 @@
           <span class="block-title">
             <el-icon><Tickets /></el-icon> 三池清单
           </span>
-          <span class="block-hint">客观公开榜单 · 不评分不推荐</span>
+          <span class="block-hint">数据日 {{ emotion.date }} · 客观公开榜单 · 不评分不推荐</span>
         </div>
         <el-card shadow="never" class="table-card">
           <el-tabs v-model="poolTab" class="pool-tabs">
@@ -290,6 +293,15 @@ const emotion = ref<ShortTermEmotion | null>(null)
 // ── 近 10 交易日情绪序列（独立接口，不阻塞主情绪；数据源不可用时明确空态） ──
 const history = ref<EmotionHistory | null>(null)
 const historyLoading = ref(false)
+
+// 区块级数据时间：曲线区间起点 → 终点（与上方当日快照分开标注）
+const historyRange = computed(() => {
+  const series = history.value?.series || []
+  if (!series.length) return ''
+  const first = series[0].date
+  const last = series[series.length - 1].date
+  return first === last ? `数据日 ${last}` : `区间 ${first} → ${last}`
+})
 
 const emotionChartOption = computed<EChartsOption | null>(() => {
   const series = history.value?.series || []

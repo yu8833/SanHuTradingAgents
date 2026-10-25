@@ -60,72 +60,81 @@
           <div class="syn-concl-text">{{ verdict.conclusion }}</div>
         </div>
 
-        <!-- ① 现状 -->
-        <div class="syn-panel" v-if="verdict.status">
-          <div class="syn-panel-title status"><el-icon><DataLine /></el-icon> 现状</div>
-          <div class="syn-plain-text">{{ verdict.status }}</div>
-        </div>
-
-        <!-- ② 引起现状的原因 -->
-        <div class="syn-panel" v-if="verdict.reasons.length">
-          <div class="syn-panel-title reasons"><el-icon><InfoFilled /></el-icon> 引起现状的原因</div>
-          <ul class="syn-panel-list">
-            <li v-for="(r, i) in verdict.reasons" :key="'r' + i">▸ {{ r }}</li>
-          </ul>
-        </div>
-
-        <!-- ③ 操作要点：主攻 / 回避 / 持仓分析 / 仓位纪律 -->
-        <div class="syn-panel" v-if="hasOperationPoints">
-          <div class="syn-panel-title bull"><el-icon><Opportunity /></el-icon> 操作要点</div>
-          <div class="syn-op-grid">
-            <div class="syn-op-card" v-if="verdict.operation_points.main_direction">
-              <div class="syn-op-card-label main">主攻方向</div>
-              <div class="syn-op-card-text">{{ verdict.operation_points.main_direction }}</div>
-            </div>
-            <div class="syn-op-card" v-if="verdict.operation_points.avoid_direction">
-              <div class="syn-op-card-label avoid">回避方向</div>
-              <div class="syn-op-card-text">{{ verdict.operation_points.avoid_direction }}</div>
-            </div>
-            <div class="syn-op-card" v-if="verdict.operation_points.position_discipline">
-              <div class="syn-op-card-label disc">仓位纪律</div>
-              <div class="syn-op-card-text">{{ verdict.operation_points.position_discipline }}</div>
-            </div>
+        <!-- 首屏决策卡：主攻 / 回避 / 仓位（回答「今天怎么办」，一眼可见） -->
+        <div class="syn-decision" v-if="hasOperationPoints">
+          <div class="syn-dec-card syn-dec-card--main" v-if="verdict.operation_points.main_direction">
+            <div class="syn-dec-label">主攻</div>
+            <div class="syn-dec-text">{{ verdict.operation_points.main_direction }}</div>
+          </div>
+          <div class="syn-dec-card syn-dec-card--avoid" v-if="verdict.operation_points.avoid_direction">
+            <div class="syn-dec-label">回避</div>
+            <div class="syn-dec-text">{{ verdict.operation_points.avoid_direction }}</div>
+          </div>
+          <div class="syn-dec-card syn-dec-card--pos" v-if="verdict.operation_points.position_discipline">
+            <div class="syn-dec-label">仓位</div>
+            <div class="syn-dec-text">{{ verdict.operation_points.position_discipline }}</div>
           </div>
         </div>
 
-        <!-- ④ 今日观察：外围传导 + 观察信号 -->
-        <div class="syn-panel" v-if="verdict.external_observation || verdict.watch.length">
-          <div class="syn-panel-title watch"><el-icon><View /></el-icon> 今日观察</div>
-          <div class="syn-ext" v-if="verdict.external_observation">
-            <div class="syn-ext-label">外围传导 · 美股 / 大宗商品 → A股情绪</div>
-            <div class="syn-ext-text">{{ verdict.external_observation }}</div>
-          </div>
-          <ul class="syn-panel-list" v-if="verdict.watch.length">
-            <li v-for="(w, i) in verdict.watch" :key="'w' + i">◎ {{ w }}</li>
-          </ul>
-        </div>
+        <!-- 推理过程：默认收起，首屏只留决策结论 -->
+        <el-collapse v-model="reasonOpen" class="syn-reason">
+          <el-collapse-item name="reason">
+            <template #title>
+              <span class="syn-reason-title"><el-icon><Document /></el-icon> 展开推理过程</span>
+              <span class="syn-reason-sub">{{ reasonSections }}</span>
+            </template>
 
-        <!-- ⑤ 操作策略 -->
-        <div class="syn-panel" v-if="verdict.strategy">
-          <div class="syn-panel-title strat"><el-icon><Guide /></el-icon> 操作策略</div>
-          <div class="syn-strat-text">{{ verdict.strategy }}</div>
-        </div>
+            <div class="syn-reason-body">
+              <!-- ① 现状 -->
+              <div class="syn-panel" v-if="verdict.status">
+                <div class="syn-panel-title status"><el-icon><DataLine /></el-icon> 现状</div>
+                <div class="syn-plain-text">{{ verdict.status }}</div>
+              </div>
 
-        <!-- AI 自主补充（重大事件影响等） -->
-        <div class="syn-panel" v-if="verdict.extra.length">
-          <div class="syn-panel-title extra"><el-icon><StarFilled /></el-icon> 重点补充</div>
-          <ul class="syn-panel-list">
-            <li v-for="(e, i) in verdict.extra" :key="'e' + i">★ {{ e }}</li>
-          </ul>
-        </div>
+              <!-- ② 引起现状的原因 -->
+              <div class="syn-panel" v-if="verdict.reasons.length">
+                <div class="syn-panel-title reasons"><el-icon><InfoFilled /></el-icon> 引起现状的原因</div>
+                <ul class="syn-panel-list">
+                  <li v-for="(r, i) in verdict.reasons" :key="'r' + i">▸ {{ r }}</li>
+                </ul>
+              </div>
 
-        <!-- 风险提示 -->
-        <div class="syn-risk" v-if="verdict.risk_tips.length">
-          <span class="syn-risk-title"><el-icon><WarnTriangleFilled /></el-icon> 风险提示</span>
-          <ul class="syn-risk-list">
-            <li v-for="(tip, i) in verdict.risk_tips" :key="i">{{ tip }}</li>
-          </ul>
-        </div>
+              <!-- ③ 今日观察：外围传导 + 观察信号 -->
+              <div class="syn-panel" v-if="verdict.external_observation || verdict.watch.length">
+                <div class="syn-panel-title watch"><el-icon><View /></el-icon> 今日观察</div>
+                <div class="syn-ext" v-if="verdict.external_observation">
+                  <div class="syn-ext-label">外围传导 · 美股 / 大宗商品 → A股情绪</div>
+                  <div class="syn-ext-text">{{ verdict.external_observation }}</div>
+                </div>
+                <ul class="syn-panel-list" v-if="verdict.watch.length">
+                  <li v-for="(w, i) in verdict.watch" :key="'w' + i">◎ {{ w }}</li>
+                </ul>
+              </div>
+
+              <!-- ④ 操作策略 -->
+              <div class="syn-panel" v-if="verdict.strategy">
+                <div class="syn-panel-title strat"><el-icon><Guide /></el-icon> 操作策略</div>
+                <div class="syn-strat-text">{{ verdict.strategy }}</div>
+              </div>
+
+              <!-- AI 自主补充（重大事件影响等） -->
+              <div class="syn-panel" v-if="verdict.extra.length">
+                <div class="syn-panel-title extra"><el-icon><StarFilled /></el-icon> 重点补充</div>
+                <ul class="syn-panel-list">
+                  <li v-for="(e, i) in verdict.extra" :key="'e' + i">★ {{ e }}</li>
+                </ul>
+              </div>
+
+              <!-- 风险提示 -->
+              <div class="syn-risk" v-if="verdict.risk_tips.length">
+                <span class="syn-risk-title"><el-icon><WarnTriangleFilled /></el-icon> 风险提示</span>
+                <ul class="syn-risk-list">
+                  <li v-for="(tip, i) in verdict.risk_tips" :key="i">{{ tip }}</li>
+                </ul>
+              </div>
+            </div>
+          </el-collapse-item>
+        </el-collapse>
       </section>
 
       <div v-else class="syn-missing">
@@ -204,8 +213,8 @@ import {
 import { formatBeijingDateTimeMinute } from '@/utils/datetime'
 import { fmtPrice, fmtPct, clsByVal } from '@/utils/format'
 import {
-  Refresh, Loading, Aim, Opportunity, WarnTriangleFilled, View, Guide,
-  DataLine, InfoFilled, StarFilled, TrendCharts,
+  Refresh, Loading, Aim, WarnTriangleFilled, View, Guide,
+  DataLine, InfoFilled, StarFilled, TrendCharts, Document,
 } from '@element-plus/icons-vue'
 
 defineOptions({ name: 'VibeSynthesis' })
@@ -255,6 +264,23 @@ const hasOperationPoints = computed(() => {
   const op = verdict.value?.operation_points
   if (!op) return false
   return !!(op.main_direction || op.avoid_direction || op.position_discipline)
+})
+
+/** 推理过程默认收起；展开后保留用户选择（keep-alive 切回仍在展开态） */
+const reasonOpen = ref<string[]>([])
+
+/** 折叠标题右侧：提示里面有哪些小节，避免用户不知道展开能看到什么 */
+const reasonSections = computed(() => {
+  const v = verdict.value
+  if (!v) return ''
+  const names: string[] = []
+  if (v.status) names.push('现状')
+  if (v.reasons.length) names.push('原因')
+  if (v.external_observation || v.watch.length) names.push('今日观察')
+  if (v.strategy) names.push('操作策略')
+  if (v.extra.length) names.push('重点补充')
+  if (v.risk_tips.length) names.push('风险提示')
+  return names.join(' · ')
 })
 
 /** 结论横幅信心度环：--pct 与 --ring-color 由方向色驱动 */
@@ -508,30 +534,88 @@ onActivated(() => {
   color: var(--el-text-color-regular);
 }
 
-/* 操作要点卡片 */
-.syn-op-grid {
+/* 首屏决策卡：主攻 / 回避 / 仓位 —— 直接回答「今天怎么办」 */
+.syn-decision {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.syn-dec-card {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color-lighter);
+  border-left-width: 3px;
+}
+.syn-dec-card--main {
+  border-left-color: var(--app-up);
+  background: rgba(245, 108, 108, .05);
+}
+.syn-dec-card--avoid {
+  border-left-color: var(--app-down);
+  background: rgba(103, 194, 58, .05);
+}
+.syn-dec-card--pos {
+  border-left-color: var(--el-color-warning);
+  background: rgba(230, 162, 60, .06);
+}
+.syn-dec-label {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  margin-bottom: 4px;
+}
+.syn-dec-card--main .syn-dec-label { color: var(--app-up); }
+.syn-dec-card--avoid .syn-dec-label { color: var(--app-down); }
+.syn-dec-card--pos .syn-dec-label { color: var(--el-color-warning); }
+.syn-dec-text {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--el-text-color-regular);
+}
+
+@media (max-width: 900px) {
+  .syn-decision { grid-template-columns: 1fr; }
+}
+
+/* 推理过程折叠区：默认收起，不抢首屏 */
+.syn-reason {
+  border-top: 1px solid var(--el-border-color-lighter);
+  border-bottom: none;
+}
+.syn-reason :deep(.el-collapse-item__header) {
+  height: auto;
+  padding: 8px 2px;
+  border-bottom: none;
+  gap: 10px;
+  line-height: 1.5;
+}
+.syn-reason :deep(.el-collapse-item__wrap) {
+  border-bottom: none;
+}
+.syn-reason-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-regular);
+}
+.syn-reason-sub {
+  margin-left: auto;
+  padding-right: 8px;
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--el-text-color-placeholder);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.syn-reason-body {
   display: flex;
   flex-direction: column;
   gap: 10px;
-}
-.syn-op-card {
-  background: var(--el-fill-color-blank);
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
-  padding: 10px 12px;
-}
-.syn-op-card-label {
-  font-size: 12px;
-  font-weight: 700;
-  margin-bottom: 5px;
-}
-.syn-op-card-label.main { color: var(--app-up); }
-.syn-op-card-label.avoid { color: var(--app-down); }
-.syn-op-card-label.disc { color: var(--el-color-warning); }
-.syn-op-card-text {
-  font-size: 13.5px;
-  line-height: 1.7;
-  color: var(--el-text-color-regular);
+  padding: 2px 0 4px;
 }
 
 /* 今日观察 · 外围传导 */

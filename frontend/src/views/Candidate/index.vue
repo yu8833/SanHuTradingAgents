@@ -24,6 +24,7 @@
         <div class="flow-title">
           选择行业
           <span class="flow-sub">与「趋势分析-行业全景」同口径（{{ sectorTotal }} 个同花顺行业）</span>
+          <span v-if="updatedAt" class="block-time">行情数据 {{ updatedAt }}</span>
         </div>
         <div class="flow-actions">
           <el-input
@@ -64,19 +65,19 @@
         <div class="flow-title">
           候选个股
           <span class="flow-sub">{{ selectedSector ? `行业：${selectedSector.name}` : '全部行业各行业三买 TOP' }} · 三买三卖择时信号</span>
+          <span v-if="candidateAsOf" class="block-time">候选数据 {{ candidateAsOf }}</span>
         </div>
         <div class="flow-actions signal-filter">
           <el-radio-group v-model="signalFilter" size="small">
-            <el-radio-button value="buy">三买 {{ signalStats.buy }}</el-radio-button>
-            <el-radio-button value="all">全部 {{ signalStats.all }}</el-radio-button>
-            <el-radio-button value="B1">左侧 {{ signalStats.B1 }}</el-radio-button>
-            <el-radio-button value="B2">突破 {{ signalStats.B2 }}</el-radio-button>
-            <el-radio-button value="B3">回踩 {{ signalStats.B3 }}</el-radio-button>
-            <el-radio-button value="S1">加速卖 {{ signalStats.S1 }}</el-radio-button>
-            <el-radio-button value="S2">跌破卖 {{ signalStats.S2 }}</el-radio-button>
-            <el-radio-button value="S3">清仓卖 {{ signalStats.S3 }}</el-radio-button>
+            <el-radio-button value="buy" title="仅三买信号（B1+B2+B3）">三买 {{ signalStats.buy }}</el-radio-button>
+            <el-radio-button value="all" title="不过滤，显示全部三买三卖信号">全部 {{ signalStats.all }}</el-radio-button>
+            <el-radio-button value="B1" title="B1 左侧买点：超跌/震荡低位触发，提前埋伏">左侧 {{ signalStats.B1 }}</el-radio-button>
+            <el-radio-button value="B2" title="B2 突破买点：放量突破确认，右侧进场">突破 {{ signalStats.B2 }}</el-radio-button>
+            <el-radio-button value="B3" title="B3 回踩买点：强势回踩不破，加仓机会">回踩 {{ signalStats.B3 }}</el-radio-button>
+            <el-radio-button value="S1" title="S1 加速卖点：冲高放量，兑现离场">加速卖 {{ signalStats.S1 }}</el-radio-button>
+            <el-radio-button value="S2" title="S2 跌破卖点：破位下行，防守减仓">跌破卖 {{ signalStats.S2 }}</el-radio-button>
+            <el-radio-button value="S3" title="S3 清仓卖点：趋势破坏，清仓回避">清仓卖 {{ signalStats.S3 }}</el-radio-button>
           </el-radio-group>
-          <el-button size="small" :icon="Refresh" :loading="stockLoading" @click="loadCandidates">计算候选</el-button>
         </div>
       </div>
 
@@ -92,6 +93,7 @@
 
       <div class="stocks-hint">
         {{ stocksHint }} · {{ signalFilter === 'buy' ? '仅三买' : signalFilter === 'all' ? '三买三卖' : signalFilter }} · 显示 {{ filteredCandidates.length }} 只
+        <span v-if="trendAsOf" class="block-time">趋势/资金帧 {{ trendAsOf }}</span>
         <span class="goto-trend">
           <router-link to="/vibe/review/trend-analysis">行业资金/象限详情 → 趋势分析</router-link>
         </span>
@@ -248,6 +250,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, nextTick } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Refresh, Aim, Cpu, Loading } from '@element-plus/icons-vue'
 import { candidateApi, type CandidateStock } from '@/api/candidate'
@@ -313,9 +316,62 @@ async function loadSectors() {
 }
 function filterSectors() {}
 
+/* ── 大盘看板「行业强弱」→ 本页：ETF 主题行业名 → 同花顺行业名静态映射 ──
+   两套口径名称交集为 0（ETF 主题 23 个 vs 同花顺行业 90 个），只能靠映射兜住跳转链路 */
+const ETF_TO_THS: Record<string, string> = {
+  农业: '种植业与林业',
+  人工智能: '软件开发',
+  电力: '电力',
+  消费: '食品加工制造',
+  计算机: '计算机设备',
+  房地产: '房地产',
+  汽车: '汽车整车',
+  通信: '通信设备',
+  医药: '化学制药',
+  有色金属: '工业金属',
+  银行: '银行',
+  化工: '化学制品',
+  电子: '光学光电子',
+  煤炭: '煤炭开采加工',
+  传媒: '文化传媒',
+  钢铁: '钢铁',
+  半导体: '半导体',
+  军工: '军工装备',
+  证券: '证券',
+  新能源: '光伏设备',
+  环保: '环境治理',
+  机械: '通用设备',
+  交通运输: '公路铁路运输',
+}
+
+const route = useRoute()
+
+/** 解析 URL 上的 sector 参数（ETF 主题名或同花顺行业名均可），返回本页可用的行业对象 */
+function resolveQuerySector(raw: string): { name: string } | null {
+  const key = raw.trim()
+  if (!key) return null
+  const thsName = ETF_TO_THS[key] || key
+  const hit = sectors.value.find(s => s.name === thsName)
+  // 行业列表未加载成功时仍按映射名请求候选池，接口本身只认行业名字符串
+  return hit ? { name: hit.name } : { name: thsName }
+}
+
+/** 带参跳转落地：预选行业 + 直接拉候选，省掉用户再点一次行业 */
+async function applySectorFromQuery(): Promise<boolean> {
+  const sector = resolveQuerySector(String(route.query.sector || ''))
+  if (!sector) return false
+  selectedSector.value = sector
+  await loadCandidates()
+  nextTick(() => stockSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+  return true
+}
+
 /* ================= ② 候选个股：三买三卖 ================= */
 const selectedSector = ref<{ name: string } | null>(null)
 const candidates = ref<CandidateStock[]>([])
+// 区块级数据时间：候选池行情日 / 趋势资金帧日期（与页头「更新于」不同源）
+const candidateAsOf = ref('')
+const trendAsOf = ref('')
 const limit = 30
 const stockSection = ref<HTMLElement | null>(null)
 const signalFilter = ref<'all' | 'buy' | 'B1' | 'B2' | 'B3' | 'S1' | 'S2' | 'S3'>('buy')
@@ -366,9 +422,11 @@ async function loadCandidates() {
     if (selectedSector.value) {
       const res = await candidateApi.stocks(selectedSector.value.name, limit)
       candidates.value = res.data?.items || []
+      candidateAsOf.value = res.data?.as_of || ''
     } else {
       const res = await candidateApi.stocksOverview(10, 5)
       candidates.value = res.data?.items || []
+      candidateAsOf.value = res.data?.as_of || ''
     }
   } catch (e) {
     ElMessage.error('计算候选个股失败')
@@ -408,6 +466,7 @@ async function loadTrendSlim() {
     const res = await vibeApi.getStockQuadrantSlim()
     const data = (res as any)?.data ?? null
     const frame = data?.frame || {}
+    trendAsOf.value = data?.as_of || ''
     const out: Record<string, number[]> = {}
     for (const [code, v] of Object.entries(frame)) out[norm(String(code))] = v as number[]
     trendByCode.value = out
@@ -567,10 +626,14 @@ async function refreshAll() {
   }
 }
 
-// 首次进入：并行加载行业 + 默认候选
+// 首次进入：并行加载行业与趋势帧；带 sector 参数时按映射预选行业并直接拉候选，否则走默认全市场
 onMounted(async () => {
-  await Promise.allSettled([loadSectors(), loadCandidates(), loadTrendSlim()])
-  nextTick(() => stockSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+  await Promise.allSettled([loadSectors(), loadTrendSlim()])
+  const jumped = await applySectorFromQuery()
+  if (!jumped) {
+    await loadCandidates()
+    nextTick(() => stockSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+  }
 })
 </script>
 
@@ -621,6 +684,13 @@ onMounted(async () => {
   font-size: 12px;
   font-weight: 400;
   color: var(--el-text-color-secondary);
+}
+/* 区块级数据时间：标注该块数据自身口径，避免与页头「更新于」混淆 */
+.block-time {
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--el-text-color-placeholder);
+  margin-left: 10px;
 }
 .flow-actions {
   display: flex;

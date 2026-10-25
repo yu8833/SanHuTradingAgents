@@ -50,80 +50,6 @@
       </div>
     </section>
 
-    <!-- 市场透视：市场状态 → 行业强弱 → 个股榜单（三层粒度在同一屏串联） -->
-    <section v-if="dashboard && (dashboard.regime || dashboard.industry_rank)" class="block">
-      <div class="block-head">
-        <span class="block-title"><el-icon><Compass /></el-icon> 市场透视</span>
-        <span class="block-hint">状态研判 → 行业方向 → 个股榜单 · 行业条长 = 当日涨跌幅，数字 = 主力净流入(亿)</span>
-      </div>
-
-      <!-- 第一层：市场状态（结论用文字，不画图） -->
-      <div v-if="dashboard.regime" class="regime-line">
-        <el-tag :type="regimeTrendType" effect="plain">{{ dashboard.regime.trend_label }}</el-tag>
-        <el-tag :type="regimeVolType" effect="plain">{{ dashboard.regime.volatility_label }}</el-tag>
-        <span class="regime-advice-inline">{{ dashboard.regime.advice || '暂无操作建议' }}</span>
-      </div>
-
-      <div class="persp-grid">
-        <!-- 第二层：行业强弱双向条形（中线=0，红向右=涨，绿向左=跌） -->
-        <el-card v-if="dashboard.industry_rank" shadow="never" class="persp-card">
-          <div class="persp-card-title">
-            行业强弱
-            <span class="persp-card-note">ETF 主题行业 · 领涨/领跌各 5</span>
-          </div>
-          <div v-if="industryBars.leading.length || industryBars.lagging.length" class="ind-bars">
-            <template v-for="(group, gi) in [industryBars.leading, industryBars.lagging]" :key="gi">
-              <div v-if="gi === 1 && industryBars.leading.length && industryBars.lagging.length" class="ind-divider">
-                <span>上方领涨 · 下方领跌</span>
-              </div>
-              <div v-for="bar in group" :key="bar.name" class="ind-row">
-                <span class="ind-name" :title="bar.name">{{ bar.name }}</span>
-                <div class="ind-track">
-                  <i class="ind-axis" />
-                  <i class="ind-fill" :class="bar.dir === 'up' ? 'is-up' : 'is-down'" :style="bar.style" />
-                </div>
-                <span class="ind-val">
-                  <b :class="bar.dir === 'up' ? 'up' : 'down'">{{ fmtPct(bar.pct) }}</b>
-                  <em :class="clsByVal(bar.net, '')">{{ fmtSigned(bar.net, 1) }}亿</em>
-                </span>
-              </div>
-            </template>
-          </div>
-          <div v-else class="rank-empty">暂无行业数据</div>
-        </el-card>
-
-        <!-- 第三层：个股榜单（每行附迷你涨跌条，便于扫读） -->
-        <el-card v-if="listCols.length" shadow="never" class="persp-card">
-          <div class="persp-card-title">
-            市场榜单
-            <span class="persp-card-note">涨幅 / 跌幅 / 成交额 / 换手 TOP 6</span>
-          </div>
-          <div class="list-grid list-grid--compact">
-            <div v-for="(col, key) in listCols" :key="key" class="list-card">
-              <div class="list-head">
-                <span class="list-title">{{ col.title }}</span>
-                <span class="list-top">TOP {{ Math.min(6, col.rows.length) }}</span>
-              </div>
-              <div v-for="(r, idx) in col.rows.slice(0, 6)" :key="key + '-' + r.code" class="list-item">
-                <span class="list-no">{{ idx + 1 }}</span>
-                <div class="list-main">
-                  <router-link target="_blank" rel="noopener" :to="`/stocks/${r.code}`" class="list-name stock-name" :title="r.name">{{ r.name }}</router-link>
-                  <div class="list-code">{{ r.code }}</div>
-                  <i class="mini-bar" :class="clsByVal(r.pct_chg, '')" :style="{ width: miniBarWidth(r.pct_chg) }" />
-                </div>
-                <div class="list-right">
-                  <div v-if="col.mode === 'amount'" class="list-amt">{{ fmtAmount(r.amount) }}</div>
-                  <div v-else-if="col.mode === 'active'" class="list-amt accent">{{ r.turnover_rate }}%</div>
-                  <div :class="clsByVal(r.pct_chg)">{{ fmtPct(r.pct_chg) }}</div>
-                  <div v-if="col.mode === 'gain' || col.mode === 'loss'" class="list-close">{{ fmtPrice(r.close) }}</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </el-card>
-      </div>
-    </section>
-
     <!-- 情绪评分 + KPI + 涨跌分布 + 雷达 -->
     <section v-if="dashboard" class="block">
       <div class="block-head">
@@ -237,7 +163,7 @@
         <div class="kpi-cell">
           <div class="kpi-label">涨停</div>
           <div class="kpi-value up">{{ dashboard.limit.limit_up }}</div>
-          <div class="kpi-sub">封板率 {{ dashboard.limit.seal_rate == null ? '—' : fmtAbsPct(dashboard.limit.seal_rate * 100, 0) }}</div>
+          <div class="kpi-sub" title="封板率 = 涨停 ÷（涨停 + 炸板），越高说明封板越坚决">封板率 {{ dashboard.limit.seal_rate == null ? '—' : fmtAbsPct(dashboard.limit.seal_rate * 100, 0) }}</div>
         </div>
         <div class="kpi-cell">
           <div class="kpi-label">跌停</div>
@@ -254,6 +180,93 @@
           <div class="kpi-value accent">{{ lianbanCount }}家</div>
           <div class="kpi-sub">2 板及以上家数</div>
         </div>
+      </div>
+    </section>
+
+    <!-- 市场透视：市场状态 → 行业强弱 → 个股榜单（置于页尾：先看指数与情绪，再看方向与个股） -->
+    <section v-if="dashboard && (dashboard.regime || dashboard.industry_rank)" class="block block--tail">
+      <div class="block-head">
+        <span class="block-title"><el-icon><Compass /></el-icon> 市场透视</span>
+        <span class="block-hint">状态研判 → 行业方向 → 个股榜单 · 行业条长 = 当日涨跌幅，数字 = 主力净流入(亿)</span>
+      </div>
+
+      <!-- 第一层：市场状态（结论用文字，不画图） -->
+      <div v-if="dashboard.regime" class="regime-line">
+        <el-tag :type="regimeTrendType" effect="plain">{{ dashboard.regime.trend_label }}</el-tag>
+        <el-tag :type="regimeVolType" effect="plain">{{ dashboard.regime.volatility_label }}</el-tag>
+        <span class="regime-advice-inline">{{ dashboard.regime.advice || '暂无操作建议' }}</span>
+        <span v-if="dashboard.regime.as_of" class="data-time">趋势数据 {{ shortTime(dashboard.regime.as_of) }}</span>
+      </div>
+
+      <div class="persp-grid">
+        <!-- 第二层：行业强弱双向条形（中线=0，红向右=涨，绿向左=跌；点击跳股票筛选） -->
+        <el-card v-if="dashboard.industry_rank" shadow="never" class="persp-card">
+          <div class="persp-card-title">
+            行业强弱
+            <span class="persp-card-note">
+              ETF 主题行业 · 领涨/领跌各 10
+              <em v-if="industryRankAsOf" class="data-time">行业数据 {{ industryRankAsOf }}</em>
+            </span>
+          </div>
+          <div v-if="industryBars.leading.length || industryBars.lagging.length" class="ind-bars">
+            <template v-for="(group, gi) in [industryBars.leading, industryBars.lagging]" :key="gi">
+              <div v-if="gi === 1 && industryBars.leading.length && industryBars.lagging.length" class="ind-divider">
+                <span>上方领涨 · 下方领跌（点击行业 → 股票筛选）</span>
+              </div>
+              <div
+                v-for="bar in group"
+                :key="bar.name"
+                class="ind-row ind-row--link"
+                :title="`查看「${bar.name}」对应行业的候选个股`"
+                @click="gotoSector(bar.name)"
+              >
+                <span class="ind-name" :title="bar.name">{{ bar.name }}</span>
+                <div class="ind-track">
+                  <i class="ind-axis" />
+                  <i class="ind-fill" :class="bar.dir === 'up' ? 'is-up' : 'is-down'" :style="bar.style" />
+                </div>
+                <span class="ind-val">
+                  <b :class="bar.dir === 'up' ? 'up' : 'down'">{{ fmtPct(bar.pct) }}</b>
+                  <em :class="clsByVal(bar.net, '')">{{ fmtSigned(bar.net, 1) }}亿</em>
+                </span>
+              </div>
+            </template>
+          </div>
+          <div v-else class="rank-empty">暂无行业数据</div>
+        </el-card>
+
+        <!-- 第三层：个股榜单（每行附迷你涨跌条，便于扫读） -->
+        <el-card v-if="listCols.length" shadow="never" class="persp-card">
+          <div class="persp-card-title">
+            市场榜单
+            <span class="persp-card-note">
+              涨幅 / 跌幅 / 成交额 / 换手 TOP 10
+              <em v-if="quotesAsOf" class="data-time">行情 {{ shortTime(quotesAsOf) }}</em>
+            </span>
+          </div>
+          <div class="list-grid list-grid--compact">
+            <div v-for="(col, key) in listCols" :key="key" class="list-card">
+              <div class="list-head">
+                <span class="list-title">{{ col.title }}</span>
+                <span class="list-top">TOP {{ Math.min(10, col.rows.length) }}</span>
+              </div>
+              <div v-for="(r, idx) in col.rows.slice(0, 10)" :key="key + '-' + r.code" class="list-item">
+                <span class="list-no">{{ idx + 1 }}</span>
+                <div class="list-main">
+                  <router-link target="_blank" rel="noopener" :to="`/stocks/${r.code}`" class="list-name stock-name" :title="r.name">{{ r.name }}</router-link>
+                  <div class="list-code">{{ r.code }}</div>
+                  <i class="mini-bar" :class="clsByVal(r.pct_chg, '')" :style="{ width: miniBarWidth(r.pct_chg) }" />
+                </div>
+                <div class="list-right">
+                  <div v-if="col.mode === 'amount'" class="list-amt">{{ fmtAmount(r.amount) }}</div>
+                  <div v-else-if="col.mode === 'active'" class="list-amt accent">{{ r.turnover_rate }}%</div>
+                  <div :class="clsByVal(r.pct_chg)">{{ fmtPct(r.pct_chg) }}</div>
+                  <div v-if="col.mode === 'gain' || col.mode === 'loss'" class="list-close">{{ fmtPrice(r.close) }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </el-card>
       </div>
     </section>
 
@@ -333,6 +346,7 @@
 // 显式声明组件名，供 <keep-alive :include> 匹配
 defineOptions({ name: 'ReviewOverview' })
 import { ref, computed, onMounted, onActivated, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   DataAnalysis,
@@ -357,6 +371,18 @@ const loading = ref(false)
 const activeTab = ref('ashare')
 const indices = ref<IndexQuote[]>([])
 const dashboard = ref<MarketDashboard | null>(null)
+const router = useRouter()
+
+// 区块级数据时间：ETF 行业快照与全市场行情不同源、刷新节奏不同，需分别标注
+const industryRankAsOf = computed(() => dashboard.value?.industry_rank?.as_of || '')
+const quotesAsOf = computed(() => dashboard.value?.as_of || '')
+const shortTime = (v?: string | null) =>
+  v ? formatBeijingDateTimeMinute(String(v)) : ''
+
+// 点击行业 → 股票筛选（ETF 主题名作为参数，目标页负责映射到同花顺行业）
+const gotoSector = (name: string) => {
+  router.push({ path: '/candidate', query: { sector: name } })
+}
 
 // 市场状态标签配色：趋势（牛/震荡/熊）、波动（高/低/未知）
 const regimeTrendType = computed(() => {
@@ -704,6 +730,22 @@ onActivated(() => {
   margin-bottom: 24px;
 }
 
+/* 页尾汇总块：与上方内容拉开层次 */
+.block--tail {
+  margin-top: 8px;
+  padding-top: 18px;
+  border-top: 1px solid var(--el-border-color-lighter);
+}
+
+/* 区块级数据时间：标注该块数据自身的生成时刻，避免与页头「更新于」混淆 */
+.data-time {
+  font-size: 11.5px;
+  font-style: normal;
+  font-weight: 400;
+  color: var(--el-text-color-placeholder);
+  margin-left: 8px;
+}
+
 .block-head {
   display: flex;
   justify-content: space-between;
@@ -1043,6 +1085,17 @@ onActivated(() => {
   align-items: center;
   gap: 8px;
   padding: 3px 0;
+}
+
+/* 可点击行业行：悬停提示可跳转股票筛选 */
+.ind-row--link {
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.15s ease;
+}
+
+.ind-row--link:hover {
+  background: var(--el-fill-color-light);
 }
 
 .ind-name {
