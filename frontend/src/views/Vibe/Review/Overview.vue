@@ -50,37 +50,76 @@
       </div>
     </section>
 
-    <!-- 市场状态 + 行业强弱（首屏：趋势/波动/建议 + 领涨领跌行业） -->
+    <!-- 市场透视：市场状态 → 行业强弱 → 个股榜单（三层粒度在同一屏串联） -->
     <section v-if="dashboard && (dashboard.regime || dashboard.industry_rank)" class="block">
       <div class="block-head">
-        <span class="block-title"><el-icon><Compass /></el-icon> 市场状态与行业强弱</span>
-        <span class="block-hint">趋势 / 波动研判 · 行业按当日涨幅</span>
+        <span class="block-title"><el-icon><Compass /></el-icon> 市场透视</span>
+        <span class="block-hint">状态研判 → 行业方向 → 个股榜单 · 行业条长 = 当日涨跌幅，数字 = 主力净流入(亿)</span>
       </div>
-      <div class="regime-grid">
-        <el-card v-if="dashboard.regime" shadow="never" class="regime-card">
-          <div class="regime-tags">
-            <el-tag :type="regimeTrendType" effect="plain">{{ dashboard.regime.trend_label }}</el-tag>
-            <el-tag :type="regimeVolType" effect="plain">{{ dashboard.regime.volatility_label }}</el-tag>
+
+      <!-- 第一层：市场状态（结论用文字，不画图） -->
+      <div v-if="dashboard.regime" class="regime-line">
+        <el-tag :type="regimeTrendType" effect="plain">{{ dashboard.regime.trend_label }}</el-tag>
+        <el-tag :type="regimeVolType" effect="plain">{{ dashboard.regime.volatility_label }}</el-tag>
+        <span class="regime-advice-inline">{{ dashboard.regime.advice || '暂无操作建议' }}</span>
+      </div>
+
+      <div class="persp-grid">
+        <!-- 第二层：行业强弱双向条形（中线=0，红向右=涨，绿向左=跌） -->
+        <el-card v-if="dashboard.industry_rank" shadow="never" class="persp-card">
+          <div class="persp-card-title">
+            行业强弱
+            <span class="persp-card-note">ETF 主题行业 · 领涨/领跌各 5</span>
           </div>
-          <p class="regime-advice">{{ dashboard.regime.advice || '暂无操作建议' }}</p>
+          <div v-if="industryBars.leading.length || industryBars.lagging.length" class="ind-bars">
+            <template v-for="(group, gi) in [industryBars.leading, industryBars.lagging]" :key="gi">
+              <div v-if="gi === 1 && industryBars.leading.length && industryBars.lagging.length" class="ind-divider">
+                <span>上方领涨 · 下方领跌</span>
+              </div>
+              <div v-for="bar in group" :key="bar.name" class="ind-row">
+                <span class="ind-name" :title="bar.name">{{ bar.name }}</span>
+                <div class="ind-track">
+                  <i class="ind-axis" />
+                  <i class="ind-fill" :class="bar.dir === 'up' ? 'is-up' : 'is-down'" :style="bar.style" />
+                </div>
+                <span class="ind-val">
+                  <b :class="bar.dir === 'up' ? 'up' : 'down'">{{ fmtPct(bar.pct) }}</b>
+                  <em :class="clsByVal(bar.net, '')">{{ fmtSigned(bar.net, 1) }}亿</em>
+                </span>
+              </div>
+            </template>
+          </div>
+          <div v-else class="rank-empty">暂无行业数据</div>
         </el-card>
-        <el-card v-if="dashboard.industry_rank" shadow="never" class="rank-card">
-          <div class="rank-title up">领涨行业</div>
-          <div v-for="(it, i) in dashboard.industry_rank.leading" :key="'lead' + it.name" class="rank-item">
-            <span class="rank-no">{{ i + 1 }}</span>
-            <span class="rank-name" :title="it.name">{{ it.name }}</span>
-            <span class="rank-pct up">{{ fmtPct(it.pct) }}</span>
+
+        <!-- 第三层：个股榜单（每行附迷你涨跌条，便于扫读） -->
+        <el-card v-if="listCols.length" shadow="never" class="persp-card">
+          <div class="persp-card-title">
+            市场榜单
+            <span class="persp-card-note">涨幅 / 跌幅 / 成交额 / 换手 TOP 6</span>
           </div>
-          <div v-if="!dashboard.industry_rank.leading?.length" class="rank-empty">暂无数据</div>
-        </el-card>
-        <el-card v-if="dashboard.industry_rank" shadow="never" class="rank-card">
-          <div class="rank-title down">领跌行业</div>
-          <div v-for="(it, i) in dashboard.industry_rank.lagging" :key="'lag' + it.name" class="rank-item">
-            <span class="rank-no">{{ i + 1 }}</span>
-            <span class="rank-name" :title="it.name">{{ it.name }}</span>
-            <span class="rank-pct down">{{ fmtPct(it.pct) }}</span>
+          <div class="list-grid list-grid--compact">
+            <div v-for="(col, key) in listCols" :key="key" class="list-card">
+              <div class="list-head">
+                <span class="list-title">{{ col.title }}</span>
+                <span class="list-top">TOP {{ Math.min(6, col.rows.length) }}</span>
+              </div>
+              <div v-for="(r, idx) in col.rows.slice(0, 6)" :key="key + '-' + r.code" class="list-item">
+                <span class="list-no">{{ idx + 1 }}</span>
+                <div class="list-main">
+                  <router-link target="_blank" rel="noopener" :to="`/stocks/${r.code}`" class="list-name stock-name" :title="r.name">{{ r.name }}</router-link>
+                  <div class="list-code">{{ r.code }}</div>
+                  <i class="mini-bar" :class="clsByVal(r.pct_chg, '')" :style="{ width: miniBarWidth(r.pct_chg) }" />
+                </div>
+                <div class="list-right">
+                  <div v-if="col.mode === 'amount'" class="list-amt">{{ fmtAmount(r.amount) }}</div>
+                  <div v-else-if="col.mode === 'active'" class="list-amt accent">{{ r.turnover_rate }}%</div>
+                  <div :class="clsByVal(r.pct_chg)">{{ fmtPct(r.pct_chg) }}</div>
+                  <div v-if="col.mode === 'gain' || col.mode === 'loss'" class="list-close">{{ fmtPrice(r.close) }}</div>
+                </div>
+              </div>
+            </div>
           </div>
-          <div v-if="!dashboard.industry_rank.lagging?.length" class="rank-empty">暂无数据</div>
         </el-card>
       </div>
     </section>
@@ -218,34 +257,6 @@
       </div>
     </section>
 
-    <!-- 四大榜单 -->
-    <section v-if="dashboard" class="block">
-      <div class="block-head">
-        <span class="block-title"><el-icon><DataAnalysis /></el-icon> 市场榜单</span>
-        <span class="block-hint">涨幅 / 跌幅 / 成交额 / 换手</span>
-      </div>
-      <div class="list-grid">
-        <div v-for="(col, key) in listCols" :key="key" class="list-card">
-          <div class="list-head">
-            <span class="list-title">{{ col.title }}</span>
-            <span class="list-top">TOP {{ col.rows.length }}</span>
-          </div>
-          <div v-for="(r, idx) in col.rows" :key="key + '-' + r.code" class="list-item">
-            <span class="list-no">{{ idx + 1 }}</span>
-            <div class="list-main">
-              <router-link target="_blank" rel="noopener" :to="`/stocks/${r.code}`" class="list-name stock-name" :title="r.name">{{ r.name }}</router-link>
-              <div class="list-code">{{ r.code }}</div>
-            </div>
-            <div class="list-right">
-              <div v-if="col.mode === 'amount'" class="list-amt">{{ fmtAmount(r.amount) }}</div>
-              <div v-else-if="col.mode === 'active'" class="list-amt accent">{{ r.turnover_rate }}%</div>
-              <div :class="clsByVal(r.pct_chg)">{{ fmtPct(r.pct_chg) }}</div>
-              <div v-if="col.mode === 'gain' || col.mode === 'loss'" class="list-close">{{ fmtPrice(r.close) }}</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
       </el-tab-pane>
 
       <!-- 外围市场（分类快照：美股 / 港股 / 亚太 / VIX / 股指期货 / A50 / 商品 + 美股港股个股） -->
@@ -595,6 +606,32 @@ const listCols = computed(() => {
   ]
 })
 
+// 行业强弱双向条：以中线为 0 轴，条长按本组最大绝对涨跌幅归一（涨向右 / 跌向左）
+const industryBars = computed(() => {
+  const ir = dashboard.value?.industry_rank
+  const leading = ir?.leading || []
+  const lagging = ir?.lagging || []
+  const all = [...leading, ...lagging]
+  if (!all.length) return { leading: [], lagging: [] }
+  const maxAbs = Math.max(0.1, ...all.map(i => Math.abs(Number(i.pct) || 0)))
+  const mk = (list: any[], dir: 'up' | 'down') => list.map((i: any) => {
+    const pct = Number(i.pct) || 0
+    // 最长 50%（半个轨道），下限 4% 保证极小值仍可见
+    const w = Math.max(4, Math.round((Math.abs(pct) / maxAbs) * 50))
+    return {
+      name: i.name,
+      pct,
+      net: Number(i.net) || 0,
+      dir,
+      style: dir === 'up' ? { left: '50%', width: `${w}%` } : { right: '50%', width: `${w}%` },
+    }
+  })
+  return { leading: mk(leading, 'up'), lagging: mk(lagging, 'down') }
+})
+
+// 榜单每行迷你涨跌条：|涨跌幅|/10% 归一，封顶 100%
+const miniBarWidth = (v: unknown) => `${Math.min(100, Math.round((Math.abs(Number(v) || 0) / 10) * 100))}%`
+
 // 带超时的请求包装
 const withTimeout = <T>(promise: Promise<T>, timeoutMs: number = 15000): Promise<T> => {
   return Promise.race([
@@ -943,75 +980,146 @@ onActivated(() => {
   margin-bottom: 12px;
 }
 
-/* 市场状态 + 行业强弱 */
-.regime-grid {
-  display: grid;
-  grid-template-columns: 1.4fr 1fr 1fr;
-  gap: 12px;
-}
-
-.regime-card,
-.rank-card {
+/* 市场透视：状态一行 + 行业条形 + 榜单 */
+.regime-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  background: var(--el-fill-color-light);
   border-radius: 8px;
 }
 
-.regime-card :deep(.el-card__body),
-.rank-card :deep(.el-card__body) {
-  padding: 14px 16px;
-}
-
-.regime-tags {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-
-.regime-advice {
-  margin: 0;
+.regime-advice-inline {
   font-size: 12.5px;
-  line-height: 1.8;
+  line-height: 1.7;
   color: var(--el-text-color-regular);
 }
 
-.rank-title {
+.persp-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.85fr) 1.6fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.persp-card {
+  border-radius: 8px;
+}
+
+.persp-card :deep(.el-card__body) {
+  padding: 14px 16px;
+}
+
+.persp-card-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
   font-size: 13px;
   font-weight: 600;
+  color: var(--el-text-color-primary);
   margin-bottom: 10px;
 }
 
-.rank-item {
+.persp-card-note {
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--el-text-color-placeholder);
+}
+
+/* 行业强弱双向条：中线 = 0，涨向右、跌向左 */
+.ind-bars {
   display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ind-row {
+  display: grid;
+  grid-template-columns: 76px 1fr 96px;
   align-items: center;
   gap: 8px;
-  padding: 5px 0;
-  border-bottom: 1px dashed var(--el-border-color-lighter);
+  padding: 3px 0;
 }
 
-.rank-item:last-child {
-  border-bottom: none;
-}
-
-.rank-no {
-  width: 16px;
-  font-size: 11px;
-  color: var(--el-text-color-placeholder);
-  font-family: var(--app-font-mono);
-}
-
-.rank-name {
-  flex: 1;
-  font-size: 12.5px;
+.ind-name {
+  font-size: 12px;
   color: var(--el-text-color-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.rank-pct {
+.ind-track {
+  position: relative;
+  height: 12px;
+  border-radius: 3px;
+  background: var(--el-fill-color-lighter);
+}
+
+.ind-axis {
+  position: absolute;
+  left: 50%;
+  top: -2px;
+  bottom: -2px;
+  width: 1px;
+  background: var(--el-border-color);
+}
+
+.ind-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 3px;
+}
+
+.ind-fill.is-up {
+  background: linear-gradient(90deg, #f8a5a0 0%, #f56c6c 100%);
+  border-radius: 0 3px 3px 0;
+}
+
+.ind-fill.is-down {
+  background: linear-gradient(90deg, #67c23a 0%, #95d475 100%);
+  border-radius: 3px 0 0 3px;
+}
+
+.ind-val {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 6px;
   font-family: var(--app-font-mono);
-  font-size: 12.5px;
-  font-weight: 600;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.ind-val b {
+  font-size: 12px;
+}
+
+.ind-val em {
+  font-style: normal;
+  color: var(--el-text-color-secondary);
+}
+
+.ind-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 6px;
+  font-size: 11px;
+  color: var(--el-text-color-placeholder);
+}
+
+.ind-divider::before,
+.ind-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--el-border-color-lighter);
 }
 
 .rank-empty {
@@ -1020,8 +1128,8 @@ onActivated(() => {
   padding: 8px 0;
 }
 
-@media (max-width: 992px) {
-  .regime-grid {
+@media (max-width: 1200px) {
+  .persp-grid {
     grid-template-columns: 1fr;
   }
 }
@@ -1199,11 +1307,25 @@ onActivated(() => {
 .lg-flat { color: var(--app-flat); }
 .lg-down { color: var(--app-down); }
 
-/* 四大榜单 */
+/* 市场榜单（市场透视右侧 2×2 紧凑版） */
 .list-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 12px;
+}
+
+.list-grid--compact {
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.list-grid--compact .list-card {
+  padding: 10px 12px;
+}
+
+.list-grid--compact .list-item {
+  padding: 4px 0;
+  gap: 8px;
 }
 
 .list-card {
@@ -1273,6 +1395,20 @@ onActivated(() => {
   font-size: 11px;
   color: var(--el-text-color-placeholder);
 }
+
+/* 榜单行迷你涨跌条：宽度 = |涨跌幅|/10%，颜色随涨跌 */
+.mini-bar {
+  display: block;
+  height: 2px;
+  margin-top: 3px;
+  border-radius: 1px;
+  background: var(--app-flat);
+  transition: width 0.3s ease;
+}
+
+.mini-bar.up { background: var(--app-up); }
+.mini-bar.down { background: var(--app-down); }
+.mini-bar.flat { background: var(--el-border-color); }
 
 .list-right {
   text-align: right;
