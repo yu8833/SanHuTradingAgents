@@ -122,6 +122,44 @@ async def market_trade_date(current_user: dict = Depends(get_optional_current_us
         return ok({"trade_date": ""})
 
 
+@router.get("/market/pre-open")
+async def market_pre_open(current_user: dict = Depends(get_optional_current_user)):
+    """开盘情景：A50/美股期货/商品定档开盘缺口 + 上一交易日情绪结构与环比。
+
+    盘前唯一的前瞻信息块；期货抓取失败时降级为「昨日结构」，不返回 500。
+    """
+    try:
+        from app.services.market_overview import get_pre_open
+
+        return ok(await get_pre_open())
+    except Exception as e:
+        logger.error(f"开盘情景异常: {e}")
+        return ok({
+            "as_of": "", "bands": [], "overseas": [], "structure": None,
+            "gap": {"pct": None, "band": None, "label": "待定", "tone": "flat",
+                    "basis_name": "", "degraded": False},
+            "note": "",
+        })
+
+
+@router.get("/market/events")
+async def market_events(current_user: dict = Depends(get_optional_current_user)):
+    """今日宏观事件：白名单过滤 + 规则化影响打分（无影响/影响波动/影响方向）。
+
+    与看板、研判共用同一份数据；日历源不可用时 source_ok=False，页面显式降级。
+    """
+    try:
+        from app.services.market_events import get_market_events
+
+        return ok(await get_market_events())
+    except Exception as e:
+        logger.error(f"今日事件异常: {e}")
+        return ok({
+            "date": datetime.now().strftime("%Y-%m-%d"), "updated": "",
+            "events": [], "source_ok": False, "source": "",
+        })
+
+
 @router.get("/market/concept-analysis")
 async def market_concept_analysis(current_user: dict = Depends(get_optional_current_user)):
     """概念分析：概念实时行情 + 领涨/领跌榜 + 资金流榜（同花顺，Redis分级TTL缓存）"""

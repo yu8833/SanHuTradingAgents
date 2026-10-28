@@ -21,7 +21,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
-from app.services.cache_layer import cached, set_cache
+from app.services.cache_layer import cached, get_ttl, set_cache
 from app.services.macro.macro_service import _get_llm_cfg, _parse_llm_json
 from app.utils.trading_time import get_market_trade_date
 
@@ -79,7 +79,9 @@ def _call_llm(cfg: dict, prompt: str) -> dict:
         },
         headers={"Authorization": f"Bearer {cfg['api_key']}",
                  "Content-Type": "application/json"},
-        timeout=12,  # 研判生成上限 12s：超时/失败由调用方降级为规则结论，避免冷启动空等到 60s
+        # 研判生成上限 30s：四页数据聚合 prompt 偏长，12s 在外部模型下极易超时 → 全部走兜底。
+        # 页面侧已有 SWR：缓存过期先回旧值、后台重建，不再让请求方空等，放宽超时不伤首屏。
+        timeout=30,
     )
     resp.raise_for_status()
     content = resp.json()["choices"][0]["message"]["content"]
@@ -421,11 +423,26 @@ async def _build_market_part() -> dict:
     }
 
 
-async def get_market_synthesis_cached() -> dict:
-    """综合研判市场级快照（Redis 缓存 + SWR，market 级 TTL），供页面访问与预热复用。
+# 规则兜底只缓存 2 分钟：LLM 超时多为瞬时故障，尽快重试才不会让一次超时污染半小时页面。
+_DEGRADED_TTL = 120
 
-    命中缓存（含 SWR 备用旧值）即时返回；冷启动才前台构建。规则兜底结论同样缓存，
-    避免 LLM 临时不可用时每个请求都空转等超时。
+
+def _synthesis_ttl(value: dict) -> int:
+    """LLM 成功 → market 级 TTL；规则兜底 → 短 TTL（下次访问即重试）。"""
+    return get_ttl("market") if value.get("llm_available") else _DEGRADED_TTL
+
+
+def _is_llm_verdict(value: dict) -> bool:
+    """只有 LLM 成功产出的结论才写入 SWR 备用值，避免兜底覆盖上次有效研判。"""
+    return bool(value.get("llm_available"))
+
+
+async def get_market_synthesis_cached() -> dict:
+    """综合研判市场级快照（Redis 缓存 + SWR），供页面访问与预热复用。
+
+    命中缓存（含 SWR 备用旧值）即时返回；冷启动才前台构建。
+    规则兜底结论也会缓存，但只保留 2 分钟，且不写入 SWR 备用值——
+    这样 LLM 恢复后最多 2 分钟就能自动拿到真实研判，同时并发请求仍由单飞合并。
     """
     return await cached(
         "vibe:market_synthesis", _build_market_part,
@@ -433,6 +450,8 @@ async def get_market_synthesis_cached() -> dict:
         valid=lambda v: bool(v.get("verdict")),
         swr=True,
         stale_ttl=6 * 3600,  # 旧研判兜底 6h：缓存过期瞬间秒回旧结论 + 后台重建，避免用户等 30s+ 冷聚合
+        ttl_fn=_synthesis_ttl,
+        stale_pred=_is_llm_verdict,
     )
 
 
@@ -455,9 +474,11 @@ async def build_market_synthesis(user_id: str, refresh: bool = False) -> dict:
 
     if refresh:
         market = await _build_market_part()
-        # 回写缓存（与 _build_and_cache 同构：主 key + SWR 备用 key）
-        await set_cache("vibe:market_synthesis", market, category="market")
-        await set_cache("vibe:market_synthesis:stale", market, ttl=3 * 3600)
+        # 回写缓存（与 _build_and_cache 同构：主 key + SWR 备用 key），
+        # 但兜底结论只保留 2 分钟且不覆盖备用值，避免 LLM 故障时长期看到规则结论。
+        await set_cache("vibe:market_synthesis", market, ttl=_synthesis_ttl(market))
+        if _is_llm_verdict(market):
+            await set_cache("vibe:market_synthesis:stale", market, ttl=6 * 3600)
     else:
         market = await get_market_synthesis_cached()
 

@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
@@ -16,6 +18,7 @@ from app.services.cache_layer import cached
 from app.services.data_sources.akshare_adapter import _parse_cn_amount, _parse_pct_str
 
 BEIJING = timezone(timedelta(hours=8))
+logger = logging.getLogger(__name__)
 
 
 def _num(v) -> int:
@@ -347,6 +350,132 @@ async def get_emotion_history(days: int = 10) -> dict:
     )
 
 
+# 开盘情景分档：以 A50 夜盘涨跌幅定档，只预判开盘缺口，不代表全天方向
+_PREOPEN_BANDS = (
+    {"key": "deep_down", "label": "大幅低开", "tone": "down", "lo": None, "hi": -1.0},
+    {"key": "down", "label": "低开", "tone": "down", "lo": -1.0, "hi": -0.3},
+    {"key": "flat", "label": "平开", "tone": "flat", "lo": -0.3, "hi": 0.3},
+    {"key": "up", "label": "高开", "tone": "up", "lo": 0.3, "hi": 1.0},
+    {"key": "deep_up", "label": "大幅高开", "tone": "up", "lo": 1.0, "hi": None},
+)
+
+# 盘前展示顺序：A50 最直接，其次美股期货，再到定价 A 股资源/成长板块的商品
+_PREOPEN_ORDER = ("a50fut", "ndxfut", "spxfut", "wti", "copper", "gold")
+
+
+def _preopen_band(pct: float) -> dict:
+    if pct <= -1.0:
+        return _PREOPEN_BANDS[0]
+    if pct < -0.3:
+        return _PREOPEN_BANDS[1]
+    if pct < 0.3:
+        return _PREOPEN_BANDS[2]
+    if pct < 1.0:
+        return _PREOPEN_BANDS[3]
+    return _PREOPEN_BANDS[4]
+
+
+def _preopen_structure(series: list[dict]) -> dict | None:
+    """上一完整交易日的情绪结构 + 日环比（series 末点若是今日盘中数据则跳过）。"""
+    if not series:
+        return None
+    today = datetime.now(BEIJING).strftime("%Y-%m-%d")
+    prev = [p for p in series if p.get("date") and p["date"] != today] or series
+    last = prev[-1]
+    before = prev[-2] if len(prev) >= 2 else None
+
+    def delta(key: str):
+        if not before:
+            return None
+        a, b = last.get(key), before.get(key)
+        if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+            return round(a - b, 3)
+        return None
+
+    seal = last.get("seal_rate")
+    seal_delta_pt = None
+    if isinstance(seal, (int, float)) and before and isinstance(before.get("seal_rate"), (int, float)):
+        seal_delta_pt = round((seal - before["seal_rate"]) * 100, 1)
+
+    return {
+        "date": last.get("date"),
+        "zt": last.get("zt"),
+        "zt_delta": delta("zt"),
+        "max_boards": last.get("max_boards"),
+        "max_boards_delta": delta("max_boards"),
+        "lianban": last.get("lianban"),
+        "lianban_delta": delta("lianban"),
+        "seal_rate": seal,
+        "seal_delta_pt": seal_delta_pt,
+    }
+
+
+async def _build_pre_open() -> dict:
+    """盘前聚合：隔夜外盘（A50/美股期货/商品）+ 上一交易日情绪结构。
+
+    外盘抓取与情绪序列并行，各自硬超时降级；任一失败只影响对应字段，
+    不阻塞整块（盘前没有行情也必须能给出「昨日结构」）。
+    """
+    futures: list[dict] = []
+    try:
+        futures = await asyncio.wait_for(
+            asyncio.to_thread(gstock.index_futures), timeout=25
+        )
+    except Exception:
+        logger.warning("盘前外盘期货抓取失败/超时，降级为空")
+
+    history: dict = {}
+    try:
+        history = await asyncio.wait_for(get_emotion_history(10), timeout=20)
+    except Exception:
+        logger.warning("盘前情绪历史获取失败/超时，降级为空")
+
+    items = {it.get("key"): it for it in (futures or [])}
+    basis = items.get("a50fut") or items.get("ndxfut") or items.get("spxfut")
+    pct = basis.get("change_pct") if basis else None
+    band = _preopen_band(float(pct)) if isinstance(pct, (int, float)) else None
+    degraded = bool(basis) and basis.get("key") != "a50fut"
+
+    overseas = [
+        {
+            "key": key,
+            "name": items[key].get("name"),
+            "price": items[key].get("price"),
+            "change_pct": items[key].get("change_pct"),
+        }
+        for key in _PREOPEN_ORDER
+        if key in items
+    ]
+
+    return {
+        "as_of": datetime.now(BEIJING).replace(microsecond=0).isoformat(),
+        "bands": [
+            {"key": b["key"], "label": b["label"], "tone": b["tone"], "lo": b["lo"], "hi": b["hi"]}
+            for b in _PREOPEN_BANDS
+        ],
+        "gap": {
+            "pct": pct,
+            "band": band["key"] if band else None,
+            "label": band["label"] if band else "待定",
+            "tone": band["tone"] if band else "flat",
+            "basis_name": basis.get("name") if basis else "",
+            "degraded": degraded,
+        },
+        "overseas": overseas,
+        "structure": _preopen_structure((history or {}).get("series") or []),
+        "note": "期货为延时行情，与 A 股不同源；仅用于开盘情景，不代表全天方向",
+    }
+
+
+async def get_pre_open() -> dict:
+    """开盘情景（Redis 缓存 5 分钟）：盘前结论快、刷新也快。"""
+    return await cached(
+        "vibe:pre_open", _build_pre_open,
+        category="market", ttl=300,
+        valid=lambda v: bool(v.get("overseas") or v.get("structure")),
+    )
+
+
 async def get_turnover_top() -> dict:
     """全市场成交额榜 Top20（客观公开榜单，Redis缓存 market 级TTL）。"""
     def build():
@@ -354,6 +483,7 @@ async def get_turnover_top() -> dict:
             "stocks": astock.market_turnover_rank(20),
             "updated": datetime.now(BEIJING).strftime("%Y-%m-%d %H:%M"),
         }
+
     return await cached(
         "vibe:turnover_top", build,
         category="market",

@@ -196,12 +196,16 @@ async def _build_and_cache(
     key: str, build_fn: Callable, category: str,
     valid: Callable[[Any], bool], ttl: int | None,
     stale_key: str | None, stale_ttl: int | None,
+    ttl_fn: Callable[[Any], int] | None = None,
+    stale_pred: Callable[[Any], bool] | None = None,
 ) -> Any:
     try:
         value = await _execute_build(build_fn)
         if valid(value):
-            await set_cache(key, value, ttl=ttl, category=category)
-            if stale_key:
+            # ttl_fn 按构建结果决定 TTL（如 LLM 成功用长缓存、规则兜底用短缓存）
+            eff_ttl = ttl_fn(value) if ttl_fn else ttl
+            await set_cache(key, value, ttl=eff_ttl, category=category)
+            if stale_key and (stale_pred(value) if stale_pred else True):
                 # 备用旧值：长 TTL（默认 3h），供 SWR 在正式 key 过期后回退
                 await set_cache(stale_key, value, ttl=stale_ttl or 3 * 3600)
         else:
@@ -218,13 +222,16 @@ async def _ensure_build_task(
     key: str, build_fn: Callable, category: str,
     valid: Callable[[Any], bool], ttl: int | None,
     stale_key: str | None, stale_ttl: int | None,
+    ttl_fn: Callable[[Any], int] | None = None,
+    stale_pred: Callable[[Any], bool] | None = None,
 ) -> asyncio.Task[Any]:
     """按原始 key 单飞去重；主缓存写入 key，备用旧值写入 stale_key。"""
     async with _build_tasks_lock:
         task = _build_tasks.get(key)
         if task is None or task.done():
             task = asyncio.create_task(
-                _build_and_cache(key, build_fn, category, valid, ttl, stale_key, stale_ttl)
+                _build_and_cache(key, build_fn, category, valid, ttl, stale_key, stale_ttl,
+                                  ttl_fn, stale_pred)
             )
             _build_tasks[key] = task
 
@@ -238,11 +245,15 @@ async def _ensure_build_task(
 
 async def cached(key: str, build_fn: Callable, category: str = "default",
                  valid: Callable[[Any], bool] = bool, ttl: int | None = None,
-                 swr: bool = False, stale_ttl: int | None = None) -> Any:
+                 swr: bool = False, stale_ttl: int | None = None,
+                 ttl_fn: Callable[[Any], int] | None = None,
+                 stale_pred: Callable[[Any], bool] | None = None) -> Any:
     """
     带缓存的数据获取：命中则返回，未命中则调用 build_fn 构建并缓存。
     valid 返回 False 的结果不缓存，下次直接重试。
     ttl 指定时覆盖分级 TTL（例如财经日历固定 1 天），否则按 category+时段自动分级。
+    ttl_fn 按构建结果动态决定主缓存 TTL（优先于 ttl），用于「成功长缓存、兜底短缓存」。
+    stale_pred 控制是否把结果写入 SWR 备用 key（默认都写），避免兜底结果覆盖上次成功值。
 
     swr=True（stale-while-revalidate）：正式 key 过期但备用旧值仍有效时，
     立即返回旧值并在后台异步重建缓存，请求方无需等待；无旧值时才前台构建。
@@ -257,11 +268,13 @@ async def cached(key: str, build_fn: Callable, category: str = "default",
         stale = await get_cache(stale_key)
         if stale is not None and valid(stale):
             # 后台异步重建，不阻塞本次请求；单飞防止重复重建
-            await _ensure_build_task(key, build_fn, category, valid, ttl, stale_key, stale_ttl)
+            await _ensure_build_task(key, build_fn, category, valid, ttl, stale_key, stale_ttl,
+                                     ttl_fn, stale_pred)
             return stale
 
     # 前台构建：单飞合并并发请求（同一 key 同时只构建一次，其余等待其结果）
-    task = await _ensure_build_task(key, build_fn, category, valid, ttl, stale_key, stale_ttl)
+    task = await _ensure_build_task(key, build_fn, category, valid, ttl, stale_key, stale_ttl,
+                                    ttl_fn, stale_pred)
     try:
         return await task
     finally:

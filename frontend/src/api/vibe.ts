@@ -214,6 +214,79 @@ export interface MarketDashboard {
   updated: string
 }
 
+export interface PreOpenBand {
+  key: string
+  label: string
+  tone: 'up' | 'down' | 'flat'
+  lo: number | null
+  hi: number | null
+}
+
+export interface PreOpenOverseas {
+  key: string
+  name: string
+  price: number | null
+  change_pct: number | null
+}
+
+export interface PreOpenStructure {
+  date: string
+  zt: number
+  zt_delta: number | null
+  max_boards: number
+  max_boards_delta: number | null
+  lianban: number
+  lianban_delta: number | null
+  seal_rate: number | null
+  seal_delta_pt: number | null
+}
+
+export interface PreOpen {
+  as_of: string
+  bands: PreOpenBand[]
+  gap: {
+    pct: number | null
+    band: string | null
+    label: string
+    tone: 'up' | 'down' | 'flat'
+    basis_name: string
+    degraded: boolean
+  }
+  overseas: PreOpenOverseas[]
+  structure: PreOpenStructure | null
+  note?: string
+}
+
+export interface MarketEvent {
+  id: string
+  time: string
+  datetime: string
+  title: string
+  region: 'CN' | 'US' | 'EU' | string
+  status: 'pending' | 'released' | 'expired'
+  forecast?: number | null
+  actual?: number | null
+  prev?: number | null
+  surprise_label?: string
+  direction: 'bull' | 'bear' | 'neutral'
+  impact: 'none' | 'volatility' | 'direction'
+  strength?: '轻' | '中' | '重' | string
+  horizon?: string
+  action?: string
+  sectors?: string[]
+  transmission?: string[]
+  watch?: string
+  score?: number | null
+}
+
+export interface MarketEvents {
+  date: string
+  updated: string
+  events: MarketEvent[]
+  source_ok: boolean
+  source?: string
+}
+
 export interface LianbanStock {
   code: string
   name: string
@@ -574,7 +647,20 @@ export const vibeApi = {
 
   async getDashboard(refresh = false) {
     if (refresh) clearCache('/api/vibe/market/dashboard')
-    return cachedGet<MarketDashboard>('/api/vibe/market/dashboard', undefined, 180000, { timeout: 15000 })
+    // 冷启动需重算 regime（约 30s+），超时设 45s，避免整块市场状态被判失败后静默消失
+    return cachedGet<MarketDashboard>('/api/vibe/market/dashboard', undefined, 180000, { timeout: 45000 })
+  },
+
+  // 今日宏观事件：白名单过滤 + 影响分档（none / volatility / direction），5 分钟前端缓存
+  async getMarketEvents(refresh = false) {
+    if (refresh) clearCache('/api/vibe/market/events')
+    return cachedGet<MarketEvents>('/api/vibe/market/events', undefined, 300000, { timeout: 25000 })
+  },
+
+  // 开盘情景：隔夜外盘（A50/美股期货/商品）+ 上一交易日情绪结构，短缓存 5 分钟
+  async getPreOpen(refresh = false) {
+    if (refresh) clearCache('/api/vibe/market/pre-open')
+    return cachedGet<PreOpen>('/api/vibe/market/pre-open', undefined, 120000, { timeout: 30000 })
   },
 
   async getEmotion(refresh = false) {

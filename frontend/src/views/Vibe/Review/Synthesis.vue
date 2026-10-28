@@ -12,7 +12,11 @@
         </div>
       </div>
       <div class="page-hero-meta">
-        <span class="page-hero-tag">更新于 {{ updatedAt }}</span>
+        <span class="page-hero-tag">数据 {{ dataAsOf || '—' }} · 研判 {{ updatedAt || '—' }}</span>
+        <span v-if="syn && !syn.llm_available" class="syn-degraded">
+          规则兜底
+          <em @click="loadAll(true)">重试 AI 研判</em>
+        </span>
         <span v-if="loading && syn" class="syn-refresh-hint">
           <el-icon class="is-loading"><Loading /></el-icon> 正在重新研判…
         </span>
@@ -42,13 +46,30 @@
             <span class="syn-direc-zh">{{ verdict.directionZh }}方向</span>
             <span class="syn-direc-main">{{ verdict.direction }}</span>
           </div>
-          <div class="syn-conf-wrap" v-if="verdict.confidence != null">
-            <div class="syn-conf-ring" :style="confRingStyle">
-              <span class="syn-conf-num">{{ verdict.confidence }}</span>
-              <span class="syn-conf-unit">%</span>
+          <el-popover
+            v-if="verdict.confidence != null"
+            placement="bottom"
+            :width="272"
+            trigger="hover"
+            :disabled="!events.length"
+          >
+            <template #reference>
+              <div class="syn-conf-wrap">
+                <div class="syn-conf-ring" :style="confRingStyle">
+                  <span class="syn-conf-num">{{ verdict.confidence }}</span>
+                  <span class="syn-conf-unit">%</span>
+                </div>
+                <span class="syn-conf-label">信心度<em v-if="events.length" class="conf-badge">含事件</em></span>
+              </div>
+            </template>
+            <div class="conf-pop">
+              <div class="conf-pop-title">信心度已计入以下事件（只修正，不覆盖趋势判断）</div>
+              <div v-for="e in events" :key="e.id" class="conf-pop-row">
+                <span>{{ e.time }} {{ shortTitle(e.title) }}</span>
+                <em :class="`dir-${e.direction}`">{{ dirLabel(e.direction) }}</em>
+              </div>
             </div>
-            <span class="syn-conf-label">信心度</span>
-          </div>
+          </el-popover>
           <div class="syn-tags">
             <el-tag v-if="syn?.llm_available" size="small" type="danger" effect="dark">AI 研判</el-tag>
             <el-tag v-else size="small" type="warning" effect="plain">规则兜底</el-tag>
@@ -76,7 +97,128 @@
           </div>
         </div>
 
-        <!-- 推理过程：默认收起，首屏只留决策结论 -->
+      </section>
+
+      <!-- 今日事件影响：只在这里做深度分析（看板只给时间轴），可直接修正主攻/回避/仓位 -->
+      <section v-if="eventsData" id="events" class="syn-events">
+        <div class="syn-events-head">
+          <span class="syn-events-title"><el-icon><Calendar /></el-icon> 今日事件影响</span>
+          <span class="syn-events-hint">{{ eventHeadline }}</span>
+          <span v-if="eventsData.updated" class="data-time">更新 {{ shortTime(eventsData.updated) }}</span>
+        </div>
+
+        <div v-if="events.length" class="ev-list">
+          <el-card
+            v-for="e in events"
+            :key="e.id"
+            shadow="never"
+            class="ev-card"
+            :class="[`impact-${e.impact}`, { 'is-expired': e.status === 'expired' }]"
+          >
+            <div class="ev-row ev-main">
+              <span class="ev-time">{{ e.time }}</span>
+              <span class="ev-title">{{ e.title }}</span>
+              <span v-if="e.surprise_label" class="ev-surprise" :class="surpriseClass(e)">
+                {{ e.surprise_label }}
+              </span>
+              <span class="ev-status" :class="`status-${e.status}`">{{ eventStatusLabel(e) }}</span>
+              <span class="ev-toggle" @click="toggleEvent(e.id)">
+                {{ expandedEvents.includes(e.id) ? '收起' : '展开' }}
+              </span>
+            </div>
+
+            <div class="ev-row ev-impact">
+              <span class="ev-label">影响</span>
+              <span class="ev-impact-val" :class="`dir-${e.direction}`">{{ impactText(e) }}</span>
+            </div>
+
+            <div v-if="e.action" class="ev-row ev-action">
+              <span class="ev-label">怎么做</span>
+              <span>{{ e.action }}</span>
+            </div>
+
+            <div v-if="e.sectors && e.sectors.length" class="ev-row ev-sectors">
+              <span class="ev-label">相关</span>
+              <span v-for="s in e.sectors" :key="s" class="ev-tag">{{ s }}</span>
+            </div>
+
+            <div v-if="expandedEvents.includes(e.id)" class="ev-detail">
+              <div v-if="e.transmission && e.transmission.length" class="ev-trans">
+                <span v-for="(t, i) in e.transmission" :key="i" class="ev-trans-step">
+                  {{ t }}<em v-if="i < e.transmission.length - 1">→</em>
+                </span>
+              </div>
+              <div v-if="e.watch" class="ev-watch">观察点：{{ e.watch }}</div>
+            </div>
+          </el-card>
+        </div>
+        <div v-else-if="!eventsData.source_ok" class="ev-empty">
+          经济日历暂不可用，事件影响暂缺；不影响上方研判结论
+        </div>
+        <div v-else class="ev-empty">今日无重大宏观事件，按原计划执行</div>
+      </section>
+
+      <div v-if="!verdict" class="syn-missing">
+        <el-empty :image-size="72" description="本次未获取到研判结论（AI 与规则兜底均不可用），可点「AI 重新研判」重试" />
+      </div>
+
+      <!-- 买卖清单：盘中实时计算，与上方 AI 文字研判相互独立 -->
+      <section v-if="syn" class="syn-guide">
+        <div class="syn-guide-head">
+          <span class="syn-guide-title"><el-icon><TrendCharts /></el-icon> 今日买卖清单</span>
+          <span class="syn-guide-hint">盘中实时计算 · 与上方文字研判相互独立</span>
+        </div>
+        <div class="syn-guide-grid">
+          <div class="syn-guide-col">
+            <div class="syn-guide-col-head">
+              <span class="buy">买入关注</span>
+              <span class="syn-guide-count">{{ buyList.length }} 只</span>
+            </div>
+            <div v-for="b in buyList" :key="'b-' + b.code" class="syn-guide-item">
+              <div class="syn-guide-row">
+                <router-link target="_blank" rel="noopener" :to="`/stocks/${b.code}`" class="syn-guide-name">{{ b.name || b.code }}</router-link>
+                <span class="syn-guide-code">{{ b.code }}</span>
+                <el-tag size="small" :type="buyTagType(b)" effect="plain">{{ buyStateLabel(b) }}</el-tag>
+              </div>
+              <div class="syn-guide-metrics">
+                <span>现价 <b class="mono">{{ fmtPrice(b.last_price) }}</b></span>
+                <span>触发价 <b class="mono">{{ fmtPrice(b.trigger_price) }}</b></span>
+                <span v-if="b.distance_pct != null" :class="{ 'is-near': isNear(b.distance_pct) }">
+                  偏离 <b class="mono">{{ fmtPct(b.distance_pct) }}</b>
+                </span>
+              </div>
+              <div class="syn-guide-advice">{{ b.advice || '等待实时价确认触发' }}</div>
+            </div>
+            <div v-if="!buyList.length" class="syn-guide-empty">暂无待触发的买入计划</div>
+          </div>
+
+          <div class="syn-guide-col">
+            <div class="syn-guide-col-head">
+              <span class="sell">持仓卖出</span>
+              <span class="syn-guide-count">{{ sellList.length }} 只</span>
+            </div>
+            <div v-for="s in sellList" :key="'s-' + s.code" class="syn-guide-item">
+              <div class="syn-guide-row">
+                <router-link target="_blank" rel="noopener" :to="`/stocks/${s.code}`" class="syn-guide-name">{{ s.name || s.code }}</router-link>
+                <span class="syn-guide-code">{{ s.code }}</span>
+                <el-tag size="small" :type="sellTagType(s)" effect="plain">{{ s.advice_label || s.advice || '持有' }}</el-tag>
+              </div>
+              <div class="syn-guide-metrics">
+                <span>现价 <b class="mono">{{ fmtPrice(s.last_price) }}</b></span>
+                <span>持仓 <b class="mono">{{ s.quantity ?? '—' }}</b></span>
+                <span v-if="s.profit_loss_rate != null" :class="clsByVal(s.profit_loss_rate)">
+                  盈亏 <b class="mono">{{ fmtPct(s.profit_loss_rate) }}</b>
+                </span>
+              </div>
+              <div class="syn-guide-advice">{{ s.advice_text || s.advice || '暂无卖出动作' }}</div>
+            </div>
+            <div v-if="!sellList.length" class="syn-guide-empty">暂无持仓卖出建议</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 推理过程：默认收起，首屏只留决策结论与事件影响 -->
+      <section v-if="verdict" class="syn-reason-wrap">
         <el-collapse v-model="reasonOpen" class="syn-reason">
           <el-collapse-item name="reason">
             <template #title>
@@ -137,65 +279,6 @@
         </el-collapse>
       </section>
 
-      <div v-else class="syn-missing">
-        <el-empty :image-size="72" description="本次未获取到研判结论（AI 与规则兜底均不可用），可点「AI 重新研判」重试" />
-      </div>
-
-      <!-- 买卖清单：盘中实时计算，与上方 AI 文字研判相互独立 -->
-      <section v-if="syn" class="syn-guide">
-        <div class="syn-guide-head">
-          <span class="syn-guide-title"><el-icon><TrendCharts /></el-icon> 今日买卖清单</span>
-          <span class="syn-guide-hint">盘中实时计算 · 与上方文字研判相互独立</span>
-        </div>
-        <div class="syn-guide-grid">
-          <div class="syn-guide-col">
-            <div class="syn-guide-col-head">
-              <span class="buy">买入关注</span>
-              <span class="syn-guide-count">{{ buyList.length }} 只</span>
-            </div>
-            <div v-for="b in buyList" :key="'b-' + b.code" class="syn-guide-item">
-              <div class="syn-guide-row">
-                <router-link target="_blank" rel="noopener" :to="`/stocks/${b.code}`" class="syn-guide-name">{{ b.name || b.code }}</router-link>
-                <span class="syn-guide-code">{{ b.code }}</span>
-                <el-tag size="small" :type="buyTagType(b)" effect="plain">{{ buyStateLabel(b) }}</el-tag>
-              </div>
-              <div class="syn-guide-metrics">
-                <span>现价 <b class="mono">{{ fmtPrice(b.last_price) }}</b></span>
-                <span>触发价 <b class="mono">{{ fmtPrice(b.trigger_price) }}</b></span>
-                <span v-if="b.distance_pct != null" :class="{ 'is-near': isNear(b.distance_pct) }">
-                  偏离 <b class="mono">{{ fmtPct(b.distance_pct) }}</b>
-                </span>
-              </div>
-              <div class="syn-guide-advice">{{ b.advice || '等待实时价确认触发' }}</div>
-            </div>
-            <div v-if="!buyList.length" class="syn-guide-empty">暂无待触发的买入计划</div>
-          </div>
-
-          <div class="syn-guide-col">
-            <div class="syn-guide-col-head">
-              <span class="sell">持仓卖出</span>
-              <span class="syn-guide-count">{{ sellList.length }} 只</span>
-            </div>
-            <div v-for="s in sellList" :key="'s-' + s.code" class="syn-guide-item">
-              <div class="syn-guide-row">
-                <router-link target="_blank" rel="noopener" :to="`/stocks/${s.code}`" class="syn-guide-name">{{ s.name || s.code }}</router-link>
-                <span class="syn-guide-code">{{ s.code }}</span>
-                <el-tag size="small" :type="sellTagType(s)" effect="plain">{{ s.advice_label || s.advice || '持有' }}</el-tag>
-              </div>
-              <div class="syn-guide-metrics">
-                <span>现价 <b class="mono">{{ fmtPrice(s.last_price) }}</b></span>
-                <span>持仓 <b class="mono">{{ s.quantity ?? '—' }}</b></span>
-                <span v-if="s.profit_loss_rate != null" :class="clsByVal(s.profit_loss_rate)">
-                  盈亏 <b class="mono">{{ fmtPct(s.profit_loss_rate) }}</b>
-                </span>
-              </div>
-              <div class="syn-guide-advice">{{ s.advice_text || s.advice || '暂无卖出动作' }}</div>
-            </div>
-            <div v-if="!sellList.length" class="syn-guide-empty">暂无持仓卖出建议</div>
-          </div>
-        </div>
-      </section>
-
       <div class="disclaimer">以上内容由 AI 依据公开市场数据综合研判，仅供参考，不构成任何投资建议。股市有风险，投资需谨慎。</div>
     </template>
   </div>
@@ -209,12 +292,14 @@ import {
   type MarketSynthesis,
   type SynthesisBuyItem,
   type SynthesisSellItem,
+  type MarketEvent,
+  type MarketEvents,
 } from '@/api/vibe'
 import { formatBeijingDateTimeMinute } from '@/utils/datetime'
 import { fmtPrice, fmtPct, clsByVal } from '@/utils/format'
 import {
   Refresh, Loading, Aim, WarnTriangleFilled, View, Guide,
-  DataLine, InfoFilled, StarFilled, TrendCharts, Document,
+  DataLine, InfoFilled, StarFilled, TrendCharts, Document, Calendar,
 } from '@element-plus/icons-vue'
 
 defineOptions({ name: 'VibeSynthesis' })
@@ -226,8 +311,71 @@ const syn = ref<MarketSynthesis | null>(null)
 const tradeDate = ref('')
 const titleDate = computed(() => syn.value?.trade_date || tradeDate.value || '')
 
-// 页头「更新于」：数据获取时刻（LLM 研判完成时刻）
+// 页头「研判于」：数据获取时刻（LLM 研判完成时刻）
 const updatedAt = computed(() => syn.value?.as_of ? formatBeijingDateTimeMinute(syn.value.as_of) : '')
+
+// 页头「数据」：行情快照的数据时刻（与研判生成时刻区分，避免误以为数据是实时的）
+// 后端 as_of 是「北京时间墙钟字符串」，直接截取即可，勿再做时区换算（会被当成本地时间二次平移）
+const dataAsOf = computed(() => {
+  const dash = syn.value?.sources?.dashboard
+  // 研判快照里 dashboard 是裁剪版（可能只有 updated，无 as_of）
+  const raw = dash?.as_of || dash?.updated
+  if (!raw) return ''
+  const s = String(raw)
+  // 已是北京时间墙钟字符串（YYYY-MM-DD HH:mm）直接截取；带偏移的走统一格式化
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(s)) return s.slice(5, 16)
+  return formatBeijingDateTimeMinute(s).slice(5, 16)
+})
+
+// ── 今日事件影响（与看板共用同一份事件数据，这里做深度分析与动作建议） ──
+const eventsData = ref<MarketEvents | null>(null)
+const events = computed<MarketEvent[]>(() => eventsData.value?.events || [])
+const expandedEvents = ref<string[]>([])
+const toggleEvent = (id: string) => {
+  const i = expandedEvents.value.indexOf(id)
+  if (i >= 0) expandedEvents.value.splice(i, 1)
+  else expandedEvents.value.push(id)
+}
+
+const shortTime = (v?: string) => {
+  if (!v) return ''
+  const s = formatBeijingDateTimeMinute(v)
+  return s ? s.slice(5, 16) : ''
+}
+const shortTitle = (t: string) => (t && t.length > 14 ? `${t.slice(0, 14)}…` : t || '')
+const dirLabel = (d?: string) => (d === 'bull' ? '偏多' : d === 'bear' ? '偏空' : '中性')
+const surpriseClass = (e: MarketEvent) => `sur-${e.direction || 'neutral'}`
+const eventStatusLabel = (e: MarketEvent) =>
+  e.status === 'pending' ? '待公布' : e.status === 'expired' ? '已过时' : '已公布'
+
+/** 影响一行说清三件事：方向 / 力度 / 时效；噪音事件明确标注「不改判断」 */
+const impactText = (e: MarketEvent) => {
+  if (e.impact === 'none') return '无影响 · 不改判断'
+  const parts = [dirLabel(e.direction)]
+  if (e.strength) parts.push(e.strength)
+  if (e.horizon) parts.push(e.horizon)
+  return parts.join(' · ')
+}
+
+/** 区块标题：件数 + 其中真正会改变方向的件数（让用户知道要不要逐条读） */
+const eventHeadline = computed(() => {
+  const list = events.value
+  if (!list.length) return ''
+  const dir = list.filter(e => e.impact === 'direction').length
+  const vol = list.filter(e => e.impact === 'volatility').length
+  if (dir) return `共 ${list.length} 件 · ${dir} 件可能改变方向`
+  if (vol) return `共 ${list.length} 件 · 仅影响 ${vol} 次盘中波动`
+  return `共 ${list.length} 件 · 均不改变判断`
+})
+
+const loadEvents = async () => {
+  try {
+    const res: any = await vibeApi.getMarketEvents()
+    eventsData.value = res?.data || res || null
+  } catch (e) {
+    console.error('[Synthesis] 事件加载失败', e)
+  }
+}
 
 const verdict = computed(() => {
   const v = syn.value?.verdict
@@ -341,12 +489,17 @@ function prefetchTradeDate() {
 onMounted(() => {
   prefetchTradeDate()
   loadAll(false)
+  // 事件独立加载：失败不影响研判结论
+  loadEvents()
 })
 
 // keep-alive 恢复时读缓存（避免每次切回都重跑 LLM 并等待 10~60 秒）
 let inited = false
 onActivated(() => {
-  if (inited) loadAll(false)
+  if (inited) {
+    loadAll(false)
+    loadEvents()
+  }
   inited = true
 })
 </script>
@@ -375,6 +528,195 @@ onActivated(() => {
   font-size: 12px;
   color: var(--el-text-color-secondary);
 }
+
+/* 规则兜底标识：标明结论来源，并给出重新尝试 AI 的通路 */
+.syn-degraded {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--el-color-warning);
+  background: rgba(230, 162, 60, .12);
+}
+.syn-degraded em {
+  font-style: normal;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+/* 信心度「含事件」角标 + 悬浮明细 */
+.conf-badge {
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 6px;
+  font-style: normal;
+  font-size: 9px;
+  background: rgba(43, 108, 176, .14);
+  color: #2b6cb0;
+}
+.conf-pop-title {
+  margin-bottom: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--el-text-color-secondary);
+}
+.conf-pop-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12.5px;
+  line-height: 1.9;
+  color: var(--el-text-color-regular);
+}
+.conf-pop-row em { font-style: normal; font-weight: 600; white-space: nowrap; }
+.dir-bull { color: var(--app-up); }
+.dir-bear { color: var(--app-down); }
+.dir-neutral { color: var(--el-text-color-secondary); }
+
+/* ── 今日事件影响 ── */
+.syn-events {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border-radius: var(--app-radius-lg);
+  background: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color-light);
+  box-shadow: var(--app-shadow);
+}
+.syn-events-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.syn-events-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+}
+.syn-events-hint { font-size: 12px; color: var(--el-text-color-secondary); }
+.syn-events-head .data-time { margin-left: auto; }
+
+.ev-list { display: flex; flex-direction: column; gap: 8px; }
+.ev-card {
+  border-left: 3px solid var(--el-border-color);
+  box-shadow: none;
+}
+.ev-card.impact-volatility {
+  border-left-color: var(--el-color-warning);
+  background: rgba(230, 162, 60, .04);
+}
+.ev-card.impact-direction {
+  border-left-color: var(--el-color-primary);
+  background: rgba(43, 108, 176, .04);
+}
+.ev-card.is-expired { opacity: .72; }
+.ev-card :deep(.el-card__body) { padding: 10px 12px; }
+
+.ev-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  font-size: 13px;
+}
+.ev-row + .ev-row { margin-top: 6px; }
+.ev-main { font-weight: 600; }
+.ev-time {
+  flex: none;
+  font-family: var(--app-font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+}
+.ev-title {
+  color: var(--el-text-color-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ev-surprise {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  background: var(--el-fill-color);
+}
+.ev-surprise.sur-bull { color: var(--app-up); background: rgba(245, 108, 108, .12); }
+.ev-surprise.sur-bear { color: var(--app-down); background: rgba(103, 194, 58, .12); }
+.ev-surprise.sur-neutral { color: var(--el-text-color-secondary); }
+.ev-status {
+  flex: none;
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--el-text-color-placeholder);
+}
+.ev-status.status-pending { color: var(--el-color-warning); }
+.ev-toggle {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--el-color-primary);
+  cursor: pointer;
+}
+.ev-label {
+  flex: none;
+  width: 34px;
+  font-size: 11.5px;
+  color: var(--el-text-color-placeholder);
+}
+.ev-impact-val { font-weight: 600; }
+.ev-action {
+  align-items: flex-start;
+  line-height: 1.6;
+  color: var(--el-text-color-regular);
+}
+.ev-sectors { flex-wrap: wrap; }
+.ev-tag {
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-size: 11px;
+  background: var(--el-fill-color);
+  color: var(--el-text-color-secondary);
+}
+.ev-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--el-border-color-lighter);
+}
+.ev-trans {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--el-text-color-regular);
+}
+.ev-trans-step em {
+  font-style: normal;
+  margin-left: 4px;
+  color: var(--el-text-color-placeholder);
+}
+.ev-watch { font-size: 12px; line-height: 1.6; color: #2b6cb0; }
+.ev-empty {
+  padding: 14px 0;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--el-text-color-placeholder);
+}
+
+.syn-reason-wrap { margin-top: 14px; }
 
 .syn-missing {
   padding: 8px 0;

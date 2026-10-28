@@ -210,6 +210,34 @@ def _etf_industry_rank(top_n: int = 10) -> dict:
         return {"leading": [], "lagging": [], "as_of": ""}
 
 
+def _industry_rank(sectors: list[dict], as_of: str = "", top_n: int = 20) -> dict:
+    """行业强弱：同花顺行业（90 个，与「行业全景 / 股票筛选」同口径）领涨/领跌各 N。
+
+    ETF 主题行业只有 23 个，撑不起「各 20」（必然重复 17 个），故优先用同花顺行业；
+    该源失败或无数据时回退 ETF 主题行业，并用 source 标注口径供前端说明。
+
+    net 由元换算为亿（_sectors 返回单位是元）。
+    """
+    rows = []
+    for s in sectors or []:
+        name = s.get("name")
+        pct = s.get("pct")
+        # 缺涨跌幅的行业不参与排序，避免以 0 混入领跌榜
+        if not name or pct is None:
+            continue
+        rows.append({
+            "name": name,
+            "pct": round(_num(pct), 2),
+            "net": round(_num(s.get("net")) / 1e8, 2),
+        })
+    if not rows:
+        return {**_etf_industry_rank(top_n), "source": "etf"}
+
+    leading = sorted(rows, key=lambda x: x["pct"], reverse=True)[:top_n]
+    lagging = sorted(rows, key=lambda x: x["pct"])[:top_n]
+    return {"leading": leading, "lagging": lagging, "as_of": as_of, "source": "ths"}
+
+
 def _market_regime() -> dict | None:
     """统一市场状态（趋势+波动+建议），与「策略行情条」共用 compute_market_context 口径。
 
@@ -248,6 +276,7 @@ async def _build() -> dict:
         "sentiment": 15, # AKShare 涨跌家数
         "emotion": 25,   # 东财涨停四池（含最多回溯 8 天）
         "regime": 15,    # 市场状态（复用进程级缓存时秒回）
+        "sectors": 15,   # 同花顺行业资金流（90 个，供行业强弱 20/20）
     }
 
     async def _bounded(step_name: str, fn, default):
@@ -276,13 +305,20 @@ async def _build() -> dict:
         return _run()
 
     rows_task = asyncio.create_task(asyncio.to_thread(_load_market_rows))
-    indices, sentiment, emotion, regime = await asyncio.gather(
+
+    def _load_sectors() -> list[dict]:
+        # 复用行业全景/股票筛选的数据源，保证三处行业口径一致
+        from app.services.market_overview import _sectors
+        return _sectors()
+
+    indices, sentiment, emotion, regime, sectors = await asyncio.gather(
         _bounded("indices", astock.index_quote, []),
         _bounded("sentiment", _sentiment, {}),
         # 短线情绪复用 get_short_term_emotion 的 Redis 缓存（vibe:short_term_emotion），
         # 与「短线情绪」页读同一份快照，保证看板与情绪页「最高连板/梯队/封板率」一致。
         _bounded_async("emotion", get_short_term_emotion, {}),
         _bounded("regime", _market_regime, None),
+        _bounded("sectors", _load_sectors, []),
     )
     rows = await rows_task
 
@@ -327,8 +363,8 @@ async def _build() -> dict:
     strong_diff_pct = (strong_up - strong_down) / total * 100 if total else 0
     strong_down_pct = strong_down / total * 100 if total else 0
 
-    # 主线 = 行业热度领涨（ETF 主题行业，与三买三卖口径一致）
-    ind_rank = _etf_industry_rank()
+    # 主线 = 行业热度领涨（同花顺行业，与行业全景/股票筛选口径一致）
+    ind_rank = _industry_rank(sectors, as_of=sentiment.get("date") or "", top_n=20)
     mainline_items = ind_rank["leading"]
     mainline_avg = max([float(i.get("pct") or 0) for i in mainline_items], default=0)
     mainline_score = round(_score(mainline_avg, -0.5, 3.0)) if mainline_items else 50
