@@ -286,6 +286,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onActivated } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   vibeApi,
@@ -304,6 +305,7 @@ import {
 
 defineOptions({ name: 'VibeSynthesis' })
 
+const route = useRoute()
 const loading = ref(false)
 const syn = ref<MarketSynthesis | null>(null)
 
@@ -375,6 +377,16 @@ const loadEvents = async () => {
   } catch (e) {
     console.error('[Synthesis] 事件加载失败', e)
   }
+  scrollToEventsIfNeeded()
+}
+
+// 从看板「今日事件」跳转会带 #events，但事件块要等数据回来才渲染；
+// 路由的 scrollBehavior 只回顶部，这里在数据到位后补一次定位
+const scrollToEventsIfNeeded = () => {
+  if (route.hash !== '#events' || !eventsData.value) return
+  requestAnimationFrame(() => {
+    document.getElementById('events')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  })
 }
 
 const verdict = computed(() => {

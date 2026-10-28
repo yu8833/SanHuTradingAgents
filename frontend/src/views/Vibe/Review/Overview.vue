@@ -14,7 +14,7 @@
       <div class="page-hero-meta">
         <span class="market-state" :class="marketState.cls">{{ marketState.label }}</span>
         <span class="page-hero-tag">数据 {{ dataAsOf || '—' }} · 更新 {{ updatedAt || '—' }}</span>
-        <router-link to="/vibe/review/synthesis" class="hero-link">看今日结论 →</router-link>
+        <router-link to="/vibe/synthesis" class="hero-link">看今日结论 →</router-link>
         <el-button type="primary" plain :icon="Refresh" :loading="loading" @click="refreshOverview">
           刷新
         </el-button>
@@ -564,7 +564,7 @@ const eventTicks = [
   { label: '15:00', pct: (900 / 1440) * 100 },
   { label: '24:00', pct: 99 },
 ]
-const gotoEvents = () => router.push('/vibe/review/synthesis#events')
+const gotoEvents = () => router.push('/vibe/synthesis#events')
 
 const colorClass = (v: number | null | undefined) => {
   if (v == null) return 'flat'
