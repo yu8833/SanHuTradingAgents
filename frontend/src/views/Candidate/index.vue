@@ -37,7 +37,7 @@
             @clear="filterSectors"
           />
           <el-button size="small" :type="selectedSector ? 'default' : 'primary'" @click="clearSelectedSector">
-            {{ selectedSector ? `当前：${selectedSector.name}` : '默认：全部行业三买 TOP' }}
+            {{ selectedSector ? `当前：${selectedSector.name}` : '默认：强势前 10 行业三买 TOP5' }}
           </el-button>
         </div>
       </div>
@@ -64,7 +64,7 @@
         <span class="flow-step">②</span>
         <div class="flow-title">
           候选个股
-          <span class="flow-sub">{{ selectedSector ? `行业：${selectedSector.name}` : '全部行业各行业三买 TOP' }} · 三买三卖择时信号</span>
+          <span class="flow-sub">{{ selectedSector ? `行业：${selectedSector.name}` : '强势前 10 行业 · 每行业三买 TOP5' }} · 三买三卖择时信号</span>
           <span v-if="candidateAsOf" class="block-time">候选数据 {{ candidateAsOf }}</span>
         </div>
         <div class="flow-actions signal-filter">
@@ -88,7 +88,7 @@
           <v-chart class="chart chart--scatter" :option="scatterOption" autoresize />
         </div>
         <el-empty v-else :image-size="48" description="暂无候选个股（可切换行业或稍后再看）" />
-        <div class="panel-tip">右上角 = 高动量 + 高 ROE 的质量优等生；下方表格点击行可快速加入自选或 AI 分析</div>
+        <div class="panel-tip">右上角 = 高动量 + 高 ROE 的质量优等生；点击表格行打开个股详情，行内按钮可直接加自选或发起 AI 分析</div>
       </div>
 
       <div class="stocks-hint">
@@ -97,6 +97,11 @@
         <span class="goto-trend">
           <router-link to="/vibe/review/trend-analysis">行业资金/象限详情 → 趋势分析</router-link>
         </span>
+      </div>
+      <!-- 加载失败：必须清空上一行业结果并给出重试，避免标题与表格数据错配 -->
+      <div v-if="candidateError" class="candidate-error">
+        <el-alert :title="candidateError" type="error" show-icon :closable="false" />
+        <el-button size="small" :loading="stockLoading" @click="loadCandidates">重试</el-button>
       </div>
       <div class="table-scroll">
         <el-table
@@ -125,6 +130,13 @@
           <el-table-column label="择时信号" width="100" align="center">
             <template #default="{ row }">
               <el-tag :type="signalTagType(row.signal_type)" size="small" effect="plain">{{ row.signal_label || row.signal_type }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="质量分" width="92" align="right" sortable :sort-method="(a, b) => (a.quality_score || 0) - (b.quality_score || 0)">
+            <template #default="{ row }">
+              <el-tooltip content="质量分：综合 ROE、动量、资金与景气度打分，默认按此降序" placement="top" :show-after="200">
+                <span class="score-num">{{ fmtNum(row.quality_score, 1) }}</span>
+              </el-tooltip>
             </template>
           </el-table-column>
           <el-table-column label="趋势象限" width="105">
@@ -249,8 +261,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref, computed, onMounted, onActivated, nextTick } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Refresh, Aim, Cpu, Loading } from '@element-plus/icons-vue'
 import { candidateApi, type CandidateStock } from '@/api/candidate'
@@ -345,6 +357,7 @@ const ETF_TO_THS: Record<string, string> = {
 }
 
 const route = useRoute()
+const router = useRouter()
 
 /** 解析 URL 上的 sector 参数（ETF 主题名或同花顺行业名均可），返回本页可用的行业对象 */
 function resolveQuerySector(raw: string): { name: string } | null {
@@ -377,16 +390,17 @@ const stockSection = ref<HTMLElement | null>(null)
 const signalFilter = ref<'all' | 'buy' | 'B1' | 'B2' | 'B3' | 'S1' | 'S2' | 'S3'>('buy')
 const stockLoading = ref(false)
 const refreshingAll = ref(false)
+const candidateError = ref('')
 
 const stocksHint = computed(() =>
   selectedSector.value
     ? `行业 ${selectedSector.value.name} · top ${limit}`
-    : '全市场各行业 · 每行业 top 5 · 全为三买信号'
+    : '强势前 10 行业 · 每行业 top 5 · 全为三买信号'
 )
 const emptyText = computed(() =>
   selectedSector.value
     ? `行业「${selectedSector.value.name}」当前无三买信号（可切换行业，或切「全部」查看三买三卖）`
-    : '市场当前无三买买入信号（可切换行业，或稍后再看）'
+    : '强势前 10 行业当前无三买买入信号（可切换行业，或稍后再看）'
 )
 
 // 信号过滤：buy=仅三买（B1/B2/B3）/ all=全部 / 具体信号
@@ -408,16 +422,27 @@ const signalStats = computed(() => {
 /** 选中行业 → 加载候选 */
 function pickSector(s: { name: string }) {
   selectedSector.value = s
+  syncSectorQuery(s.name)
   loadCandidates()
   nextTick(() => stockSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
 }
 function clearSelectedSector() {
   selectedSector.value = null
+  syncSectorQuery(null)
   loadCandidates()
+}
+
+/** 选中行业写入 URL，支持刷新保持与分享；手动选择时用 replace 避免污染前进/后退 */
+function syncSectorQuery(name: string | null) {
+  const query = { ...route.query } as Record<string, any>
+  if (name) query.sector = name
+  else delete query.sector
+  router.replace({ query })
 }
 
 async function loadCandidates() {
   stockLoading.value = true
+  candidateError.value = ''
   try {
     if (selectedSector.value) {
       const res = await candidateApi.stocks(selectedSector.value.name, limit)
@@ -429,7 +454,12 @@ async function loadCandidates() {
       candidateAsOf.value = res.data?.as_of || ''
     }
   } catch (e) {
-    ElMessage.error('计算候选个股失败')
+    // 切换行业失败时清空旧结果，否则标题已是新行业、表格仍展示上一行业的股票
+    candidates.value = []
+    candidateAsOf.value = ''
+    candidateError.value = selectedSector.value
+      ? `行业「${selectedSector.value.name}」候选加载失败（可能暂无数据或接口超时）`
+      : '候选个股加载失败，请稍后重试'
   } finally {
     stockLoading.value = false
   }
@@ -627,6 +657,7 @@ async function refreshAll() {
 }
 
 // 首次进入：并行加载行业与趋势帧；带 sector 参数时按映射预选行业并直接拉候选，否则走默认全市场
+let bootstrapped = false
 onMounted(async () => {
   await Promise.allSettled([loadSectors(), loadTrendSlim()])
   const jumped = await applySectorFromQuery()
@@ -634,6 +665,24 @@ onMounted(async () => {
     await loadCandidates()
     nextTick(() => stockSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
   }
+  bootstrapped = true
+})
+
+// keep-alive 恢复：从大盘看板等行业入口带新 sector 回来时，需要重新对齐选中行业
+// （首次挂载时 activated 先于 onMounted 的异步初始化完成，用 bootstrapped 挡住避免重复请求）
+onActivated(async () => {
+  if (!bootstrapped) return
+  const raw = String(route.query.sector || '')
+  // 侧边栏重新进入不带 sector：把保留的选中行业写回 URL，避免地址与页面状态不一致
+  if (!raw) {
+    if (selectedSector.value) syncSectorQuery(selectedSector.value.name)
+    return
+  }
+  const target = resolveQuerySector(raw)
+  if (!target || target.name === selectedSector.value?.name) return
+  selectedSector.value = target
+  await loadCandidates()
+  nextTick(() => stockSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
 })
 </script>
 
@@ -781,6 +830,20 @@ onMounted(async () => {
   overflow: hidden;
   box-shadow: var(--el-box-shadow-light);
   border: 1px solid var(--el-border-color-light);
+  /* 行点击会打开个股详情，需要可点击暗示；按钮/链接自身的 pointer 不受影响 */
+  :deep(.el-table__row) { cursor: pointer; }
+}
+.candidate-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  .el-alert { flex: 1; }
+}
+.score-num {
+  font-family: var(--app-font-mono);
+  font-weight: 600;
+  color: var(--el-text-color-primary);
 }
 .muted { color: var(--el-text-color-secondary); }
 .stock-code, .stock-name { text-decoration: none; }

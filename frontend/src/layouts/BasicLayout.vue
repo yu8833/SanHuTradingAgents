@@ -110,6 +110,7 @@ const keepAliveComponents = computed(() => [
   'ReviewOverview',      // 大盘看板
   'ReviewEmotion',       // 短线情绪
   'TrendAnalysis',       // 趋势分析（内嵌三 Tab 各自 KeepAlive）
+  'CandidateScreening',  // 股票筛选（保留选中行业与结果，返回不重算）
   'Radar'                // 资讯雷达
 ])
 
