@@ -8,7 +8,7 @@
         </div>
         <div class="page-hero-text">
           <h2 class="page-hero-title">{{ titleDate }} · 短线情绪</h2>
-          <p class="page-hero-sub">连板梯队 / 打板情绪 · 客观公开榜单</p>
+          <p class="page-hero-sub">打板质量 / 情绪周期 / 强弱结构 · 客观公开榜单</p>
         </div>
       </div>
       <div class="page-hero-meta">
@@ -22,55 +22,53 @@
     <div class="emotion-content" v-loading="loading" element-loading-background="rgba(255,255,255,0.85)">
 
     <template v-if="emotion">
-      <!-- 关键计数 -->
+      <!-- 1. 情绪概览 -->
       <section class="block">
         <div class="block-head">
           <span class="block-title">
-            <el-icon><DataLine /></el-icon> 关键计数
+            <el-icon><DataLine /></el-icon> 情绪概览
           </span>
-          <span class="block-hint">数据日 {{ emotion.date }}</span>
+          <span class="block-hint">数据日 {{ emotion.date }} · 数字下方为较上一交易日变化</span>
         </div>
         <div class="grid grid-6">
-          <el-card shadow="never" class="count-card">
-            <div class="cnt-label" title="收盘涨停家数（东财涨停池口径）">涨停</div>
-            <div class="cnt-num up">{{ emotion.zt_count }}</div>
-            <div class="cnt-sub">家</div>
+          <el-card v-for="k in kpis" :key="k.key" shadow="never" class="count-card">
+            <div class="cnt-label" :title="k.tip">{{ k.label }}</div>
+            <div class="cnt-num" :class="k.tone">{{ k.value }}</div>
+            <div class="cnt-sub">
+              <span>{{ k.unit }}</span>
+              <span v-if="k.delta != null" class="cnt-delta" :class="clsByVal(k.delta, '')">
+                {{ fmtSigned(k.delta, 0) }}
+              </span>
+            </div>
           </el-card>
-          <el-card shadow="never" class="count-card">
-            <div class="cnt-label" title="收盘跌停家数（东财跌停池口径）">跌停</div>
-            <div class="cnt-num down">{{ emotion.dt_count }}</div>
-            <div class="cnt-sub">家</div>
-          </el-card>
-          <el-card shadow="never" class="count-card">
-            <div class="cnt-label" title="当日连板高度最高的个股连板数">最高连板</div>
-            <div class="cnt-num">{{ emotion.max_boards }}</div>
-            <div class="cnt-sub">板</div>
-          </el-card>
-          <el-card shadow="never" class="count-card">
-            <div class="cnt-label" title="连续 2 个及以上交易日涨停的家数">连板（2板+）</div>
-            <div class="cnt-num">{{ emotion.lianban_count }}</div>
-            <div class="cnt-sub">家</div>
-          </el-card>
-          <el-card shadow="never" class="count-card">
-            <div class="cnt-label" title="盘中触及涨停但收盘未封住的个股家数">炸板</div>
-            <div class="cnt-num neutral">{{ emotion.zb_count }}</div>
-            <div class="cnt-sub">家</div>
-          </el-card>
-          <el-card shadow="never" class="count-card">
-            <div class="cnt-label" title="昨日涨停家数，用作今日晋级率的分母">昨涨停</div>
-            <div class="cnt-num">{{ emotion.yzt_count }}</div>
-            <div class="cnt-sub">家</div>
-          </el-card>
+        </div>
+        <div class="fund-strip">
+          <div class="fund-item" title="涨停池内个股当日成交额合计">
+            <span class="fund-label">涨停池成交额</span>
+            <b>{{ fmtYi(amountStats.zt) }}</b><i>亿</i>
+          </div>
+          <div class="fund-item" title="炸板池内个股当日成交额合计，反映封板失败的资金消耗">
+            <span class="fund-label">炸板池成交额</span>
+            <b>{{ fmtYi(amountStats.zb) }}</b><i>亿</i>
+          </div>
+          <div class="fund-item" title="封板资金占比 = 涨停池成交额 ÷（涨停池 + 炸板池），越高说明打板资金越集中在最终封住的个股上">
+            <span class="fund-label">封板资金占比</span>
+            <b>{{ amountStats.sealShare == null ? '-' : amountStats.sealShare.toFixed(1) }}</b><i>%</i>
+          </div>
+          <div class="fund-item" title="连板股（2板+）平均单只成交额">
+            <span class="fund-label">连板股均成交额</span>
+            <b>{{ fmtYi(amountStats.lbAvg) }}</b><i>亿</i>
+          </div>
         </div>
       </section>
 
-      <!-- 打板情绪比率 -->
+      <!-- 2. 打板情绪比率 -->
       <section class="block">
         <div class="block-head">
           <span class="block-title">
             <el-icon><MagicStick /></el-icon> 打板情绪比率
           </span>
-          <span class="block-hint">数据日 {{ emotion.date }}</span>
+          <span class="block-hint">数据日 {{ emotion.date }} · 灰色数字为近 5 个交易日均值</span>
         </div>
         <div class="grid grid-3">
           <el-card shadow="never" class="ratio-card">
@@ -79,6 +77,7 @@
             <div class="rt-bar">
               <div class="bar-fill up" :style="{ width: rateWidth(emotion.seal_rate) }"></div>
             </div>
+            <div class="rt-avg">近5日均值 {{ fmtPctFromFraction(ratioAvg.seal, 1) }}</div>
           </el-card>
           <el-card shadow="never" class="ratio-card">
             <div class="rt-label" title="炸板率 = 炸板 ÷（涨停 + 炸板），越高说明封板承接越弱">炸板率</div>
@@ -86,6 +85,7 @@
             <div class="rt-bar">
               <div class="bar-fill down" :style="{ width: rateWidth(emotion.break_rate) }"></div>
             </div>
+            <div class="rt-avg">近5日均值 {{ fmtPctFromFraction(ratioAvg.break, 1) }}</div>
           </el-card>
           <el-card shadow="never" class="ratio-card">
             <div class="rt-label" title="晋级率 = 今日连板家数 ÷ 昨日涨停家数，反映打板资金接力意愿">晋级率</div>
@@ -93,11 +93,12 @@
             <div class="rt-bar">
               <div class="bar-fill neutral" :style="{ width: rateWidth(emotion.promotion_rate) }"></div>
             </div>
+            <div class="rt-avg">{{ emotion.lianban_count }} 家 ÷ 昨涨停 {{ emotion.yzt_count }} 家</div>
           </el-card>
         </div>
       </section>
 
-      <!-- 情绪周期：近 10 日曲线 + 周期阶段 -->
+      <!-- 3. 情绪周期：家数走势 + 打板质量 -->
       <section class="block">
         <div class="block-head">
           <span class="block-title">
@@ -106,144 +107,243 @@
           <span v-if="historyRange" class="block-hint">{{ historyRange }}</span>
           <span v-if="phase" class="phase-tag" :class="`phase-${phase.tone}`">{{ phase.label }}</span>
         </div>
-        <el-card shadow="never" class="trend-card" v-loading="historyLoading">
-          <div v-if="emotionChartOption" class="emotion-chart-wrap">
-            <VChart :option="emotionChartOption" autoresize class="emotion-chart" />
-          </div>
-          <div v-else class="empty">历史情绪数据暂不可用（数据源未返回），稍后刷新重试</div>
-          <p v-if="phase" class="phase-desc">{{ phase.desc }}</p>
-        </el-card>
+        <div class="grid grid-2">
+          <el-card shadow="never" class="chart-card" v-loading="historyLoading">
+            <div class="chart-cap">家数走势 <span>涨停 / 炸板 / 跌停（柱）· 最高连板（右轴）</span></div>
+            <VChart v-if="countChartOption" :option="countChartOption" autoresize class="chart-240" />
+            <div v-else class="empty">历史情绪数据暂不可用（数据源未返回），稍后刷新重试</div>
+          </el-card>
+          <el-card shadow="never" class="chart-card" v-loading="historyLoading">
+            <div class="chart-cap">打板质量 <span>封板率 / 炸板率（%）· 连板家数（右轴）</span></div>
+            <VChart v-if="qualityChartOption" :option="qualityChartOption" autoresize class="chart-240" />
+            <div v-else class="empty">历史情绪数据暂不可用</div>
+          </el-card>
+        </div>
+        <p v-if="phase" class="phase-desc">{{ phase.desc }}</p>
       </section>
 
-      <!-- 连板梯队（点击梯队过滤下方清单） -->
+      <!-- 4. 今日 vs 近 10 日均值（同一维度双柱对比，避免百分比解读歧义） -->
       <section class="block">
         <div class="block-head">
           <span class="block-title">
-            <el-icon><Sort /></el-icon> 连板梯队
+            <el-icon><DataAnalysis /></el-icon> 今日 vs 近 10 日均值
           </span>
-          <span class="block-hint">数据日 {{ emotion.date }} · 点击梯队筛选下方连板股 · 再点「全部」取消</span>
+          <span class="block-hint">红色为今日实际值，灰色为近 10 个交易日均值（不含今日）</span>
         </div>
-        <el-card shadow="never" class="ladder-card">
-          <div v-if="emotion.ladder.length" class="ladder-visual">
-            <button
-              v-for="l in emotion.ladder"
-              :key="l.boards"
-              class="ladder-item"
-              :class="{ active: selectedTier === l.boards }"
-              @click="toggleTier(l.boards)"
-            >
-              <span class="ladder-count">{{ l.count }}</span>
-              <span class="ladder-bar" :style="{ height: ladderHeight(l.count) }"></span>
-              <span class="ladder-tier">{{ l.boards }}{{ l.plus ? '+' : '' }}板</span>
-            </button>
-            <button
-              v-if="selectedTier != null"
-              class="ladder-item ladder-all"
-              @click="selectedTier = null"
-            >
-              <span class="ladder-count">全部</span>
-              <span class="ladder-bar" style="height: 8px"></span>
-              <span class="ladder-tier">取消筛选</span>
-            </button>
-          </div>
-          <div v-else class="empty">暂无连板梯队数据</div>
-        </el-card>
-      </section>
-
-      <!-- 连板股清单 -->
-      <section class="block">
-        <div class="block-head">
-          <span class="block-title">
-            <el-icon><Histogram /></el-icon> 连板股清单
-            <el-tag v-if="selectedTier != null" size="small" type="danger" effect="plain" class="tier-tag">
-              {{ selectedTierLabel }}
-            </el-tag>
-          </span>
-          <span class="block-hint">数据日 {{ emotion.date }} · 共 {{ filteredLianbanStocks.length }} 只</span>
-        </div>
-        <el-card shadow="never" class="table-card">
-          <el-table :data="filteredLianbanStocks" stripe size="default" class="app-table app-table--ranking">
-            <el-table-column label="名称 / 代码" min-width="170">
-              <template #default="{ row }">
-                <div class="stock-cell">
-                  <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-name">{{ row.name }}</router-link>
-                  <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
+        <el-card shadow="never" class="chart-card">
+          <div v-if="compareRows.length" class="cmp-list">
+            <div v-for="r in compareRows" :key="r.label" class="cmp-row">
+              <div class="cmp-label">
+                <span>{{ r.label }}</span>
+                <i v-if="r.reverse">低者为好</i>
+              </div>
+              <div class="cmp-bars">
+                <div class="cmp-line">
+                  <span class="cmp-tag today">今日</span>
+                  <div class="cmp-track"><div class="cmp-fill today" :style="{ width: r.todayW }"></div></div>
+                  <b class="cmp-val">{{ r.todayText }}</b>
                 </div>
-              </template>
-            </el-table-column>
-            <el-table-column label="连板数" width="90" align="right" sortable>
-              <template #default="{ row }">
-                <el-tag type="danger" effect="plain">{{ row.boards }}板</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="现价" width="100" align="right" sortable>
-              <template #default="{ row }">{{ fmtPrice(row.price) }}</template>
-            </el-table-column>
-            <el-table-column label="涨停%" width="100" align="right" sortable>
-              <template #default="{ row }">
-                <span class="up">{{ fmtPct(row.pct) }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="成交额(亿)" width="120" align="right" sortable>
-              <template #default="{ row }">{{ fmtYi(row.amount) }}</template>
-            </el-table-column>
-            <el-table-column label="流通市值(亿)" width="130" align="right" sortable>
-              <template #default="{ row }">{{ fmtYi(row.float_cap) }}</template>
-            </el-table-column>
-            <el-table-column label="概念" min-width="120" prop="industry" />
-          </el-table>
+                <div class="cmp-line">
+                  <span class="cmp-tag avg">均值</span>
+                  <div class="cmp-track"><div class="cmp-fill avg" :style="{ width: r.avgW }"></div></div>
+                  <b class="cmp-val">{{ r.avgText }}</b>
+                </div>
+              </div>
+              <span class="cmp-delta" :title="`今日较近10日均值变化 ${r.deltaText}`">{{ r.deltaText }}</span>
+            </div>
+          </div>
+          <div v-else class="empty">历史均值数据不足，无法对比</div>
         </el-card>
       </section>
 
-      <!-- 三池清单：涨停 / 炸板 / 跌停 -->
+      <!-- 6. 打板生态：晋级阶梯 / 行业分布 / 连板股成交额 -->
+      <section class="block">
+        <div class="block-head">
+          <span class="block-title">
+            <el-icon><Histogram /></el-icon> 打板生态
+          </span>
+          <span class="block-hint">数据日 {{ emotion.date }} · 晋级留存 / 行业集中度 / 连板股资金分布</span>
+        </div>
+        <div class="grid grid-2">
+          <el-card shadow="never" class="chart-card">
+            <div class="chart-cap">晋级阶梯 <span>点击长条查看明细 · 留存率 = 该档家数 ÷ 昨日涨停家数</span></div>
+            <VChart
+              v-if="stageOption"
+              :option="stageOption"
+              autoresize
+              class="chart-220"
+              @click="onStageClick"
+            />
+            <div v-else class="empty">昨日涨停池暂无数据，无法计算晋级留存</div>
+            <EmotionDetailTable
+              v-if="stageDetail"
+              :title="stageDetail.title"
+              :rows="stageDetail.rows"
+              :metric="{ key: 'boards', label: '连板', suffix: '板' }"
+              @close="stageSel = null"
+            />
+          </el-card>
+          <el-card shadow="never" class="chart-card">
+            <div class="chart-cap">
+              行业分布
+              <el-radio-group v-model="indPool" size="small" class="pool-switch">
+                <el-radio-button value="zt">涨停</el-radio-button>
+                <el-radio-button value="zb">炸板</el-radio-button>
+                <el-radio-button value="dt">跌停</el-radio-button>
+              </el-radio-group>
+              <span>点击长条查看明细 · 前三行业占比 {{ cr3 }}%</span>
+            </div>
+            <VChart
+              v-if="industryOption"
+              :option="industryOption"
+              autoresize
+              class="chart-220"
+              @click="onIndustryClick"
+            />
+            <div v-else class="empty">该池暂无个股</div>
+            <EmotionDetailTable
+              v-if="industryDetail"
+              :title="industryDetail.title"
+              :rows="industryDetail.rows"
+              :metric="industryMetric"
+              @close="indSel = null"
+            />
+          </el-card>
+        </div>
+        <el-card shadow="never" class="chart-card chart-card--wide">
+          <div class="chart-cap">
+            连板股成交额 <span>颜色越深连板越高 · 共 {{ emotion.lianban_stocks.length }} 只</span>
+          </div>
+          <VChart
+            v-if="lianbanAmountOption"
+            :option="lianbanAmountOption"
+            autoresize
+            :style="{ height: lianbanChartHeight }"
+          />
+          <div v-else class="empty">暂无连板股</div>
+        </el-card>
+      </section>
+
+      <!-- 7. 风险结构：炸板强度 / 跌停天数 -->
+      <section class="block">
+        <div class="block-head">
+          <span class="block-title">
+            <el-icon><Warning /></el-icon> 风险结构
+          </span>
+          <span class="block-hint">炸板次数越多、连续跌停天数越长，说明分歧与补跌压力越大</span>
+        </div>
+        <div class="grid grid-2">
+          <el-card shadow="never" class="chart-card">
+            <div class="chart-cap">炸板强度 <span>点击长条查看明细 · 炸板池 {{ emotion.pools?.zb?.length || 0 }} 只</span></div>
+            <VChart v-if="breakDistOption" :option="breakDistOption" autoresize class="chart-200" @click="onBreakClick" />
+            <div v-else class="empty">今日无炸板个股</div>
+            <EmotionDetailTable
+              v-if="breakDetail"
+              :title="breakDetail.title"
+              :rows="breakDetail.rows"
+              :metric="{ key: 'break_times', label: '炸板', suffix: '次' }"
+              @close="zbSel = null"
+            />
+          </el-card>
+          <el-card shadow="never" class="chart-card">
+            <div class="chart-cap">跌停天数 <span>点击长条查看明细 · 跌停池 {{ emotion.pools?.dt?.length || 0 }} 只</span></div>
+            <VChart v-if="dtDistOption" :option="dtDistOption" autoresize class="chart-200" @click="onDtClick" />
+            <div v-else class="empty">今日无跌停个股</div>
+            <EmotionDetailTable
+              v-if="dtDetail"
+              :title="dtDetail.title"
+              :rows="dtDetail.rows"
+              :metric="{ key: 'days', label: '连续跌停', suffix: '天' }"
+              @close="dtSel = null"
+            />
+          </el-card>
+        </div>
+      </section>
+
+      <!-- 8. 明细榜单（默认收起，避免表格堆叠） -->
       <section v-if="emotion.pools" class="block">
-        <div class="block-head">
-          <span class="block-title">
-            <el-icon><Tickets /></el-icon> 三池清单
-          </span>
-          <span class="block-hint">数据日 {{ emotion.date }} · 客观公开榜单 · 不评分不推荐</span>
-        </div>
-        <el-card shadow="never" class="table-card">
-          <el-tabs v-model="poolTab" class="pool-tabs">
-            <el-tab-pane :label="`涨停池 ${emotion.pools.zt.length}`" name="zt" />
-            <el-tab-pane :label="`炸板池 ${emotion.pools.zb.length}`" name="zb" />
-            <el-tab-pane :label="`跌停池 ${emotion.pools.dt.length}`" name="dt" />
-          </el-tabs>
-          <el-table :data="poolRows" stripe size="default" class="app-table app-table--ranking">
-            <el-table-column label="名称 / 代码" min-width="170">
-              <template #default="{ row }">
-                <div class="stock-cell">
-                  <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-name">{{ row.name }}</router-link>
-                  <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
-                </div>
-              </template>
-            </el-table-column>
-            <el-table-column label="现价" width="100" align="right" sortable prop="price">
-              <template #default="{ row }">{{ fmtPrice(row.price) }}</template>
-            </el-table-column>
-            <el-table-column label="涨跌幅" width="100" align="right" sortable prop="pct">
-              <template #default="{ row }">
-                <span :class="clsByVal(row.pct, '')">{{ fmtPct(row.pct) }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column v-if="poolTab === 'zt'" label="连板" width="90" align="right" sortable prop="boards">
-              <template #default="{ row }">
-                <el-tag type="danger" effect="plain" size="small">{{ row.boards }}板</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column v-if="poolTab === 'zb'" label="炸板次数" width="100" align="right" sortable prop="break_times">
-              <template #default="{ row }">{{ row.break_times }} 次</template>
-            </el-table-column>
-            <el-table-column v-if="poolTab === 'dt'" label="连续跌停" width="100" align="right" sortable prop="days">
-              <template #default="{ row }">{{ row.days }} 天</template>
-            </el-table-column>
-            <el-table-column label="成交额(亿)" width="120" align="right" sortable prop="amount">
-              <template #default="{ row }">{{ fmtYi(row.amount) }}</template>
-            </el-table-column>
-            <el-table-column label="行业" min-width="120" prop="industry" />
-          </el-table>
-          <div v-if="!poolRows.length" class="empty">该池暂无个股</div>
-        </el-card>
+        <el-collapse v-model="detailOpen" class="detail-collapse">
+          <el-collapse-item name="lianban">
+            <template #title>
+              <span class="collapse-title">连板股明细（{{ emotion.lianban_stocks.length }} 只）</span>
+            </template>
+            <el-table :data="emotion.lianban_stocks" stripe size="default" class="app-table app-table--ranking">
+              <el-table-column label="名称 / 代码" min-width="170">
+                <template #default="{ row }">
+                  <div class="stock-cell">
+                    <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-name">{{ row.name }}</router-link>
+                    <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column label="连板数" width="90" align="right" sortable>
+                <template #default="{ row }">
+                  <el-tag type="danger" effect="plain">{{ row.boards }}板</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="现价" width="100" align="right" sortable>
+                <template #default="{ row }">{{ fmtPrice(row.price) }}</template>
+              </el-table-column>
+              <el-table-column label="涨停%" width="100" align="right" sortable>
+                <template #default="{ row }">
+                  <span class="up">{{ fmtPct(row.pct) }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="成交额(亿)" width="120" align="right" sortable>
+                <template #default="{ row }">{{ fmtYi(row.amount) }}</template>
+              </el-table-column>
+              <el-table-column label="流通市值(亿)" width="130" align="right" sortable>
+                <template #default="{ row }">{{ fmtYi(row.float_cap) }}</template>
+              </el-table-column>
+              <el-table-column label="概念" min-width="120" prop="industry" />
+            </el-table>
+          </el-collapse-item>
+
+          <el-collapse-item name="pools">
+            <template #title>
+              <span class="collapse-title">三池清单（涨停 {{ emotion.pools.zt.length }} / 炸板 {{ emotion.pools.zb.length }} / 跌停 {{ emotion.pools.dt.length }}）</span>
+            </template>
+            <el-tabs v-model="poolTab" class="pool-tabs">
+              <el-tab-pane :label="`涨停池 ${emotion.pools.zt.length}`" name="zt" />
+              <el-tab-pane :label="`炸板池 ${emotion.pools.zb.length}`" name="zb" />
+              <el-tab-pane :label="`跌停池 ${emotion.pools.dt.length}`" name="dt" />
+            </el-tabs>
+            <el-table :data="poolRows" stripe size="default" class="app-table app-table--ranking">
+              <el-table-column label="名称 / 代码" min-width="170">
+                <template #default="{ row }">
+                  <div class="stock-cell">
+                    <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-name">{{ row.name }}</router-link>
+                    <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column label="现价" width="100" align="right" sortable prop="price">
+                <template #default="{ row }">{{ fmtPrice(row.price) }}</template>
+              </el-table-column>
+              <el-table-column label="涨跌幅" width="100" align="right" sortable prop="pct">
+                <template #default="{ row }">
+                  <span :class="clsByVal(row.pct, '')">{{ fmtPct(row.pct) }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column v-if="poolTab === 'zt'" label="连板" width="90" align="right" sortable prop="boards">
+                <template #default="{ row }">
+                  <el-tag type="danger" effect="plain" size="small">{{ row.boards }}板</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column v-if="poolTab === 'zb'" label="炸板次数" width="100" align="right" sortable prop="break_times">
+                <template #default="{ row }">{{ row.break_times }} 次</template>
+              </el-table-column>
+              <el-table-column v-if="poolTab === 'dt'" label="连续跌停" width="100" align="right" sortable prop="days">
+                <template #default="{ row }">{{ row.days }} 天</template>
+              </el-table-column>
+              <el-table-column label="成交额(亿)" width="120" align="right" sortable prop="amount">
+                <template #default="{ row }">{{ fmtYi(row.amount) }}</template>
+              </el-table-column>
+              <el-table-column label="行业" min-width="120" prop="industry" />
+            </el-table>
+            <div v-if="!poolRows.length" class="empty">该池暂无个股</div>
+          </el-collapse-item>
+        </el-collapse>
       </section>
 
       <p class="disclaimer">以上数据来自公开源，仅供参考，不构成投资建议</p>
@@ -255,30 +355,48 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onActivated } from 'vue'
+import { ref, computed, watch, onMounted, onActivated } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   TrendCharts,
   DataLine,
+  DataAnalysis,
   Refresh,
   MagicStick,
-  Sort,
   Histogram,
-  Tickets,
+  Warning,
 } from '@element-plus/icons-vue'
 import { use as echartsUse } from 'echarts/core'
-import { LineChart } from 'echarts/charts'
-import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components'
+import { LineChart, BarChart } from 'echarts/charts'
+import {
+  GridComponent,
+  TooltipComponent,
+  LegendComponent,
+} from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
 import type { EChartsOption } from 'echarts'
-import { vibeApi, type ShortTermEmotion, type EmotionPoolRow, type EmotionHistory } from '@/api/vibe'
-import { fmtPrice, fmtYi, fmtPctFromFraction, fmtPct, clsByVal } from '@/utils/format'
+import EmotionDetailTable from './EmotionDetailTable.vue'
+import {
+  vibeApi,
+  type ShortTermEmotion,
+  type EmotionPoolRow,
+  type EmotionHistory,
+  type EmotionHistoryPoint,
+} from '@/api/vibe'
+import { fmtPrice, fmtYi, fmtPctFromFraction, fmtPct, fmtSigned, clsByVal } from '@/utils/format'
 import { formatBeijingDateTimeMinute } from '@/utils/datetime'
 
 defineOptions({ name: 'ReviewEmotion' })
 
-echartsUse([CanvasRenderer, LineChart, GridComponent, TooltipComponent, LegendComponent])
+echartsUse([
+  CanvasRenderer,
+  LineChart,
+  BarChart,
+  GridComponent,
+  TooltipComponent,
+  LegendComponent,
+])
 
 // 标题日期：优先情绪数据日期（最新交易日）；数据未回前用轻量接口预取的最新交易日（首屏即正确，不闪非交易日当天）
 const tradeDate = ref('')
@@ -294,104 +412,579 @@ const emotion = ref<ShortTermEmotion | null>(null)
 const history = ref<EmotionHistory | null>(null)
 const historyLoading = ref(false)
 
+const histSeries = computed<EmotionHistoryPoint[]>(() => history.value?.series || [])
+
+// 上一交易日 / 均值样本（排除今日数据点，避免自己和自己比）
+const prevPoint = computed<EmotionHistoryPoint | null>(() => {
+  const e = emotion.value
+  const before = histSeries.value.filter(p => !e || p.date < e.date)
+  return before.length ? before[before.length - 1] : null
+})
+const avgPoints = computed(() => {
+  const d = emotion.value?.date
+  return histSeries.value.filter(p => !d || p.date !== d)
+})
+const recent5 = computed(() => avgPoints.value.slice(-5))
+
 // 区块级数据时间：曲线区间起点 → 终点（与上方当日快照分开标注）
 const historyRange = computed(() => {
-  const series = history.value?.series || []
+  const series = histSeries.value
   if (!series.length) return ''
   const first = series[0].date
   const last = series[series.length - 1].date
   return first === last ? `数据日 ${last}` : `区间 ${first} → ${last}`
 })
 
-const emotionChartOption = computed<EChartsOption | null>(() => {
-  const series = history.value?.series || []
-  if (series.length < 2) return null
-  const dates = series.map(p => p.date.slice(5))
-  const maxBoard = Math.max(1, ...series.map(p => p.max_boards || 0))
+const axisLabel = { color: '#a0aec0', fontSize: 10 }
+const splitLine = { lineStyle: { color: '#f0f4f8' } }
+const TIP = {
+  backgroundColor: '#fff',
+  borderColor: 'rgba(45,55,72,.08)',
+  borderWidth: 1,
+  textStyle: { color: '#2d3748', fontSize: 12 },
+  extraCssText: 'box-shadow: 0 6px 20px rgba(45,55,72,.12); border-radius: 8px;',
+}
+const LEGEND = {
+  top: 0,
+  right: 0,
+  itemWidth: 10,
+  itemHeight: 10,
+  textStyle: { color: '#718096', fontSize: 11 },
+}
+
+// ── 概览 KPI（含环比） ──
+const kpis = computed(() => {
+  const e = emotion.value
+  if (!e) return []
+  const p = prevPoint.value
+  const d = (cur: number, prevVal?: number) => (p && prevVal != null ? cur - (prevVal as number) : null)
+  return [
+    { key: 'zt', label: '涨停', tip: '收盘涨停家数（东财涨停池口径）', value: e.zt_count, unit: '家', tone: 'up', delta: d(e.zt_count, p?.zt) },
+    { key: 'dt', label: '跌停', tip: '收盘跌停家数（东财跌停池口径）', value: e.dt_count, unit: '家', tone: 'down', delta: d(e.dt_count, p?.dt) },
+    { key: 'zb', label: '炸板', tip: '盘中触及涨停但收盘未封住的个股家数', value: e.zb_count, unit: '家', tone: 'neutral', delta: d(e.zb_count, p?.zb) },
+    { key: 'lianban', label: '连板（2板+）', tip: '连续 2 个及以上交易日涨停的家数', value: e.lianban_count, unit: '家', tone: '', delta: d(e.lianban_count, p?.lianban) },
+    { key: 'max', label: '最高连板', tip: '当日连板高度最高的个股连板数', value: e.max_boards, unit: '板', tone: '', delta: d(e.max_boards, p?.max_boards) },
+    { key: 'yzt', label: '昨涨停', tip: '昨日涨停家数，用作今日晋级率的分母', value: e.yzt_count, unit: '家', tone: '', delta: null },
+  ]
+})
+
+// ── 资金维度 ──
+const amountStats = computed(() => {
+  const pools = emotion.value?.pools
+  const sum = (rows?: EmotionPoolRow[]) => (rows || []).reduce((a, r) => a + (Number(r.amount) || 0), 0)
+  const ztAmt = sum(pools?.zt)
+  const zbAmt = sum(pools?.zb)
+  const lb = emotion.value?.lianban_stocks || []
+  const lbAmt = lb.reduce((a, r) => a + (Number(r.amount) || 0), 0)
+  const total = ztAmt + zbAmt
+  return {
+    zt: ztAmt,
+    zb: zbAmt,
+    sealShare: total ? (ztAmt / total) * 100 : null,
+    lbAvg: lb.length ? lbAmt / lb.length : 0,
+  }
+})
+
+// ── 比率均值 ──
+const ratioAvg = computed(() => {
+  const seals = recent5.value.map(p => p.seal_rate).filter((v): v is number => v != null)
+  const breaks = recent5.value
+    .map(p => (p.zt + p.zb ? p.zb / (p.zt + p.zb) : null))
+    .filter((v): v is number => v != null)
+  const avg = (arr: number[]) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null)
+  return { seal: avg(seals), break: avg(breaks) }
+})
+
+// ── 情绪周期图 1：家数走势（柱）+ 最高连板（线） ──
+const countChartOption = computed<EChartsOption | null>(() => {
+  const s = histSeries.value
+  if (s.length < 2) return null
+  const maxBoard = Math.max(1, ...s.map(p => p.max_boards || 0))
   return {
     animationDuration: 500,
-    grid: { left: 44, right: 42, top: 34, bottom: 26 },
-    tooltip: {
-      trigger: 'axis',
-      backgroundColor: '#fff',
-      borderColor: 'rgba(45,55,72,.08)',
-      borderWidth: 1,
-      textStyle: { color: '#2d3748', fontSize: 12 },
-      extraCssText: 'box-shadow: 0 6px 20px rgba(45,55,72,.12); border-radius: 8px;',
-    },
-    legend: {
-      top: 0,
-      right: 0,
-      itemWidth: 10,
-      itemHeight: 10,
-      textStyle: { color: '#718096', fontSize: 11 },
-      data: ['涨停', '炸板', '跌停', '最高连板'],
-    },
+    grid: { left: 40, right: 42, top: 32, bottom: 24 },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, ...TIP },
+    legend: { ...LEGEND, data: ['涨停', '炸板', '跌停', '最高连板'] },
     xAxis: {
       type: 'category',
-      data: dates,
-      axisLabel: { color: '#a0aec0', fontSize: 10 },
+      data: s.map(p => p.date.slice(5)),
+      axisLabel,
       axisTick: { show: false },
       axisLine: { lineStyle: { color: '#cbd5e0' } },
     },
     yAxis: [
-      {
-        type: 'value',
-        name: '家数',
-        nameTextStyle: { color: '#a0aec0', fontSize: 10 },
-        axisLabel: { color: '#a0aec0', fontSize: 10 },
-        splitLine: { lineStyle: { color: '#f0f4f8' } },
-      },
+      { type: 'value', name: '家数', nameTextStyle: { ...axisLabel }, axisLabel, splitLine },
       {
         type: 'value',
         name: '板',
         min: 0,
         max: maxBoard + 1,
-        nameTextStyle: { color: '#a0aec0', fontSize: 10 },
-        axisLabel: { color: '#a0aec0', fontSize: 10 },
+        nameTextStyle: { ...axisLabel },
+        axisLabel,
         splitLine: { show: false },
       },
     ],
     series: [
       {
-        name: '涨停',
-        type: 'line',
-        smooth: true,
-        symbolSize: 5,
-        data: series.map(p => p.zt),
-        itemStyle: { color: '#f56c6c' },
-        lineStyle: { width: 2.2 },
+        name: '涨停', type: 'bar', barMaxWidth: 14, barGap: '15%',
+        data: s.map(p => p.zt),
+        itemStyle: { color: '#f56c6c', borderRadius: [3, 3, 0, 0] },
       },
       {
-        name: '炸板',
-        type: 'line',
-        smooth: true,
-        symbolSize: 4,
-        data: series.map(p => p.zb),
-        itemStyle: { color: '#e6a23c' },
-        lineStyle: { width: 1.4, type: 'dashed' },
+        name: '炸板', type: 'bar', barMaxWidth: 14,
+        data: s.map(p => p.zb),
+        itemStyle: { color: '#e6a23c', borderRadius: [3, 3, 0, 0] },
       },
       {
-        name: '跌停',
-        type: 'line',
-        smooth: true,
-        symbolSize: 4,
-        data: series.map(p => p.dt),
-        itemStyle: { color: '#67c23a' },
-        lineStyle: { width: 1.4 },
+        name: '跌停', type: 'bar', barMaxWidth: 14,
+        data: s.map(p => p.dt),
+        itemStyle: { color: '#67c23a', borderRadius: [3, 3, 0, 0] },
       },
       {
-        name: '最高连板',
-        type: 'line',
-        yAxisIndex: 1,
-        smooth: true,
-        symbolSize: 4,
-        data: series.map(p => p.max_boards),
+        name: '最高连板', type: 'line', yAxisIndex: 1, smooth: true, symbolSize: 5,
+        data: s.map(p => p.max_boards),
         itemStyle: { color: '#7c3aed' },
-        lineStyle: { width: 1.4, type: 'dotted' },
+        lineStyle: { width: 2 },
       },
     ],
   }
+})
+
+// ── 情绪周期图 2：封板率 / 炸板率（%）+ 连板家数（右轴） ──
+const qualityChartOption = computed<EChartsOption | null>(() => {
+  const s = histSeries.value
+  if (s.length < 2) return null
+  const seal = s.map(p => (p.seal_rate == null ? null : +(p.seal_rate * 100).toFixed(1)))
+  const brk = s.map(p => {
+    const a = p.zt + p.zb
+    return a ? +((p.zb / a) * 100).toFixed(1) : null
+  })
+  const maxLianban = Math.max(1, ...s.map(p => p.lianban || 0))
+  return {
+    animationDuration: 500,
+    grid: { left: 40, right: 42, top: 32, bottom: 24 },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, ...TIP },
+    legend: { ...LEGEND, data: ['封板率', '炸板率', '连板家数'] },
+    xAxis: {
+      type: 'category',
+      data: s.map(p => p.date.slice(5)),
+      axisLabel,
+      axisTick: { show: false },
+      axisLine: { lineStyle: { color: '#cbd5e0' } },
+    },
+    yAxis: [
+      {
+        type: 'value', name: '%', min: 0, max: 100,
+        nameTextStyle: { ...axisLabel }, axisLabel: { ...axisLabel, formatter: '{value}%' }, splitLine,
+      },
+      {
+        type: 'value', name: '家', min: 0, max: maxLianban + 2,
+        nameTextStyle: { ...axisLabel }, axisLabel, splitLine: { show: false },
+      },
+    ],
+    series: [
+      {
+        name: '连板家数', type: 'bar', yAxisIndex: 1, barMaxWidth: 14,
+        data: s.map(p => p.lianban),
+        itemStyle: { color: '#a5b4fc', borderRadius: [3, 3, 0, 0] },
+      },
+      {
+        name: '封板率', type: 'line', smooth: true, symbolSize: 4,
+        data: seal,
+        itemStyle: { color: '#e11d48' },
+        lineStyle: { width: 2.2 },
+      },
+      {
+        name: '炸板率', type: 'line', smooth: true, symbolSize: 4,
+        data: brk,
+        itemStyle: { color: '#e6a23c' },
+        lineStyle: { width: 1.6, type: 'dashed' },
+      },
+    ],
+  }
+})
+
+// ── 今日 vs 近 10 日均值（双条对比，直接展示同量纲数值） ──
+interface CompareRow {
+  label: string
+  today: number
+  avg: number
+  unit: string
+  reverse?: boolean
+  todayW: string
+  avgW: string
+  todayText: string
+  avgText: string
+  deltaText: string
+  deltaTone: string
+}
+const compareRows = computed<CompareRow[]>(() => {
+  const e = emotion.value
+  const avg = avgPoints.value
+  if (!e || !avg.length) return []
+  const avgOf = (fn: (p: EmotionHistoryPoint) => number | null | undefined) => {
+    const vals = avg.map(fn).filter((v): v is number => v != null)
+    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null
+  }
+  const defs: Array<{ label: string; today: number | null; avg: number | null; unit: string; reverse?: boolean }> = [
+    { label: '涨停家数', today: e.zt_count, avg: avgOf(p => p.zt), unit: '家' },
+    { label: '连板家数', today: e.lianban_count, avg: avgOf(p => p.lianban), unit: '家' },
+    { label: '最高连板', today: e.max_boards, avg: avgOf(p => p.max_boards), unit: '板' },
+    { label: '封板率', today: e.seal_rate == null ? null : e.seal_rate * 100, avg: avgOf(p => (p.seal_rate == null ? null : p.seal_rate * 100)), unit: '%' },
+    { label: '炸板家数', today: e.zb_count, avg: avgOf(p => p.zb), unit: '家', reverse: true },
+    { label: '跌停家数', today: e.dt_count, avg: avgOf(p => p.dt), unit: '家', reverse: true },
+  ]
+  const valid = defs.filter(d => d.today != null && d.avg != null)
+  if (!valid.length) return []
+  // 同一图表内所有条共用一个最大刻度，保证今日与均值可直接目测比较
+  const scale = Math.max(1, ...valid.flatMap(d => [d.today as number, d.avg as number]))
+  const toW = (v: number) => `${Math.max(1.5, (v / scale) * 100).toFixed(1)}%`
+  return valid.map(d => {
+    const today = d.today as number
+    const avgVal = d.avg as number
+    const diff = today - avgVal
+    const pct = avgVal ? (diff / avgVal) * 100 : 0
+    const better = d.reverse ? diff < 0 : diff > 0
+    return {
+      label: d.label,
+      today,
+      avg: avgVal,
+      unit: d.unit,
+      reverse: d.reverse,
+      todayW: toW(today),
+      avgW: toW(avgVal),
+      todayText: `${today.toFixed(unitDigit(d.unit))}${d.unit}`,
+      avgText: `${avgVal.toFixed(unitDigit(d.unit))}${d.unit}`,
+      deltaText: `${diff > 0 ? '+' : ''}${diff.toFixed(unitDigit(d.unit))}${d.unit}（${pct > 0 ? '+' : ''}${pct.toFixed(0)}%）`,
+      deltaTone: Math.abs(pct) < 5 ? 'flat' : better ? 'up' : 'down',
+    }
+  })
+})
+const unitDigit = (unit: string) => (unit === '板' ? 0 : unit === '%' ? 1 : 0)
+
+// ── 晋级阶梯（昨日涨停 → 今日连板 → 3板+ → 5板+） ──
+interface StageDef { name: string; value: number; pct: number; color: string; min: number }
+const stageList = computed<StageDef[]>(() => {
+  const e = emotion.value
+  if (!e || !e.yzt_count) return []
+  const ladder = e.ladder || []
+  const above = (min: number) => ladder.filter(l => l.boards >= min).reduce((a, l) => a + l.count, 0)
+  const pct = (v: number) => +((v / e.yzt_count) * 100).toFixed(1)
+  return [
+    { name: '昨日涨停', value: e.yzt_count, pct: 100, color: '#cbd5e0', min: 1 },
+    { name: '今日连板 2板+', value: e.lianban_count, pct: pct(e.lianban_count), color: '#f87171', min: 2 },
+    { name: '3板+', value: above(3), pct: pct(above(3)), color: '#ef4444', min: 3 },
+    { name: '5板+', value: above(5), pct: pct(above(5)), color: '#b91c1c', min: 5 },
+  ]
+})
+const stageOption = computed<EChartsOption | null>(() => {
+  const e = emotion.value
+  const stages = stageList.value
+  if (!e || !stages.length) return null
+  return {
+    animationDuration: 500,
+    grid: { left: 92, right: 96, top: 12, bottom: 22 },
+    tooltip: {
+      trigger: 'item',
+      ...TIP,
+      formatter: (p: any) => {
+        const s = stages[p.dataIndex]
+        return `${s.name}<br/>${s.value} 家 · 占昨日涨停 ${s.pct}%<br/><span style="color:#a0aec0">点击长条查看明细</span>`
+      },
+    },
+    xAxis: { type: 'value', max: Math.max(1, e.yzt_count), axisLabel, splitLine },
+    yAxis: {
+      type: 'category',
+      inverse: true,
+      data: stages.map(s => s.name),
+      axisLabel: { color: '#4a5568', fontSize: 11 },
+      axisTick: { show: false },
+      axisLine: { lineStyle: { color: '#e2e8f0' } },
+    },
+    series: [{
+      type: 'bar',
+      barMaxWidth: 22,
+      cursor: 'pointer',
+      data: stages.map(s => ({ value: s.value, itemStyle: { color: s.color, borderRadius: [0, 4, 4, 0] } })),
+      label: {
+        show: true,
+        position: 'right',
+        fontSize: 10,
+        color: '#718096',
+        formatter: (p: any) => {
+          const s = stages[p.dataIndex]
+          return `${s.value}家 · ${s.pct}%`
+        },
+      },
+    }],
+  }
+})
+
+const stageSel = ref<number | null>(null)
+const onStageClick = (p: any) => {
+  const idx = Number(p?.dataIndex)
+  if (Number.isNaN(idx)) return
+  stageSel.value = stageSel.value === idx ? null : idx
+}
+const stageDetail = computed(() => {
+  const idx = stageSel.value
+  const stages = stageList.value
+  const e = emotion.value
+  if (idx == null || !stages[idx] || !e) return null
+  const stage = stages[idx]
+  const isYzt = stage.name === '昨日涨停'
+  const rows = isYzt
+    ? (e.pools?.yzt || [])
+    : (e.lianban_stocks || []).filter(r => (r.boards || 0) >= stage.min)
+  // 昨涨停池的涨跌幅为今日表现，标题注明避免误读
+  return { title: isYzt ? '昨日涨停（今日表现）' : stage.name, rows }
+})
+
+// ── 行业分布（涨停 / 炸板 / 跌停 可切换） ──
+const indPool = ref<'zt' | 'zb' | 'dt'>('zt')
+const industryRows = computed(() => {
+  const rows = emotion.value?.pools?.[indPool.value] || []
+  const cnt = new Map<string, number>()
+  rows.forEach(r => {
+    const k = (r.industry || '').trim() || '未分类'
+    cnt.set(k, (cnt.get(k) || 0) + 1)
+  })
+  return [...cnt.entries()]
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count)
+})
+const cr3 = computed(() => {
+  const rows = industryRows.value
+  const total = rows.reduce((a, r) => a + r.count, 0)
+  const top3 = rows.slice(0, 3).reduce((a, r) => a + r.count, 0)
+  return total ? Math.round((top3 / total) * 100) : 0
+})
+const industryOption = computed<EChartsOption | null>(() => {
+  const top = industryRows.value.slice(0, 10)
+  if (!top.length) return null
+  const max = Math.max(1, ...top.map(r => r.count))
+  const colorMap = { zt: '#f87171', zb: '#e6a23c', dt: '#67c23a' } as const
+  return {
+    animationDuration: 500,
+    grid: { left: 96, right: 40, top: 10, bottom: 22 },
+    tooltip: {
+      trigger: 'item',
+      ...TIP,
+      formatter: (p: any) => {
+        const r = top[p.dataIndex]
+        const total = industryRows.value.reduce((a, x) => a + x.count, 0)
+        return `${r.name}<br/>${r.count} 家 · 占该池 ${((r.count / total) * 100).toFixed(1)}%<br/><span style="color:#a0aec0">点击长条查看明细</span>`
+      },
+    },
+    xAxis: { type: 'value', max: max, minInterval: 1, axisLabel, splitLine },
+    yAxis: {
+      type: 'category',
+      inverse: true,
+      data: top.map(r => r.name),
+      axisLabel: { color: '#4a5568', fontSize: 11 },
+      axisTick: { show: false },
+      axisLine: { lineStyle: { color: '#e2e8f0' } },
+    },
+    series: [{
+      type: 'bar',
+      barMaxWidth: 16,
+      cursor: 'pointer',
+      data: top.map(r => ({ value: r.count, itemStyle: { color: colorMap[indPool.value], borderRadius: [0, 4, 4, 0] } })),
+      label: { show: true, position: 'right', fontSize: 10, color: '#718096', formatter: '{c}家' },
+    }],
+  }
+})
+
+// 点击行业长条 → 展开该行业的个股明细；切换池后自动清空
+const indSel = ref<string | null>(null)
+watch(indPool, () => { indSel.value = null })
+const onIndustryClick = (p: any) => {
+  const idx = Number(p?.dataIndex)
+  const name = industryRows.value.slice(0, 10)[idx]?.name
+  if (!name) return
+  indSel.value = indSel.value === name ? null : name
+}
+const industryDetail = computed(() => {
+  const name = indSel.value
+  const e = emotion.value
+  if (!name || !e) return null
+  const rows = (e.pools?.[indPool.value] || []).filter(r => ((r.industry || '').trim() || '未分类') === name)
+  const poolLabel = { zt: '涨停', zb: '炸板', dt: '跌停' }[indPool.value]
+  return { title: `${poolLabel}池 · ${name}`, rows }
+})
+const industryMetric = computed(() => {
+  if (indPool.value === 'zb') return { key: 'break_times', label: '炸板', suffix: '次' }
+  if (indPool.value === 'dt') return { key: 'days', label: '连续跌停', suffix: '天' }
+  return { key: 'boards', label: '连板', suffix: '板' }
+})
+
+// ── 连板股成交额（替代表格） ──
+const boardColor = (b: number) =>
+  b >= 5 ? '#b91c1c' : b === 4 ? '#dc2626' : b === 3 ? '#ef4444' : '#f87171'
+const lianbanSorted = computed(() =>
+  [...(emotion.value?.lianban_stocks || [])].sort((a, b) => (b.amount || 0) - (a.amount || 0))
+)
+const lianbanChartHeight = computed(() => {
+  const n = lianbanSorted.value.length
+  return `${Math.max(150, n * 34 + 30)}px`
+})
+const lianbanAmountOption = computed<EChartsOption | null>(() => {
+  const rows = lianbanSorted.value
+  if (!rows.length) return null
+  return {
+    animationDuration: 500,
+    grid: { left: 116, right: 62, top: 10, bottom: 20 },
+    tooltip: {
+      trigger: 'item',
+      ...TIP,
+      formatter: (p: any) => {
+        const r = rows[p.dataIndex]
+        return `<b>${r.name}</b> ${r.code}<br/>连板 ${r.boards}板 · ${r.industry || '未分类'}<br/>成交额 ${fmtYi(r.amount)} 亿<br/>流通市值 ${fmtYi(r.float_cap)} 亿`
+      },
+    },
+    xAxis: {
+      type: 'value',
+      axisLabel: { ...axisLabel, formatter: '{value}亿' },
+      splitLine,
+    },
+    yAxis: {
+      type: 'category',
+      inverse: true,
+      data: rows.map(r => `${r.name} ${r.boards}板`),
+      axisLabel: { color: '#4a5568', fontSize: 11 },
+      axisTick: { show: false },
+      axisLine: { lineStyle: { color: '#e2e8f0' } },
+    },
+    series: [{
+      type: 'bar',
+      barMaxWidth: 18,
+      data: rows.map(r => ({
+        value: +(((r.amount || 0) / 1e8).toFixed(2)),
+        itemStyle: { color: boardColor(r.boards), borderRadius: [0, 4, 4, 0] },
+      })),
+      label: {
+        show: true,
+        position: 'right',
+        fontSize: 10,
+        color: '#718096',
+        formatter: (p: any) => `${p.value}亿`,
+      },
+    }],
+  }
+})
+
+// ── 风险结构：炸板次数 / 跌停天数（点击柱体展开该档明细） ──
+interface RiskBucket { label: string; min: number; max: number | null; count: number }
+const breakBuckets = computed<RiskBucket[]>(() => {
+  const buckets: RiskBucket[] = [
+    { label: '1次', min: 1, max: 1, count: 0 },
+    { label: '2次', min: 2, max: 2, count: 0 },
+    { label: '3次', min: 3, max: 3, count: 0 },
+    { label: '4次+', min: 4, max: null, count: 0 },
+  ]
+  ;(emotion.value?.pools?.zb || []).forEach(r => {
+    const n = Math.max(1, Number(r.break_times) || 1)
+    buckets[Math.min(3, n - 1)].count += 1
+  })
+  return buckets
+})
+const breakDistOption = computed<EChartsOption | null>(() => {
+  const buckets = breakBuckets.value
+  if (!buckets.some(b => b.count)) return null
+  return {
+    animationDuration: 500,
+    grid: { left: 40, right: 16, top: 16, bottom: 24 },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      ...TIP,
+      valueFormatter: (v: any) => `${v} 家`,
+    },
+    xAxis: {
+      type: 'category',
+      data: buckets.map(b => b.label),
+      axisLabel,
+      axisTick: { show: false },
+      axisLine: { lineStyle: { color: '#cbd5e0' } },
+    },
+    yAxis: { type: 'value', name: '家', nameTextStyle: { ...axisLabel }, axisLabel, splitLine },
+    series: [{
+      type: 'bar',
+      barMaxWidth: 40,
+      cursor: 'pointer',
+      data: buckets.map(b => b.count),
+      itemStyle: { color: '#e6a23c', borderRadius: [4, 4, 0, 0] },
+      label: { show: true, position: 'top', fontSize: 10, color: '#718096' },
+    }],
+  }
+})
+const dtBuckets = computed<RiskBucket[]>(() => {
+  const buckets: RiskBucket[] = [
+    { label: '1天', min: 1, max: 1, count: 0 },
+    { label: '2天', min: 2, max: 2, count: 0 },
+    { label: '3天+', min: 3, max: null, count: 0 },
+  ]
+  ;(emotion.value?.pools?.dt || []).forEach(r => {
+    const n = Math.max(1, Number(r.days) || 1)
+    buckets[Math.min(2, n - 1)].count += 1
+  })
+  return buckets
+})
+const dtDistOption = computed<EChartsOption | null>(() => {
+  const buckets = dtBuckets.value
+  if (!buckets.some(b => b.count)) return null
+  return {
+    animationDuration: 500,
+    grid: { left: 40, right: 16, top: 16, bottom: 24 },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, ...TIP, valueFormatter: (v: any) => `${v} 家` },
+    xAxis: {
+      type: 'category',
+      data: buckets.map(b => b.label),
+      axisLabel,
+      axisTick: { show: false },
+      axisLine: { lineStyle: { color: '#cbd5e0' } },
+    },
+    yAxis: { type: 'value', name: '家', minInterval: 1, nameTextStyle: { ...axisLabel }, axisLabel, splitLine },
+    series: [{
+      type: 'bar',
+      barMaxWidth: 48,
+      cursor: 'pointer',
+      data: buckets.map(b => b.count),
+      itemStyle: { color: '#67c23a', borderRadius: [4, 4, 0, 0] },
+      label: { show: true, position: 'top', fontSize: 10, color: '#718096' },
+    }],
+  }
+})
+
+const zbSel = ref<number | null>(null)
+const dtSel = ref<number | null>(null)
+const pickBucket = (
+  p: any,
+  buckets: RiskBucket[],
+  current: number | null,
+): number | null => {
+  const idx = Number(p?.dataIndex)
+  if (Number.isNaN(idx) || !buckets[idx]) return current
+  return current === idx ? null : idx
+}
+const onBreakClick = (p: any) => { zbSel.value = pickBucket(p, breakBuckets.value, zbSel.value) }
+const onDtClick = (p: any) => { dtSel.value = pickBucket(p, dtBuckets.value, dtSel.value) }
+
+const inBucket = (v: number, b: RiskBucket) => v >= b.min && (b.max == null || v <= b.max)
+
+const breakDetail = computed(() => {
+  const idx = zbSel.value
+  const b = idx == null ? null : breakBuckets.value[idx]
+  if (!b) return null
+  const rows = (emotion.value?.pools?.zb || []).filter(r => inBucket(Math.max(1, Number(r.break_times) || 1), b))
+  return { title: `炸板 ${b.label}`, rows }
+})
+const dtDetail = computed(() => {
+  const idx = dtSel.value
+  const b = idx == null ? null : dtBuckets.value[idx]
+  if (!b) return null
+  const rows = (emotion.value?.pools?.dt || []).filter(r => inBucket(Math.max(1, Number(r.days) || 1), b))
+  return { title: `连续跌停 ${b.label}`, rows }
 })
 
 // 情绪周期阶段（基于涨停/跌停家数、炸板率、连板高度与环比变化）
@@ -401,8 +994,7 @@ interface PhaseInfo { label: string; tone: PhaseTone; desc: string }
 const phase = computed<PhaseInfo | null>(() => {
   const e = emotion.value
   if (!e) return null
-  const series = history.value?.series || []
-  const prev = series.length >= 2 ? series[series.length - 2] : null
+  const prev = prevPoint.value
   const zt = Number(e.zt_count) || 0
   const zb = Number(e.zb_count) || 0
   const dt = Number(e.dt_count) || 0
@@ -430,25 +1022,8 @@ const phase = computed<PhaseInfo | null>(() => {
   return { label: '启动期', tone: 'mid', desc: '情绪温和、主线未明，适合轻仓试错' }
 })
 
-// ── 连板梯队：柱高 = 家数，点击梯队筛选下方连板股 ──
-const selectedTier = ref<number | null>(null)
-const ladderMax = computed(() => Math.max(1, ...(emotion.value?.ladder || []).map(l => l.count)))
-const ladderHeight = (n: number) => `${Math.max(10, Math.round((n / ladderMax.value) * 100))}%`
-const toggleTier = (boards: number) => {
-  selectedTier.value = selectedTier.value === boards ? null : boards
-}
-const filteredLianbanStocks = computed(() => {
-  const list = emotion.value?.lianban_stocks || []
-  const tier = emotion.value?.ladder?.find(l => l.boards === selectedTier.value)
-  if (selectedTier.value == null || !tier) return list
-  return list.filter(r => tier.plus ? r.boards >= tier.boards : r.boards === tier.boards)
-})
-const selectedTierLabel = computed(() => {
-  const tier = emotion.value?.ladder?.find(l => l.boards === selectedTier.value)
-  return tier ? `${tier.boards}${tier.plus ? '+' : ''}板` : ''
-})
-
-// ── 三池清单（涨停 / 炸板 / 跌停） ──
+// ── 三池明细（折叠区） ──
+const detailOpen = ref<string[]>([])
 const poolTab = ref<'zt' | 'zb' | 'dt'>('zt')
 const poolRows = computed<EmotionPoolRow[]>(() => {
   const pools = emotion.value?.pools
@@ -463,10 +1038,13 @@ const load = async (refresh = false) => {
   try {
     const res = await vibeApi.getEmotion(refresh)
     emotion.value = (res as any).data || null
+    // 数据刷新后收起所有图表明细，避免指向已变化的档位
+    stageSel.value = null
+    indSel.value = null
+    zbSel.value = null
+    dtSel.value = null
     if (!emotion.value) {
       ElMessage.warning('暂无短线情绪数据')
-    } else if (selectedTier.value != null && !emotion.value.ladder?.some(l => l.boards === selectedTier.value)) {
-      selectedTier.value = null
     }
   } catch (e: any) {
     ElMessage.error(e?.message || '数据加载失败')
@@ -551,6 +1129,10 @@ onActivated(() => {
   gap: 12px;
 }
 
+.grid-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .grid-3 {
   grid-template-columns: repeat(3, 1fr);
 }
@@ -588,6 +1170,51 @@ onActivated(() => {
 .cnt-sub {
   font-size: 12px;
   color: var(--el-text-color-placeholder);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cnt-delta {
+  font-family: var(--app-font-mono);
+  font-weight: 600;
+}
+
+.cnt-delta.up { color: var(--app-up); }
+.cnt-delta.down { color: var(--app-down); }
+
+.fund-strip {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.fund-item {
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--el-fill-color-lighter);
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.fund-label {
+  font-size: 12.5px;
+  color: var(--el-text-color-secondary);
+}
+
+.fund-item b {
+  font-family: var(--app-font-mono);
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+}
+
+.fund-item i {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--el-text-color-placeholder);
 }
 
 .ratio-card {
@@ -618,6 +1245,12 @@ onActivated(() => {
   overflow: hidden;
 }
 
+.rt-avg {
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--el-text-color-placeholder);
+}
+
 .bar-fill {
   height: 100%;
   border-radius: 3px;
@@ -628,19 +1261,43 @@ onActivated(() => {
   border-radius: 8px;
 }
 
-/* 情绪周期：曲线 + 阶段标签 */
-.trend-card {
+/* 图表卡片 */
+.chart-card {
   border-radius: 8px;
 }
 
-.emotion-chart-wrap {
-  min-height: 240px;
+.chart-card :deep(.el-card__body) {
+  padding: 14px 16px;
 }
 
-.emotion-chart {
-  width: 100%;
-  height: 240px;
+.chart-card--wide {
+  margin-top: 12px;
 }
+
+.chart-cap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.chart-cap > span {
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--el-text-color-secondary);
+}
+
+.pool-switch {
+  margin-left: auto;
+}
+
+.chart-200 { width: 100%; height: 200px; }
+.chart-220 { width: 100%; height: 220px; }
+.chart-240 { width: 100%; height: 240px; }
 
 .phase-tag {
   display: inline-flex;
@@ -677,73 +1334,100 @@ onActivated(() => {
   color: var(--el-text-color-secondary);
 }
 
-/* 连板梯队：柱状可视化 */
-.ladder-visual {
-  display: flex;
-  align-items: flex-end;
-  justify-content: flex-start;
-  gap: 18px;
-  height: 150px;
-  padding: 8px 4px 0;
-  overflow-x: auto;
-}
-
-.ladder-item {
+/* 今日 vs 近 10 日均值：双条对比 */
+.cmp-list {
   display: flex;
   flex-direction: column;
+  gap: 10px;
+}
+
+.cmp-row {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr) 118px;
   align-items: center;
-  justify-content: flex-end;
+  gap: 12px;
+}
+
+.cmp-label {
+  font-size: 12.5px;
+  color: var(--el-text-color-regular);
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+}
+
+.cmp-label i {
+  font-style: normal;
+  font-size: 10.5px;
+  color: var(--el-text-color-placeholder);
+}
+
+.cmp-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.cmp-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cmp-tag {
+  width: 30px;
+  flex: none;
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+}
+
+.cmp-track {
+  flex: 1;
+  height: 12px;
+  border-radius: 3px;
+  background: var(--el-fill-color-lighter);
+  overflow: hidden;
+}
+
+.cmp-fill {
   height: 100%;
-  min-width: 54px;
-  padding: 0 4px;
-  background: none;
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: background 0.15s ease;
+  border-radius: 3px;
+  transition: width 0.4s ease;
 }
 
-.ladder-item:hover { background: var(--el-fill-color-light); }
-.ladder-item.active { background: var(--el-color-danger-light-9); }
+.cmp-fill.today { background: var(--app-up); }
+.cmp-fill.avg { background: var(--el-border-color-darker); }
 
-.ladder-count {
+.cmp-val {
+  width: 54px;
+  flex: none;
   font-family: var(--app-font-mono);
-  font-size: 14px;
-  font-weight: 700;
+  font-size: 11.5px;
   color: var(--el-text-color-primary);
-  margin-bottom: 4px;
+  text-align: right;
 }
 
-.ladder-bar {
-  width: 100%;
-  max-width: 42px;
-  border-radius: 4px 4px 0 0;
-  background: linear-gradient(180deg, #f87171 0%, #f56c6c 100%);
-  transition: height 0.35s ease;
-}
-
-.ladder-item.active .ladder-bar {
-  background: linear-gradient(180deg, #dc2626 0%, #b91c1c 100%);
-}
-
-.ladder-all .ladder-bar {
-  background: var(--el-border-color);
-}
-
-.ladder-tier {
-  margin-top: 6px;
-  font-size: 12px;
+.cmp-delta {
+  font-family: var(--app-font-mono);
+  font-size: 11.5px;
+  text-align: right;
   color: var(--el-text-color-secondary);
   white-space: nowrap;
 }
 
-.ladder-item.active .ladder-tier {
-  color: var(--el-color-danger);
-  font-weight: 600;
+.cmp-delta.up { color: var(--app-up); }
+.cmp-delta.down { color: var(--app-down); }
+.cmp-delta.flat { color: var(--el-text-color-secondary); }
+
+/* 明细折叠区 */
+.detail-collapse {
+  border-top: none;
 }
 
-.tier-tag {
-  margin-left: 4px;
+.collapse-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
 }
 
 /* 三池清单 Tab */
@@ -779,7 +1463,9 @@ onActivated(() => {
 }
 
 @media (max-width: 992px) {
+  .grid-2 { grid-template-columns: 1fr; }
   .grid-3 { grid-template-columns: 1fr; }
+  .fund-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 768px) {
@@ -791,7 +1477,6 @@ onActivated(() => {
     gap: 8px;
   }
   .grid-3 {
-    grid-template-columns: 1fr;
     gap: 8px;
   }
   .count-card :deep(.el-card__body) {
@@ -815,14 +1500,14 @@ onActivated(() => {
     flex-wrap: wrap;
     gap: 4px;
   }
-  .ladder-visual {
-    gap: 10px;
-  }
 }
 
 @media (max-width: 480px) {
   .grid-6 {
     grid-template-columns: repeat(2, 1fr);
+  }
+  .fund-strip {
+    grid-template-columns: 1fr;
   }
 }
 </style>

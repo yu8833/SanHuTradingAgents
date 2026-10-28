@@ -226,7 +226,8 @@ def _emotion() -> dict:
             }
             for k in extra:
                 src = {"boards": "lbc", "break_times": "zbc", "days": "days"}.get(k, k)
-                row[k] = _num(p.get(src)) if k != "days" else (_num(p.get(src)) or 1)
+                # 连板数/连续跌停天数缺省按 1（榜单里出现即至少 1 板/1 天）
+                row[k] = (_num(p.get(src)) or 1) if k in ("days", "boards") else _num(p.get(src))
             out.append(row)
         return out
 
@@ -265,6 +266,9 @@ def _emotion() -> dict:
                          key=lambda x: (-x["boards"], -(x["amount"] or 0))),
             "zb": _pool_brief(zb, ("break_times",)),
             "dt": _pool_brief(dt, ("days",)),
+            # 昨涨停池：供「晋级阶梯」点击查看昨日涨停明细（晋级分母口径）
+            "yzt": sorted(_pool_brief(yzt, ("boards",)),
+                          key=lambda x: (-x["boards"], -(x["amount"] or 0))),
         },
         "seal_rate": seal_rate,
         "break_rate": break_rate,

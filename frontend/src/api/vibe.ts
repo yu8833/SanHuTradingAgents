@@ -317,6 +317,8 @@ export interface EmotionPools {
   zt: EmotionPoolRow[]
   zb: EmotionPoolRow[]
   dt: EmotionPoolRow[]
+  /** 昨涨停池（晋级阶梯分母口径） */
+  yzt?: EmotionPoolRow[]
 }
 
 export interface ShortTermEmotion {
