@@ -70,6 +70,13 @@ async def prewarm_market_data() -> None:
             except Exception as e:
                 logger.warning(f"🌡️ [prewarm] {desc} 失败（忽略）: {e}")
 
+        async def _metrics_prewarm():
+            """市场温度/宽度/风格/集中度：首次调用会触发历史基线回填（约 10s）。"""
+            from app.services.market_metrics import ensure_metrics_history, get_market_metrics
+
+            await ensure_metrics_history()
+            await get_market_metrics()
+
         # 市场状态（趋势/波动/建议）：compute_market_context 冷启动要全市场扫描（约 35s），
         # 超过看板内的 15s 步进超时 → 若与看板并发预热，看板首轮必然拿不到 regime。
         # 必须先把这份进程级缓存加热，再预热看板。
@@ -96,6 +103,8 @@ async def prewarm_market_data() -> None:
             # 个股趋势（六图四象限 + 30日时间轴）：构建含全市场帧聚合，冷启动最重，
             # 必须后台预热，避免用户首刷等 40s+。
             _safe("个股趋势", get_stock_quadrant()),
+            # 市场温度指标：历史基线回填 + 当日分位缓存预热
+            _safe("市场温度指标", _metrics_prewarm()),
         )
         el = asyncio.get_event_loop().time() - start
         _last_prewarm_ts = asyncio.get_event_loop().time()

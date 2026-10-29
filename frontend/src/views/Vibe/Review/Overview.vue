@@ -243,93 +243,154 @@
       </div>
     </section>
 
-    <!-- 市场透视：市场状态 → 行业强弱 → 个股榜单（置于页尾：先看指数与情绪，再看方向与个股） -->
-    <section v-if="dashboard && (dashboard.regime || dashboard.industry_rank)" class="block block--tail">
+    <!-- 市场温度与结构：把孤立数字放进近一年分位，回答「今天算热还是冷」 -->
+    <section v-if="metrics" class="block">
       <div class="block-head">
-        <span class="block-title"><el-icon><Compass /></el-icon> 市场透视</span>
-        <span class="block-hint">状态研判 → 行业方向 → 个股榜单 · 行业条长 = 当日涨跌幅，数字 = 主力净流入(亿)</span>
+        <span class="block-title"><el-icon><DataAnalysis /></el-icon> 市场温度与结构</span>
+        <span class="block-hint">
+          分位基于近一年交易日 · {{ metrics.is_live ? '盘中实时值，收盘后定稿' : '收盘定稿' }}
+          <em v-if="metrics.as_of" class="data-time">数据 {{ metrics.as_of }} · 更新 {{ shortTime(metrics.updated) }}</em>
+        </span>
       </div>
 
-      <!-- 第一层：市场状态（结论用文字，不画图） -->
-      <div v-if="dashboard.regime" class="regime-line">
-        <el-tag :type="regimeTrendType" effect="plain">{{ dashboard.regime.trend_label }}</el-tag>
-        <el-tag :type="regimeVolType" effect="plain">{{ dashboard.regime.volatility_label }}</el-tag>
-        <span class="regime-advice-inline">{{ dashboard.regime.advice || '暂无操作建议' }}</span>
-        <span v-if="dashboard.regime.as_of" class="data-time">趋势数据 {{ shortTime(dashboard.regime.as_of) }}</span>
+      <div v-if="metrics.alerts.length" class="alert-row">
+        <span v-for="a in metrics.alerts" :key="a.title" class="alert-chip" :class="`is-${a.level}`">
+          <b>{{ a.title }}</b><span>{{ a.detail }}</span>
+        </span>
       </div>
-      <!-- 状态计算超时不能静默消失：明确说明并给重试入口 -->
-      <div v-else class="regime-line regime-line--missing">
-        <el-icon><Warning /></el-icon>
-        <span>市场状态暂缺（数据计算超时，通常冷启动首次计算需要 30 秒）</span>
-        <span class="regime-retry" @click="refreshOverview">重试</span>
+      <div v-else-if="metrics.ready" class="alert-row alert-row--calm">
+        <span class="alert-chip is-ok">无异常信号 · 温度与广度均在正常区间</span>
       </div>
 
-      <div class="persp-grid">
-        <!-- 第二层：行业强弱双向条形（中线=0，红向右=涨，绿向左=跌；点击跳股票筛选） -->
-        <el-card v-if="dashboard.industry_rank" shadow="never" class="persp-card">
-          <div class="persp-card-title">
-            行业强弱
-            <span class="persp-card-note">
-              同花顺行业 · 领涨/领跌各 20
-              <em v-if="industryRankAsOf" class="data-time">行业数据 {{ industryRankAsOf }}</em>
-            </span>
+      <!-- 温度分位：每项一条分位条，中位刻度固定在 50% -->
+      <div class="temp-grid">
+        <div v-for="t in metrics.temperature" :key="t.key" class="temp-item" :title="t.desc">
+          <div class="temp-head">
+            <span class="temp-label">{{ t.label }}</span>
+            <span class="temp-value">{{ t.value }}<em>{{ t.unit }}</em></span>
           </div>
-          <div v-if="industryBars.leading.length || industryBars.lagging.length" class="ind-bars">
-            <template v-for="(group, gi) in [industryBars.leading, industryBars.lagging]" :key="gi">
-              <div v-if="gi === 1 && industryBars.leading.length && industryBars.lagging.length" class="ind-divider">
-                <span>上方领涨 · 下方领跌（全行业按涨跌幅排序，点击行业 → 股票筛选）</span>
-              </div>
-              <div
-                v-for="bar in group"
-                :key="bar.name"
-                class="ind-row ind-row--link"
-                :title="`查看「${bar.name}」对应行业的候选个股`"
-                @click="gotoSector(bar.name)"
-              >
-                <span class="ind-name" :title="bar.name">{{ bar.name }}</span>
-                <div class="ind-track">
-                  <i class="ind-axis" />
-                  <i class="ind-fill" :class="bar.dir === 'up' ? 'is-up' : 'is-down'" :style="bar.style" />
-                </div>
-                <span class="ind-val">
-                  <b :class="bar.dir === 'up' ? 'up' : 'down'">{{ fmtPct(bar.pct) }}</b>
-                  <em :class="clsByVal(bar.net, '')">{{ fmtSigned(bar.net, 1) }}亿</em>
-                </span>
-              </div>
-            </template>
+          <div class="temp-track">
+            <i v-if="t.rank != null" class="temp-fill" :class="rankTone(t)" :style="{ width: t.rank + '%' }" />
+            <i class="temp-median" title="近一年中位数 = 50% 分位" />
           </div>
-          <div v-else class="rank-empty">暂无行业数据</div>
+          <div class="temp-foot">
+            <span v-if="t.rank != null">近一年 <b :class="rankTone(t)">{{ t.rank }}%</b> 分位</span>
+            <span v-else class="temp-pending">历史基线构建中…</span>
+            <span v-if="t.median != null" class="temp-med">中位 {{ t.median }}{{ t.unit }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="struct-grid">
+        <!-- 宽度曲线：上涨率 + 站上20日线占比（同为 0-100%，可直接对比） -->
+        <el-card shadow="never" class="dash-card">
+          <div class="card-title">
+            市场宽度（近 {{ breadthSeries.length }} 个交易日）
+            <span class="dist-note">实线 = 上涨率 · 虚线 = 站上 20 日线占比 · 灰线 = 50% 中性</span>
+          </div>
+          <div v-if="breadthChart" class="bw-chart">
+            <svg :viewBox="`0 0 ${breadthChart.w} ${breadthChart.h}`" class="bw-svg" preserveAspectRatio="none">
+              <line
+                v-for="g in breadthChart.grid"
+                :key="g.v"
+                :x1="breadthChart.padL"
+                :x2="breadthChart.w - breadthChart.padR"
+                :y1="g.y"
+                :y2="g.y"
+                class="bw-grid"
+                :class="{ 'bw-grid--mid': g.v === 50 }"
+              />
+              <polygon :points="breadthChart.area" class="bw-area" />
+              <polyline :points="breadthChart.upLine" class="bw-up" />
+              <polyline v-for="(seg, i) in breadthChart.maSegs" :key="'ma' + i" :points="seg" class="bw-ma" />
+              <circle v-for="p in breadthChart.dots" :key="p.k" :cx="p.x" :cy="p.y" :r="2.2" class="bw-dot">
+                <title>{{ p.tip }}</title>
+              </circle>
+              <text v-for="l in breadthChart.xLabels" :key="l.k" :x="l.x" :y="breadthChart.h - 4" class="bw-xlabel">{{ l.text }}</text>
+            </svg>
+          </div>
+          <div v-else class="rank-empty">暂无足够交易日数据</div>
         </el-card>
 
-        <!-- 第三层：个股榜单（每行附迷你涨跌条，便于扫读） -->
-        <el-card v-if="listCols.length" shadow="never" class="persp-card">
-          <div class="persp-card-title">
-            市场榜单
-            <span class="persp-card-note">
-              涨幅 / 跌幅 / 成交额 / 换手 TOP 10
-              <em v-if="quotesAsOf" class="data-time">行情 {{ shortTime(quotesAsOf) }}</em>
-            </span>
+        <!-- 结构快照：MA20 宽度 + 涨跌停 + 腾落线累计 -->
+        <el-card shadow="never" class="dash-card">
+          <div class="card-title">结构快照</div>
+          <div class="snap-row">
+            <div class="snap-item">
+              <div class="snap-label">站上 20 日线</div>
+              <div class="snap-value" :class="ma20Tone">
+                {{ metrics.breadth.ma20_above == null ? '—' : metrics.breadth.ma20_above + '%' }}
+              </div>
+              <div class="snap-sub">个股占比 · 中期结构</div>
+            </div>
+            <div class="snap-item">
+              <div class="snap-label">涨停 / 跌停</div>
+              <div class="snap-value">
+                <span class="up">{{ metrics.breadth.zt }}</span><span class="kpi-sep">/</span><span class="down">{{ metrics.breadth.dt }}</span>
+              </div>
+              <div class="snap-sub">按板块涨跌幅阈值近似</div>
+            </div>
+            <div class="snap-item">
+              <div class="snap-label">腾落线（60日累计）</div>
+              <div class="snap-value" :class="adlSum > 0 ? 'up' : adlSum < 0 ? 'down' : ''">
+                {{ adlSum > 0 ? '+' : '' }}{{ adlSum }}
+              </div>
+              <div class="snap-sub">上涨家数 − 下跌家数</div>
+            </div>
           </div>
-          <div class="list-grid list-grid--compact">
-            <div v-for="(col, key) in listCols" :key="key" class="list-card">
-              <div class="list-head">
-                <span class="list-title">{{ col.title }}</span>
-                <span class="list-top">TOP {{ Math.min(10, col.rows.length) }}</span>
+        </el-card>
+      </div>
+
+      <div class="mini-grid">
+        <!-- 风格轮动：流通市值三分位分组平均涨跌幅 -->
+        <el-card v-if="metrics.style" shadow="never" class="dash-card">
+          <div class="card-title">
+            风格轮动
+            <span class="dist-note">按流通市值三分位分组 · 平均涨跌幅</span>
+          </div>
+          <div class="style-bars">
+            <div v-for="b in metrics.style.buckets" :key="b.key" class="style-row">
+              <span class="style-name">{{ b.label }}</span>
+              <div class="style-track">
+                <i class="style-axis" />
+                <i class="style-fill" :class="b.pct >= 0 ? 'is-up' : 'is-down'" :style="styleBar(b.pct)" />
               </div>
-              <div v-for="(r, idx) in col.rows.slice(0, 10)" :key="key + '-' + r.code" class="list-item">
-                <span class="list-no">{{ idx + 1 }}</span>
-                <div class="list-main">
-                  <router-link target="_blank" rel="noopener" :to="`/stocks/${r.code}`" class="list-name stock-name" :title="r.name">{{ r.name }}</router-link>
-                  <div class="list-code">{{ r.code }}</div>
-                  <i class="mini-bar" :class="clsByVal(r.pct_chg, '')" :style="{ width: miniBarWidth(r.pct_chg) }" />
-                </div>
-                <div class="list-right">
-                  <div v-if="col.mode === 'amount'" class="list-amt">{{ fmtAmount(r.amount) }}</div>
-                  <div v-else-if="col.mode === 'active'" class="list-amt accent">{{ r.turnover_rate }}%</div>
-                  <div :class="clsByVal(r.pct_chg)">{{ fmtPct(r.pct_chg) }}</div>
-                  <div v-if="col.mode === 'gain' || col.mode === 'loss'" class="list-close">{{ fmtPrice(r.close) }}</div>
-                </div>
-              </div>
+              <span class="style-val" :class="b.pct >= 0 ? 'up' : 'down'">{{ fmtPct(b.pct) }}</span>
+              <span class="style-share">{{ b.share }}%</span>
+            </div>
+          </div>
+          <div class="card-foot">
+            大盘 − 小盘：<b :class="metrics.style.spread >= 0 ? 'up' : 'down'">{{ fmtPct(metrics.style.spread) }}</b>
+            <span class="foot-note">{{ metrics.style.spread >= 0 ? '资金偏大盘' : '资金偏小盘' }}</span>
+          </div>
+        </el-card>
+
+        <!-- 成交额集中度：头部吸金占比 + HHI -->
+        <el-card v-if="metrics.concentration" shadow="never" class="dash-card">
+          <div class="card-title">
+            成交额集中度
+            <span class="dist-note">HHI 越高，资金越集中在少数个股</span>
+          </div>
+          <div class="conc-bar">
+            <div class="conc-seg conc-top" :style="{ width: concTopW + '%' }" :title="`前10名合计 ${metrics.concentration.top10_share}%`" />
+            <div class="conc-seg conc-rest" />
+          </div>
+          <div class="conc-legend">
+            <span class="lg-up">前10名 {{ metrics.concentration.top10_share }}%</span>
+            <span class="lg-rest">其余 {{ (100 - metrics.concentration.top10_share).toFixed(1) }}%</span>
+          </div>
+          <div class="snap-row snap-row--tight">
+            <div class="snap-item">
+              <div class="snap-label">第一大占比</div>
+              <div class="snap-value">{{ metrics.concentration.top1_share }}%</div>
+            </div>
+            <div class="snap-item">
+              <div class="snap-label">HHI</div>
+              <div class="snap-value">{{ metrics.concentration.hhi }}</div>
+            </div>
+            <div class="snap-item">
+              <div class="snap-label">成交额</div>
+              <div class="snap-value accent">{{ metrics.concentration.total }}亿</div>
             </div>
           </div>
         </el-card>
@@ -405,9 +466,7 @@ import {
   Refresh,
   Loading,
   Odometer,
-  Compass,
   Calendar,
-  Warning,
 } from '@element-plus/icons-vue'
 import {
   vibeApi,
@@ -415,27 +474,22 @@ import {
   type MarketDashboard,
   type MarketEvent,
   type MarketEvents,
+  type MarketMetrics,
+  type MarketTemperatureItem,
   type PreOpen,
   type PreOpenBand,
 } from '@/api/vibe'
-import { fmtPrice, fmtPct, fmtAbsPct, fmtAmount, fmtSigned, clsByVal } from '@/utils/format'
+import { fmtPrice, fmtPct, fmtAbsPct, fmtAmount, fmtSigned } from '@/utils/format'
 import { formatBeijingDateTimeMinute } from '@/utils/datetime'
 
 const loading = ref(false)
 const indices = ref<IndexQuote[]>([])
 const dashboard = ref<MarketDashboard | null>(null)
+const metrics = ref<MarketMetrics | null>(null)
 const router = useRouter()
 
-// 区块级数据时间：ETF 行业快照与全市场行情不同源、刷新节奏不同，需分别标注
-const industryRankAsOf = computed(() => dashboard.value?.industry_rank?.as_of || '')
-const quotesAsOf = computed(() => dashboard.value?.as_of || '')
 const shortTime = (v?: string | null) =>
   v ? formatBeijingDateTimeMinute(String(v)) : ''
-
-// 点击行业 → 股票筛选（ETF 主题名作为参数，目标页负责映射到同花顺行业）
-const gotoSector = (name: string) => {
-  router.push({ path: '/candidate', query: { sector: name } })
-}
 
 // ── 开盘情景：隔夜外盘定档开盘缺口 + 上一交易日情绪结构（盘前唯一的前瞻信息） ──
 const preOpen = ref<PreOpen | null>(null)
@@ -481,16 +535,6 @@ const scenarioPointerPct = computed(() => {
   if (pct == null) return null
   const raw = ((Math.max(-1.5, Math.min(1.5, pct)) + 1.5) / 3) * 100
   return Math.min(97, Math.max(3, raw))
-})
-
-// 市场状态标签配色：趋势（牛/震荡/熊）、波动（高/低/未知）
-const regimeTrendType = computed(() => {
-  const t = dashboard.value?.regime?.trend
-  return t === 'bull' ? 'danger' : t === 'bear' ? 'success' : 'warning'
-})
-const regimeVolType = computed(() => {
-  const v = dashboard.value?.regime?.volatility
-  return v === 'high' ? 'danger' : v === 'low' ? 'success' : 'info'
 })
 
 // 标题日期：优先后端数据返回的交易日；数据未回前用轻量接口预取的最新交易日（首屏即正确，不闪非交易日当天）
@@ -689,43 +733,86 @@ const breadthDownW = computed(() => {
   return (b.down / b.total) * 100
 })
 
-// 四大榜单
-const listCols = computed(() => {
-  const d = dashboard.value
-  if (!d) return []
-  return [
-    { title: '涨幅榜', mode: 'gain', rows: d.top_gainers },
-    { title: '跌幅榜', mode: 'loss', rows: d.top_losers },
-    { title: '成交额榜', mode: 'amount', rows: d.turnover_leaders },
-    { title: '活跃换手', mode: 'active', rows: d.active_leaders },
-  ]
-})
+// ── 市场温度与结构：分位 / 宽度曲线 / 风格 / 集中度 ──
+const breadthSeries = computed(() => metrics.value?.breadth?.series || [])
 
-// 行业强弱双向条：以中线为 0 轴，条长按本组最大绝对涨跌幅归一（涨向右 / 跌向左）
-const industryBars = computed(() => {
-  const ir = dashboard.value?.industry_rank
-  const leading = ir?.leading || []
-  const lagging = ir?.lagging || []
-  const all = [...leading, ...lagging]
-  if (!all.length) return { leading: [], lagging: [] }
-  const maxAbs = Math.max(0.1, ...all.map(i => Math.abs(Number(i.pct) || 0)))
-  const mk = (list: any[], dir: 'up' | 'down') => list.map((i: any) => {
-    const pct = Number(i.pct) || 0
-    // 最长 50%（半个轨道），下限 4% 保证极小值仍可见
-    const w = Math.max(4, Math.round((Math.abs(pct) / maxAbs) * 50))
-    return {
-      name: i.name,
-      pct,
-      net: Number(i.net) || 0,
-      dir,
-      style: dir === 'up' ? { left: '50%', width: `${w}%` } : { right: '50%', width: `${w}%` },
+// 分位配色：热度指标高分为热（红），低分为冷（绿），中间中性
+const rankTone = (t: MarketTemperatureItem) => {
+  if (t.rank == null) return 'is-muted'
+  return t.rank >= 75 ? 'is-hot' : t.rank <= 25 ? 'is-cold' : 'is-neutral'
+}
+
+// 宽度曲线：上涨率（实线+面积）与站上20日线占比（虚线）同为 0-100%，共用一根纵轴
+const breadthChart = computed(() => {
+  const pts = breadthSeries.value
+  if (pts.length < 3) return null
+  const w = 640
+  const h = 170
+  const padL = 12
+  const padR = 12
+  const padT = 10
+  const padB = 20
+  const iw = w - padL - padR
+  const ih = h - padT - padB
+  const x = (i: number) => padL + (i / (pts.length - 1)) * iw
+  const y = (v: number) => padT + ih - (Math.max(0, Math.min(100, v)) / 100) * ih
+
+  const upLine = pts.map((p, i) => `${x(i).toFixed(1)},${y(p.up_pct).toFixed(1)}`).join(' ')
+  const area = `${padL},${padT + ih} ${upLine} ${w - padR},${padT + ih}`
+
+  // 虚线遇到缺失值断开，避免把缺口连成一条假趋势
+  const maSegs: string[] = []
+  let cur: string[] = []
+  pts.forEach((p, i) => {
+    if (p.ma20_above == null) {
+      if (cur.length) { maSegs.push(cur.join(' ')); cur = [] }
+    } else {
+      cur.push(`${x(i).toFixed(1)},${y(p.ma20_above).toFixed(1)}`)
     }
   })
-  return { leading: mk(leading, 'up'), lagging: mk(lagging, 'down') }
+  if (cur.length) maSegs.push(cur.join(' '))
+
+  const grid = [0, 25, 50, 75, 100].map(v => ({ v, y: y(v) }))
+  const dots = pts
+    .map((p, i) => ({ p, i }))
+    .filter(({ i }) => i % 5 === 0 || i === pts.length - 1)
+    .map(({ p, i }) => ({
+      k: `${p.date}-${i}`,
+      x: x(i),
+      y: y(p.up_pct),
+      tip: `${p.date} · 上涨率 ${p.up_pct}%${p.ma20_above == null ? '' : ` · 站上20日线 ${p.ma20_above}%`}`,
+    }))
+
+  const xLabels = [0, Math.floor(pts.length / 2), pts.length - 1].map(i => ({
+    k: `lx-${i}`,
+    x: x(i),
+    text: String(pts[i].date || '').slice(5),
+  }))
+
+  return { w, h, padL, padR, upLine, area, maSegs, grid, dots, xLabels }
 })
 
-// 榜单每行迷你涨跌条：|涨跌幅|/10% 归一，封顶 100%
-const miniBarWidth = (v: unknown) => `${Math.min(100, Math.round((Math.abs(Number(v) || 0) / 10) * 100))}%`
+const adlSum = computed(() => {
+  const s = breadthSeries.value
+  return s.length ? s[s.length - 1].adl : 0
+})
+
+const ma20Tone = computed(() => {
+  const v = metrics.value?.breadth?.ma20_above
+  if (v == null) return ''
+  return v >= 50 ? 'up' : 'down'
+})
+
+const concTopW = computed(() => Math.min(100, Math.max(0, metrics.value?.concentration?.top10_share || 0)))
+
+const styleMax = computed(() =>
+  Math.max(1, ...(metrics.value?.style?.buckets || []).map(b => Math.abs(b.pct)))
+)
+// 风格条以中线为 0 轴，条长按组内最大绝对涨跌幅归一（涨向右 / 跌向左）
+const styleBar = (pct: number) => {
+  const w = Math.max(4, Math.round((Math.abs(pct) / styleMax.value) * 50))
+  return pct >= 0 ? { left: '50%', width: `${w}%` } : { right: '50%', width: `${w}%` }
+}
 
 // 带超时的请求包装
 const withTimeout = <T>(promise: Promise<T>, timeoutMs: number = 15000): Promise<T> => {
@@ -748,10 +835,11 @@ const loadAshare = async (refresh = false) => {
       withTimeout(vibeApi.getIndices(), 15000),
       withTimeout(vibeApi.getDashboard(refresh), 60000),
       withTimeout(vibeApi.getMarketEvents(refresh), 25000),
+      withTimeout(vibeApi.getMarketMetrics(refresh), 20000),
     ])
 
     // 逐个处理结果，失败不影响其他数据显示
-    const [idxRes, dashRes, evtRes] = results
+    const [idxRes, dashRes, evtRes, metRes] = results
     if (idxRes.status === 'fulfilled') {
       indices.value = (idxRes.value as any).data || []
     }
@@ -760,6 +848,9 @@ const loadAshare = async (refresh = false) => {
     }
     if (evtRes.status === 'fulfilled') {
       eventsData.value = (evtRes.value as any).data || null
+    }
+    if (metRes.status === 'fulfilled') {
+      metrics.value = (metRes.value as any).data || null
     }
 
     // 统计失败数量，给出提示
@@ -869,19 +960,373 @@ onActivated(() => {
   text-decoration: underline;
 }
 
-/* 市场状态缺失：不能静默消失，给原因与重试 */
-.regime-line--missing {
-  color: var(--el-text-color-secondary);
-  font-size: 12.5px;
+/* ── 市场温度与结构 ── */
+.alert-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.alert-chip {
+  display: inline-flex;
+  align-items: baseline;
   gap: 6px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  border: 1px solid transparent;
 }
-.regime-retry {
+
+.alert-chip b {
+  font-weight: 600;
+}
+
+.alert-chip.is-danger {
+  color: var(--el-color-danger);
+  background: var(--el-color-danger-light-9);
+  border-color: var(--el-color-danger-light-7);
+}
+
+.alert-chip.is-warning {
+  color: var(--el-color-warning);
+  background: var(--el-color-warning-light-9);
+  border-color: var(--el-color-warning-light-7);
+}
+
+.alert-chip.is-info {
   color: var(--el-color-primary);
-  cursor: pointer;
-  margin-left: 4px;
+  background: var(--el-color-primary-light-9);
+  border-color: var(--el-color-primary-light-7);
 }
-.regime-retry:hover {
-  text-decoration: underline;
+
+.alert-chip.is-ok {
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-light);
+}
+
+.alert-row--calm {
+  margin-bottom: 10px;
+}
+
+/* 温度分位卡：一条分位条 + 中位刻度（50%） */
+.temp-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.temp-item {
+  background: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.temp-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.temp-label {
+  font-size: 12.5px;
+  color: var(--el-text-color-regular);
+}
+
+.temp-value {
+  font-family: var(--app-font-mono);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.temp-value em {
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--el-text-color-secondary);
+  margin-left: 2px;
+}
+
+.temp-track {
+  position: relative;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--el-fill-color-lighter);
+  margin: 10px 0 6px;
+}
+
+.temp-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.temp-fill.is-hot { background: var(--app-up); }
+.temp-fill.is-cold { background: var(--app-down); }
+.temp-fill.is-neutral { background: var(--el-color-primary); }
+.temp-fill.is-muted { background: var(--el-border-color); }
+
+.temp-median {
+  position: absolute;
+  left: 50%;
+  top: -2px;
+  bottom: -2px;
+  width: 1px;
+  background: var(--el-text-color-placeholder);
+  opacity: 0.7;
+}
+
+.temp-foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--el-text-color-secondary);
+}
+
+.temp-foot b.is-hot { color: var(--app-up); }
+.temp-foot b.is-cold { color: var(--app-down); }
+.temp-foot b.is-neutral { color: var(--el-color-primary); }
+.temp-foot b.is-muted { color: var(--el-text-color-placeholder); }
+
+.temp-med {
+  color: var(--el-text-color-placeholder);
+}
+
+.temp-pending {
+  color: var(--el-text-color-placeholder);
+}
+
+/* 宽度曲线 + 结构快照 */
+.struct-grid {
+  display: grid;
+  grid-template-columns: 1.55fr 1fr;
+  gap: 12px;
+  margin-bottom: 12px;
+  align-items: stretch;
+}
+
+.bw-chart {
+  margin-top: 2px;
+}
+
+.bw-svg {
+  display: block;
+  width: 100%;
+  height: 170px;
+}
+
+.bw-grid {
+  stroke: var(--el-border-color-lighter);
+  stroke-width: 1;
+}
+
+.bw-grid--mid {
+  stroke: var(--el-border-color);
+  stroke-dasharray: 4 4;
+}
+
+.bw-area {
+  fill: var(--el-color-primary-light-9);
+  opacity: 0.55;
+}
+
+.bw-up {
+  stroke: var(--el-color-primary);
+  stroke-width: 1.8;
+  fill: none;
+}
+
+.bw-ma {
+  stroke: var(--el-text-color-secondary);
+  stroke-width: 1.4;
+  stroke-dasharray: 5 4;
+  fill: none;
+  opacity: 0.85;
+}
+
+.bw-dot {
+  fill: var(--el-color-primary);
+  opacity: 0.85;
+}
+
+.bw-xlabel {
+  font-size: 10px;
+  fill: var(--el-text-color-placeholder);
+  text-anchor: middle;
+}
+
+/* 结构快照 */
+.snap-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.snap-row--tight {
+  margin-top: 12px;
+}
+
+.snap-item {
+  min-width: 0;
+}
+
+.snap-label {
+  font-size: 11.5px;
+  color: var(--el-text-color-secondary);
+}
+
+.snap-value {
+  font-family: var(--app-font-mono);
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  line-height: 1.4;
+}
+
+.snap-value.up { color: var(--app-up); }
+.snap-value.down { color: var(--app-down); }
+.snap-value.accent { color: var(--el-color-primary); }
+
+.snap-sub {
+  font-size: 11px;
+  color: var(--el-text-color-placeholder);
+}
+
+/* 风格轮动 + 成交额集中度 */
+.mini-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  align-items: stretch;
+}
+
+.style-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 4px 0 10px;
+}
+
+.style-row {
+  display: grid;
+  grid-template-columns: 34px 1fr 64px 42px;
+  align-items: center;
+  gap: 8px;
+}
+
+.style-name {
+  font-size: 12px;
+  color: var(--el-text-color-primary);
+}
+
+.style-track {
+  position: relative;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--el-fill-color-lighter);
+}
+
+.style-axis {
+  position: absolute;
+  left: 50%;
+  top: -2px;
+  bottom: -2px;
+  width: 1px;
+  background: var(--el-border-color);
+}
+
+.style-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 3px;
+}
+
+.style-fill.is-up {
+  background: linear-gradient(90deg, #f8a5a0 0%, #f56c6c 100%);
+  border-radius: 0 3px 3px 0;
+}
+
+.style-fill.is-down {
+  background: linear-gradient(90deg, #67c23a 0%, #95d475 100%);
+  border-radius: 3px 0 0 3px;
+}
+
+.style-val {
+  font-family: var(--app-font-mono);
+  font-size: 11.5px;
+  text-align: right;
+}
+
+.style-share {
+  font-size: 11px;
+  color: var(--el-text-color-placeholder);
+  text-align: right;
+}
+
+.card-foot {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--el-text-color-regular);
+  border-top: 1px dashed var(--el-border-color-lighter);
+  padding-top: 8px;
+}
+
+.foot-note {
+  color: var(--el-text-color-placeholder);
+  font-size: 11px;
+}
+
+/* 集中度条 */
+.conc-bar {
+  display: flex;
+  height: 10px;
+  border-radius: 3px;
+  overflow: hidden;
+  margin: 6px 0 6px;
+  background: var(--el-fill-color-lighter);
+}
+
+.conc-seg {
+  height: 100%;
+}
+
+.conc-top {
+  background: var(--el-color-primary);
+  opacity: 0.85;
+}
+
+.conc-rest {
+  flex: 1;
+  background: var(--el-fill-color-dark);
+}
+
+.conc-legend {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11.5px;
+  color: var(--el-text-color-secondary);
+}
+
+.conc-legend .lg-up { color: var(--el-color-primary); }
+.conc-legend .lg-rest { color: var(--el-text-color-placeholder); }
+
+.rank-empty {
+  font-size: 12px;
+  color: var(--el-text-color-placeholder);
+  padding: 8px 0;
 }
 
 /* ── 今日事件：一条时间轴回答「几点有事」，不在此处放影响判断 ── */
@@ -1357,185 +1802,6 @@ onActivated(() => {
   margin-bottom: 12px;
 }
 
-/* 市场透视：状态一行 + 行业条形 + 榜单 */
-.regime-line {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 14px;
-  margin-bottom: 12px;
-  background: var(--el-fill-color-light);
-  border-radius: 8px;
-}
-
-.regime-advice-inline {
-  font-size: 12.5px;
-  line-height: 1.7;
-  color: var(--el-text-color-regular);
-}
-
-.persp-grid {
-  display: grid;
-  grid-template-columns: minmax(320px, 0.85fr) 1.6fr;
-  gap: 12px;
-  /* 两栏等高：行业 20 行与榜单 4×10 行内容量不同，靠拉伸与均分对齐，避免底部参差 */
-  align-items: stretch;
-}
-
-.persp-card {
-  border-radius: 8px;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-}
-
-.persp-card :deep(.el-card__body) {
-  padding: 14px 16px;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.persp-card-title {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  flex: 0 0 auto;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
-  margin-bottom: 10px;
-}
-
-.persp-card-note {
-  font-size: 11.5px;
-  font-weight: 400;
-  color: var(--el-text-color-placeholder);
-}
-
-/* 行业强弱双向条：中线 = 0，涨向右、跌向左；行间均分剩余高度，与右侧榜单等高 */
-.ind-bars {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  flex: 1;
-  gap: 0;
-  min-height: 0;
-}
-
-.ind-row {
-  display: grid;
-  grid-template-columns: 76px 1fr 96px;
-  align-items: center;
-  gap: 8px;
-  padding: 3px 0;
-  /* 40 行与右侧 4×10 榜单行数一致，均分高度后两卡底边与行距都对齐 */
-  flex: 1 1 0;
-}
-
-/* 可点击行业行：悬停提示可跳转股票筛选 */
-.ind-row--link {
-  cursor: pointer;
-  border-radius: 4px;
-  transition: background 0.15s ease;
-}
-
-.ind-row--link:hover {
-  background: var(--el-fill-color-light);
-}
-
-.ind-name {
-  font-size: 12px;
-  color: var(--el-text-color-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ind-track {
-  position: relative;
-  height: 12px;
-  border-radius: 3px;
-  background: var(--el-fill-color-lighter);
-}
-
-.ind-axis {
-  position: absolute;
-  left: 50%;
-  top: -2px;
-  bottom: -2px;
-  width: 1px;
-  background: var(--el-border-color);
-}
-
-.ind-fill {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  border-radius: 3px;
-}
-
-.ind-fill.is-up {
-  background: linear-gradient(90deg, #f8a5a0 0%, #f56c6c 100%);
-  border-radius: 0 3px 3px 0;
-}
-
-.ind-fill.is-down {
-  background: linear-gradient(90deg, #67c23a 0%, #95d475 100%);
-  border-radius: 3px 0 0 3px;
-}
-
-.ind-val {
-  display: flex;
-  align-items: baseline;
-  justify-content: flex-end;
-  gap: 6px;
-  font-family: var(--app-font-mono);
-  font-size: 11.5px;
-  white-space: nowrap;
-}
-
-.ind-val b {
-  font-size: 12px;
-}
-
-.ind-val em {
-  font-style: normal;
-  color: var(--el-text-color-secondary);
-}
-
-.ind-divider {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 8px 0 6px;
-  font-size: 11px;
-  color: var(--el-text-color-placeholder);
-}
-
-.ind-divider::before,
-.ind-divider::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  background: var(--el-border-color-lighter);
-}
-
-.rank-empty {
-  font-size: 12px;
-  color: var(--el-text-color-placeholder);
-  padding: 8px 0;
-}
-
-@media (max-width: 1200px) {
-  .persp-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
 .kpi-cell {
   background: var(--el-fill-color-blank);
   border: 1px solid var(--el-border-color-lighter);
@@ -1705,142 +1971,19 @@ onActivated(() => {
 .lg-flat { color: var(--app-flat); }
 .lg-down { color: var(--app-down); }
 
-/* 市场榜单（市场透视右侧 2×2 紧凑版） */
-.list-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
-}
-
-.list-grid--compact {
-  grid-template-columns: repeat(2, 1fr);
-  /* 两行等分剩余高度，与左侧行业卡对齐 */
-  grid-auto-rows: 1fr;
-  gap: 10px;
-  flex: 1;
-}
-
-.list-grid--compact .list-card {
-  padding: 10px 12px;
-}
-
-.list-grid--compact .list-item {
-  padding: 4px 0;
-  gap: 8px;
-  flex: 1;
-}
-
-.list-card {
-  background: var(--el-fill-color-blank);
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
-  padding: 12px 14px;
-  display: flex;
-  flex-direction: column;
-}
-
-.list-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.list-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
-}
-
-.list-top {
-  font-size: 11px;
-  color: var(--el-text-color-placeholder);
-}
-
-.list-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 0;
-  border-bottom: 1px dashed var(--el-border-color-lighter);
-}
-
-.list-item:last-child {
-  border-bottom: none;
-}
-
-.list-no {
-  width: 18px;
-  height: 18px;
-  border-radius: 4px;
-  background: var(--el-fill-color-light);
-  color: var(--el-text-color-secondary);
-  font-size: 11px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.list-main {
-  flex: 1;
-  min-width: 0;
-}
-
-.list-name {
-  font-size: 13px;
-  color: var(--el-text-color-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.list-code {
-  font-size: 11px;
-  color: var(--el-text-color-placeholder);
-}
-
-/* 榜单行迷你涨跌条：宽度 = |涨跌幅|/10%，颜色随涨跌 */
-.mini-bar {
-  display: block;
-  height: 2px;
-  margin-top: 3px;
-  border-radius: 1px;
-  background: var(--app-flat);
-  transition: width 0.3s ease;
-}
-
-.mini-bar.up { background: var(--app-up); }
-.mini-bar.down { background: var(--app-down); }
-.mini-bar.flat { background: var(--el-border-color); }
-
-.list-right {
-  text-align: right;
-  flex-shrink: 0;
-}
-
-.list-amt {
-  font-family: var(--app-font-mono);
-  font-size: 12px;
-  color: var(--el-text-color-regular);
-}
-
-.list-amt.accent {
-  color: var(--el-color-primary);
-}
-
-.list-close {
-  font-size: 11px;
-  color: var(--el-text-color-placeholder);
-}
-
 @media (max-width: 1200px) {
   .kpi-row { grid-template-columns: repeat(2, 1fr); }
-  .list-grid { grid-template-columns: repeat(2, 1fr); }
+  .temp-grid { grid-template-columns: repeat(2, 1fr); }
+  .struct-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 900px) {
+  .mini-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 768px) {
   .kpi-row { grid-template-columns: repeat(2, 1fr); }
-  .dash-main, .list-grid { grid-template-columns: 1fr; }
+  .dash-main { grid-template-columns: 1fr; }
+  .snap-row { grid-template-columns: repeat(3, 1fr); gap: 8px; }
 }
 </style>

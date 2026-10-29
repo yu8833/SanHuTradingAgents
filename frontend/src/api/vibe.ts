@@ -287,6 +287,57 @@ export interface MarketEvents {
   source?: string
 }
 
+// 大盘增强指标：温度分位 / 宽度曲线 / 风格轮动 / 成交额集中度 / 盘中预警
+export interface MarketTemperatureItem {
+  key: string
+  label: string
+  unit: string
+  value: number
+  rank: number | null
+  median: number | null
+  samples: number
+  higher_is_hot: boolean
+  desc: string
+}
+
+export interface MarketBreadthPoint {
+  date: string
+  adl: number
+  up_pct: number
+  ma20_above: number | null
+  zt: number
+}
+
+export interface MarketMetrics {
+  ready: boolean
+  as_of: string
+  is_live: boolean
+  updated: string
+  temperature: MarketTemperatureItem[]
+  breadth: {
+    series: MarketBreadthPoint[]
+    ma20_above: number | null
+    zt: number
+    dt: number
+  }
+  style: {
+    as_of: string
+    mv_as_of?: string
+    buckets: { key: string; label: string; pct: number; share: number; count: number }[]
+    spread: number
+  } | null
+  concentration: {
+    as_of: string
+    total: number
+    top1_share: number
+    top10_share: number
+    hhi: number
+    count: number
+  } | null
+  alerts: { level: 'danger' | 'warning' | 'info'; title: string; detail: string }[]
+  note: string
+}
+
 export interface LianbanStock {
   code: string
   name: string
@@ -657,6 +708,12 @@ export const vibeApi = {
   async getMarketEvents(refresh = false) {
     if (refresh) clearCache('/api/vibe/market/events')
     return cachedGet<MarketEvents>('/api/vibe/market/events', undefined, 300000, { timeout: 25000 })
+  },
+
+  // 大盘增强指标：盘中实时点 + 历史分位（后端交易时段缓存 120s）
+  async getMarketMetrics(refresh = false) {
+    if (refresh) clearCache('/api/vibe/market/metrics')
+    return cachedGet<MarketMetrics>('/api/vibe/market/metrics', undefined, 120000, { timeout: 20000 })
   },
 
   // 开盘情景：隔夜外盘（A50/美股期货/商品）+ 上一交易日情绪结构，短缓存 5 分钟

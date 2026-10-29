@@ -1172,6 +1172,28 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"❌ 市场数据预热任务注册失败（忽略）: {e}", exc_info=True)
 
+        # 市场温度指标：收盘后固化当日基线行（供历史分位/宽度曲线；盘中实时点走独立接口）
+        try:
+            from app.services.market_metrics import ensure_metrics_history, finalize_market_metrics
+
+            async def _finalize_market_metrics():
+                try:
+                    await ensure_metrics_history()
+                    await finalize_market_metrics()
+                except Exception as e:
+                    logger.error(f"❌ 市场温度指标固化失败: {e}", exc_info=True)
+
+            scheduler.add_job(
+                _finalize_market_metrics,
+                CronTrigger(hour=19, minute=50, timezone=get_tz()),
+                id="market_metrics_finalize",
+                name="市场温度指标固化（收盘后）",
+                replace_existing=True,
+            )
+            logger.info("📊 市场温度指标固化任务已注册: 19:50")
+        except Exception as e:
+            logger.error(f"❌ 市场温度指标任务注册失败（忽略）: {e}", exc_info=True)
+
         # 统一交易日历：每日刷新 + 启动装载（is_trading_day / 交易日序列统一走权威日历）
         try:
             import asyncio as _asyncio

@@ -16,6 +16,7 @@ from app.core.response import ok
 from app.services import vibe_astock as astock
 from app.services.concept_analysis import get_concept_analysis
 from app.services.market_dashboard import get_dashboard
+from app.services.market_metrics import get_market_metrics
 from app.services.market_overview import get_global_indices, get_overview, get_short_term_emotion, get_turnover_top
 from app.services.news_data_service import NewsQueryParams, get_news_data_service
 from app.services.newsradar import fetch_radar, get_radar_cached
@@ -107,6 +108,21 @@ async def market_dashboard(current_user: dict = Depends(get_optional_current_use
     except Exception as e:
         logger.error(f"市场看板异常: {e}")
         return ok({})
+
+
+@router.get("/market/metrics")
+async def market_metrics(current_user: dict = Depends(get_optional_current_user)):
+    """大盘增强指标：温度历史分位 / 宽度曲线 / 风格轮动 / 成交额集中度 / 盘中预警。
+
+    盘中实时点来自 market_quotes（2-6 分钟刷新），历史分位来自收盘后固化的基线，
+    两者在返回层拼接，因此盘中即可看到"今日值 + 近一年分位"，无需等收盘。
+    """
+    try:
+        data = await get_market_metrics()
+        return ok(data)
+    except Exception as e:
+        logger.error(f"市场增强指标异常: {e}")
+        return ok({"ready": False, "temperature": [], "breadth": {"series": []}, "alerts": []})
 
 
 @router.get("/market/trade-date")
