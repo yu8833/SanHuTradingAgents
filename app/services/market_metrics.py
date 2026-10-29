@@ -230,16 +230,27 @@ def _history_status_sync() -> tuple[bool, int]:
 # 盘中实时点
 # ---------------------------------------------------------------------------
 
-def _live_point(db) -> dict[str, Any]:
-    """基于 market_quotes 全市场快照计算当日实时点（<2s）。"""
+def _live_point(db, pools: dict[str, Any] | None = None) -> dict[str, Any]:
+    """基于 market_quotes 全市场快照计算当日实时点（<2s）。
+
+    pools 为东财封板池代码集合（与「短线情绪→情绪概览」同源）。日期一致时
+    涨停/跌停按池子判定，保证看板各处数字一致；否则回落阈值近似。
+    """
     quotes = list(db["market_quotes"].find(
-        {}, {"_id": 0, "symbol": 1, "pct_chg": 1, "amount": 1,
+        {}, {"_id": 0, "code": 1, "symbol": 1, "pct_chg": 1, "amount": 1,
              "turnover_rate": 1, "close": 1, "trade_date": 1}
     ))
     if not quotes:
         return {}
 
-    data_date = _normalize_date(quotes[0].get("trade_date"))
+    # 只保留最新交易日快照（集合里可能残留少量手工回填的历史行）
+    dates = [_normalize_date(q.get("trade_date")) for q in quotes if q.get("trade_date")]
+    data_date = max(dates) if dates else ""
+    if data_date:
+        quotes = [q for q in quotes if _normalize_date(q.get("trade_date")) == data_date]
+    use_pool = bool(pools) and str(pools.get("date") or "") == data_date
+    zt_codes = set(pools.get("zt") or []) if use_pool else set()
+    dt_codes = set(pools.get("dt") or []) if use_pool else set()
     n = len(quotes)
     up = down = zt = dt = 0
     total_amt = 0.0
@@ -253,7 +264,7 @@ def _live_point(db) -> dict[str, Any]:
         amt = max(0.0, _f(q.get("amount")))
         if amt > MAX_STOCK_AMOUNT:
             amt = 0.0
-        sym = str(q.get("symbol") or "")
+        sym = str(q.get("code") or q.get("symbol") or "")
         pcts[sym] = pct
         total_amt += amt
         if amt > 0:
@@ -262,11 +273,18 @@ def _live_point(db) -> dict[str, Any]:
             up += 1
         elif pct < 0:
             down += 1
-        lim = _limit_pct(sym)
-        if pct >= lim - 0.2:
-            zt += 1
-        elif pct <= -(lim - 0.2):
-            dt += 1
+        if use_pool:
+            # 封板池为唯一口径：未入池个股不计入涨跌停（即便涨幅接近限制）
+            if sym in zt_codes:
+                zt += 1
+            elif sym in dt_codes:
+                dt += 1
+        else:
+            lim = _limit_pct(sym)
+            if pct >= lim - 0.2:
+                zt += 1
+            elif pct <= -(lim - 0.2):
+                dt += 1
         tr = q.get("turnover_rate")
         if tr is not None:
             turn_sum += _f(tr)
@@ -430,7 +448,7 @@ def _style_buckets(db, data_date: str, pcts: dict[str, float]) -> dict[str, Any]
 # ---------------------------------------------------------------------------
 
 _TEMP_DEFS = [
-    ("zt", "涨停家数", "家", True, "涨停家数越多，短线做多情绪越强"),
+    ("zt", "涨停家数", "家", True, "涨停家数越多，短线做多情绪越强（东财封板池口径；历史分位以涨跌幅阈值近似）"),
     ("amount", "成交额", "亿", True, "全市场成交额，反映资金参与度"),
     ("avg_turnover", "平均换手", "%", True, "个股平均换手率，反映筹码活跃度"),
     ("up_pct", "上涨率", "%", True, "上涨家数占比，反映市场广度"),
@@ -516,11 +534,29 @@ def _alerts(temp: list[dict], live: dict) -> list[dict]:
     return out
 
 
+async def _pool_sets() -> dict[str, Any] | None:
+    """东财封板池代码集合（与「短线情绪→情绪概览」复用同一份 Redis 快照）。"""
+    try:
+        from app.services.market_overview import get_short_term_emotion
+
+        emo = await asyncio.wait_for(get_short_term_emotion(), timeout=25)
+        pools = emo.get("pools") or {}
+        zt = {str(p.get("code") or "").split(".")[0] for p in pools.get("zt") or []}
+        dt = {str(p.get("code") or "").split(".")[0] for p in pools.get("dt") or []}
+        if not zt and not dt:
+            return None
+        return {"date": str(emo.get("date") or ""), "zt": zt, "dt": dt}
+    except Exception as e:
+        logger.warning(f"📊 [metrics] 封板池不可用，涨停/跌停回落阈值近似: {e}")
+        return None
+
+
 async def _build_metrics() -> dict[str, Any]:
     db = _sync_db()
     ready, count = await asyncio.to_thread(_history_status, db)
 
-    live_data = await asyncio.to_thread(_live_point, db)
+    pools = await _pool_sets()
+    live_data = await asyncio.to_thread(_live_point, db, pools)
     live = (live_data or {}).get("point") or {}
 
     history: list[dict] = []
@@ -551,7 +587,7 @@ async def _build_metrics() -> dict[str, Any]:
         "style": (live_data or {}).get("style"),
         "concentration": (live_data or {}).get("concentration"),
         "alerts": _alerts(temp, live) if live else [],
-        "note": "涨停/跌停按各板块涨跌幅阈值近似（不含 ST 5% 特例）；分位基于近一年交易日",
+        "note": "涨停/跌停取东财封板池（与短线情绪页一致）；历史分位的历史序列按涨跌幅阈值近似",
     }
 
 

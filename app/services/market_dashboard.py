@@ -65,8 +65,19 @@ def _load_name_fallback() -> dict[str, str]:
         return {}
 
 
+def _norm_date(v) -> str:
+    """交易日归一为 YYYY-MM-DD（兼容 20261029 / 2026-10-29 两种写入形态）。"""
+    s = str(v or "").strip()
+    digits = "".join(ch for ch in s if ch.isdigit())
+    return f"{digits[:4]}-{digits[4:6]}-{digits[6:8]}" if len(digits) >= 8 else s
+
+
 def _load_market_rows() -> list[dict]:
-    """读取全市场实时快照，返回带有效涨跌幅的行（仅保留 pct_chg 有效者）。"""
+    """读取全市场实时快照，返回带有效涨跌幅的行（仅保留 pct_chg 有效者）。
+
+    只保留最新一个交易日的快照：market_quotes 里可能残留手工回填的历史行，
+    混入会让涨跌分布/广度与情绪页的当日口径对不上。
+    """
     try:
         db = get_mongo_db_sync()
         coll = db["market_quotes"]
@@ -78,7 +89,7 @@ def _load_market_rows() -> list[dict]:
         }, {
             "code": 1, "symbol": 1, "name": 1,
             "close": 1, "pct_chg": 1, "amount": 1,
-            "turnover_rate": 1, "industry": 1,
+            "turnover_rate": 1, "industry": 1, "trade_date": 1,
             "_id": 0,
         }):
             pct = _num(doc.get("pct_chg"))
@@ -94,19 +105,30 @@ def _load_market_rows() -> list[dict]:
                 # 保留 None 以区分「换手率缺失」与「真实为 0」，供量能兜底逻辑判断
                 "turnover_rate": doc.get("turnover_rate"),
                 "industry": doc.get("industry") or "",
+                "trade_date": _norm_date(doc.get("trade_date")),
             })
+        dates = [r["trade_date"] for r in rows if r.get("trade_date")]
+        if dates:
+            latest = max(dates)
+            rows = [r for r in rows if r.get("trade_date") == latest]
         return rows
     except Exception:
         return []
 
 
-def _pct_band_rows(rows: list[dict]) -> list[dict]:
+def _pct_band_rows(
+    rows: list[dict],
+    zt_codes: set[str] | None = None,
+    dt_codes: set[str] | None = None,
+) -> list[dict]:
     """按涨跌幅区间归类。dir: -1=跌 0=平 1=涨。
 
-    涨跌两端的 "5~7% / >7% / 涨停" 与 "跌停" 为新增档位：涨停/跌停按代码前缀的
-    涨跌幅限制判定（复用 vibe_astock._get_limit_pct，主板≈10%、创业板/科创板≈20%、
-    北交所≈30%，另含 0.5% 容差），与相邻区间互不重叠；涨区间严格只统计 v>0，
-    平盘(v==0)单独归为 "0%"，避免平盘被计入涨导致涨柱总数与 breadth.up 不一致。
+    涨停/跌停**优先按东财封板池代码集合判定**（与「短线情绪 → 情绪概览」同一份
+    数据源，保证两处数字完全一致）；封板池不可用（接口失败/日期不匹配）时，
+    才回落为按代码前缀的涨跌幅限制判定（主板≈10%、创业板/科创板≈20%、
+    北交所≈30%，含 0.5% 容差），此时数字口径为「触及涨跌停附近」。
+    涨区间严格只统计 v>0，平盘(v==0)单独归为 "0%"，避免平盘被计入涨
+    导致涨柱总数与 breadth.up 不一致。
     """
     band_order = [
         "跌停", "<-5%", "-5~-3%", "-3~-1%", "-1~0%", "0%",
@@ -114,8 +136,8 @@ def _pct_band_rows(rows: list[dict]) -> list[dict]:
     ]
     dir_map = {"0%": 0, "跌停": -1, "涨停": 1}
 
-    def classify(pct: float, lim: float) -> str:
-        if pct <= -lim:
+    def classify(pct: float, lim: float, allow_limit: bool = True) -> str:
+        if allow_limit and pct <= -lim:
             return "跌停"
         if pct < -5.0:
             return "<-5%"
@@ -133,17 +155,31 @@ def _pct_band_rows(rows: list[dict]) -> list[dict]:
             return "1~3%"
         if pct < 5.0:
             return "3~5%"
-        if pct < lim:
+        if allow_limit and pct < lim:
             return ">5%"
-        return "涨停"
+        return "涨停" if allow_limit else ">5%"
 
+    zt_set = zt_codes or set()
+    dt_set = dt_codes or set()
+    # 有封板池时，池子就是涨跌停的唯一口径：未入池的个股即便涨幅接近限制
+    # 也归入 ">5%" / "<-5%" 档，避免出现「分布里的跌停比情绪页多 17 家」
+    use_pool = bool(zt_set or dt_set)
     counts = {label: 0 for label in band_order}
     total = len(rows) or 1
     for r in rows:
         pct = _num(r.get("pct_chg"))
-        # 涨停/跌停阈值：板块涨跌幅限制 - 0.5% 容差（实际涨停价存在四舍五入）
-        lim = astock._get_limit_pct(r.get("code", "")) - 0.5
-        counts[classify(pct, lim)] += 1
+        code = str(r.get("code") or "")
+        if use_pool:
+            if code in zt_set:
+                counts["涨停"] += 1
+                continue
+            if code in dt_set:
+                counts["跌停"] += 1
+                continue
+            counts[classify(pct, 0.0, allow_limit=False)] += 1
+            continue
+        # 无封板池：按板块涨跌幅限制 - 0.5% 容差判定（含接近未封死）
+        counts[classify(pct, astock._get_limit_pct(code) - 0.5)] += 1
     out = []
     for label in band_order:
         count = counts[label]
@@ -322,6 +358,15 @@ async def _build() -> dict:
     )
     rows = await rows_task
 
+    # 封板池代码集合：让「涨跌分布」的涨停/跌停与「短线情绪→情绪概览」同一口径。
+    # 仅当池子日期与行情快照日期一致时启用，否则回落为涨跌幅阈值近似。
+    quote_date = next((r.get("trade_date") for r in rows if r.get("trade_date")), "")
+    emotion_date = str(emotion.get("date") or "") if emotion else ""
+    pools = (emotion.get("pools") if emotion else {}) or {}
+    zt_codes = {str(p.get("code") or "").split(".")[0] for p in pools.get("zt") or []}
+    dt_codes = {str(p.get("code") or "").split(".")[0] for p in pools.get("dt") or []}
+    pool_ok = bool(emotion_date and quote_date and emotion_date == quote_date and (zt_codes or dt_codes))
+
     total = len(rows)
     up = sum(1 for r in rows if r["pct_chg"] > 0)
     down = sum(1 for r in rows if r["pct_chg"] < 0)
@@ -407,8 +452,14 @@ async def _build() -> dict:
     else:
         emotion_label = "冰点"
 
+    dist = _pct_band_rows(
+        rows,
+        zt_codes if pool_ok else None,
+        dt_codes if pool_ok else None,
+    )
+
     return {
-        "as_of": sentiment.get("date") or "",
+        "as_of": sentiment.get("date") or quote_date or "",
         # 市场当前参考交易日（交易时段=当日，盘前=最近已完成交易日），
         # 供前端页面标题展示「X月X日 · 大盘看板」
         "trade_date": get_market_trade_date().strftime("%Y-%m-%d"),
@@ -421,11 +472,15 @@ async def _build() -> dict:
             "strong_up": strong_up, "strong_down": strong_down,
         },
         "amount": {"total": round(total_amount, 2), "avg": round(avg_amount, 2)},
-        "distribution": _pct_band_rows(rows),
+        "distribution": dist,
         "limit": {
             "limit_up": zt_count, "limit_down": dt_count,
             "seal_rate": seal_rate, "max_boards": max_boards,
             "tiers": ladder,
+            # 涨跌分布两端（涨停/跌停柱）的口径来源，前端据此标注文案
+            "source": "eastmoney_pool" if pool_ok else "threshold",
+            "zt_band": next((b["count"] for b in dist if b["label"] == "涨停"), 0),
+            "dt_band": next((b["count"] for b in dist if b["label"] == "跌停"), 0),
         },
         "activity": {
             "avg_turnover": round(avg_turnover, 2),

@@ -21,6 +21,16 @@
       </div>
     </div>
 
+    <!-- 一句话结论：先给判断，下面各块都是这句话的依据 -->
+    <section v-if="dashboard" class="verdict">
+      <span class="verdict-tag" :style="scoreStyle">{{ dashboard.emotion.label }} · {{ dashboard.emotion.score }} 分</span>
+      <p class="verdict-text">{{ verdictText }}</p>
+      <span class="verdict-meta">
+        <em v-if="metrics" :class="{ 'is-live': metrics.is_live }">{{ metrics.is_live ? '盘中实时' : '收盘定稿' }}</em>
+        <span v-if="dataAsOf">数据 {{ dataAsOf }}</span>
+      </span>
+    </section>
+
     <!-- 开盘情景：盘前唯一的前瞻信息（隔夜外盘 → 开盘缺口）+ 昨日情绪结构，08:30 后自动展开 -->
     <section v-if="preOpen && preOpen.bands.length" class="preopen-block">
       <div class="preopen-head">
@@ -137,39 +147,11 @@
       </div>
     </section>
 
-    <!-- 情绪评分 + KPI + 涨跌分布 + 雷达 -->
+    <!-- 今日涨跌分布：横截面回答「涨多还是跌多、极端多少」 -->
     <section v-if="dashboard" class="block">
       <div class="block-head">
-        <span class="block-title"><el-icon><Odometer /></el-icon> 市场情绪与涨跌分布</span>
-        <span class="score-badge" :style="scoreStyle">{{ dashboard.emotion.label }} · {{ dashboard.emotion.score }}</span>
-      </div>
-
-      <!-- KPI 指标行 -->
-      <div class="kpi-row">
-        <div class="kpi-cell">
-          <div class="kpi-label">个股涨 / 平 / 跌</div>
-          <div class="kpi-value">
-            <span class="up">{{ dashboard.breadth.up }}</span><span class="kpi-sep">/</span><span class="kpi-mid">{{ dashboard.breadth.flat }}</span><span class="kpi-sep">/</span><span class="down">{{ dashboard.breadth.down }}</span>
-          </div>
-          <div class="kpi-sub">上涨率 {{ dashboard.breadth.up_pct }}%</div>
-        </div>
-        <div class="kpi-cell">
-          <div class="kpi-label">强势 / 弱势</div>
-          <div class="kpi-value">
-            <span class="up">{{ dashboard.breadth.strong_up }}</span><span class="kpi-sep">/</span><span class="down">{{ dashboard.breadth.strong_down }}</span>
-          </div>
-          <div class="kpi-sub">涨跌 ≥3%</div>
-        </div>
-        <div class="kpi-cell">
-          <div class="kpi-label">成交额</div>
-          <div class="kpi-value accent">{{ fmtAmount(dashboard.amount.total) }}</div>
-          <div class="kpi-sub">均额 {{ fmtAmount(dashboard.amount.avg) }}</div>
-        </div>
-        <div class="kpi-cell">
-          <div class="kpi-label">换手</div>
-          <div class="kpi-value accent">{{ dashboard.activity.avg_turnover }}%</div>
-          <div class="kpi-sub">高换手 {{ dashboard.activity.high_turnover }} · 占 {{ dashboard.activity.high_turnover_pct }}%</div>
-        </div>
+        <span class="block-title"><el-icon><Histogram /></el-icon> 今日涨跌分布</span>
+        <span class="block-hint">{{ limitNote }}</span>
       </div>
 
       <!-- 雷达 + 涨跌分布 -->
@@ -208,12 +190,12 @@
             </svg>
           </div>
           <div v-else class="radar-empty">{{ dashboard.radar.length ? '今日情绪数据为空' : '暂无雷达数据' }}</div>
+          <p class="cap">六个维度越靠外越强；缩在虚线（50 分）以内的维度，就是当天明显的短板。</p>
         </el-card>
 
         <el-card shadow="never" class="dash-card">
           <div class="card-title">
-            涨跌分布 / 广度
-            <span class="dist-note">涨停/跌停按涨跌幅阈值判定，含接近未封死（东财口径）</span>
+            涨跌家数分布
           </div>
           <div class="dist-bars">
             <div v-for="b in distDisplay" :key="b.label" class="dist-col">
@@ -239,16 +221,21 @@
               <span class="lg-down">跌 {{ dashboard.breadth.down }}</span>
             </div>
           </div>
+          <div class="dist-foot">
+            <span>涨跌 ≥3%：<b class="up">{{ dashboard.breadth.strong_up }}</b> 家强势 / <b class="down">{{ dashboard.breadth.strong_down }}</b> 家弱势</span>
+            <span>平均 {{ fmtPct(dashboard.breadth.avg_pct) }} · 中位 {{ fmtPct(dashboard.breadth.median_pct) }}</span>
+          </div>
+          <p class="cap">右端（涨停/大涨）越长，赚钱效应越强；两端同时变长、中间变短 = 涨跌分化加剧，多数个股其实在原地。</p>
         </el-card>
       </div>
     </section>
 
-    <!-- 市场温度与结构：把孤立数字放进近一年分位，回答「今天算热还是冷」 -->
+    <!-- 市场温度与资金结构：把今天的读数放进近一年分位/趋势，回答「今天算热还是冷、钱去了哪」 -->
     <section v-if="metrics" class="block">
       <div class="block-head">
-        <span class="block-title"><el-icon><DataAnalysis /></el-icon> 市场温度与结构</span>
+        <span class="block-title"><el-icon><DataAnalysis /></el-icon> 市场温度与资金结构</span>
         <span class="block-hint">
-          分位基于近一年交易日 · {{ metrics.is_live ? '盘中实时值，收盘后定稿' : '收盘定稿' }}
+          分位基于近一年交易日 · {{ metrics.is_live ? '盘中实时，收盘后定稿' : '收盘定稿' }}
           <em v-if="metrics.as_of" class="data-time">数据 {{ metrics.as_of }} · 更新 {{ shortTime(metrics.updated) }}</em>
         </span>
       </div>
@@ -263,6 +250,10 @@
       </div>
 
       <!-- 温度分位：每项一条分位条，中位刻度固定在 50% -->
+      <div class="temp-headline">
+        今日读数 · 近一年分位
+        <span class="dist-note">条越长越接近近一年极值；竖线 = 中位数（50% 分位）</span>
+      </div>
       <div class="temp-grid">
         <div v-for="t in metrics.temperature" :key="t.key" class="temp-item" :title="t.desc">
           <div class="temp-head">
@@ -281,65 +272,51 @@
         </div>
       </div>
 
-      <div class="struct-grid">
-        <!-- 宽度曲线：上涨率 + 站上20日线占比（同为 0-100%，可直接对比） -->
-        <el-card shadow="never" class="dash-card">
-          <div class="card-title">
-            市场宽度（近 {{ breadthSeries.length }} 个交易日）
-            <span class="dist-note">实线 = 上涨率 · 虚线 = 站上 20 日线占比 · 灰线 = 50% 中性</span>
-          </div>
-          <div v-if="breadthChart" class="bw-chart">
-            <svg :viewBox="`0 0 ${breadthChart.w} ${breadthChart.h}`" class="bw-svg" preserveAspectRatio="none">
-              <line
-                v-for="g in breadthChart.grid"
-                :key="g.v"
-                :x1="breadthChart.padL"
-                :x2="breadthChart.w - breadthChart.padR"
-                :y1="g.y"
-                :y2="g.y"
-                class="bw-grid"
-                :class="{ 'bw-grid--mid': g.v === 50 }"
-              />
-              <polygon :points="breadthChart.area" class="bw-area" />
-              <polyline :points="breadthChart.upLine" class="bw-up" />
-              <polyline v-for="(seg, i) in breadthChart.maSegs" :key="'ma' + i" :points="seg" class="bw-ma" />
-              <circle v-for="p in breadthChart.dots" :key="p.k" :cx="p.x" :cy="p.y" :r="2.2" class="bw-dot">
-                <title>{{ p.tip }}</title>
-              </circle>
-              <text v-for="l in breadthChart.xLabels" :key="l.k" :x="l.x" :y="breadthChart.h - 4" class="bw-xlabel">{{ l.text }}</text>
-            </svg>
-          </div>
-          <div v-else class="rank-empty">暂无足够交易日数据</div>
-        </el-card>
-
-        <!-- 结构快照：MA20 宽度 + 涨跌停 + 腾落线累计 -->
-        <el-card shadow="never" class="dash-card">
-          <div class="card-title">结构快照</div>
-          <div class="snap-row">
-            <div class="snap-item">
-              <div class="snap-label">站上 20 日线</div>
-              <div class="snap-value" :class="ma20Tone">
-                {{ metrics.breadth.ma20_above == null ? '—' : metrics.breadth.ma20_above + '%' }}
-              </div>
-              <div class="snap-sub">个股占比 · 中期结构</div>
-            </div>
-            <div class="snap-item">
-              <div class="snap-label">涨停 / 跌停</div>
-              <div class="snap-value">
-                <span class="up">{{ metrics.breadth.zt }}</span><span class="kpi-sep">/</span><span class="down">{{ metrics.breadth.dt }}</span>
-              </div>
-              <div class="snap-sub">按板块涨跌幅阈值近似</div>
-            </div>
-            <div class="snap-item">
-              <div class="snap-label">腾落线（60日累计）</div>
-              <div class="snap-value" :class="adlSum > 0 ? 'up' : adlSum < 0 ? 'down' : ''">
-                {{ adlSum > 0 ? '+' : '' }}{{ adlSum }}
-              </div>
-              <div class="snap-sub">上涨家数 − 下跌家数</div>
-            </div>
-          </div>
-        </el-card>
-      </div>
+      <!-- 市场宽度：60 日趋势，回答「涨跌是在扩散还是收敛」 -->
+      <el-card shadow="never" class="dash-card width-card">
+        <div class="card-title">
+          市场宽度趋势（近 {{ breadthSeries.length }} 个交易日）
+          <span class="dist-note">
+            实线 = 当日上涨个股占比<template v-if="breadthChart && breadthChart.maSegs.length"> · 虚线 = 站上 20 日均线个股占比</template> · 50% = 多空分界
+          </span>
+        </div>
+        <div v-if="breadthChart" class="bw-chart">
+          <svg :viewBox="`0 0 ${breadthChart.w} ${breadthChart.h}`" class="bw-svg" preserveAspectRatio="none">
+            <line
+              v-for="g in breadthChart.grid"
+              :key="g.v"
+              :x1="breadthChart.padL"
+              :x2="breadthChart.w - breadthChart.padR"
+              :y1="g.y"
+              :y2="g.y"
+              class="bw-grid"
+              :class="{ 'bw-grid--mid': g.v === 50 }"
+            />
+            <polygon :points="breadthChart.area" class="bw-area" />
+            <polyline :points="breadthChart.upLine" class="bw-up" />
+            <polyline v-for="(seg, i) in breadthChart.maSegs" :key="'ma' + i" :points="seg" class="bw-ma" />
+            <circle v-for="p in breadthChart.dots" :key="p.k" :cx="p.x" :cy="p.y" :r="2.2" class="bw-dot">
+              <title>{{ p.tip }}</title>
+            </circle>
+            <text v-for="l in breadthChart.yLabels" :key="'y' + l.v" :x="2" :y="l.y - 2" class="bw-ylabel">{{ l.v }}%</text>
+            <text
+              v-for="e in breadthChart.endLabels"
+              :key="e.k"
+              :x="e.x"
+              :y="e.y"
+              :class="e.cls"
+            >{{ e.text }}</text>
+            <text v-for="l in breadthChart.xLabels" :key="l.k" :x="l.x" :y="breadthChart.h - 4" class="bw-xlabel">{{ l.text }}</text>
+          </svg>
+        </div>
+        <div v-else class="rank-empty">暂无足够交易日数据</div>
+        <p class="cap">
+          上涨率高于 50% = 赚钱效应扩散到多数个股；连续多日低于 30% 说明下跌在扩散、指数再涨也只是少数权重拉动。
+          <template v-if="metrics.breadth.ma20_above != null">
+            今日 <b>{{ metrics.breadth.ma20_above }}%</b> 个股站上 20 日线，代表中期趋势的个股比例。
+          </template>
+        </p>
+      </el-card>
 
       <div class="mini-grid">
         <!-- 风格轮动：流通市值三分位分组平均涨跌幅 -->
@@ -363,6 +340,7 @@
             大盘 − 小盘：<b :class="metrics.style.spread >= 0 ? 'up' : 'down'">{{ fmtPct(metrics.style.spread) }}</b>
             <span class="foot-note">{{ metrics.style.spread >= 0 ? '资金偏大盘' : '资金偏小盘' }}</span>
           </div>
+          <p class="cap">大市值涨得多 = 资金偏防守、抱团权重；小市值涨得多 = 资金偏进攻、题材活跃。</p>
         </el-card>
 
         <!-- 成交额集中度：头部吸金占比 + HHI -->
@@ -388,11 +366,8 @@
               <div class="snap-label">HHI</div>
               <div class="snap-value">{{ metrics.concentration.hhi }}</div>
             </div>
-            <div class="snap-item">
-              <div class="snap-label">成交额</div>
-              <div class="snap-value accent">{{ metrics.concentration.total }}亿</div>
-            </div>
           </div>
+          <p class="cap">前 10 名占全市场成交额的比重越高，说明资金越集中、抱团少数标的，其余个股越缺流动性。</p>
         </el-card>
       </div>
     </section>
@@ -465,7 +440,7 @@ import {
   DataLine,
   Refresh,
   Loading,
-  Odometer,
+  Histogram,
   Calendar,
 } from '@element-plus/icons-vue'
 import {
@@ -479,7 +454,7 @@ import {
   type PreOpen,
   type PreOpenBand,
 } from '@/api/vibe'
-import { fmtPrice, fmtPct, fmtAbsPct, fmtAmount, fmtSigned } from '@/utils/format'
+import { fmtPrice, fmtPct, fmtAbsPct, fmtSigned } from '@/utils/format'
 import { formatBeijingDateTimeMinute } from '@/utils/datetime'
 
 const loading = ref(false)
@@ -631,6 +606,34 @@ const scoreStyle = computed(() => {
   return { color: c, borderColor: c + '40', background: c + '14' }
 })
 
+// 一句话结论：先给判断，再让下面各块去支撑它
+const verdictText = computed(() => {
+  const d = dashboard.value
+  if (!d) return ''
+  const up = d.breadth.up_pct
+  const breadthWord =
+    up >= 60 ? '个股普涨' : up >= 45 ? '涨跌家数接近' : up >= 30 ? '个股偏跌' : '个股普跌'
+  const zt = d.limit?.limit_up ?? 0
+  const dt = d.limit?.limit_down ?? 0
+  const amount = metrics.value?.temperature?.find((t) => t.key === 'amount')
+  let posWord = ''
+  if (amount?.rank != null) {
+    posWord = amount.rank >= 75
+      ? `，成交额处近一年 ${amount.rank}% 高位`
+      : amount.rank <= 25
+        ? `，成交额处近一年 ${amount.rank}% 低位`
+        : `，成交额处近一年 ${amount.rank}% 分位`
+  }
+  return `${breadthWord}：上涨 ${up}%，涨停 ${zt} 家 / 跌停 ${dt} 家${posWord}。`
+})
+
+// 涨跌分布两端口径：与短线情绪页同源时不额外解释，仅降级时提示
+const limitNote = computed(() =>
+  dashboard.value?.limit?.source === 'threshold'
+    ? '封板池暂不可用 · 涨停/跌停按涨跌幅阈值近似'
+    : '涨停/跌停取封板池，与「短线情绪」页一致'
+)
+
 // 雷达图几何
 const RADAR_CX = 120
 const RADAR_CY = 120
@@ -708,11 +711,12 @@ const distBarClass = (dir: -1 | 0 | 1 | undefined) => {
   return 'dist-down'
 }
 
-// 涨跌分布 tooltip：涨停/跌停按涨跌幅阈值判定（跌幅≤-限制价+容差即计入），
-// 与东财/乐谷「真实封板」口径不同，含接近跌停未封死个股
+// 涨跌分布 tooltip：标注两端口径来源（封板池 / 阈值近似）
 const distTip = (b: { label: string; count: number }) => {
   const note = (b.label === '涨停' || b.label === '跌停')
-    ? '（按涨跌幅阈值判定：达到板块涨跌幅限制，含接近未封死）'
+    ? (dashboard.value?.limit?.source === 'threshold'
+      ? '（按涨跌幅阈值近似，含接近未封死）'
+      : '（封板池口径，与短线情绪页一致）')
     : ''
   return `${b.label}: ${b.count}只${note}`
 }
@@ -789,18 +793,25 @@ const breadthChart = computed(() => {
     text: String(pts[i].date || '').slice(5),
   }))
 
-  return { w, h, padL, padR, upLine, area, maSegs, grid, dots, xLabels }
-})
+  const yLabels = [0, 25, 50, 75, 100].map(v => ({ v, y: y(v) }))
 
-const adlSum = computed(() => {
-  const s = breadthSeries.value
-  return s.length ? s[s.length - 1].adl : 0
-})
+  // 末端读数：把「今天宽度多少」直接标在曲线末端，替代一块只放数字的小卡片
+  const last = pts.length - 1
+  const endLabels: { k: string; x: number; y: number; text: string; cls: string }[] = []
+  if (pts[last]) {
+    endLabels.push({
+      k: 'up', x: x(last) - 2, y: y(pts[last].up_pct) - 6,
+      text: `上涨率 ${pts[last].up_pct}%`, cls: 'bw-end bw-end--up',
+    })
+    if (pts[last].ma20_above != null) {
+      endLabels.push({
+        k: 'ma', x: x(last) - 2, y: y(pts[last].ma20_above as number) + 14,
+        text: `站上20日线 ${pts[last].ma20_above}%`, cls: 'bw-end bw-end--ma',
+      })
+    }
+  }
 
-const ma20Tone = computed(() => {
-  const v = metrics.value?.breadth?.ma20_above
-  if (v == null) return ''
-  return v >= 50 ? 'up' : 'down'
+  return { w, h, padL, padR, upLine, area, maSegs, grid, dots, xLabels, yLabels, endLabels }
 })
 
 const concTopW = computed(() => Math.min(100, Math.max(0, metrics.value?.concentration?.top10_share || 0)))
@@ -960,6 +971,72 @@ onActivated(() => {
   text-decoration: underline;
 }
 
+/* ── 一句话结论：先给判断 ── */
+.verdict {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  margin-bottom: 18px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color-lighter);
+  border-left: 3px solid var(--el-color-primary);
+}
+
+.verdict-tag {
+  flex: 0 0 auto;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.verdict-text {
+  flex: 1 1 320px;
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--el-text-color-primary);
+}
+
+.verdict-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11.5px;
+  color: var(--el-text-color-placeholder);
+}
+
+.verdict-meta em {
+  font-style: normal;
+  padding: 1px 7px;
+  border-radius: 8px;
+  background: var(--el-fill-color-light);
+}
+
+.verdict-meta em.is-live {
+  color: var(--el-color-danger);
+  background: var(--el-color-danger-light-9);
+}
+
+@media (max-width: 768px) {
+  .verdict-text { flex-basis: 100%; order: 3; }
+  .verdict-meta { margin-left: auto; }
+}
+
+/* 每张图一句话：这图在说什么、怎么用 */
+.cap {
+  margin: 10px 0 0;
+  padding-top: 8px;
+  border-top: 1px dashed var(--el-border-color-lighter);
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--el-text-color-secondary);
+}
+
 /* ── 市场温度与结构 ── */
 .alert-row {
   display: flex;
@@ -1011,6 +1088,19 @@ onActivated(() => {
 }
 
 /* 温度分位卡：一条分位条 + 中位刻度（50%） */
+.temp-headline {
+  margin: 2px 0 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.temp-headline .dist-note {
+  display: inline;
+  margin: 0 0 0 10px;
+  font-weight: 400;
+}
+
 .temp-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -1106,13 +1196,9 @@ onActivated(() => {
   color: var(--el-text-color-placeholder);
 }
 
-/* 宽度曲线 + 结构快照 */
-.struct-grid {
-  display: grid;
-  grid-template-columns: 1.55fr 1fr;
-  gap: 12px;
+/* 宽度曲线（整行） */
+.width-card {
   margin-bottom: 12px;
-  align-items: stretch;
 }
 
 .bw-chart {
@@ -1165,6 +1251,21 @@ onActivated(() => {
   text-anchor: middle;
 }
 
+.bw-ylabel {
+  font-size: 9.5px;
+  fill: var(--el-text-color-placeholder);
+}
+
+/* 曲线末端读数：直接在图上标明今天的两个宽度值 */
+.bw-end {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-anchor: end;
+}
+
+.bw-end--up { fill: var(--el-color-primary); }
+.bw-end--ma { fill: var(--el-text-color-secondary); }
+
 /* 结构快照 */
 .snap-row {
   display: grid;
@@ -1173,6 +1274,7 @@ onActivated(() => {
 }
 
 .snap-row--tight {
+  grid-template-columns: repeat(2, 1fr);
   margin-top: 12px;
 }
 
@@ -1191,15 +1293,6 @@ onActivated(() => {
   font-weight: 600;
   color: var(--el-text-color-primary);
   line-height: 1.4;
-}
-
-.snap-value.up { color: var(--app-up); }
-.snap-value.down { color: var(--app-down); }
-.snap-value.accent { color: var(--el-color-primary); }
-
-.snap-sub {
-  font-size: 11px;
-  color: var(--el-text-color-placeholder);
 }
 
 /* 风格轮动 + 成交额集中度 */
@@ -1787,55 +1880,10 @@ onActivated(() => {
 }
 
 /* ===== 市场看板（借鉴 tickflow Dashboard）===== */
-.score-badge {
-  font-size: 12px;
-  font-weight: 600;
-  padding: 2px 10px;
-  border-radius: 10px;
-  border: 1px solid;
-}
-
-.kpi-row {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-.kpi-cell {
-  background: var(--el-fill-color-blank);
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
-  padding: 12px 14px;
-}
-
-.kpi-label {
-  font-size: 12px;
-  color: var(--el-text-color-regular);
-  margin-bottom: 6px;
-}
-
-.kpi-value {
-  font-family: var(--app-font-mono);
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
-}
-
-.kpi-value .kpi-sep {
+.kpi-sep {
   color: var(--el-text-color-placeholder);
   margin: 0 3px;
   font-weight: 400;
-}
-
-.kpi-value.accent {
-  color: var(--el-color-primary);
-}
-
-.kpi-sub {
-  font-size: 11px;
-  color: var(--el-text-color-secondary);
-  margin-top: 4px;
 }
 
 .dash-main {
@@ -1971,10 +2019,27 @@ onActivated(() => {
 .lg-flat { color: var(--app-flat); }
 .lg-down { color: var(--app-down); }
 
+/* 分布图脚注：强弱股与平均涨跌（替代原 KPI 行） */
+.dist-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.dist-foot b {
+  font-family: var(--app-font-mono);
+  font-weight: 600;
+}
+
+.dist-foot b.up { color: var(--app-up); }
+.dist-foot b.down { color: var(--app-down); }
+
 @media (max-width: 1200px) {
-  .kpi-row { grid-template-columns: repeat(2, 1fr); }
   .temp-grid { grid-template-columns: repeat(2, 1fr); }
-  .struct-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 900px) {
@@ -1982,7 +2047,6 @@ onActivated(() => {
 }
 
 @media (max-width: 768px) {
-  .kpi-row { grid-template-columns: repeat(2, 1fr); }
   .dash-main { grid-template-columns: 1fr; }
   .snap-row { grid-template-columns: repeat(3, 1fr); gap: 8px; }
 }

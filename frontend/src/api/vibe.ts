@@ -172,6 +172,10 @@ export interface DashboardLimit {
   seal_rate: number | null
   max_boards: number
   tiers: { boards: number; count: number; plus?: boolean }[]
+  /** 涨跌分布两端口径：eastmoney_pool=东财封板池（与短线情绪一致）；threshold=涨跌幅阈值近似 */
+  source?: 'eastmoney_pool' | 'threshold'
+  zt_band?: number
+  dt_band?: number
 }
 
 export interface MarketRegime {
