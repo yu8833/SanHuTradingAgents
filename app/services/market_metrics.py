@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from app.services.cache_layer import cached
@@ -174,6 +174,8 @@ def _backfill_sync(days: int = HISTORY_DAYS) -> int:
             turn_map[str(r["_id"])] = round(_f(r["avg"]), 2)
 
     now = now_tz()
+    # 宽度趋势曲线的历史虚线：一次性算好近 N 日「站上 20 日线占比」
+    ma20_map = _ma20_series_sync(db)
     docs = []
     for r in rows[-HISTORY_DAYS:]:
         d = _normalize_date(r["_id"])
@@ -194,6 +196,7 @@ def _backfill_sync(days: int = HISTORY_DAYS) -> int:
             "amount": round(_f(r.get("amt")) / 1e8, 2),
             "avg_turnover": turn_map.get(d),
             "adl_delta": up - down,
+            "ma20_above": ma20_map.get(d),
             "finalized": True,
             "source": "daily_quotes",
             "updated_at": now,
@@ -341,14 +344,15 @@ def _live_point(db, pools: dict[str, Any] | None = None) -> dict[str, Any]:
 
 
 def _ma20_above_ratio(db, data_date: str, quotes: list[dict]) -> float | None:
-    """当前价站上 20 日均线的个股占比（需要最近 20 个交易日收盘）。"""
+    """当前价站上 20 日均线的个股占比（口径：20 日均值含当日价）。"""
     try:
         dates = [d for d in db["stock_daily_quotes"].distinct(
             "trade_date", {"period": "daily", "trade_date": {"$lte": data_date}}
         )]
         dates = sorted(_normalize_date(d) for d in dates if d)
-        dates = dates[-20:]
-        if len(dates) < 20:
+        # 当日实时价不在日线集合里，故只需前 19 个已完成交易日的收盘价
+        dates = dates[-19:]
+        if len(dates) < 19:
             return None
 
         rows = db["stock_daily_quotes"].find(
@@ -378,12 +382,11 @@ def _ma20_above_ratio(db, data_date: str, quotes: list[dict]) -> float | None:
         for q in quotes:
             sym = str(q.get("symbol") or "")
             closes = per_symbol.get(sym)
-            if not closes or len(closes) < 20:
-                continue
-            ma20 = sum(closes) / len(closes)
             cur = q.get("close")
-            if cur is None:
+            if not closes or len(closes) < 19 or cur is None:
                 continue
+            # 20 日均线 = (前 19 日收盘和 + 当日价) / 20，与历史曲线同一口径
+            ma20 = (sum(closes) + _f(cur)) / 20
             valid += 1
             if _f(cur) > ma20:
                 above += 1
@@ -391,6 +394,95 @@ def _ma20_above_ratio(db, data_date: str, quotes: list[dict]) -> float | None:
     except Exception as e:
         logger.warning(f"📊 [metrics] MA20 宽度计算失败（忽略）: {e}")
         return None
+
+
+def _ma20_series_sync(db, days: int = CHART_DAYS) -> dict[str, float]:
+    """近 N 个交易日「收盘价站上 20 日均线」的个股占比（%）。
+
+    宽度趋势图需要历史点，而盯盘用的 _ma20_above_ratio 只能算「今天」。
+    这里一次性取窗口内（N+19 个交易日）的收盘价，按股票做 20 日滚动均值，
+    逐日统计占比，回填到历史基线里供曲线使用。
+    """
+    try:
+        latest = db["stock_daily_quotes"].find_one(
+            {"period": "daily", "trade_date": {"$exists": True}},
+            {"trade_date": 1}, sort=[("trade_date", -1)],
+        )
+        if not latest:
+            return {}
+        end = _normalize_date(latest.get("trade_date"))
+        # 用「结束日 − (N+19) 个交易日的宽松自然日下界」，避免依赖交易日历
+        start_dt = datetime.strptime(end, "%Y-%m-%d") - timedelta(days=(days + 19) * 2 + 20)
+        start = start_dt.strftime("%Y-%m-%d")
+
+        dates = sorted(d for d in db["stock_daily_quotes"].distinct(
+            "trade_date", {"period": "daily", "trade_date": {"$gte": start, "$lte": end}}
+        ) if d)
+        dates = dates[-(days + 19):]
+        if len(dates) < 20:
+            return {}
+
+        pipeline = [
+            {"$match": {"period": "daily", "trade_date": {"$in": dates}, "close": {"$ne": None}}},
+            {"$addFields": {"prio": {"$switch": {
+                "branches": [
+                    {"case": {"$eq": ["$data_source", "tushare"]}, "then": 0},
+                    {"case": {"$eq": ["$data_source", "baostock"]}, "then": 1},
+                    {"case": {"$eq": ["$data_source", "akshare"]}, "then": 2},
+                ],
+                "default": 3,
+            }}}},
+            # 同源重复：(股票, 日期) 取优先级最高的那条
+            {"$sort": {"symbol": 1, "trade_date": 1, "prio": 1}},
+            {"$group": {
+                "_id": {"s": "$symbol", "d": "$trade_date"},
+                "close": {"$first": "$close"},
+            }},
+            {"$sort": {"_id.s": 1, "_id.d": 1}},
+        ]
+        rows = db["stock_daily_quotes"].aggregate(pipeline, allowDiskUse=True)
+
+        above: dict[str, int] = {}
+        valid: dict[str, int] = {}
+
+        def _flush(sym: str, seq: list[tuple[str, float]]) -> None:
+            # seq 已按日期升序；第 i 天与「含当天的 20 日均线」比较
+            if len(seq) < 20:
+                return
+            window_sum = 0.0
+            for i, (d, close) in enumerate(seq):
+                window_sum += close
+                if i >= 20:
+                    window_sum -= seq[i - 20][1]
+                if i < 19:
+                    continue
+                ma20 = window_sum / 20
+                valid[d] = valid.get(d, 0) + 1
+                if close > ma20:
+                    above[d] = above.get(d, 0) + 1
+
+        cur_sym, cur_seq = "", []
+        for r in rows:
+            sym = str((r.get("_id") or {}).get("s") or "")
+            d = _normalize_date((r.get("_id") or {}).get("d"))
+            close = r.get("close")
+            if not sym or not d or close is None:
+                continue
+            if sym != cur_sym:
+                if cur_sym:
+                    _flush(cur_sym, cur_seq)
+                cur_sym, cur_seq = sym, []
+            cur_seq.append((d, _f(close)))
+        if cur_sym:
+            _flush(cur_sym, cur_seq)
+
+        return {
+            d: round(above.get(d, 0) / n * 100, 2)
+            for d, n in valid.items() if n > 0
+        }
+    except Exception as e:
+        logger.warning(f"📊 [metrics] MA20 历史序列计算失败（忽略）: {e}")
+        return {}
 
 
 def _style_buckets(db, data_date: str, pcts: dict[str, float]) -> dict[str, Any] | None:

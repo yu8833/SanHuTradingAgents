@@ -1284,7 +1284,7 @@ onActivated(() => {
 }
 
 .ro--up b { color: var(--el-color-primary); }
-.ro--ma b { color: var(--el-text-color-primary); }
+.ro--ma b { color: var(--el-color-warning); }
 .ro--med { color: var(--el-text-color-placeholder); }
 
 .bw-plot {
@@ -1346,11 +1346,11 @@ onActivated(() => {
 }
 
 .bw-ma {
-  stroke: var(--el-text-color-secondary);
-  stroke-width: 1.4;
-  stroke-dasharray: 4 3;
+  stroke: var(--el-color-warning);
+  stroke-width: 1.6;
+  stroke-dasharray: 5 3;
   fill: none;
-  opacity: 0.9;
+  opacity: 0.95;
 }
 
 /* 今日竖线，标出曲线末端 */
@@ -1432,7 +1432,7 @@ onActivated(() => {
 
 .bw-key i.k-ma {
   height: 0;
-  border-top: 1.5px dashed var(--el-text-color-secondary);
+  border-top: 1.5px dashed var(--el-color-warning);
   background: none;
 }
 
