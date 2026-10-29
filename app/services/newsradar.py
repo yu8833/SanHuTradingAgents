@@ -38,6 +38,14 @@ def _local(tag: str) -> str:
     return tag.split("}")[-1]
 
 
+_TZ_MARK = re.compile(r"(?:Z|[+-]\d{2}:?\d{2}|GMT|UTC|UT)$", re.IGNORECASE)
+
+
+def _has_tz(s: str) -> bool:
+    """判断时间字符串是否带时区标记（部分中文源只给「年-月-日 时:分:秒」）。"""
+    return bool(_TZ_MARK.search((s or "").strip()))
+
+
 def _parse_dt(s: str):
     if not s:
         return None
@@ -88,6 +96,14 @@ def _fetch_source(src: dict, per: int, cutoff, redline: list[str]):
                 continue
             dt = _parse_dt(rawtime)
             if dt is not None:
+                now = datetime.now(timezone.utc)
+                # 无时区标记的时间默认按 UTC 解读；若因此落到未来（如国际能源网用北京时间
+                # 却不带 +08:00，会显示成「明天的资讯」），回退 8 小时按北京时间解读。
+                if dt > now + timedelta(minutes=10) and not _has_tz(rawtime):
+                    dt = dt - timedelta(hours=8)
+                # 校正后仍处于未来的条目（源站预发布）直接丢弃，避免出现未来日期。
+                if dt > now + timedelta(minutes=10):
+                    continue
                 if cutoff and dt < cutoff:
                     continue
                 d["time"] = dt.astimezone(BEIJING).strftime("%m-%d %H:%M")
