@@ -253,6 +253,7 @@ def _live_point(db, pools: dict[str, Any] | None = None) -> dict[str, Any]:
     dt_codes = set(pools.get("dt") or []) if use_pool else set()
     n = len(quotes)
     up = down = zt = dt = 0
+    zt_th = dt_th = 0
     total_amt = 0.0
     turn_sum = 0.0
     turn_cnt = 0
@@ -273,18 +274,21 @@ def _live_point(db, pools: dict[str, Any] | None = None) -> dict[str, Any]:
             up += 1
         elif pct < 0:
             down += 1
+        # 阈值口径同时保留：历史基线（market_metrics_daily）就是按涨跌幅阈值算的，
+        # 分位必须与同口径的数比，否则封板池偏少的家数会被误判成「历史极低」
+        lim = _limit_pct(sym)
+        if pct >= lim - 0.2:
+            zt_th += 1
+        elif pct <= -(lim - 0.2):
+            dt_th += 1
         if use_pool:
-            # 封板池为唯一口径：未入池个股不计入涨跌停（即便涨幅接近限制）
+            # 展示用口径：封板池为唯一口径，未入池个股不计入涨跌停
             if sym in zt_codes:
                 zt += 1
             elif sym in dt_codes:
                 dt += 1
         else:
-            lim = _limit_pct(sym)
-            if pct >= lim - 0.2:
-                zt += 1
-            elif pct <= -(lim - 0.2):
-                dt += 1
+            zt, dt = zt_th, dt_th
         tr = q.get("turnover_rate")
         if tr is not None:
             turn_sum += _f(tr)
@@ -305,6 +309,8 @@ def _live_point(db, pools: dict[str, Any] | None = None) -> dict[str, Any]:
         "up_pct": round(up / n * 100, 2) if n else 0.0,
         "zt": zt,
         "dt": dt,
+        "zt_th": zt_th,
+        "dt_th": dt_th,
         "amount": round(total_amt / 1e8, 2),
         "avg_turnover": round(turn_sum / turn_cnt, 2) if turn_cnt else None,
         "adl_delta": up - down,
@@ -448,7 +454,8 @@ def _style_buckets(db, data_date: str, pcts: dict[str, float]) -> dict[str, Any]
 # ---------------------------------------------------------------------------
 
 _TEMP_DEFS = [
-    ("zt", "涨停家数", "家", True, "涨停家数越多，短线做多情绪越强（东财封板池口径；历史分位以涨跌幅阈值近似）"),
+    ("zt", "涨停家数", "家", True, "实际封住的涨停家数，越多短线做多情绪越强（东财涨停池口径；历史分位按涨跌幅阈值近似）"),
+    ("dt", "跌停家数", "家", False, "实际封住的跌停家数，越多抛压越重、恐慌越浓（东财跌停池口径）"),
     ("amount", "成交额", "亿", True, "全市场成交额，反映资金参与度"),
     ("avg_turnover", "平均换手", "%", True, "个股平均换手率，反映筹码活跃度"),
     ("up_pct", "上涨率", "%", True, "上涨家数占比，反映市场广度"),
@@ -468,7 +475,9 @@ def _temperature(history: list[dict], live: dict) -> list[dict]:
         if cur is None:
             continue
         cur_f = _f(cur)
-        rank = _rank(vals, cur_f)
+        # 涨跌停家数展示用封板池口径，但历史基线是阈值口径，分位改用同口径值计算
+        rank_val = _f(live.get(f"{key}_th")) if live.get(f"{key}_th") is not None else cur_f
+        rank = _rank(vals, rank_val)
         med = _median(vals)
         out.append({
             "key": key,
@@ -571,11 +580,30 @@ async def _build_metrics() -> dict[str, Any]:
     temp = _temperature(history, live) if live else []
     series = _breadth_series(history, live) if live else []
 
+    # 交易状态：只有真实处于盘中时段才叫「实时」；收盘后当日数据已不再变化，
+    # 显示「已收盘」，周末/节假日显示「休市」
+    from app.utils.trading_time import get_trading_status, is_trading_day
+
+    status = get_trading_status()
+    live_session = status in ("morning_session", "noon_break", "afternoon_session")
+    status_label = {
+        "pre_market": "盘前",
+        "morning_session": "盘中",
+        "noon_break": "午间休市",
+        "afternoon_session": "盘中",
+        "after_market": "已收盘",
+        # closed 既含「交易日 15:30 后」也含「非交易日」，需按是否交易日区分文案
+        "closed": "已收盘" if is_trading_day(now_tz().date()) else "休市",
+    }.get(status, "已收盘")
+
     return {
         "ready": ready and count >= MIN_HISTORY_ROWS,
         "as_of": live.get("date") or "",
-        # 实时快照（盘中/刚收盘）为 True；19:50 固化任务写入 finalized=True 后转 False
-        "is_live": not bool(live.get("finalized")),
+        # 实时：仅盘中时段为 True；收盘后当日数据已定，标记 finalized 亦为 False
+        "is_live": live_session,
+        "status": status,
+        "status_label": status_label,
+        "finalized": bool(live.get("finalized")),
         "updated": now_tz().isoformat(),
         "temperature": temp,
         "breadth": {
@@ -621,6 +649,9 @@ async def finalize_market_metrics() -> dict[str, Any]:
         return {"ok": False, "reason": "no_quote"}
 
     doc = dict(point)
+    # 历史基线一律用阈值口径，固化时写入同口径值，保证后续分位可比
+    doc["zt"] = point.get("zt_th", point.get("zt"))
+    doc["dt"] = point.get("dt_th", point.get("dt"))
     doc["finalized"] = True
     doc["updated_at"] = now_tz()
 

@@ -26,7 +26,7 @@
       <span class="verdict-tag" :style="scoreStyle">{{ dashboard.emotion.label }} · {{ dashboard.emotion.score }} 分</span>
       <p class="verdict-text">{{ verdictText }}</p>
       <span class="verdict-meta">
-        <em v-if="metrics" :class="{ 'is-live': metrics.is_live }">{{ metrics.is_live ? '盘中实时' : '收盘定稿' }}</em>
+        <em v-if="metrics" :class="{ 'is-live': metrics.is_live }">{{ metrics.status_label || (metrics.is_live ? '盘中' : '已收盘') }}</em>
         <span v-if="dataAsOf">数据 {{ dataAsOf }}</span>
       </span>
     </section>
@@ -235,7 +235,7 @@
       <div class="block-head">
         <span class="block-title"><el-icon><DataAnalysis /></el-icon> 市场温度与资金结构</span>
         <span class="block-hint">
-          分位基于近一年交易日 · {{ metrics.is_live ? '盘中实时，收盘后定稿' : '收盘定稿' }}
+          分位基于近一年交易日 · {{ metrics.status_label || '已收盘' }}{{ metrics.is_live ? '（数据仍在跳动）' : '（当日数据已定）' }}
           <em v-if="metrics.as_of" class="data-time">数据 {{ metrics.as_of }} · 更新 {{ shortTime(metrics.updated) }}</em>
         </span>
       </div>
@@ -265,7 +265,10 @@
             <i class="temp-median" title="近一年中位数 = 50% 分位" />
           </div>
           <div class="temp-foot">
-            <span v-if="t.rank != null">近一年 <b :class="rankTone(t)">{{ t.rank }}%</b> 分位</span>
+            <span v-if="t.rank != null">
+              近一年 <b :class="rankTone(t)">{{ t.rank }}%</b> 分位
+              <em v-if="!t.higher_is_hot" class="temp-rev">越高越冷</em>
+            </span>
             <span v-else class="temp-pending">历史基线构建中…</span>
             <span v-if="t.median != null" class="temp-med">中位 {{ t.median }}{{ t.unit }}</span>
           </div>
@@ -274,73 +277,102 @@
 
       <!-- 市场宽度：60 日趋势，回答「涨跌是在扩散还是收敛」 -->
       <el-card shadow="never" class="dash-card width-card">
-        <div class="card-title">
-          市场宽度趋势（近 {{ breadthSeries.length }} 个交易日）
-          <span class="dist-note">
-            实线 = 当日上涨个股占比<template v-if="breadthChart && breadthChart.maSegs.length"> · 虚线 = 站上 20 日均线个股占比</template> · 50% = 多空分界
-          </span>
+        <div class="card-title card-title--flex">
+          市场宽度趋势
+          <span class="dist-note">近 {{ breadthSeries.length }} 个交易日</span>
+          <div v-if="bwChart" class="bw-readout">
+            <span class="ro ro--up">今日上涨率 <b>{{ bwChart.today.up_pct }}%</b></span>
+            <span v-if="bwChart.today.ma20_above != null" class="ro ro--ma">
+              站上 20 日线 <b>{{ bwChart.today.ma20_above }}%</b>
+            </span>
+            <span class="ro ro--med">一年中位 {{ bwChart.today.median }}%</span>
+          </div>
         </div>
-        <div v-if="breadthChart" class="bw-chart">
-          <svg :viewBox="`0 0 ${breadthChart.w} ${breadthChart.h}`" class="bw-svg" preserveAspectRatio="none">
-            <line
-              v-for="g in breadthChart.grid"
-              :key="g.v"
-              :x1="breadthChart.padL"
-              :x2="breadthChart.w - breadthChart.padR"
-              :y1="g.y"
-              :y2="g.y"
-              class="bw-grid"
-              :class="{ 'bw-grid--mid': g.v === 50 }"
+        <div v-if="bwChart" class="bw-plot">
+          <div class="bw-yaxis">
+            <span v-for="t in bwChart.yTicks" :key="t.v" :style="{ bottom: t.v + '%' }">{{ t.v }}%</span>
+          </div>
+          <div class="bw-canvas">
+            <div
+              v-for="t in bwChart.yTicks"
+              :key="'g' + t.v"
+              class="bw-gline"
+              :class="{ 'is-mid': t.v === 50 }"
+              :style="{ bottom: t.v + '%' }"
             />
-            <polygon :points="breadthChart.area" class="bw-area" />
-            <polyline :points="breadthChart.upLine" class="bw-up" />
-            <polyline v-for="(seg, i) in breadthChart.maSegs" :key="'ma' + i" :points="seg" class="bw-ma" />
-            <circle v-for="p in breadthChart.dots" :key="p.k" :cx="p.x" :cy="p.y" :r="2.2" class="bw-dot">
-              <title>{{ p.tip }}</title>
-            </circle>
-            <text v-for="l in breadthChart.yLabels" :key="'y' + l.v" :x="2" :y="l.y - 2" class="bw-ylabel">{{ l.v }}%</text>
-            <text
-              v-for="e in breadthChart.endLabels"
-              :key="e.k"
-              :x="e.x"
-              :y="e.y"
-              :class="e.cls"
-            >{{ e.text }}</text>
-            <text v-for="l in breadthChart.xLabels" :key="l.k" :x="l.x" :y="breadthChart.h - 4" class="bw-xlabel">{{ l.text }}</text>
-          </svg>
+            <svg class="bw-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
+              <defs>
+                <linearGradient :id="'bwFill'" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="var(--el-color-primary)" stop-opacity="0.28" />
+                  <stop offset="100%" stop-color="var(--el-color-primary)" stop-opacity="0.02" />
+                </linearGradient>
+              </defs>
+              <polygon :points="bwChart.area" :fill="'url(#bwFill)'" />
+              <polyline :points="bwChart.upLine" class="bw-up" vector-effect="non-scaling-stroke" />
+              <polyline
+                v-for="(seg, i) in bwChart.maSegs"
+                :key="'ma' + i"
+                :points="seg"
+                class="bw-ma"
+                vector-effect="non-scaling-stroke"
+              />
+            </svg>
+            <!-- 今日竖线：标示曲线末端对应的交易日 -->
+            <div class="bw-today" />
+            <div
+              v-for="d in bwChart.dots"
+              :key="d.k"
+              class="bw-pt"
+              :style="{ left: d.xp + '%', bottom: d.yp + '%' }"
+            >
+              <span class="bw-tip">{{ d.tip }}</span>
+            </div>
+            <div
+              v-for="l in bwChart.xTicks"
+              :key="l.k"
+              class="bw-xaxis"
+              :style="{ left: l.xp + '%', transform: l.align }"
+            >{{ l.text }}</div>
+          </div>
         </div>
         <div v-else class="rank-empty">暂无足够交易日数据</div>
+        <div class="bw-legend">
+          <span class="bw-key"><i class="k-up" />上涨个股占比</span>
+          <span class="bw-key"><i class="k-ma" />站上 20 日线占比</span>
+          <span class="bw-key"><i class="k-mid" />50% 多空分界</span>
+        </div>
         <p class="cap">
-          上涨率高于 50% = 赚钱效应扩散到多数个股；连续多日低于 30% 说明下跌在扩散、指数再涨也只是少数权重拉动。
-          <template v-if="metrics.breadth.ma20_above != null">
-            今日 <b>{{ metrics.breadth.ma20_above }}%</b> 个股站上 20 日线，代表中期趋势的个股比例。
-          </template>
+          上涨率高于 50% = 赚钱效应扩散到多数个股；连续多日低于 30% 说明下跌在扩散，指数再涨也可能只是少数权重在拉。
+          站上 20 日线的比例代表中期趋势还在的个股有多少。
         </p>
       </el-card>
 
       <div class="mini-grid">
-        <!-- 风格轮动：流通市值三分位分组平均涨跌幅 -->
+        <!-- 市值风格：全市场按流通市值三等分，比较各组平均涨跌幅 -->
         <el-card v-if="metrics.style" shadow="never" class="dash-card">
           <div class="card-title">
-            风格轮动
-            <span class="dist-note">按流通市值三分位分组 · 平均涨跌幅</span>
+            市值风格：钱偏大还是偏小
+            <span class="dist-note">全市场按流通市值三等分 · 组内平均涨跌幅</span>
+          </div>
+          <div v-if="styleVerdict" class="style-verdict" :class="`tone-${styleVerdict.tone}`">
+            <b>{{ styleVerdict.label }}</b>
+            <span>{{ styleVerdict.detail }}</span>
           </div>
           <div class="style-bars">
             <div v-for="b in metrics.style.buckets" :key="b.key" class="style-row">
               <span class="style-name">{{ b.label }}</span>
+              <span class="style-count">{{ b.count }} 家</span>
               <div class="style-track">
                 <i class="style-axis" />
                 <i class="style-fill" :class="b.pct >= 0 ? 'is-up' : 'is-down'" :style="styleBar(b.pct)" />
               </div>
               <span class="style-val" :class="b.pct >= 0 ? 'up' : 'down'">{{ fmtPct(b.pct) }}</span>
-              <span class="style-share">{{ b.share }}%</span>
             </div>
           </div>
-          <div class="card-foot">
-            大盘 − 小盘：<b :class="metrics.style.spread >= 0 ? 'up' : 'down'">{{ fmtPct(metrics.style.spread) }}</b>
-            <span class="foot-note">{{ metrics.style.spread >= 0 ? '资金偏大盘' : '资金偏小盘' }}</span>
-          </div>
-          <p class="cap">大市值涨得多 = 资金偏防守、抱团权重；小市值涨得多 = 资金偏进攻、题材活跃。</p>
+          <p class="cap">
+            三组是把同一批股票按流通市值从大到小排成三段（各约三分之一），比较各组今天平均涨跌幅。
+            谁跌得少／涨得多，就说明资金更愿意待在那一边；横线是 0%，条在中线左侧为跌。
+          </p>
         </el-card>
 
         <!-- 成交额集中度：头部吸金占比 + HHI -->
@@ -743,75 +775,92 @@ const breadthSeries = computed(() => metrics.value?.breadth?.series || [])
 // 分位配色：热度指标高分为热（红），低分为冷（绿），中间中性
 const rankTone = (t: MarketTemperatureItem) => {
   if (t.rank == null) return 'is-muted'
-  return t.rank >= 75 ? 'is-hot' : t.rank <= 25 ? 'is-cold' : 'is-neutral'
+  // 反向指标（跌停家数）：分位越高说明越冷，配色需翻转，避免「高跌停=红色热」的误读
+  const hot = t.higher_is_hot ? t.rank : 100 - t.rank
+  return hot >= 75 ? 'is-hot' : hot <= 25 ? 'is-cold' : 'is-neutral'
 }
 
-// 宽度曲线：上涨率（实线+面积）与站上20日线占比（虚线）同为 0-100%，共用一根纵轴
-const breadthChart = computed(() => {
+// 宽度曲线：上涨率（实线+渐变面积）与站上20日线占比（虚线）同为 0-100%，共用一根纵轴。
+// SVG 用 0-100 归一坐标（preserveAspectRatio="none"）保证任意宽度都能铺满；
+// 文字/圆点改为 HTML 定位，避免非等比缩放下文字被横向拉扁。
+const bwChart = computed(() => {
   const pts = breadthSeries.value
   if (pts.length < 3) return null
-  const w = 640
-  const h = 170
-  const padL = 12
-  const padR = 12
-  const padT = 10
-  const padB = 20
-  const iw = w - padL - padR
-  const ih = h - padT - padB
-  const x = (i: number) => padL + (i / (pts.length - 1)) * iw
-  const y = (v: number) => padT + ih - (Math.max(0, Math.min(100, v)) / 100) * ih
+  const n = pts.length
+  const xp = (i: number) => (i / (n - 1)) * 100
+  // SVG 的 y 轴向下为正，故取 100 - 值；HTML 定位用 bottom = 值
+  const yp = (v: number) => 100 - Math.max(0, Math.min(100, v))
 
-  const upLine = pts.map((p, i) => `${x(i).toFixed(1)},${y(p.up_pct).toFixed(1)}`).join(' ')
-  const area = `${padL},${padT + ih} ${upLine} ${w - padR},${padT + ih}`
+  const upLine = pts.map((p, i) => `${xp(i).toFixed(2)},${yp(p.up_pct).toFixed(2)}`).join(' ')
+  const area = `0,100 ${upLine} 100,100`
 
-  // 虚线遇到缺失值断开，避免把缺口连成一条假趋势
+  // 虚线遇缺失值断开，避免把缺口连成一条假趋势
   const maSegs: string[] = []
   let cur: string[] = []
   pts.forEach((p, i) => {
     if (p.ma20_above == null) {
       if (cur.length) { maSegs.push(cur.join(' ')); cur = [] }
     } else {
-      cur.push(`${x(i).toFixed(1)},${y(p.ma20_above).toFixed(1)}`)
+      cur.push(`${xp(i).toFixed(2)},${yp(p.ma20_above).toFixed(2)}`)
     }
   })
   if (cur.length) maSegs.push(cur.join(' '))
 
-  const grid = [0, 25, 50, 75, 100].map(v => ({ v, y: y(v) }))
   const dots = pts
     .map((p, i) => ({ p, i }))
-    .filter(({ i }) => i % 5 === 0 || i === pts.length - 1)
+    .filter(({ i }) => i % 6 === 0 || i === n - 1)
     .map(({ p, i }) => ({
       k: `${p.date}-${i}`,
-      x: x(i),
-      y: y(p.up_pct),
+      xp: xp(i),
+      yp: Math.max(0, Math.min(100, p.up_pct)),
+      ma: p.ma20_above != null,
       tip: `${p.date} · 上涨率 ${p.up_pct}%${p.ma20_above == null ? '' : ` · 站上20日线 ${p.ma20_above}%`}`,
     }))
 
-  const xLabels = [0, Math.floor(pts.length / 2), pts.length - 1].map(i => ({
-    k: `lx-${i}`,
-    x: x(i),
+  const xTicks = [0, Math.floor(n / 2), n - 1].map((i, idx) => ({
+    k: `x-${i}`,
+    xp: xp(i),
     text: String(pts[i].date || '').slice(5),
+    align: idx === 0 ? 'translateX(0)' : idx === 2 ? 'translateX(-100%)' : 'translateX(-50%)',
   }))
 
-  const yLabels = [0, 25, 50, 75, 100].map(v => ({ v, y: y(v) }))
+  // 一年中位上涨率：作为「常态水位」参照，让今天的 13.9% 一眼看出偏离多少
+  const sorted = pts.map(p => p.up_pct).sort((a, b) => a - b)
+  const median = sorted[Math.floor(sorted.length / 2)]
 
-  // 末端读数：把「今天宽度多少」直接标在曲线末端，替代一块只放数字的小卡片
-  const last = pts.length - 1
-  const endLabels: { k: string; x: number; y: number; text: string; cls: string }[] = []
-  if (pts[last]) {
-    endLabels.push({
-      k: 'up', x: x(last) - 2, y: y(pts[last].up_pct) - 6,
-      text: `上涨率 ${pts[last].up_pct}%`, cls: 'bw-end bw-end--up',
-    })
-    if (pts[last].ma20_above != null) {
-      endLabels.push({
-        k: 'ma', x: x(last) - 2, y: y(pts[last].ma20_above as number) + 14,
-        text: `站上20日线 ${pts[last].ma20_above}%`, cls: 'bw-end bw-end--ma',
-      })
-    }
+  return {
+    upLine,
+    area,
+    maSegs,
+    dots,
+    xTicks,
+    yTicks: [0, 25, 50, 75, 100].map(v => ({ v })),
+    today: { ...pts[n - 1], median: Math.round(median * 10) / 10 },
   }
+})
 
-  return { w, h, padL, padR, upLine, area, maSegs, grid, dots, xLabels, yLabels, endLabels }
+// 市值风格结论：先说「钱偏大还是偏小」，再看三根条验证
+const styleVerdict = computed(() => {
+  const s = metrics.value?.style
+  if (!s?.buckets?.length) return null
+  const spread = s.spread
+  const allDown = s.buckets.every(b => b.pct < 0)
+  const allUp = s.buckets.every(b => b.pct > 0)
+  const big = spread >= 0
+  const label = big ? '资金相对偏大盘' : '资金相对偏小盘'
+  let detail = big
+    ? '大盘组表现最好，权重更抗跌、更受资金照顾'
+    : '小盘组表现最好，题材更活跃、弹性更大'
+  if (allDown) {
+    detail = big
+      ? `三组都在跌，但越小盘跌得越多（差 ${Math.abs(spread).toFixed(2)} 个百分点），抛压集中在小盘`
+      : `三组都在跌，但越小盘跌得越少（差 ${Math.abs(spread).toFixed(2)} 个百分点），小盘相对抗跌`
+  } else if (allUp) {
+    detail = big
+      ? `三组都在涨，大盘涨得更多（多 ${Math.abs(spread).toFixed(2)} 个百分点），资金抱团权重`
+      : `三组都在涨，小盘涨得更多（多 ${Math.abs(spread).toFixed(2)} 个百分点），资金更愿意做题材`
+  }
+  return { label, detail, tone: big ? 'defense' : 'offense' }
 })
 
 const concTopW = computed(() => Math.min(100, Math.max(0, metrics.value?.concentration?.top10_share || 0)))
@@ -1103,8 +1152,8 @@ onActivated(() => {
 
 .temp-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 10px;
   margin-bottom: 12px;
 }
 
@@ -1192,6 +1241,17 @@ onActivated(() => {
   color: var(--el-text-color-placeholder);
 }
 
+/* 反向指标标注（跌停家数：分位越高越冷） */
+.temp-rev {
+  font-style: normal;
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 10px;
+  color: var(--el-text-color-placeholder);
+  background: var(--el-fill-color-light);
+}
+
 .temp-pending {
   color: var(--el-text-color-placeholder);
 }
@@ -1201,70 +1261,187 @@ onActivated(() => {
   margin-bottom: 12px;
 }
 
-.bw-chart {
-  margin-top: 2px;
+/* 宽度趋势图：SVG 只画线面，刻度/圆点/标签用 HTML 定位，任意宽度都不变形 */
+.bw-readout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.ro {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 400;
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-secondary);
+}
+
+.ro b {
+  font-family: var(--app-font-mono);
+  font-weight: 600;
+}
+
+.ro--up b { color: var(--el-color-primary); }
+.ro--ma b { color: var(--el-text-color-primary); }
+.ro--med { color: var(--el-text-color-placeholder); }
+
+.bw-plot {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.bw-yaxis {
+  position: relative;
+  flex: 0 0 32px;
+  height: 176px;
+}
+
+.bw-yaxis span {
+  position: absolute;
+  right: 0;
+  transform: translateY(50%);
+  font-size: 9.5px;
+  line-height: 1;
+  color: var(--el-text-color-placeholder);
+}
+
+.bw-canvas {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 176px;
+  margin-bottom: 16px;
+}
+
+.bw-gline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--el-border-color-lighter);
+}
+
+.bw-gline.is-mid {
+  background: var(--el-border-color);
+  background-image: linear-gradient(90deg, var(--el-border-color) 50%, transparent 50%);
+  background-size: 8px 1px;
 }
 
 .bw-svg {
-  display: block;
+  position: absolute;
+  inset: 0;
   width: 100%;
-  height: 170px;
-}
-
-.bw-grid {
-  stroke: var(--el-border-color-lighter);
-  stroke-width: 1;
-}
-
-.bw-grid--mid {
-  stroke: var(--el-border-color);
-  stroke-dasharray: 4 4;
-}
-
-.bw-area {
-  fill: var(--el-color-primary-light-9);
-  opacity: 0.55;
+  height: 100%;
+  display: block;
 }
 
 .bw-up {
   stroke: var(--el-color-primary);
-  stroke-width: 1.8;
+  stroke-width: 2;
+  stroke-linejoin: round;
   fill: none;
 }
 
 .bw-ma {
   stroke: var(--el-text-color-secondary);
   stroke-width: 1.4;
-  stroke-dasharray: 5 4;
+  stroke-dasharray: 4 3;
   fill: none;
-  opacity: 0.85;
+  opacity: 0.9;
 }
 
-.bw-dot {
-  fill: var(--el-color-primary);
-  opacity: 0.85;
+/* 今日竖线，标出曲线末端 */
+.bw-today {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 0;
+  border-left: 1px dashed var(--el-color-primary-light-5);
 }
 
-.bw-xlabel {
+.bw-pt {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--el-color-primary);
+  transform: translate(-50%, 50%);
+  box-shadow: 0 0 0 1.5px var(--el-bg-color);
+  z-index: 2;
+}
+
+.bw-tip {
+  position: absolute;
+  left: 50%;
+  bottom: 11px;
+  transform: translateX(-50%);
+  padding: 3px 7px;
+  border-radius: 5px;
+  background: var(--el-bg-color-overlay);
+  border: 1px solid var(--el-border-color-light);
+  box-shadow: var(--el-box-shadow-light);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--el-text-color-primary);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s;
+  z-index: 4;
+}
+
+.bw-pt:hover .bw-tip {
+  opacity: 1;
+}
+
+.bw-xaxis {
+  position: absolute;
+  bottom: -16px;
   font-size: 10px;
-  fill: var(--el-text-color-placeholder);
-  text-anchor: middle;
+  line-height: 1;
+  color: var(--el-text-color-placeholder);
+  white-space: nowrap;
 }
 
-.bw-ylabel {
-  font-size: 9.5px;
-  fill: var(--el-text-color-placeholder);
+.bw-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
 }
 
-/* 曲线末端读数：直接在图上标明今天的两个宽度值 */
-.bw-end {
-  font-size: 10.5px;
-  font-weight: 600;
-  text-anchor: end;
+.bw-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 
-.bw-end--up { fill: var(--el-color-primary); }
-.bw-end--ma { fill: var(--el-text-color-secondary); }
+.bw-key i {
+  display: inline-block;
+  width: 14px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--el-color-primary);
+}
+
+.bw-key i.k-ma {
+  height: 0;
+  border-top: 1.5px dashed var(--el-text-color-secondary);
+  background: none;
+}
+
+.bw-key i.k-mid {
+  height: 0;
+  border-top: 1px dashed var(--el-border-color);
+  background: none;
+  width: 10px;
+}
 
 /* 结构快照 */
 .snap-row {
@@ -1312,7 +1489,7 @@ onActivated(() => {
 
 .style-row {
   display: grid;
-  grid-template-columns: 34px 1fr 64px 42px;
+  grid-template-columns: 34px 48px 1fr 66px;
   align-items: center;
   gap: 8px;
 }
@@ -1320,6 +1497,43 @@ onActivated(() => {
 .style-name {
   font-size: 12px;
   color: var(--el-text-color-primary);
+}
+
+.style-count {
+  font-size: 10.5px;
+  color: var(--el-text-color-placeholder);
+}
+
+/* 市值风格结论条：先给「钱偏哪边」，条形图只作佐证 */
+.style-verdict {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin: 2px 0 12px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.style-verdict b {
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.style-verdict span {
+  color: var(--el-text-color-regular);
+}
+
+.style-verdict.tone-defense {
+  background: var(--el-fill-color-light);
+  border-left: 3px solid var(--el-color-info);
+}
+
+.style-verdict.tone-offense {
+  background: var(--el-color-danger-light-9);
+  border-left: 3px solid var(--el-color-danger);
 }
 
 .style-track {
@@ -1359,27 +1573,6 @@ onActivated(() => {
   font-family: var(--app-font-mono);
   font-size: 11.5px;
   text-align: right;
-}
-
-.style-share {
-  font-size: 11px;
-  color: var(--el-text-color-placeholder);
-  text-align: right;
-}
-
-.card-foot {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--el-text-color-regular);
-  border-top: 1px dashed var(--el-border-color-lighter);
-  padding-top: 8px;
-}
-
-.foot-note {
-  color: var(--el-text-color-placeholder);
-  font-size: 11px;
 }
 
 /* 集中度条 */
@@ -1907,6 +2100,14 @@ onActivated(() => {
   margin-bottom: 10px;
 }
 
+/* 标题行内并排放尾部读数（宽度趋势卡片用） */
+.card-title--flex {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
 /* 雷达图 */
 .radar-wrap {
   display: flex;
@@ -2039,7 +2240,7 @@ onActivated(() => {
 .dist-foot b.down { color: var(--app-down); }
 
 @media (max-width: 1200px) {
-  .temp-grid { grid-template-columns: repeat(2, 1fr); }
+  .temp-grid { grid-template-columns: repeat(3, 1fr); }
 }
 
 @media (max-width: 900px) {
@@ -2048,6 +2249,9 @@ onActivated(() => {
 
 @media (max-width: 768px) {
   .dash-main { grid-template-columns: 1fr; }
+  .temp-grid { grid-template-columns: repeat(2, 1fr); }
+  .bw-canvas { height: 140px; }
+  .bw-yaxis { height: 140px; }
   .snap-row { grid-template-columns: repeat(3, 1fr); gap: 8px; }
 }
 </style>

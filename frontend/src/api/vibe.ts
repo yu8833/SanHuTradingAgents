@@ -316,6 +316,11 @@ export interface MarketMetrics {
   ready: boolean
   as_of: string
   is_live: boolean
+  /** 交易时段状态：pre_market / morning_session / noon_break / afternoon_session / after_market / closed */
+  status?: string
+  /** 状态中文：盘前 / 盘中 / 午间休市 / 已收盘 / 休市 */
+  status_label?: string
+  finalized?: boolean
   updated: string
   temperature: MarketTemperatureItem[]
   breadth: {
