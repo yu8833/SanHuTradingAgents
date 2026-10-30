@@ -244,6 +244,9 @@ async def create_stock_screening_view(db):
 
         # 创建视图：将 stock_basic_info、market_quotes 和 stock_financial_data 关联
         pipeline = [
+            # 第零步：只保留在市股票（is_active=False 为退市/代码停用；缺失视为在市，兼容未回填）
+            # 避免退市股因无实时行情而产出 trade_date=None 的脏行（如 377 条历史脏行）
+            {"$match": {"is_active": {"$ne": False}}},
             # 第一步：关联实时行情数据 (market_quotes)
             # 修复 #B2：同时用 symbol 和 code 匹配，避免只写了 symbol 的记录 join 失败
             {
@@ -343,7 +346,12 @@ async def create_stock_screening_view(db):
                     "pct_chg": "$quote_data.pct_chg",
                     "amount": "$quote_data.amount",
                     "volume": "$quote_data.volume",
-                    "trade_date": "$quote_data.trade_date",
+                    # 行情缺失时回落最近成交日（如 CDR 689009 无实时快照，日线仍有数据）
+                    "trade_date": {"$ifNull": ["$quote_data.trade_date", "$last_trade_date"]},
+                    # 上市状态（is_active=False 为退市/代码停用）
+                    "status": 1,
+                    "is_active": 1,
+                    "last_trade_date": 1,
                     # 时间戳
                     "updated_at": 1,
                     "quote_updated_at": "$quote_data.updated_at",

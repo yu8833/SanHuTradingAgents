@@ -225,9 +225,12 @@ class DataIntegrityService:
     async def _get_expected_stock_codes(self, db, trade_date: str | None = None) -> list[str]:
         """获取应同步的A股股票代码列表（与同步服务一致），按 code 去重
 
-        stock_basic_info 缺少上市状态字段（status/list_status 全为空），无法直接区分退市股，
-        因此额外用"近期是否仍有成交"过滤：仅保留在该交易日之前 45 个自然日内有日线记录的股票。
-        这样既剔除已退市/长期停牌股（避免每日固定缺 N 只的假告警），又能保留真正缺数的在市股票。
+        在市口径以 Tushare 上市状态为准（is_active 由 multi_source_basics_sync_service 每日回填）：
+        is_active=False 的退市/代码停用记录剔除；缺失 is_active 视为在市（兼容新上市未回填）。
+
+        注意：不能用「近 N 日有成交」作为主判据——长期停牌的在市股票同样没有成交，
+        会被误判为退市（如 *ST康佳A、信达证券等）。仅当全库尚未回填 is_active 时，
+        才回退到「近45日有成交 且 名称含退/退市」的兜底口径。
         """
         cursor = db.stock_basic_info.find(
             {
@@ -239,25 +242,26 @@ class DataIntegrityService:
                             {"market": {"$in": ["主板", "创业板", "科创板", "北交所"]}},
                         ]
                     },
-                    {
-                        "$or": [
-                            {"status": {"$ne": "D"}},
-                            {"status": {"$exists": False}},
-                        ]
-                    },
+                    {"is_active": {"$ne": False}},
                 ]
             },
-            {"code": 1},
+            {"code": 1, "name": 1},
         )
         # 使用 set 去重：stock_basic_info 按 code + source 存三源，需要按 code 唯一
         unique_codes: set = set()
+        names: dict[str, str] = {}
         async for doc in cursor:
             c = doc.get("code")
             if c:
                 unique_codes.add(c)
+                if c not in names and doc.get("name"):
+                    names[c] = str(doc["name"])
 
-        # 用近 45 个自然日的实际成交过滤退市/长期停牌股
-        if trade_date:
+        # 兜底：全库尚未回填 is_active 时，用近45日成交 + 名称含退 过滤已退市代码
+        status_backfilled = await db.stock_basic_info.count_documents(
+            {"is_active": {"$exists": True}}, limit=1
+        )
+        if trade_date and not status_backfilled:
             try:
                 cutoff = (
                     datetime.strptime(trade_date, "%Y-%m-%d") - timedelta(days=45)
@@ -273,12 +277,17 @@ class DataIntegrityService:
                     if doc.get("_id"):
                         traded_codes.add(doc["_id"])
                 before = len(unique_codes)
-                unique_codes &= traded_codes
+                # 只剔除「无成交且名称含退/退市」的代码；长期停牌的在市股票保留
+                unique_codes = {
+                    c for c in unique_codes
+                    if c in traded_codes or "退" not in names.get(c, "")
+                }
                 logger.info(
-                    f"应同步股票口径过滤: 基础列表 {before} 只 → 近45日有成交 {len(unique_codes)} 只"
+                    f"应同步股票口径兜底过滤（is_active 未回填）: 基础列表 {before} 只 → "
+                    f"{len(unique_codes)} 只"
                 )
             except Exception as e:
-                logger.warning(f"⚠️ 应同步股票口径过滤失败，回退到基础列表: {e}")
+                logger.warning(f"⚠️ 应同步股票口径兜底过滤失败，回退到基础列表: {e}")
 
         return sorted(unique_codes)
 

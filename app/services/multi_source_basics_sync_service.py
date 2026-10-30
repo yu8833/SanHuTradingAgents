@@ -17,11 +17,12 @@ from enum import Enum
 from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
-from pymongo import UpdateOne
+from pymongo import UpdateMany, UpdateOne
 
 from app.core.database import get_mongo_db
 from app.models.stock_models import StockBasicInfoDB, detect_db_extra_fields
 from app.services.basics_sync import add_financial_metrics as _add_financial_metrics_util
+from app.utils.date_utils import normalize_date
 
 logger = logging.getLogger(__name__)
 
@@ -429,6 +430,13 @@ class MultiSourceBasicsSyncService:
             stats.status = "success" if errors == 0 else "success_with_errors"
             stats.finished_at = now_tz()
 
+            # Step 8: 回填上市状态（status/is_active/delist_date/last_trade_date）
+            # 以 Tushare list_status 为权威口径；失败不影响基础信息同步结果
+            try:
+                await self._sync_listing_status(db)
+            except Exception as e:
+                logger.warning(f"⚠️ 上市状态回填失败（不影响基础信息同步）: {e}")
+
             await self._persist_status(db, stats.__dict__.copy())
             logger.info(
                 f"✅ Multi-source sync finished: total={stats.total} inserted={inserted} "
@@ -448,6 +456,113 @@ class MultiSourceBasicsSyncService:
                 self._running = False
 
 
+
+    def _fetch_listing_status(self) -> dict[str, dict[str, Any]]:
+        """拉取 Tushare 全量上市状态（L/D/P），返回 {6位代码: {status, delist_date}}。
+
+        Tushare 退市清单中的代码带 T 前缀（如 T600018），需提取 6 位数字；
+        同一代码可能被复用（退市后重新上市），因此 L 优先于 D，避免把在市股票误标退市。
+        阻塞式：供 asyncio.to_thread 调用。
+        """
+        import os
+
+        import tushare as ts
+
+        token = os.getenv("TUSHARE_TOKEN", "").strip().strip('"').strip("'")
+        if not token:
+            raise RuntimeError("TUSHARE_TOKEN 未配置，无法获取权威上市状态")
+        ts.set_token(token)
+        pro = ts.pro_api()
+
+        result: dict[str, dict[str, Any]] = {}
+        for st in ("D", "L", "P"):
+            df = pro.stock_basic(
+                exchange="", list_status=st, fields="symbol,name,list_status,delist_date"
+            )
+            if df is None or getattr(df, "empty", True):
+                continue
+            for _, row in df.iterrows():
+                digits = "".join(ch for ch in str(row.get("symbol") or "") if ch.isdigit())
+                code = digits.zfill(6) if digits else ""
+                if not code:
+                    continue
+                # L（在市）优先覆盖：代码复用场景下以"当前是否在市"为准
+                if st == "L" or code not in result:
+                    result[code] = {
+                        "status": str(row.get("list_status") or st),
+                        "delist_date": normalize_date(row.get("delist_date")),
+                    }
+        return result
+
+    async def _last_trade_dates(self, db: AsyncIOMotorDatabase, codes: list[str]) -> dict[str, str]:
+        """按代码回填最近成交日（优先实时行情，缺失时取日线最新交易日）。"""
+        last: dict[str, str] = {}
+        async for doc in db["market_quotes"].find({}, {"code": 1, "trade_date": 1}):
+            code = doc.get("code")
+            td = normalize_date(doc.get("trade_date"))
+            if code and td:
+                last[code] = td
+        missing = [c for c in codes if c not in last]
+        if missing:
+            cursor = db["stock_daily_quotes"].aggregate([
+                {"$match": {"period": "daily", "code": {"$in": missing}}},
+                {"$group": {"_id": "$code", "last": {"$max": "$trade_date"}}},
+            ])
+            async for doc in cursor:
+                if doc.get("_id") and doc.get("last"):
+                    last[doc["_id"]] = normalize_date(doc["last"]) or str(doc["last"])
+        return last
+
+    async def _sync_listing_status(self, db: AsyncIOMotorDatabase) -> dict[str, int]:
+        """回填 stock_basic_info 上市状态字段（按 code 覆盖三源文档）。
+
+        - status: L（在市）/ D（退市或代码停用）/ P（暂停上市）
+        - is_active: 是否在市（L 为 True，其余 False）——读取端统一以此判断"是否在市"
+        - delist_date: 退市日期（Tushare 提供，可能为空）
+        - last_trade_date: 最近成交日（区分"在市停牌"与"已退市"的关键补充信息）
+
+        Tushare 不可用时不写 status/is_active，仅回填 last_trade_date，
+        避免用成交活跃度猜测上市状态（会误伤长期停牌的在市股票）。
+        """
+        codes = await db[COLLECTION_NAME].distinct("code")
+        if not codes:
+            return {"total": 0, "inactive": 0, "updated": 0}
+
+        try:
+            status_map = await asyncio.to_thread(self._fetch_listing_status)
+        except Exception as e:
+            logger.warning(f"⚠️ 获取 Tushare 上市状态失败，跳过 status/is_active 回填: {e}")
+            status_map = {}
+
+        last_trade = await self._last_trade_dates(db, codes)
+
+        ops = []
+        inactive = 0
+        for code in codes:
+            doc: dict[str, Any] = {"last_trade_date": last_trade.get(code)}
+            info = status_map.get(code)
+            if status_map:
+                if info:
+                    doc["status"] = info["status"]
+                    doc["delist_date"] = info.get("delist_date")
+                    doc["is_active"] = info["status"] == "L"
+                else:
+                    # Tushare 全量清单中不存在：已退市或代码已停用（如 000022→001872 换码）
+                    doc["status"] = "D"
+                    doc["is_active"] = False
+            if doc.get("is_active") is False:
+                inactive += 1
+            # 按 code 覆盖该股票的全部数据源文档（UpdateMany），保证三源口径一致
+            ops.append(UpdateMany({"code": code}, {"$set": doc}))
+
+        if ops:
+            result = await db[COLLECTION_NAME].bulk_write(ops, ordered=False)
+            logger.info(
+                f"✅ 上市状态回填完成: 代码 {len(codes)} 只，非在市 {inactive} 只，"
+                f"更新文档 {result.modified_count} 条"
+            )
+            return {"total": len(codes), "inactive": inactive, "updated": result.modified_count}
+        return {"total": len(codes), "inactive": inactive, "updated": 0}
 
     def _add_financial_metrics(self, doc: dict, daily_metrics: dict) -> None:
         """委托到 basics_sync.processing.add_financial_metrics"""

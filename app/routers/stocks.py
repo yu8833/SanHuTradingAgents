@@ -1765,12 +1765,14 @@ async def get_news(code: str, days: int = 30, limit: int = 50, include_announcem
                         # 转换为数据库格式并保存（异步保存，不阻塞返回）
                         try:
                             news_docs = []
+                            from app.utils.timezone import parse_beijing_naive
                             for item in akshare_items:
                                 news_docs.append({
                                     "symbol": normalized_code,
                                     "title": item.get("title", ""),
                                     "source": item.get("source", ""),
-                                    "publish_time": item.get("time", ""),
+                                    # 统一入库为 aware UTC datetime，避免字符串时间导致按日聚合报错
+                                    "publish_time": parse_beijing_naive(str(item.get("time") or "").strip()),
                                     "url": item.get("url", ""),
                                     "type": item.get("type", "news"),
                                     "content": item.get("content", ""),
@@ -1797,7 +1799,7 @@ async def get_news(code: str, days: int = 30, limit: int = 50, include_announcem
                             logger.warning(f"保存新闻到数据库失败: {save_err}")
 
                         # 合并AKShare返回的数据（保留已有的数据库数据）
-                        akshare_news_list = [{"publish_time": item.get("time", ""), "title": item.get("title", ""),
+                        akshare_news_list = [{"publish_time": parse_beijing_naive(str(item.get("time") or "").strip()), "title": item.get("title", ""),
                                      "source": item.get("source", ""), "url": item.get("url", ""),
                                      "type": item.get("type", "news"), "content": item.get("content", ""),
                                      "summary": item.get("summary", "")} for item in akshare_items]
