@@ -128,7 +128,12 @@ def _sectors() -> list[dict]:
             "lead_pct": round(float(_parse_pct_str(row.get("领涨股-涨跌幅", 0)) or 0), 2),   # 领涨股涨跌幅 %
             "lead_price": round(float(row.get("当前价", 0) or 0), 2),    # 领涨股当前价 元
         })
-    return out
+    # 上游 stock_fund_flow_industry 会返回重复行（同一行业名、字段完全相同），
+    # 直接透传会让热力图出现两块一样的板块。按行业名去重，保留排序后的第一条。
+    deduped: dict[str, dict] = {}
+    for item in out:
+        deduped.setdefault(item["name"], item)
+    return list(deduped.values())
 
 
 async def get_overview() -> dict:
