@@ -34,6 +34,14 @@ from app.utils.trading_time import prev_trading_day
 
 logger = logging.getLogger(__name__)
 
+# 数据源负缓存：某源连续失败达到阈值后，在冷却期内直接跳过，避免每轮空烧抓取时间
+_SOURCE_FAIL_THRESHOLD = 2          # 连续失败次数阈值
+_SOURCE_FAIL_COOLDOWN_SECONDS = 600  # 冷却时长（10 分钟）
+
+# 覆盖率：低于 PARTIAL 视为部分帧（状态标记），低于 ALERT 视为明显缺页（告警日志）
+_COVERAGE_PARTIAL_RATIO = 0.99
+_COVERAGE_ALERT_RATIO = 0.97
+
 
 class QuotesIngestionService:
     """
@@ -64,6 +72,9 @@ class QuotesIngestionService:
         # 接口轮换相关属性
         self._rotation_sources = ["tushare", "akshare_eastmoney", "akshare_sina"]
         self._rotation_index = 0  # 当前轮换索引
+        # 负缓存：源 key -> 连续失败次数 / 冷却截止时间
+        self._source_fail_streak: dict[str, int] = {}
+        self._source_cooldown_until: dict[str, datetime] = {}
 
         # 全市场行情抓取是重 CPU/网络 的同步阻塞调用。用独立单线程执行器跑，
         # 避免占用 asyncio 默认线程池（筛查/回测等 API 的 to_thread 也用默认池），
@@ -133,7 +144,9 @@ class QuotesIngestionService:
         success: bool,
         source: str | None = None,
         records_count: int = 0,
-        error_msg: str | None = None
+        error_msg: str | None = None,
+        coverage_ratio: float | None = None,
+        partial: bool = False,
     ) -> None:
         """
         记录同步状态
@@ -143,6 +156,8 @@ class QuotesIngestionService:
             source: 数据源名称
             records_count: 记录数量
             error_msg: 错误信息
+            coverage_ratio: 本轮抓取数 / 当日已入库全量，用于暴露部分帧
+            partial: 本轮是否为部分帧（覆盖率低于阈值）
         """
         try:
             db = get_mongo_db()
@@ -159,6 +174,8 @@ class QuotesIngestionService:
                 "records_count": records_count,
                 "interval_seconds": settings.QUOTES_INGEST_INTERVAL_SECONDS,
                 "error_message": error_msg,
+                "coverage_ratio": coverage_ratio,
+                "partial": partial,
                 "updated_at": now,
             }
 
@@ -355,12 +372,47 @@ class QuotesIngestionService:
         else:  # akshare_sina
             return "akshare", "sina"
 
+    @staticmethod
+    def _source_key(source_type: str, akshare_api: str | None) -> str:
+        """统一的数据源标识，如 tushare/-、akshare/sina"""
+        return f"{source_type}/{akshare_api or '-'}"
+
+    def _is_source_cooling(self, key: str) -> bool:
+        """源是否处于冷却期（连续失败后短期内跳过）"""
+        until = self._source_cooldown_until.get(key)
+        if not until:
+            return False
+        if datetime.now(self.tz) < until:
+            return True
+        # 冷却结束，恢复该源
+        self._source_cooldown_until.pop(key, None)
+        self._source_fail_streak.pop(key, None)
+        logger.info(f"♻️ 源 {key} 冷却结束，恢复参与轮换")
+        return False
+
+    def _mark_source_failure(self, key: str) -> None:
+        streak = self._source_fail_streak.get(key, 0) + 1
+        self._source_fail_streak[key] = streak
+        if streak >= _SOURCE_FAIL_THRESHOLD:
+            self._source_cooldown_until[key] = (
+                datetime.now(self.tz) + timedelta(seconds=_SOURCE_FAIL_COOLDOWN_SECONDS)
+            )
+            logger.warning(
+                f"🚫 源 {key} 连续失败 {streak} 次，进入 {_SOURCE_FAIL_COOLDOWN_SECONDS} 秒冷却"
+            )
+
+    def _mark_source_success(self, key: str) -> None:
+        if self._source_fail_streak.pop(key, None):
+            logger.info(f"✅ 源 {key} 恢复成功，重置失败计数")
+        self._source_cooldown_until.pop(key, None)
+
     def _build_source_attempt_order(self, first_type: str, first_api: str | None = None) -> list[tuple[str, str | None]]:
         """
         构建同一轮内的数据源尝试顺序（同轮兜底）。
 
         以轮换选中的起始源为首，其余源按优先级依次兜底，保证某轮主源失败时
-        本轮仍能拿到行情，避免整轮空转（F1）。
+        本轮仍能拿到行情，避免整轮空转（F1）。处于冷却期的源本轮直接跳过；
+        若所有源都在冷却期，则退回完整顺序，保证本轮仍有一次获取机会。
 
         Returns:
             [(source_type, akshare_api), ...]，如 [("tushare", None), ("akshare", "eastmoney"), ("akshare", "sina")]
@@ -375,7 +427,17 @@ class QuotesIngestionService:
             if t == first_type and a == first_api:
                 start = i
                 break
-        return order[start:] + order[:start]
+        rotated = order[start:] + order[:start]
+
+        filtered = [x for x in rotated if not self._is_source_cooling(self._source_key(*x))]
+        if not filtered:
+            logger.warning("⚠️ 所有数据源均在冷却期，本轮强制按原顺序尝试")
+            return rotated
+
+        skipped = len(rotated) - len(filtered)
+        if skipped:
+            logger.info(f"⏭️ 本轮跳过 {skipped} 个冷却期数据源")
+        return filtered
 
     def _is_trading_time(self, now: datetime | None = None) -> bool:
         """
@@ -458,6 +520,40 @@ class QuotesIngestionService:
         from app.utils.trading_time import is_trading_day
         now = now or datetime.now(self.tz)
         return is_trading_day(now)
+
+    async def _evaluate_coverage(self, trade_date: str, fetched: int) -> tuple[float | None, bool]:
+        """评估本轮抓取的覆盖率。
+
+        以当日 market_quotes 已入库全量为基准：数据源分页丢包时本轮只能拿到部分股票，
+        此前这种「部分帧」完全静默（下游只是少几只股票）。这里显式计算并返回。
+
+        Returns:
+            (coverage_ratio, is_partial)；基准为空时返回 (None, False)
+        """
+        try:
+            db = get_mongo_db()
+            coll = db[self.collection_name]
+            # market_quotes 为「一码一文档」，集合总量即全市场基准；
+            # 同时取当日文档数，保证跨日切换时基准不会因当日文档尚未建齐而失真。
+            total_today = await coll.count_documents({"trade_date": trade_date})
+            total_universe = await coll.count_documents({})
+            total = max(total_today, total_universe)
+            if not total or not fetched:
+                return None, False
+            ratio = min(fetched / total, 1.0)
+            if ratio < _COVERAGE_ALERT_RATIO:
+                logger.warning(
+                    f"⚠️ 本轮行情覆盖不足: {fetched}/{total} = {ratio:.1%}"
+                    f"（低于告警阈值 {_COVERAGE_ALERT_RATIO:.0%}），已标记为 partial"
+                )
+            elif ratio < _COVERAGE_PARTIAL_RATIO:
+                logger.info(
+                    f"📉 本轮行情为部分帧: {fetched}/{total} = {ratio:.1%}，已标记为 partial"
+                )
+            return ratio, ratio < _COVERAGE_PARTIAL_RATIO
+        except Exception as e:
+            logger.warning(f"覆盖率校验失败（忽略）: {e}")
+            return None, False
 
     async def repair_stale_stocks(self, target_trade_date: str, quotes_map: dict[str, dict]) -> int:
         """
@@ -1273,6 +1369,7 @@ class QuotesIngestionService:
             quotes_map = None
             source_name = None
             for src_type, src_api in attempt_order:
+                src_key = self._source_key(src_type, src_api)
                 try:
                     quotes_map, source_name = await loop.run_in_executor(
                         self._fetch_executor, self._fetch_quotes_from_source, src_type, src_api
@@ -1281,7 +1378,9 @@ class QuotesIngestionService:
                     logger.warning(f"⚠️ 源 {src_type}/{src_api} 采集中异常: {e}")
                     quotes_map, source_name = None, None
                 if quotes_map:
+                    self._mark_source_success(src_key)
                     break
+                self._mark_source_failure(src_key)
                 logger.warning(f"⚠️ 源 {src_type}/{src_api} 未获取到行情数据，同轮兜底尝试下一个数据源...")
 
             if not quotes_map:
@@ -1305,6 +1404,9 @@ class QuotesIngestionService:
             # 入库
             await self._bulk_upsert(quotes_map, trade_date, source_name)
 
+            # 覆盖率校验：本轮抓取数对比当日已入库全量，暴露「部分帧」而非静默少股票
+            coverage_ratio, is_partial = await self._evaluate_coverage(trade_date, len(quotes_map))
+
             # 个股级自愈：校准库中 trade_date 落后于本次归属日的股票，
             # 避免个别股票（如数据源某轮遗漏导致的滞后）长期停留在上一交易日。
             # 仅入库成功后执行，此时集合内已含当日数据，仅补落后的少数股票。
@@ -1318,7 +1420,9 @@ class QuotesIngestionService:
                 success=True,
                 source=source_name,
                 records_count=len(quotes_map),
-                error_msg=None
+                error_msg=None,
+                coverage_ratio=coverage_ratio,
+                partial=is_partial,
             )
 
         except Exception as e:
