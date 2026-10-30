@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -54,6 +55,24 @@ def _parse_time(time_val) -> datetime | None:
     return None
 
 
+def _fetch_json_with_retry(fetch, url: str, *, params: dict, headers: dict,
+                           timeout: int = 10, attempts: int = 2) -> dict | None:
+    """外部快讯接口偶发断连或返回非 JSON，重试一次后再放弃，避免单源失败影响整轮采集。"""
+    last_error: Exception | None = None
+    for i in range(attempts):
+        try:
+            resp = fetch(url, params=params, headers=headers, timeout=timeout)
+            if getattr(resp, "status_code", 200) >= 400:
+                raise RuntimeError(f"HTTP {resp.status_code}")
+            return resp.json()
+        except Exception as e:  # noqa: BLE001 外部接口异常需兜底
+            last_error = e
+            if i + 1 < attempts:
+                time.sleep(0.5)
+    logger.warning("实时快讯接口失败(含重试): %s - %s", url, last_error)
+    return None
+
+
 def _fetch_market_news(limit: int = 50) -> list[NewsItem]:
     """抓取财联社 + 东方财富 7x24 快讯（市场级实时新闻）"""
     items: list[NewsItem] = []
@@ -61,10 +80,14 @@ def _fetch_market_news(limit: int = 50) -> list[NewsItem]:
     try:
         cls_url = "https://www.cls.cn/nodeapi/telegraphList"
         cls_params = {"rn": str(limit), "page": "1"}
-        r_cls = requests.get(
-            cls_url, params=cls_params, headers={"User-Agent": _UA, "Referer": "https://www.cls.cn/"}, timeout=10
+        cls_data = _fetch_json_with_retry(
+            requests.get,
+            cls_url,
+            params=cls_params,
+            headers={"User-Agent": _UA, "Referer": "https://www.cls.cn/"},
+            timeout=10,
         )
-        for item in r_cls.json().get("data", {}).get("roll_data", []):
+        for item in (cls_data or {}).get("data", {}).get("roll_data", []):
             title = item.get("title", "") or item.get("brief", "")
             content = item.get("content", "") or item.get("brief", "")
             pub_time = None
@@ -92,8 +115,14 @@ def _fetch_market_news(limit: int = 50) -> list[NewsItem]:
             "pageSize": str(limit),
             "req_trace": str(uuid.uuid4()),
         }
-        r_em = _em_get(em_url, params=em_params, headers={"User-Agent": _UA, "Referer": "https://kuaixun.eastmoney.com/"}, timeout=10)
-        for item in r_em.json().get("data", {}).get("fastNewsList", []):
+        em_data = _fetch_json_with_retry(
+            _em_get,
+            em_url,
+            params=em_params,
+            headers={"User-Agent": _UA, "Referer": "https://kuaixun.eastmoney.com/"},
+            timeout=10,
+        )
+        for item in (em_data or {}).get("data", {}).get("fastNewsList", []):
             code = str(item.get("code", "") or "")
             items.append(NewsItem(
                 title=item.get("title", ""),

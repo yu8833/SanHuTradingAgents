@@ -1525,6 +1525,7 @@ app = FastAPI(
     version=get_version(),
     docs_url="/docs" if settings.DEBUG else None,
     redoc_url="/redoc" if settings.DEBUG else None,
+    openapi_url="/openapi.json" if settings.DEBUG else None,
     lifespan=lifespan
 )
 
@@ -1554,14 +1555,15 @@ app.add_middleware(OperationLogMiddleware)
 async def log_requests(request: Request, call_next):
     start_time = time.time()
 
-    # 跳过健康检查和静态文件请求的日志
-    if request.url.path in ["/health", "/favicon.ico"] or request.url.path.startswith("/static"):
+    # 跳过健康检查和静态文件请求的日志（/api/health 由容器健康检查与前端高频轮询）
+    if request.url.path in ["/health", "/api/health", "/favicon.ico"] or request.url.path.startswith("/static"):
         response = await call_next(request)
         return response
 
     # 使用webapi logger记录请求
     logger = logging.getLogger("webapi")
-    logger.info(f"🔄 {request.method} {request.url.path} - 开始处理")
+    # 请求开始行降为 DEBUG：每个请求只保留一条完成日志，避免日志量翻倍
+    logger.debug(f"🔄 {request.method} {request.url.path} - 开始处理")
 
     response = await call_next(request)
     process_time = time.time() - start_time

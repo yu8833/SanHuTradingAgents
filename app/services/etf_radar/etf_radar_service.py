@@ -94,18 +94,37 @@ class EtfRadarService:
         self._adapter = AKShareAdapter()
 
     # ---------- 数据采集 ----------
+    async def _fetch_etf_with_retry(self, attempts: int = 2):
+        """ETF 资金流是快照入库的前提，AKShare 偶发断连时重试一次，避免整批入库被跳过。"""
+        last_exc: Exception | None = None
+        for i in range(attempts):
+            try:
+                df = await asyncio.to_thread(self._adapter.get_etf_spot_fund_flow)
+                if df is not None and not df.empty:
+                    return df
+            except Exception as e:  # noqa: BLE001 外部数据源异常需兜底
+                last_exc = e
+            if i + 1 < attempts:
+                await asyncio.sleep(1)
+        if last_exc is not None:
+            raise last_exc
+        return None
+
     async def _collect_raw(self) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
         """并行采集 ETF 资金流 + 行业资金流（AKShare 同步调用放入线程池，避免阻塞事件循环）。"""
         etf_df, ind_df = await asyncio.gather(
-            asyncio.to_thread(self._adapter.get_etf_spot_fund_flow),
+            self._fetch_etf_with_retry(),
             asyncio.to_thread(self._adapter.get_industry_fund_flow),
             return_exceptions=True,
         )
         if isinstance(etf_df, BaseException):
-            logger.error(f"ETF 资金流采集失败: {etf_df}")
+            logger.warning(f"ETF 资金流采集失败（含重试）: {etf_df}")
+            etf_df = None
+        elif etf_df is None or getattr(etf_df, "empty", True):
+            logger.warning("ETF 资金流返回空数据（含重试）")
             etf_df = None
         if isinstance(ind_df, BaseException):
-            logger.error(f"行业资金流采集失败: {ind_df}")
+            logger.warning(f"行业资金流采集失败: {ind_df}")
             ind_df = None
         return etf_df, ind_df
 
@@ -240,8 +259,8 @@ class EtfRadarService:
         """采集 → 评分 → 快照入库 MongoDB（etf_radar_snapshot，按 as_of 覆盖）。"""
         etf_df, ind_df = await self._collect_raw()
         if etf_df is None or etf_df.empty:
-            logger.error("ETF Radar: ETF 资金流为空，跳过入库")
-            return {"success": False, "message": "ETF 资金流采集失败", "items": []}
+            logger.warning("ETF Radar: ETF 资金流为空，跳过入库（保留上一份快照）")
+            return {"success": False, "message": "ETF 资金流采集失败，已保留上一份快照", "items": []}
 
         items = self._score(etf_df)
         flows = self._industry_flows(ind_df)

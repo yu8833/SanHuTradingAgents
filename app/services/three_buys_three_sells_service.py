@@ -75,25 +75,48 @@ def _meta_cache_put(cache: dict, data: Any) -> None:
         cache["data"] = data
 
 
+# 各评分维度的满分（dimensions 中记录的是实际得分，满分以本表为准）
+_SCORE_DIMENSION_MAX: dict[str, int] = {
+    "成交量": 20,
+    "K线涨幅": 20,
+    "均线形态": 20,
+    "大盘配合": 20,
+    "MACD": 20,
+}
+
+
 def _validate_score_dimensions(dimensions: dict[str, int], actual_score: int,
                                   bonus: int = 0, service_name: str = "") -> dict[str, Any]:
     """
-    评分维度加总校验。
-    确保各维度满分之和为100，实际得分在[0,100]之间。
+    评分维度校验。
+
+    dimensions 记录的是各维度的**实际得分**，各维度满分见 _SCORE_DIMENSION_MAX。
+    校验项：维度齐全、无未知维度、单维度得分不越界、实际得分在[0,100]之间。
     """
-    total_max = sum(dimensions.values())
+    total_max = sum(_SCORE_DIMENSION_MAX.values())
     result = {
         "passed": True,
         "errors": [],
         "warnings": [],
         "dimensions": dimensions,
+        "max_dimensions": dict(_SCORE_DIMENSION_MAX),
         "total_max": total_max,
         "actual_score": actual_score,
         "bonus": bonus,
     }
-    if total_max != 100:
+    missing = [k for k in _SCORE_DIMENSION_MAX if k not in dimensions]
+    if missing:
         result["passed"] = False
-        result["errors"].append(f"维度满分总和不等于100: {total_max}")
+        result["errors"].append(f"缺少评分维度: {missing}")
+    unknown = [k for k in dimensions if k not in _SCORE_DIMENSION_MAX]
+    if unknown:
+        result["passed"] = False
+        result["errors"].append(f"存在未知评分维度: {unknown}")
+    for name, value in dimensions.items():
+        max_value = _SCORE_DIMENSION_MAX.get(name, 0)
+        if value < 0 or value > max_value:
+            result["passed"] = False
+            result["errors"].append(f"维度得分越界: {name}={value} (应为0~{max_value})")
     if actual_score < 0 or actual_score > 100:
         result["passed"] = False
         result["errors"].append(f"实际得分越界: {actual_score} (应为0~100)")

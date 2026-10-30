@@ -108,7 +108,7 @@ class DataIntegrityService:
             logger.info(f"🔍 开始检查 {trade_date} 的历史数据完整性...")
 
             # 2. 获取应同步的股票列表（与同步服务一致的过滤逻辑）
-            expected_codes = await self._get_expected_stock_codes(db)
+            expected_codes = await self._get_expected_stock_codes(db, trade_date)
             result["expected_count"] = len(expected_codes)
 
             if not expected_codes:
@@ -222,8 +222,13 @@ class DataIntegrityService:
         logger.warning("⚠️ stock_daily_quotes 为空，无法确定最新交易日")
         return None
 
-    async def _get_expected_stock_codes(self, db) -> list[str]:
-        """获取应同步的A股股票代码列表（与同步服务一致），按 code 去重"""
+    async def _get_expected_stock_codes(self, db, trade_date: str | None = None) -> list[str]:
+        """获取应同步的A股股票代码列表（与同步服务一致），按 code 去重
+
+        stock_basic_info 缺少上市状态字段（status/list_status 全为空），无法直接区分退市股，
+        因此额外用"近期是否仍有成交"过滤：仅保留在该交易日之前 45 个自然日内有日线记录的股票。
+        这样既剔除已退市/长期停牌股（避免每日固定缺 N 只的假告警），又能保留真正缺数的在市股票。
+        """
         cursor = db.stock_basic_info.find(
             {
                 "$and": [
@@ -250,6 +255,31 @@ class DataIntegrityService:
             c = doc.get("code")
             if c:
                 unique_codes.add(c)
+
+        # 用近 45 个自然日的实际成交过滤退市/长期停牌股
+        if trade_date:
+            try:
+                cutoff = (
+                    datetime.strptime(trade_date, "%Y-%m-%d") - timedelta(days=45)
+                ).strftime("%Y-%m-%d")
+                traded_codes: set = set()
+                cursor_daily = db.stock_daily_quotes.aggregate(
+                    [
+                        {"$match": {"period": "daily", "trade_date": {"$gte": cutoff, "$lt": trade_date}}},
+                        {"$group": {"_id": "$code"}},
+                    ]
+                )
+                async for doc in cursor_daily:
+                    if doc.get("_id"):
+                        traded_codes.add(doc["_id"])
+                before = len(unique_codes)
+                unique_codes &= traded_codes
+                logger.info(
+                    f"应同步股票口径过滤: 基础列表 {before} 只 → 近45日有成交 {len(unique_codes)} 只"
+                )
+            except Exception as e:
+                logger.warning(f"⚠️ 应同步股票口径过滤失败，回退到基础列表: {e}")
+
         return sorted(unique_codes)
 
     async def _find_low_quality_codes(self, db, trade_date: str, expected_set: set) -> list[str]:
