@@ -1,6 +1,6 @@
 <template>
   <div class="emotion-detail">
-    <div class="detail-head">
+    <div v-if="!hideHead" class="detail-head">
       <span class="detail-title">{{ title }} · {{ rows.length }} 只</span>
       <span class="detail-close" @click="$emit('close')">收起</span>
     </div>
@@ -16,7 +16,7 @@
         <template #default="{ row }">
           <div class="stock-cell">
             <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-name">{{ row.name }}</router-link>
-            <span class="stock-code">{{ row.code }}</span>
+            <router-link target="_blank" rel="noopener" :to="`/stocks/${row.code}`" class="stock-code">{{ row.code }}</router-link>
           </div>
         </template>
       </el-table-column>
@@ -51,11 +51,16 @@ interface DetailRow {
   [key: string]: any
 }
 
-defineProps<{
+withDefaults(defineProps<{
   title: string
   rows: DetailRow[]
   metric?: { key: string; label: string; suffix: string } | null
-}>()
+  /** 弹窗场景可隐藏内置标题栏（标题由弹窗头展示） */
+  hideHead?: boolean
+}>(), {
+  metric: null,
+  hideHead: false,
+})
 
 defineEmits<{ (e: 'close'): void }>()
 </script>
