@@ -234,8 +234,9 @@
     <section v-if="metrics" class="block">
       <div class="block-head">
         <span class="block-title"><el-icon><DataAnalysis /></el-icon> 市场温度与资金结构</span>
+        <span class="fresh-tag is-hist">分位=近一年历史</span>
         <span class="block-hint">
-          分位基于近一年交易日 · {{ metrics.status_label || '已收盘' }}{{ metrics.is_live ? '（数据仍在跳动）' : '（当日数据已定）' }}
+          {{ metrics.status_label || '已收盘' }}{{ metrics.is_live ? '（读数仍在跳动）' : '（当日数据已定）' }}
           <em v-if="metrics.as_of" class="data-time">数据 {{ metrics.as_of }} · 更新 {{ shortTime(metrics.updated) }}</em>
         </span>
       </div>
@@ -279,7 +280,7 @@
       <el-card shadow="never" class="dash-card width-card">
         <div class="card-title card-title--flex">
           市场宽度趋势
-          <span class="dist-note">近 {{ breadthSeries.length }} 个交易日</span>
+          <span class="dist-note">前 {{ breadthSeries.length - 1 }} 日 = 历史收盘</span>
           <div v-if="bwChart" class="bw-readout">
             <span class="ro ro--up">今日上涨率 <b>{{ bwChart.today.up_pct }}%</b></span>
             <span v-if="bwChart.today.ma20_above != null" class="ro ro--ma">
@@ -352,7 +353,9 @@
         <el-card v-if="metrics.style" shadow="never" class="dash-card">
           <div class="card-title">
             市值风格：钱偏大还是偏小
-            <span class="dist-note">全市场按流通市值三等分 · 组内平均涨跌幅</span>
+            <span class="dist-note">
+              市值分组按<template v-if="metrics.style.mv_as_of"> {{ metrics.style.mv_as_of }} </template>收盘流通市值
+            </span>
           </div>
           <div v-if="styleVerdict" class="style-verdict" :class="`tone-${styleVerdict.tone}`">
             <b>{{ styleVerdict.label }}</b>
@@ -985,6 +988,21 @@ onActivated(() => {
   font-weight: 400;
   color: var(--el-text-color-placeholder);
   margin-left: 8px;
+}
+
+/* 数据时点标签：只标注「非今日实时」的部分（历史基线/历史收盘） */
+.fresh-tag {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  line-height: 17px;
+  white-space: nowrap;
+}
+
+.fresh-tag.is-hist {
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-light);
 }
 
 /* 页头：星期、盘中/休市、数据时点。三者组合用于回答「这份数据是不是今天的」 */
