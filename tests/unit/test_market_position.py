@@ -81,6 +81,23 @@ def test_position_metrics_and_zone():
     assert "逃顶" in comp["advice"]
 
 
+def test_composite_series_and_thresholds():
+    payload = compute_position_payload(_rows())
+    comp = payload["composite"]
+    series = comp["series"]
+    # 800 行样本 → 等距抽稀到上限 180 个点
+    assert len(series) == 180
+    assert series[-1]["pct"] == comp["percentile"]
+    dates = [p["date"] for p in series]
+    assert dates == sorted(dates) and len(set(dates)) == len(dates)
+    assert all(0 <= p["pct"] <= 100 for p in series)
+    assert comp["thresholds"] == {"top": 80, "bottom": 20}
+
+    empty = compute_position_payload([])
+    assert empty["composite"]["series"] == []
+    assert empty["composite"]["thresholds"] == {"top": 80, "bottom": 20}
+
+
 def test_guidance_blocks():
     payload = compute_position_payload(_rows())
     g = payload["guidance"]

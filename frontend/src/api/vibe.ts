@@ -330,8 +330,15 @@ export interface MarketPositionGuide {
   title: string
   rule: string
   stats: string
+  /** 触发阈值：逃顶为 80（≥），判底为 20（≤） */
+  threshold?: number
   active: boolean
   advice: string
+}
+
+export interface MarketPositionPoint {
+  date: string
+  pct: number
 }
 
 export interface MarketPositionAnalogCase {
@@ -364,6 +371,10 @@ export interface MarketPosition {
     zone: 'overheated' | 'warm' | 'neutral' | 'cool' | 'oversold' | 'unknown' | string
     advice: string
     components: string[]
+    /** 近 10 年合成分位曲线（最多 180 个点） */
+    series: MarketPositionPoint[]
+    /** 逃顶 / 判底阈值（80 / 20） */
+    thresholds: { top: number; bottom: number }
   }
   forward: {
     day: number

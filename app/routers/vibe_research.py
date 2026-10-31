@@ -139,7 +139,8 @@ async def market_position(current_user: dict = Depends(get_optional_current_user
             "ready": False, "as_of": "", "updated": "", "window_years": 0, "samples": 0,
             "position": [],
             "composite": {"percentile": None, "label": "构建中", "zone": "unknown",
-                          "advice": "", "components": []},
+                          "advice": "", "components": [], "series": [],
+                          "thresholds": {"top": 80, "bottom": 20}},
             "forward": None, "guidance": None, "analogs": None,
             "divergence": [], "note": "历史基线暂不可用",
         })

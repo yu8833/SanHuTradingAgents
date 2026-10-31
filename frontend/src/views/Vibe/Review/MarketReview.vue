@@ -133,16 +133,69 @@
       </div>
 
       <template v-else>
-        <div class="pos-summary" :class="'zone-' + position.composite.zone">
-          <div class="pos-zone">
-            <span class="pos-zone-label">{{ position.composite.label }}</span>
-            <span class="pos-zone-pct">合成分位 <b>{{ position.composite.percentile ?? '—' }}%</b></span>
+        <!-- 位置标尺：0–100 分位 + 五档分区 + 指针；回答「现在离顶 / 离底有多远」 -->
+        <div class="pos-hero" :class="'zone-' + position.composite.zone">
+          <div class="pos-hero-head">
+            <div class="pos-hero-left">
+              <span class="pos-zone-badge">{{ position.composite.label }}</span>
+              <div class="pos-verdict">
+                <div class="pos-verdict-title">{{ posVerdict.title }}</div>
+                <div class="pos-verdict-sub">{{ posVerdict.sub }}</div>
+              </div>
+            </div>
+            <div class="pos-hero-score">
+              <div class="pos-score-num">{{ compositePct ?? '—' }}<em>%</em></div>
+              <div class="pos-score-cap">合成分位</div>
+            </div>
           </div>
+
+          <div class="pos-gauge">
+            <div class="pos-gauge-bar">
+              <i
+                v-for="z in GAUGE_BANDS"
+                :key="z.key"
+                class="pos-gauge-band"
+                :class="z.key"
+                :style="{ width: z.width + '%' }"
+              >{{ z.name }}</i>
+              <i v-if="compositePct != null" class="pos-gauge-needle" :style="{ left: compositePct + '%' }" />
+              <em v-if="compositePct != null" class="pos-gauge-bubble" :style="{ left: compositePct + '%' }">{{ compositePct }}%</em>
+            </div>
+            <div class="pos-gauge-scale">
+              <span v-for="t in GAUGE_TICKS" :key="t" :style="{ left: t + '%' }">{{ t }}</span>
+            </div>
+            <div class="pos-gauge-dots">
+              <el-tooltip
+                v-for="d in heatDots"
+                :key="d.key"
+                :content="`${d.label}：热度分位 ${d.pct}%`"
+                placement="top"
+              >
+                <span
+                  class="pos-gauge-dot"
+                  :class="[d.tone, { 'is-low': d.row }]"
+                  :style="{ left: d.pct + '%' }"
+                />
+              </el-tooltip>
+            </div>
+          </div>
+
+          <div class="pos-distance">
+            <span
+              v-for="c in posDistance"
+              :key="c.key"
+              class="pos-distance-chip"
+              :class="c.tone"
+            >{{ c.text }}</span>
+            <span class="pos-distance-chip is-meta">
+              {{ position.window_years }} 年 · {{ position.samples }} 个交易日样本 · 截至 {{ position.as_of }}
+            </span>
+          </div>
+
           <p class="pos-advice">{{ position.composite.advice }}</p>
-          <span class="pos-meta">历史 {{ position.window_years }} 年 · 共 {{ position.samples }} 个交易日样本 · 截至 {{ position.as_of }}</span>
         </div>
 
-        <!-- 逃顶 / 判断底部：判据 + 历史同档位的真实表现（不是口号） -->
+        <!-- 逃顶 / 判断底部：触发阈值 + 历史同档位的真实表现（不是口号） -->
         <div v-if="posGuides.length" class="pos-guide">
           <div
             v-for="g in posGuides"
@@ -152,7 +205,15 @@
           >
             <div class="pos-guide-head">
               <span class="pos-guide-title">{{ g.title }}</span>
-              <em v-if="g.active" class="pos-guide-flag">当前已进入该区</em>
+              <em class="pos-guide-flag" :class="{ 'is-on': g.active }">
+                {{ g.active ? '当前已进入该区' : `触发 ${g.key === 'top' ? '≥' : '≤'}${g.threshold ?? (g.key === 'top' ? 80 : 20)}` }}
+              </em>
+            </div>
+            <div class="pos-guide-track">
+              <i class="pos-guide-zone" :class="`is-${g.key}`" />
+              <i v-if="compositePct != null" class="pos-guide-cursor" :style="{ left: compositePct + '%' }">
+                <b>{{ compositePct }}</b>
+              </i>
             </div>
             <div class="pos-guide-rule">{{ g.rule }}</div>
             <div class="pos-guide-stats">{{ g.stats }}</div>
@@ -160,33 +221,64 @@
           </div>
         </div>
 
-        <div v-for="grp in positionGroups" :key="grp.group" class="pos-group">
-          <div class="pos-group-head">
-            {{ grp.group }}<span class="pos-group-hint">{{ grp.hint }}</span>
+        <!-- 合成分位是什么：7 项热度分位的平均 + 当前内部结构 -->
+        <div class="pos-explain">
+          <div class="pos-explain-text">
+            <el-icon><InfoFilled /></el-icon>
+            <span>
+              合成分位 = 把 {{ componentHeat.length }} 个长历史指标各自折算成 0–100 的「热度分位」再取平均：
+              0% ≈ 近 {{ position.window_years }} 年最冷，100% ≈ 最热；≥80 为逃顶信号区，≤20 为判底观察区。
+            </span>
           </div>
-          <div class="pos-grid">
-            <div v-for="m in grp.items" :key="m.key" class="pos-card">
-              <el-tooltip :content="m.desc" placement="top" :show-after="200">
-                <div class="pos-label">
-                  {{ m.label }}<el-icon><QuestionFilled /></el-icon>
+          <div class="pos-comp-chips">
+            <span
+              v-for="c in componentHeat"
+              :key="c.key"
+              class="pos-comp-chip"
+              :class="c.tone"
+            >
+              <i /><em>{{ c.label }}</em><b>{{ c.pct }}%</b>
+            </span>
+          </div>
+          <div v-if="heatSpread" class="pos-spread">
+            <el-icon><WarnTriangleFilled /></el-icon>
+            <span>{{ heatSpread.text }}</span>
+          </div>
+        </div>
+
+        <!-- 近 10 年合成分位走势：红线 80 逃顶、绿线 20 判底 -->
+        <div v-if="compositeChartOption" class="pos-chart">
+          <div class="pos-block-head">
+            近 {{ position.window_years }} 年合成分位走势
+            <span class="dist-note">虚线：上 80 逃顶 / 下 20 判底 · 每个点为一个交易日（等距抽稀）</span>
+          </div>
+          <VChart :option="compositeChartOption" autoresize class="chart-200" />
+        </div>
+
+        <!-- 单项指标：分组横条（分位越靠右越热，竖线为 50% 中位） -->
+        <div class="pos-metrics">
+          <div v-for="grp in positionGroups" :key="grp.group" class="pos-group">
+            <div class="pos-group-head">
+              {{ grp.group }}<span class="pos-group-hint">{{ grp.hint }}</span>
+            </div>
+            <div class="pos-bullets">
+              <div v-for="m in grp.items" :key="m.key" class="pos-bullet">
+                <el-tooltip :content="m.desc" placement="top" :show-after="200">
+                  <span class="pos-bullet-label">{{ m.label }}<el-icon><QuestionFilled /></el-icon></span>
+                </el-tooltip>
+                <div class="pos-bullet-track">
+                  <i
+                    v-if="m.percentile != null"
+                    class="pos-bullet-fill"
+                    :class="posTone(heatOfMetric(m))"
+                    :style="{ width: m.percentile + '%' }"
+                  />
+                  <i class="pos-bullet-med" title="中位 = 50% 分位" />
                 </div>
-              </el-tooltip>
-              <div class="pos-value">
-                {{ m.value == null ? '—' : m.value }}<em>{{ m.unit }}</em>
-              </div>
-              <div class="pos-track">
-                <i
-                  v-if="m.percentile != null"
-                  class="pos-fill"
-                  :class="posTone(heatOfMetric(m))"
-                  :style="{ width: m.percentile + '%' }"
-                />
-                <i class="pos-median" title="中位 = 50% 分位" />
-              </div>
-              <div class="pos-foot">
-                <span v-if="m.percentile != null"><b>{{ m.percentile }}%</b> 分位</span>
-                <span v-else>样本不足，暂不分位</span>
-                <span class="mono">{{ m.samples }} 日样本</span>
+                <span class="pos-bullet-value">{{ m.value == null ? '—' : m.value }}<em>{{ m.unit }}</em></span>
+                <span class="pos-bullet-pct" :class="posTone(heatOfMetric(m))">
+                  {{ m.percentile == null ? '—' : m.percentile + '%' }}
+                </span>
               </div>
             </div>
           </div>
@@ -203,33 +295,40 @@
           </span>
         </div>
 
+        <!-- 历史分位 → 未来 20 日收益：以 0 为中轴的发散条形 -->
         <div v-if="position.forward" class="pos-fwd">
-          <div class="pos-fwd-head">
+          <div class="pos-block-head">
             历史分位 → 未来 {{ position.forward.day }} 日收益
             <span class="dist-note">
               等权全市场组合 · n={{ position.forward.samples }} · 近 {{ position.forward.window_years }} 年
             </span>
           </div>
-          <div class="pos-fwd-grid">
-            <div class="pos-fwd-row is-head">
-              <span>历史分位区间</span><span>中位收益</span><span>胜率</span><span>样本 n</span>
-            </div>
+          <div class="pos-fwd-rows">
             <div
               v-for="b in position.forward.bins"
               :key="b.key"
               class="pos-fwd-row"
               :class="{ 'is-current': b.key === position.forward.current_bin }"
             >
-              <span class="fwd-label">
+              <span class="pos-fwd-label">
                 {{ b.label }}
                 <em v-if="b.key === position.forward.current_bin">当前</em>
               </span>
-              <span class="mono">{{ b.median_return == null ? '—' : signedPct(b.median_return) }}</span>
-              <span class="mono">{{ b.win_rate == null ? '—' : b.win_rate + '%' }}</span>
-              <span class="mono">{{ b.n }}</span>
+              <div class="pos-fwd-track">
+                <i class="pos-fwd-zero" />
+                <i
+                  class="pos-fwd-bar"
+                  :class="(b.median_return ?? 0) >= 0 ? 'up' : 'down'"
+                  :style="fwdBarStyle(b.median_return)"
+                />
+              </div>
+              <span class="pos-fwd-val mono" :class="clsByVal(b.median_return)">{{ signedPct(b.median_return) }}</span>
+              <span class="pos-fwd-meta mono">
+                胜率 {{ b.win_rate == null ? '—' : b.win_rate + '%' }} · n={{ b.n }}
+              </span>
             </div>
           </div>
-          <p class="cap">分位越高代表当时市场越热；收益为未来 20 个交易日的等权平均涨跌幅，仅作历史统计，不代表未来。</p>
+          <p class="cap">分位越高代表当时市场越热；收益为未来 {{ position.forward.day }} 个交易日的等权平均涨跌幅，仅作历史统计，不代表未来。</p>
         </div>
 
         <p class="cap">{{ position.note }}</p>
@@ -878,6 +977,14 @@ import {
 } from '@/api/vibe'
 import { fmtPrice, fmtPct, fmtAbsPct, fmtSigned, clsByVal } from '@/utils/format'
 import { formatBeijingDateTimeMinute } from '@/utils/datetime'
+import { use as echartsUse } from 'echarts/core'
+import { LineChart } from 'echarts/charts'
+import { GridComponent, TooltipComponent, MarkLineComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+import VChart from 'vue-echarts'
+import type { EChartsOption } from 'echarts'
+
+echartsUse([CanvasRenderer, LineChart, GridComponent, TooltipComponent, MarkLineComponent])
 
 const route = useRoute()
 const loading = ref(false)
@@ -964,6 +1071,199 @@ const posGuides = computed(() => {
 /** 反向指标（越高越冷）取热度分位，仅用于配色 */
 const heatOfMetric = (m: MarketPositionMetric) =>
   m.percentile == null ? null : (m.higher_is_hot ? m.percentile : 100 - m.percentile)
+
+// 位置标尺：五档分区（0–100 各占 20 分位）+ 刻度
+const GAUGE_BANDS = [
+  { key: 'oversold', name: '判底', width: 20 },
+  { key: 'cool', name: '偏冷', width: 20 },
+  { key: 'neutral', name: '中位', width: 20 },
+  { key: 'warm', name: '偏热', width: 20 },
+  { key: 'overheated', name: '逃顶', width: 20 },
+]
+const GAUGE_TICKS = [0, 20, 40, 60, 80, 100]
+
+/** 指标简称（标尺刻点与内部结构 chips 用） */
+const POSITION_SHORT: Record<string, string> = {
+  drawdown: '回撤',
+  ma250_dev: '年线偏离',
+  amplitude: '振幅',
+  volatility: '波动率',
+  amount: '成交额',
+  up_pct: '上涨家数',
+  low_price: '低价股',
+  valuation_pe: 'PE',
+  valuation_pb: 'PB',
+}
+
+const compositePct = computed(() => position.value?.composite.percentile ?? null)
+
+/** 参与合成的指标：折算成热度分位后的刻点（标尺上的小圆点） */
+const heatDots = computed(() => {
+  const list = (position.value?.position || []).filter(m => m.in_composite && m.percentile != null)
+  return list.map((m, i) => {
+    const pct = heatOfMetric(m) as number
+    return {
+      key: m.key,
+      label: POSITION_SHORT[m.key] || m.label,
+      pct,
+      tone: posTone(pct),
+      row: i % 2 === 1,
+    }
+  })
+})
+
+/** 参与合成的指标按热度从高到低排列（内部结构 chips） */
+const componentHeat = computed(() =>
+  (position.value?.position || [])
+    .filter(m => m.in_composite && m.percentile != null)
+    .map(m => ({
+      key: m.key,
+      label: POSITION_SHORT[m.key] || m.label,
+      pct: heatOfMetric(m) as number,
+      tone: posTone(heatOfMetric(m)),
+    }))
+    .sort((a, b) => b.pct - a.pct),
+)
+
+/** 内部高度分化时给一句话解释：为什么合成分位不高不低 */
+const heatSpread = computed(() => {
+  const c = componentHeat.value
+  if (c.length < 2) return null
+  const hot = c[0]
+  const cold = c[c.length - 1]
+  const gap = hot.pct - cold.pct
+  if (gap < 40) return null
+  const tail = position.value?.composite.zone === 'neutral'
+    ? '两端相互抵消，合成值落在中位区，所以现在既不像顶、也不像底'
+    : '合成值由多数指标决定，极端项需结合下方单项指标判断'
+  return {
+    hot,
+    cold,
+    gap,
+    text: `内部高度分化：${hot.label} ${hot.pct}%（最热）与 ${cold.label} ${cold.pct}%（最冷）相差 ${gap} 个分位，${tail}`,
+  }
+})
+
+/** 现在离顶 / 离底有多远（按后端阈值计算） */
+const posDistance = computed(() => {
+  const pct = compositePct.value
+  if (pct == null) return []
+  const th = position.value?.composite.thresholds || { top: 80, bottom: 20 }
+  return [
+    pct >= th.top
+      ? { key: 'top', text: `已进入逃顶区（≥${th.top}）`, tone: 'is-hot' }
+      : { key: 'top', text: `距逃顶区还有 ${th.top - pct} 个分位`, tone: 'is-neutral' },
+    pct <= th.bottom
+      ? { key: 'bottom', text: `已进入判底观察区（≤${th.bottom}）`, tone: 'is-cold' }
+      : { key: 'bottom', text: `距判底区还有 ${pct - th.bottom} 个分位`, tone: 'is-neutral' },
+  ]
+})
+
+/** 一句话判定：现在到底是顶、底，还是都不是 */
+const posVerdict = computed(() => {
+  const pct = compositePct.value
+  const zone = position.value?.composite.zone
+  const yrs = position.value?.window_years ?? 10
+  if (pct == null) return { title: '暂无合成分位', sub: '历史样本不足，先看下方单项指标' }
+  if (zone === 'overheated') {
+    return { title: '接近顶部（逃顶信号区）', sub: `合成分位 ${pct}%，多数指标处于近 ${yrs} 年最热 20%；追高赔率下降` }
+  }
+  if (zone === 'warm') {
+    return { title: '偏高但还不是顶', sub: `合成分位 ${pct}%，位于偏热区（60–80）；持仓为主，新增仓位等回踩确认` }
+  }
+  if (zone === 'cool') {
+    return { title: '偏低但还不是底', sub: `合成分位 ${pct}%，位于偏冷区（20–40）；关注修复信号，不急着抢跑` }
+  }
+  if (zone === 'oversold') {
+    return { title: '接近底部（判底观察区）', sub: `合成分位 ${pct}%，多项指标处于近 ${yrs} 年最冷 20%；等宽度回升与波动率回落再分批建仓` }
+  }
+  return {
+    title: '既不是顶，也不是底',
+    sub: `合成分位 ${pct}%，落在中位区（40–60）；位置层面不做加减仓，跟随趋势与事件交易`,
+  }
+})
+
+/** 近 10 年合成分位走势（标线：80 逃顶 / 20 判底） */
+const compositeChartOption = computed<EChartsOption | null>(() => {
+  const pts = position.value?.composite.series || []
+  if (pts.length < 2) return null
+  const th = position.value?.composite.thresholds || { top: 80, bottom: 20 }
+  const option: EChartsOption = {
+    grid: { left: 6, right: 46, top: 12, bottom: 4, containLabel: true },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'line' },
+      formatter: (p: any) => {
+        const it = Array.isArray(p) ? p[0] : p
+        return `${it?.axisValue ?? ''}<br/>合成分位 <b>${it?.value ?? '—'}%</b>`
+      },
+    },
+    xAxis: {
+      type: 'category',
+      data: pts.map(p => p.date),
+      boundaryGap: false,
+      axisTick: { show: false },
+      axisLine: { lineStyle: { color: '#e5e7eb' } },
+      axisLabel: {
+        fontSize: 11,
+        color: '#9aa0a6',
+        hideOverlap: true,
+        formatter: (v: string) => String(v).slice(2),
+      },
+    },
+    yAxis: {
+      type: 'value',
+      min: 0,
+      max: 100,
+      interval: 20,
+      axisLabel: { fontSize: 11, color: '#9aa0a6' },
+      splitLine: { lineStyle: { color: '#f0f1f3' } },
+    },
+    series: [
+      {
+        type: 'line',
+        name: '合成分位',
+        data: pts.map(p => p.pct),
+        showSymbol: false,
+        smooth: 0.2,
+        lineStyle: { width: 1.6, color: '#2b6cb0' },
+        areaStyle: { color: 'rgba(43,108,176,.10)' },
+        itemStyle: { color: '#2b6cb0' },
+        markLine: {
+          silent: true,
+          symbol: 'none',
+          data: [
+            {
+              yAxis: th.top,
+              name: `逃顶 ${th.top}`,
+              lineStyle: { color: 'rgba(245,108,108,.75)', type: 'dashed', width: 1 },
+              label: { position: 'end', formatter: `逃顶 ${th.top}`, color: '#f56c6c', fontSize: 10 },
+            },
+            {
+              yAxis: th.bottom,
+              name: `判底 ${th.bottom}`,
+              lineStyle: { color: 'rgba(103,194,58,.75)', type: 'dashed', width: 1 },
+              label: { position: 'end', formatter: `判底 ${th.bottom}`, color: '#67c23a', fontSize: 10 },
+            },
+          ],
+        },
+      },
+    ],
+  }
+  return option
+})
+
+/** 未来收益发散条：以 0 为中轴，按最大绝对值归一化 */
+const maxAbsFwd = computed(() => {
+  const bins = position.value?.forward?.bins || []
+  return Math.max(1, ...bins.map(b => Math.abs(b.median_return || 0)))
+})
+
+function fwdBarStyle(med: number | null): Record<string, string> {
+  if (med == null) return { display: 'none' }
+  const w = Math.max(2, Math.min(50, (Math.abs(med) / maxAbsFwd.value) * 50))
+  return med >= 0 ? { left: '50%', width: `${w}%` } : { right: '50%', width: `${w}%` }
+}
 
 const scrollTo = (id: string) =>
   document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -3320,7 +3620,7 @@ onActivated(() => {
 }
 
 /* ══════════════════════════════════════════════════════════════════════
-   02 当前位置：四分位卡 / 背离 chips / 未来 20 日收益 5 档
+   02 当前位置：0–100 位置标尺 / 逃顶·判底触发条 / 历史曲线 / 指标横条
    ══════════════════════════════════════════════════════════════════════ */
 
 .pos-pending {
@@ -3334,56 +3634,183 @@ onActivated(() => {
   color: var(--el-text-color-secondary);
 }
 
-.pos-summary {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px 16px;
-  padding: 12px 16px;
+/* 顶部：判定 + 大分数 + 位置标尺 */
+.pos-hero {
+  padding: 14px 16px 12px;
   border-radius: var(--app-radius-lg);
   background: var(--el-fill-color-blank);
   border: 1px solid var(--el-border-color-light);
-  border-left-width: 3px;
   box-shadow: var(--app-shadow);
 }
-.pos-summary.zone-overheated { border-left-color: var(--app-up); }
-.pos-summary.zone-warm { border-left-color: var(--el-color-warning); }
-.pos-summary.zone-neutral { border-left-color: var(--el-color-primary); }
-.pos-summary.zone-cool { border-left-color: var(--el-color-success); }
-.pos-summary.zone-oversold { border-left-color: var(--app-down); }
-
-.pos-zone {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 10px;
+.pos-hero-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
 }
-.pos-zone-label {
-  font-size: 17px;
+.pos-hero-left {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+}
+.pos-zone-badge {
+  flex: none;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.pos-hero.zone-overheated .pos-zone-badge { color: #fff; background: var(--app-up); }
+.pos-hero.zone-warm .pos-zone-badge { color: #b26a00; background: rgba(230, 162, 60, .16); }
+.pos-hero.zone-neutral .pos-zone-badge { color: var(--el-color-primary); background: rgba(43, 108, 176, .12); }
+.pos-hero.zone-cool .pos-zone-badge { color: #3f8a2e; background: rgba(103, 194, 58, .14); }
+.pos-hero.zone-oversold .pos-zone-badge { color: #fff; background: var(--app-down); }
+.pos-verdict-title {
+  font-size: 18px;
   font-weight: 800;
+  line-height: 1.3;
   color: var(--el-text-color-primary);
 }
-.pos-zone-pct {
-  font-size: 12px;
+.pos-verdict-sub {
+  margin-top: 3px;
+  font-size: 12.5px;
+  line-height: 1.55;
   color: var(--el-text-color-secondary);
 }
-.pos-zone-pct b {
+.pos-hero-score {
+  flex: none;
+  text-align: right;
+}
+.pos-score-num {
   font-family: var(--app-font-mono);
-  font-size: 14px;
+  font-size: 34px;
+  font-weight: 800;
+  line-height: 1;
   color: var(--el-text-color-primary);
 }
-.pos-advice {
-  flex: 1 1 320px;
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.65;
-  color: var(--el-text-color-regular);
+.pos-score-num em {
+  margin-left: 1px;
+  font-style: normal;
+  font-size: 15px;
+  color: var(--el-text-color-placeholder);
 }
-.pos-meta {
+.pos-score-cap {
+  margin-top: 4px;
   font-size: 11.5px;
   color: var(--el-text-color-placeholder);
 }
 
-/* 逃顶 / 判断底部：判据 + 历史证据 */
+/* 位置标尺：五档分区 + 指针 + 各指标热度刻点 */
+.pos-gauge {
+  position: relative;
+  margin-top: 22px;
+  padding: 0 2px;
+}
+.pos-gauge-bar {
+  position: relative;
+  display: flex;
+  height: 22px;
+  border-radius: 6px;
+}
+.pos-gauge-band {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-style: normal;
+  font-size: 10.5px;
+  letter-spacing: .5px;
+  color: #fff;
+  opacity: .95;
+}
+.pos-gauge-band.oversold { background: linear-gradient(180deg, #5cb87a, #49a568); border-radius: 6px 0 0 6px; }
+.pos-gauge-band.cool { background: linear-gradient(180deg, #b9d8ac, #94c183); color: #2f5539; }
+.pos-gauge-band.neutral { background: #e3e7ee; color: #4b5563; }
+.pos-gauge-band.warm { background: linear-gradient(180deg, #f2b981, #e79a5c); }
+.pos-gauge-band.overheated { background: linear-gradient(180deg, #e8736c, #d6453d); border-radius: 0 6px 6px 0; }
+.pos-gauge-needle {
+  position: absolute;
+  top: -7px;
+  bottom: -7px;
+  width: 3px;
+  margin-left: -1.5px;
+  border-radius: 2px;
+  background: var(--el-text-color-primary);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, .85);
+}
+.pos-gauge-bubble {
+  position: absolute;
+  top: -23px;
+  transform: translateX(-50%);
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--app-font-mono);
+  color: #fff;
+  background: var(--el-text-color-primary);
+  white-space: nowrap;
+}
+.pos-gauge-scale {
+  position: relative;
+  height: 16px;
+  margin-top: 3px;
+}
+.pos-gauge-scale span {
+  position: absolute;
+  transform: translateX(-50%);
+  font-family: var(--app-font-mono);
+  font-size: 10.5px;
+  color: var(--el-text-color-placeholder);
+}
+.pos-gauge-dots {
+  position: relative;
+  height: 24px;
+  margin-top: 1px;
+}
+.pos-gauge-dot {
+  position: absolute;
+  top: 2px;
+  width: 8px;
+  height: 8px;
+  margin-left: -4px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--el-fill-color-blank);
+}
+.pos-gauge-dot.is-low { top: 14px; }
+.pos-gauge-dot.is-hot { background: var(--app-up); }
+.pos-gauge-dot.is-cold { background: var(--app-down); }
+.pos-gauge-dot.is-neutral { background: var(--el-color-primary); }
+.pos-gauge-dot.is-muted { background: var(--el-border-color); }
+
+.pos-distance {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.pos-distance-chip {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  border: 1px solid var(--el-border-color-lighter);
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-secondary);
+}
+.pos-distance-chip.is-hot { color: var(--app-up); border-color: rgba(245, 108, 108, .35); background: rgba(245, 108, 108, .08); }
+.pos-distance-chip.is-cold { color: var(--app-down); border-color: rgba(103, 194, 58, .35); background: rgba(103, 194, 58, .08); }
+.pos-distance-chip.is-neutral { color: var(--el-text-color-regular); }
+.pos-distance-chip.is-meta { color: var(--el-text-color-placeholder); background: transparent; }
+.pos-advice {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--el-text-color-regular);
+}
+
+/* 逃顶 / 判断底部：触发阈值条 + 历史证据 */
 .pos-guide {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3391,14 +3818,14 @@ onActivated(() => {
   margin-top: 10px;
 }
 .pos-guide-card {
-  padding: 10px 14px;
+  padding: 12px 14px;
   border-radius: 10px;
   border: 1px solid var(--el-border-color-lighter);
-  border-left: 3px solid var(--el-border-color);
+  border-top: 3px solid var(--el-border-color);
   background: var(--el-fill-color-blank);
 }
-.pos-guide-card.is-top { border-left-color: var(--app-up); }
-.pos-guide-card.is-bottom { border-left-color: var(--app-down); }
+.pos-guide-card.is-top { border-top-color: var(--app-up); }
+.pos-guide-card.is-bottom { border-top-color: var(--app-down); }
 .pos-guide-card.is-active { background: var(--el-fill-color-light); }
 .pos-guide-head {
   display: flex;
@@ -3413,10 +3840,44 @@ onActivated(() => {
   border-radius: 8px;
   font-style: normal;
   font-size: 11px;
-  color: var(--el-color-warning);
-  background: rgba(230, 162, 60, .12);
+  color: var(--el-text-color-placeholder);
+  background: var(--el-fill-color-light);
 }
-.pos-guide-rule { margin-top: 4px; font-size: 12px; color: var(--el-text-color-secondary); }
+.pos-guide-flag.is-on { color: var(--el-color-warning); background: rgba(230, 162, 60, .14); }
+.pos-guide-track {
+  position: relative;
+  height: 6px;
+  margin-top: 10px;
+  border-radius: 3px;
+  background: var(--el-fill-color-light);
+}
+.pos-guide-zone {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 3px;
+}
+.pos-guide-zone.is-top { left: 80%; right: 0; background: linear-gradient(90deg, rgba(232, 115, 108, .35), var(--app-up)); }
+.pos-guide-zone.is-bottom { left: 0; width: 20%; background: linear-gradient(90deg, var(--app-down), rgba(92, 184, 122, .35)); }
+.pos-guide-cursor {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 2px;
+  background: var(--el-text-color-primary);
+}
+.pos-guide-cursor b {
+  position: absolute;
+  top: -15px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--app-font-mono);
+  font-size: 10px;
+  color: var(--el-text-color-primary);
+}
+.pos-guide-rule { margin-top: 14px; font-size: 12px; color: var(--el-text-color-secondary); }
 .pos-guide-stats { margin-top: 4px; font-size: 12px; color: var(--el-text-color-regular); }
 .pos-guide-advice { margin-top: 4px; font-size: 12px; color: var(--el-text-color-placeholder); }
 
@@ -3435,7 +3896,91 @@ onActivated(() => {
   font-weight: 400;
   color: var(--el-text-color-placeholder);
 }
-.pos-group .pos-grid { margin-top: 6px; }
+.pos-group .pos-bullets { margin-top: 6px; }
+
+/* 合成分位说明 + 内部结构 chips + 分化提示 */
+.pos-explain {
+  margin-top: 10px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px dashed var(--el-border-color);
+  background: var(--el-fill-color-lighter);
+}
+.pos-explain-text {
+  display: flex;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--el-text-color-regular);
+}
+.pos-explain-text .el-icon {
+  flex: none;
+  margin-top: 2px;
+  color: var(--el-color-primary);
+}
+.pos-comp-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.pos-comp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  background: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color-lighter);
+}
+.pos-comp-chip i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.pos-comp-chip em { font-style: normal; color: var(--el-text-color-secondary); }
+.pos-comp-chip b { font-family: var(--app-font-mono); font-size: 11.5px; }
+.pos-comp-chip.is-hot i { background: var(--app-up); }
+.pos-comp-chip.is-hot b { color: var(--app-up); }
+.pos-comp-chip.is-cold i { background: var(--app-down); }
+.pos-comp-chip.is-cold b { color: var(--app-down); }
+.pos-comp-chip.is-neutral i { background: var(--el-color-primary); }
+.pos-comp-chip.is-neutral b { color: var(--el-color-primary); }
+.pos-comp-chip.is-muted i { background: var(--el-border-color); }
+.pos-spread {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--el-border-color-lighter);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--el-color-warning);
+}
+.pos-spread .el-icon { flex: none; margin-top: 2px; }
+
+/* 历史曲线 / 未来收益：统一块头 */
+.pos-chart,
+.pos-fwd {
+  margin-top: 12px;
+  padding: 12px 14px 8px;
+  border-radius: var(--app-radius-lg);
+  background: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color-light);
+}
+.pos-block-head {
+  margin-bottom: 4px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+}
+.pos-block-head .dist-note {
+  display: inline;
+  margin-top: 0;
+  margin-left: 8px;
+}
+.chart-200 { width: 100%; height: 200px; }
 
 /* 历史类比（04） */
 .pos-analog {
@@ -3492,59 +4037,55 @@ onActivated(() => {
 .pos-analog-case .up { color: var(--app-up); }
 .pos-analog-case .down { color: var(--app-down); }
 
-.pos-grid {
+/* 单项指标：横条（分位越靠右越热） */
+.pos-bullets {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 20px;
+  margin-top: 6px;
 }
-.pos-card {
-  padding: 12px 14px;
-  border-radius: 10px;
-  background: var(--el-fill-color-blank);
-  border: 1px solid var(--el-border-color-lighter);
+.pos-bullet {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr) 66px 42px;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: 6px;
+  font-size: 12px;
   min-width: 0;
 }
-.pos-label {
+.pos-bullet:hover { background: var(--el-fill-color-light); }
+.pos-bullet-label {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  font-size: 12px;
+  gap: 3px;
   color: var(--el-text-color-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   cursor: help;
 }
-.pos-value {
-  margin: 4px 0 8px;
-  font-family: var(--app-font-mono);
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--el-text-color-primary);
-  line-height: 1.1;
-}
-.pos-value em {
-  margin-left: 3px;
-  font-style: normal;
-  font-size: 11.5px;
-  font-weight: 400;
+.pos-bullet-label .el-icon {
+  flex: none;
+  font-size: 12px;
   color: var(--el-text-color-placeholder);
 }
-.pos-track {
+.pos-bullet-track {
   position: relative;
   height: 6px;
   border-radius: 3px;
   background: var(--el-fill-color-light);
-  overflow: hidden;
 }
-.pos-fill {
+.pos-bullet-fill {
   position: absolute;
   inset: 0 auto 0 0;
   border-radius: 3px;
 }
-.pos-fill.is-hot { background: var(--app-up); }
-.pos-fill.is-cold { background: var(--app-down); }
-.pos-fill.is-neutral { background: var(--el-color-primary); }
-.pos-fill.is-muted { background: var(--el-border-color); }
-.pos-median {
+.pos-bullet-fill.is-hot { background: var(--app-up); }
+.pos-bullet-fill.is-cold { background: var(--app-down); }
+.pos-bullet-fill.is-neutral { background: var(--el-color-primary); }
+.pos-bullet-fill.is-muted { background: var(--el-border-color); }
+.pos-bullet-med {
   position: absolute;
   top: -2px;
   bottom: -2px;
@@ -3553,17 +4094,30 @@ onActivated(() => {
   background: var(--el-text-color-placeholder);
   opacity: .7;
 }
-.pos-foot {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 8px;
+.pos-bullet-value {
+  text-align: right;
+  font-family: var(--app-font-mono);
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+  white-space: nowrap;
+}
+.pos-bullet-value em {
+  margin-left: 2px;
+  font-style: normal;
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--el-text-color-placeholder);
+}
+.pos-bullet-pct {
+  text-align: right;
+  font-family: var(--app-font-mono);
   font-size: 11.5px;
   color: var(--el-text-color-secondary);
+  white-space: nowrap;
 }
-.pos-foot b { font-family: var(--app-font-mono); color: var(--el-text-color-primary); }
-.pos-foot .mono { color: var(--el-text-color-placeholder); }
+.pos-bullet-pct.is-hot { color: var(--app-up); }
+.pos-bullet-pct.is-cold { color: var(--app-down); }
+.pos-bullet-pct.is-neutral { color: var(--el-text-color-regular); }
 
 .pos-div-row {
   display: flex;
@@ -3587,45 +4141,31 @@ onActivated(() => {
 .pos-div-chip.is-danger { border-color: rgba(245, 108, 108, .35); background: rgba(245, 108, 108, .08); }
 .pos-div-chip.is-info { border-color: rgba(43, 108, 176, .3); background: rgba(43, 108, 176, .06); }
 
-.pos-fwd {
-  margin-top: 12px;
-  padding: 12px 16px;
-  border-radius: var(--app-radius-lg);
-  background: var(--el-fill-color-blank);
-  border: 1px solid var(--el-border-color-light);
-}
-.pos-fwd-head {
-  font-size: 13.5px;
-  font-weight: 700;
-  color: var(--el-text-color-primary);
-  margin-bottom: 8px;
-}
-.pos-fwd-head .dist-note { display: inline; margin-left: 8px; }
-.pos-fwd-grid {
+.pos-fwd-rows {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
+  margin-top: 6px;
 }
 .pos-fwd-row {
   display: grid;
-  grid-template-columns: 1.4fr 1fr 1fr .8fr;
-  gap: 8px;
-  padding: 6px 8px;
+  grid-template-columns: 92px minmax(0, 1fr) 76px 132px;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 6px;
   border-radius: 6px;
-  font-size: 12.5px;
-  color: var(--el-text-color-regular);
-}
-.pos-fwd-row.is-head {
-  font-size: 11.5px;
-  color: var(--el-text-color-placeholder);
-  background: transparent;
+  font-size: 12px;
 }
 .pos-fwd-row.is-current {
   background: rgba(43, 108, 176, .08);
   font-weight: 600;
 }
-.pos-fwd-row .fwd-label em {
-  margin-left: 6px;
+.pos-fwd-label {
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
+}
+.pos-fwd-label em {
+  margin-left: 5px;
   padding: 0 5px;
   border-radius: 5px;
   font-style: normal;
@@ -3633,10 +4173,47 @@ onActivated(() => {
   color: var(--el-color-primary);
   background: rgba(43, 108, 176, .12);
 }
+.pos-fwd-track {
+  position: relative;
+  height: 12px;
+  border-radius: 4px;
+  background: var(--el-fill-color-light);
+}
+.pos-fwd-zero {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: var(--el-border-color);
+}
+.pos-fwd-bar {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  border-radius: 3px;
+  opacity: .8;
+}
+.pos-fwd-bar.up { background: var(--app-up); }
+.pos-fwd-bar.down { background: var(--app-down); }
+.pos-fwd-val {
+  text-align: right;
+  font-weight: 600;
+  color: var(--el-text-color-regular);
+  white-space: nowrap;
+}
+.pos-fwd-val.up { color: var(--app-up); }
+.pos-fwd-val.down { color: var(--app-down); }
+.pos-fwd-meta {
+  text-align: right;
+  font-size: 11.5px;
+  color: var(--el-text-color-placeholder);
+  white-space: nowrap;
+}
 
 @media (max-width: 1200px) {
-  .pos-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .pos-analog-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pos-bullets { grid-template-columns: 1fr; }
 }
 @media (max-width: 900px) {
   .syn-decision { grid-template-columns: 1fr; }
@@ -3644,13 +4221,18 @@ onActivated(() => {
   .pos-guide { grid-template-columns: 1fr; }
 }
 @media (max-width: 768px) {
-  .pos-grid { grid-template-columns: 1fr; }
   .pos-analog-grid { grid-template-columns: 1fr; }
   .syn-hero { padding: 16px; }
   .syn-hero-top { flex-wrap: wrap; gap: 12px; }
   .syn-tags { margin-left: 0; }
   .syn-direc-main { font-size: 26px; }
   .syn-conf-wrap { padding: 0 12px; }
-  .pos-fwd-row { grid-template-columns: 1.4fr 1fr 1fr .8fr; font-size: 11.5px; }
+  .pos-hero { padding: 12px 12px 10px; }
+  .pos-hero-head { flex-wrap: wrap; gap: 10px; }
+  .pos-score-num { font-size: 26px; }
+  .pos-gauge-band { font-size: 9px; letter-spacing: 0; }
+  .pos-bullet { grid-template-columns: 92px minmax(0, 1fr) 58px 38px; gap: 6px; }
+  .pos-fwd-row { grid-template-columns: 74px minmax(0, 1fr) 60px; gap: 8px; font-size: 11.5px; }
+  .pos-fwd-meta { display: none; }
 }
 </style>

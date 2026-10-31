@@ -27,6 +27,11 @@ POSITION_YEARS = 10
 MIN_FORWARD_ROWS = 750
 MIN_HISTORY_ROWS = 60
 FORWARD_DAYS = 20
+# 逃顶 / 判断底部的合成分位阈值（与 _ZONE_MAP 的 80 / 20 分区一致）
+TOP_THRESHOLD = 80
+BOTTOM_THRESHOLD = 20
+# 合成分位历史曲线最多返回的点数（前端折线图用，等距抽稀）
+MAX_SERIES_POINTS = 180
 # 单批回填的自然日跨度：控制单次聚合内存与耗时，整体在后台分块跑完
 CHUNK_DAYS = 400
 
@@ -513,6 +518,20 @@ def _forward_stats(rows: list[dict], composite_series: list[int | None],
     }
 
 
+def _composite_points(rows: list[dict], composite_series: list[int | None],
+                      max_points: int = MAX_SERIES_POINTS) -> list[dict[str, Any]]:
+    """合成分位历史曲线（等距抽稀，末点固定为最新交易日）。"""
+    pts = [(rows[i]["date"], v) for i, v in enumerate(composite_series) if v is not None]
+    if not pts:
+        return []
+    if len(pts) <= max_points:
+        return [{"date": d, "pct": int(v)} for d, v in pts]
+    step = (len(pts) - 1) / (max_points - 1)
+    picked = [pts[int(round(i * step))] for i in range(max_points)]
+    picked[-1] = pts[-1]
+    return [{"date": d, "pct": int(v)} for d, v in picked]
+
+
 def _analogs(rows: list[dict], dims: list[list[int | None]], composite_series: list[int | None],
              fwd_returns: list[float | None], top_n: int = 6, min_gap: int = 30) -> dict[str, Any] | None:
     """历史类比：在「热度分位」空间里找最像今天的交易日，统计其未来 20 日表现。"""
@@ -583,17 +602,19 @@ def _guidance(zone: dict[str, Any], composite: float | None,
         "top": {
             "key": "top",
             "title": "逃顶（高位区）",
-            "rule": "合成分位 ≥80：位置、情绪、参与度多数处于历史高位",
+            "rule": f"合成分位 ≥{TOP_THRESHOLD}：位置、情绪、参与度多数处于历史高位",
             "stats": stat_text(zones.get("hot"), short),
-            "active": bool(composite is not None and composite >= 80),
+            "threshold": TOP_THRESHOLD,
+            "active": bool(composite is not None and composite >= TOP_THRESHOLD),
             "advice": "优先减仓兑现，不追高；宽度与量能同步走弱时加快撤退",
         },
         "bottom": {
             "key": "bottom",
             "title": "判断底部（低位区）",
-            "rule": "合成分位 ≤20：回撤接近历史极值、低价股占比抬升、波动率处于高位",
+            "rule": f"合成分位 ≤{BOTTOM_THRESHOLD}：回撤接近历史极值、低价股占比抬升、波动率处于高位",
             "stats": stat_text(zones.get("cold"), short),
-            "active": bool(composite is not None and composite <= 20),
+            "threshold": BOTTOM_THRESHOLD,
+            "active": bool(composite is not None and composite <= BOTTOM_THRESHOLD),
             "advice": "低位区只是观察区，不抢跑；需宽度回升 + 波动率回落 + 年线偏离收窄确认后再分批建仓",
         },
         "current": {"zone": zone.get("zone"), "label": zone.get("label"),
@@ -747,6 +768,9 @@ def compute_position_payload(rows: list[dict]) -> dict[str, Any]:
             "zone": zone["zone"],
             "advice": zone["advice"],
             "components": [m["key"] for m in metrics if m["in_composite"]],
+            # 历史合成分位曲线 + 逃顶 / 判底阈值，供前端画折线图与标线
+            "series": _composite_points(rows, composite_series),
+            "thresholds": {"top": TOP_THRESHOLD, "bottom": BOTTOM_THRESHOLD},
         },
         "forward": fwd,
         "guidance": _guidance(zone, composite, fwd),
@@ -764,7 +788,9 @@ def _empty_payload(note: str = "历史分位基线首次构建中") -> dict[str,
         "window_years": 0,
         "samples": 0,
         "position": [],
-        "composite": {"percentile": None, "label": "构建中", "zone": "unknown", "advice": "", "components": []},
+        "composite": {"percentile": None, "label": "构建中", "zone": "unknown", "advice": "",
+                      "components": [], "series": [],
+                      "thresholds": {"top": TOP_THRESHOLD, "bottom": BOTTOM_THRESHOLD}},
         "forward": None,
         "guidance": _guidance({"zone": "unknown", "label": "构建中", "advice": ""}, None, None),
         "analogs": None,
