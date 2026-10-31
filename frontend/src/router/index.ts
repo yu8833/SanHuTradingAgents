@@ -155,7 +155,7 @@ const routes: RouteRecordRaw[] = [
     path: '/vibe',
     name: 'VibeResearch',
     component: () => import('@/layouts/BasicLayout.vue'),
-    redirect: '/vibe/synthesis',
+    redirect: '/vibe/market',
     meta: {
       title: '市场',
       icon: 'DataAnalysis',
@@ -164,24 +164,23 @@ const routes: RouteRecordRaw[] = [
     },
     children: [
       {
-        path: 'synthesis',
-        name: 'Synthesis',
-        component: () => import('@/views/Vibe/Review/Synthesis.vue'),
+        path: 'market',
+        name: 'MarketReview',
+        component: () => import('@/views/Vibe/Review/MarketReview.vue'),
         meta: {
-          title: '综合研判',
+          title: '大盘研判',
           parentTitle: '市场',
           requiresAuth: true
         }
       },
+      // 旧入口兼容：综合研判 / 大盘看板已合并为「大盘研判」，保留 hash 深链（如 #events）
+      {
+        path: 'synthesis',
+        redirect: (to) => ({ path: '/vibe/market', hash: to.hash })
+      },
       {
         path: 'review/overview',
-        name: 'ReviewOverview',
-        component: () => import('@/views/Vibe/Review/Overview.vue'),
-        meta: {
-          title: '大盘看板',
-          parentTitle: '市场',
-          requiresAuth: true
-        }
+        redirect: (to) => ({ path: '/vibe/market', hash: to.hash })
       },
       {
         path: 'review/emotion',

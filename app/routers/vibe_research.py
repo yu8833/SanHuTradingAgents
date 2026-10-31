@@ -125,6 +125,23 @@ async def market_metrics(current_user: dict = Depends(get_optional_current_user)
         return ok({"ready": False, "temperature": [], "breadth": {"series": []}, "alerts": []})
 
 
+@router.get("/market/position")
+async def market_position(current_user: dict = Depends(get_optional_current_user)):
+    """大盘当前位置：近 10 年历史分位 / 历史分位映射未来 20 日收益 / 位置背离。"""
+    try:
+        from app.services.market_position import get_market_position
+
+        data = await get_market_position()
+        return ok(data)
+    except Exception as e:
+        logger.error(f"大盘位置查询异常: {e}")
+        return ok({
+            "ready": False, "as_of": "", "updated": "", "position": [],
+            "composite": {"percentile": None, "label": "构建中", "zone": "unknown", "advice": ""},
+            "forward": None, "divergence": [], "note": "历史基线暂不可用",
+        })
+
+
 @router.get("/market/trade-date")
 async def market_trade_date(current_user: dict = Depends(get_optional_current_user)):
     """市场页当前参考交易日（交易时段=当日，盘前=最近已完成交易日），

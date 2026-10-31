@@ -77,6 +77,12 @@ async def prewarm_market_data() -> None:
             await ensure_metrics_history()
             await get_market_metrics()
 
+        async def _position_prewarm():
+            """大盘位置：首次构建近 10 年日度基线（后台分块，约 1~2 分钟）。"""
+            from app.services.market_position import ensure_market_position_history
+
+            await ensure_market_position_history()
+
         # 市场状态（趋势/波动/建议）：compute_market_context 冷启动要全市场扫描（约 35s），
         # 超过看板内的 15s 步进超时 → 若与看板并发预热，看板首轮必然拿不到 regime。
         # 必须先把这份进程级缓存加热，再预热看板。
@@ -105,6 +111,8 @@ async def prewarm_market_data() -> None:
             _safe("个股趋势", get_stock_quadrant()),
             # 市场温度指标：历史基线回填 + 当日分位缓存预热
             _safe("市场温度指标", _metrics_prewarm()),
+            # 大盘位置：近 10 年分位基线（重聚合，后台分块执行）
+            _safe("大盘位置基线", _position_prewarm()),
         )
         el = asyncio.get_event_loop().time() - start
         _last_prewarm_ts = asyncio.get_event_loop().time()

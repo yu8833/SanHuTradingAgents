@@ -106,8 +106,7 @@ const keepAliveComponents = computed(() => [
   'TaskCenterHome',      // 任务中心
   'FavoritesHome',       // 自选股
   'ReportsHome',         // 历史报告
-  'VibeSynthesis',       // 综合研判
-  'ReviewOverview',      // 大盘看板
+  'MarketReview',        // 大盘研判（综合研判 + 大盘看板合并）
   'ReviewEmotion',       // 短线情绪
   'TrendAnalysis',       // 趋势分析（内嵌三 Tab 各自 KeepAlive）
   'CandidateScreening',  // 股票筛选（保留选中行业与结果，返回不重算）

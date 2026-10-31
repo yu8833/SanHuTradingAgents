@@ -1,5 +1,5 @@
 <template>
-  <div class="vibe-overview app-page">
+  <div class="vibe-market app-page">
     <!-- 顶部横幅（全局统一） -->
     <div class="page-hero">
       <div class="page-hero-main">
@@ -7,32 +7,221 @@
           <el-icon :size="26"><DataAnalysis /></el-icon>
         </div>
         <div class="page-hero-text">
-          <h2 class="page-hero-title">{{ titleDate }}<em v-if="weekday" class="title-weekday">（{{ weekday }}）</em> · 大盘看板</h2>
-          <p class="page-hero-sub">大盘指数 / 市场情绪 / 涨跌分布一屏看全</p>
+          <h2 class="page-hero-title">{{ titleDate }}<em v-if="weekday" class="title-weekday">（{{ weekday }}）</em> · 大盘研判</h2>
+          <p class="page-hero-sub">今日结论 → 当前位置 → 盘中事实 → 事件与类比，一条决策链</p>
         </div>
       </div>
       <div class="page-hero-meta">
         <span class="market-state" :class="marketState.cls">{{ marketState.label }}</span>
         <span class="page-hero-tag">数据 {{ dataAsOf || '—' }} · 更新 {{ updatedAt || '—' }}</span>
-        <router-link to="/vibe/synthesis" class="hero-link">看今日结论 →</router-link>
-        <el-button type="primary" plain :icon="Refresh" :loading="loading" @click="refreshOverview">
+        <el-button type="primary" plain :icon="Refresh" :loading="loading || synLoading" @click="refreshAll">
           刷新
         </el-button>
       </div>
     </div>
 
-    <!-- 一句话结论：先给判断，下面各块都是这句话的依据 -->
-    <section v-if="dashboard" class="verdict">
-      <span class="verdict-tag" :style="scoreStyle">{{ dashboard.emotion.label }} · {{ dashboard.emotion.score }} 分</span>
-      <p class="verdict-text">{{ verdictText }}</p>
-      <span class="verdict-meta">
-        <em v-if="metrics" :class="{ 'is-live': metrics.is_live }">{{ metrics.status_label || (metrics.is_live ? '盘中' : '已收盘') }}</em>
-        <span v-if="dataAsOf">数据 {{ dataAsOf }}</span>
-      </span>
+    <!-- 01 今日结论：方向 / 信心度 / 一句话结论 / 主攻·回避·仓位 -->
+    <section id="verdict" class="mr-sec">
+      <div class="mr-sec-head">
+        <span class="mr-sec-no">01</span>
+        <span class="mr-sec-title">今日结论</span>
+        <span class="mr-sec-hint">先看结论，下面各层都是它的依据</span>
+        <span v-if="position?.divergence?.length" class="mr-div-badge" @click="scrollTo('position')">
+          背离预警 {{ position.divergence.length }}
+        </span>
+        <span class="mr-sec-actions">
+          <span v-if="syn?.as_of" class="data-time">研判 {{ shortTime(syn.as_of) }}</span>
+          <el-button link type="primary" :loading="synLoading" @click="loadSynthesis(true)">AI 重新研判</el-button>
+        </span>
+      </div>
+
+      <div v-if="synLoading && !syn" class="syn-loading">
+        <el-skeleton :rows="5" animated />
+        <div class="syn-loading-tip">
+          <el-icon class="is-loading"><Loading /></el-icon>
+          正在加载综合研判（命中缓存秒开，冷启动需 10~60 秒）…
+        </div>
+      </div>
+
+      <section v-else-if="verdict" class="syn-hero" :class="'syn-hero--' + verdict.dirClass">
+        <!-- 顶部：方向 + 信心度 + 标签 -->
+        <div class="syn-hero-top">
+          <div class="syn-direc-wrap">
+            <span class="syn-direc-zh">{{ verdict.directionZh }}方向</span>
+            <span class="syn-direc-main">{{ verdict.direction }}</span>
+          </div>
+          <el-popover
+            v-if="verdict.confidence != null"
+            placement="bottom"
+            :width="272"
+            trigger="hover"
+            :disabled="!events.length"
+          >
+            <template #reference>
+              <div class="syn-conf-wrap">
+                <div class="syn-conf-ring" :style="confRingStyle">
+                  <span class="syn-conf-num">{{ verdict.confidence }}</span>
+                  <span class="syn-conf-unit">%</span>
+                </div>
+                <span class="syn-conf-label">信心度<em v-if="events.length" class="conf-badge">含事件</em></span>
+              </div>
+            </template>
+            <div class="conf-pop">
+              <div class="conf-pop-title">信心度已计入以下事件（只修正，不覆盖趋势判断）</div>
+              <div v-for="e in events" :key="e.id" class="conf-pop-row">
+                <span>{{ e.time }} {{ shortTitle(e.title) }}</span>
+                <em :class="`dir-${e.direction}`">{{ dirLabel(e.direction) }}</em>
+              </div>
+            </div>
+          </el-popover>
+          <div class="syn-tags">
+            <el-tag v-if="syn?.llm_available" size="small" type="danger" effect="dark">AI 研判</el-tag>
+            <el-tag v-else size="small" type="warning" effect="plain">规则兜底</el-tag>
+          </div>
+        </div>
+
+        <div class="syn-hero-concl">
+          <div class="syn-concl-text">{{ verdict.conclusion }}</div>
+        </div>
+
+        <div class="syn-decision" v-if="hasOperationPoints">
+          <div class="syn-dec-card syn-dec-card--main" v-if="verdict.operation_points.main_direction">
+            <div class="syn-dec-label">主攻</div>
+            <div class="syn-dec-text">{{ verdict.operation_points.main_direction }}</div>
+          </div>
+          <div class="syn-dec-card syn-dec-card--avoid" v-if="verdict.operation_points.avoid_direction">
+            <div class="syn-dec-label">回避</div>
+            <div class="syn-dec-text">{{ verdict.operation_points.avoid_direction }}</div>
+          </div>
+          <div class="syn-dec-card syn-dec-card--pos" v-if="verdict.operation_points.position_discipline">
+            <div class="syn-dec-label">仓位</div>
+            <div class="syn-dec-text">{{ verdict.operation_points.position_discipline }}</div>
+          </div>
+        </div>
+      </section>
+
+      <el-empty
+        v-else
+        :image-size="72"
+        description="本次未获取到研判结论（AI 与规则兜底均不可用），可点「AI 重新研判」重试"
+      />
     </section>
 
+    <!-- 02 当前位置：把今天放进近 10 年历史，回答「贵不贵、热不热、接近顶还是底」 -->
+    <section id="position" class="mr-sec">
+      <div class="mr-sec-head">
+        <span class="mr-sec-no">02</span>
+        <span class="mr-sec-title">当前位置</span>
+        <span class="mr-sec-hint">估值 / 情绪 / 宽度 / 资金的历史分位，用于逃顶与判断底部</span>
+        <span class="mr-sec-actions">
+          <span v-if="position?.as_of" class="data-time">数据 {{ position.as_of }}</span>
+        </span>
+      </div>
+
+      <div v-if="positionLoading && !position" class="syn-loading">
+        <el-skeleton :rows="4" animated />
+        <div class="syn-loading-tip">
+          <el-icon class="is-loading"><Loading /></el-icon>
+          正在计算历史分位（首次构建需 1~2 分钟）…
+        </div>
+      </div>
+
+      <div v-else-if="!position || !position.ready" class="pos-pending">
+        <el-icon class="is-loading"><Loading /></el-icon>
+        <span>{{ position?.note || '历史分位基线构建中，完成后自动显示' }}</span>
+        <el-button link type="primary" @click="loadPosition(true)">立即重试</el-button>
+      </div>
+
+      <template v-else>
+        <div class="pos-summary" :class="'zone-' + position.composite.zone">
+          <div class="pos-zone">
+            <span class="pos-zone-label">{{ position.composite.label }}</span>
+            <span class="pos-zone-pct">合成分位 <b>{{ position.composite.percentile ?? '—' }}%</b></span>
+          </div>
+          <p class="pos-advice">{{ position.composite.advice }}</p>
+          <span class="pos-meta">历史 {{ position.window_years }} 年 · n={{ position.samples }} · 截至 {{ position.as_of }}</span>
+        </div>
+
+        <div class="pos-grid">
+          <div v-for="m in position.position" :key="m.key" class="pos-card">
+            <el-tooltip :content="m.desc" placement="top" :show-after="200">
+              <div class="pos-label">{{ m.label }}<el-icon><QuestionFilled /></el-icon></div>
+            </el-tooltip>
+            <div class="pos-value">
+              {{ m.value == null ? '—' : m.value }}<em>{{ m.unit }}</em>
+            </div>
+            <div class="pos-track">
+              <i v-if="m.percentile != null" class="pos-fill" :class="posTone(m.percentile)" :style="{ width: m.percentile + '%' }" />
+              <i class="pos-median" title="中位 = 50% 分位" />
+            </div>
+            <div class="pos-foot">
+              <span v-if="m.percentile != null">
+                <template v-if="m.window_years >= 0.1">近 {{ m.window_years }} 年</template>
+                <b>{{ m.percentile }}%</b> 分位
+              </span>
+              <span v-else>样本构建中</span>
+              <span class="mono">n={{ m.samples }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="position.divergence.length" class="pos-div-row">
+          <span
+            v-for="d in position.divergence"
+            :key="d.title + d.detail"
+            class="pos-div-chip"
+            :class="'is-' + d.level"
+          >
+            <b>{{ d.title }}</b><span>{{ d.detail }}</span>
+          </span>
+        </div>
+
+        <div v-if="position.forward" class="pos-fwd">
+          <div class="pos-fwd-head">
+            历史分位 → 未来 {{ position.forward.day }} 日收益
+            <span class="dist-note">
+              等权全市场组合 · n={{ position.forward.samples }} · 近 {{ position.forward.window_years }} 年
+            </span>
+          </div>
+          <div class="pos-fwd-grid">
+            <div class="pos-fwd-row is-head">
+              <span>历史分位区间</span><span>中位收益</span><span>胜率</span><span>样本 n</span>
+            </div>
+            <div
+              v-for="b in position.forward.bins"
+              :key="b.key"
+              class="pos-fwd-row"
+              :class="{ 'is-current': b.key === position.forward.current_bin }"
+            >
+              <span class="fwd-label">
+                {{ b.label }}
+                <em v-if="b.key === position.forward.current_bin">当前</em>
+              </span>
+              <span class="mono">{{ b.median_return == null ? '—' : signedPct(b.median_return) }}</span>
+              <span class="mono">{{ b.win_rate == null ? '—' : b.win_rate + '%' }}</span>
+              <span class="mono">{{ b.n }}</span>
+            </div>
+          </div>
+          <p class="cap">分位越高代表当时市场越热；收益为未来 20 个交易日的等权平均涨跌幅，仅作历史统计，不代表未来。</p>
+        </div>
+
+        <p class="cap">{{ position.note }}</p>
+      </template>
+    </section>
+
+    <!-- 03 盘中事实 -->
+    <section id="facts" class="mr-sec">
+      <div class="mr-sec-head">
+        <span class="mr-sec-no">03</span>
+        <span class="mr-sec-title">盘中事实</span>
+        <span class="mr-sec-hint">指数 / 涨跌分布 / 宽度 / 风格 / 集中度</span>
+        <span class="mr-sec-actions">
+          <span v-if="metrics?.updated" class="data-time">指标 {{ shortTime(metrics.updated) }}</span>
+        </span>
+      </div>
+
     <!-- 开盘情景：盘前唯一的前瞻信息（隔夜外盘 → 开盘缺口）+ 昨日情绪结构，08:30 后自动展开 -->
-    <section v-if="preOpen && preOpen.bands.length" class="preopen-block">
+    <section v-if="preOpen && preOpen.bands.length && isPreOpen" class="preopen-block">
       <div class="preopen-head">
         <span class="preopen-kicker">开盘情景</span>
         <span class="preopen-verdict" :class="`tone-${preOpen.gap.tone}`">
@@ -406,69 +595,202 @@
         </el-card>
       </div>
     </section>
+    </section>
 
-    <!-- 今日事件：只回答「几点有事、是否影响方向」，分析在综合研判 -->
-    <section v-if="eventsData" class="block block--tail">
-      <div class="block-head">
-        <span class="block-title"><el-icon><Calendar /></el-icon> 今日事件</span>
-        <span class="block-hint">{{ eventSummary }}</span>
-        <span v-if="eventsData.updated" class="data-time">抓取 {{ shortTime(eventsData.updated) }}</span>
+    <!-- 04 事件与类比：只回答「会不会改变判断」+ 今日买卖清单 -->
+    <section id="events" class="mr-sec">
+      <div class="mr-sec-head">
+        <span class="mr-sec-no">04</span>
+        <span class="mr-sec-title">事件与类比</span>
+        <span class="mr-sec-hint">{{ eventHeadline || '只保留会改变判断的事件，噪音事件明确标注不改判断' }}</span>
+        <span class="mr-sec-actions">
+          <span v-if="eventsData?.updated" class="data-time">更新 {{ shortTime(eventsData.updated) }}</span>
+        </span>
       </div>
 
-      <div v-if="events.length" class="event-axis">
-        <div class="event-track">
-          <i
-            v-for="t in eventTicks"
-            :key="t.label"
-            class="event-tick"
-            :class="{ 'event-tick--open': t.open }"
-            :style="{ left: t.pct + '%' }"
-          >
-            <span class="event-tick-label">{{ t.label }}</span>
-          </i>
-          <button
-            v-for="e in events"
-            :key="e.id"
-            class="event-dot"
-            :class="[`status-${e.status}`, `impact-${e.impact}`]"
-            :style="{ left: eventPct(e.time) + '%' }"
-            :title="`${e.time} ${e.title}（${statusLabel(e)}）`"
-            @click="gotoEvents"
-          />
+      <div v-if="eventsLoading && !eventsData" class="ev-empty">
+        <el-icon class="is-loading"><Loading /></el-icon> 正在加载今日事件…
+      </div>
+      <div v-else-if="!eventsData" class="ev-empty">事件源暂不可用，不影响 01 今日结论与 02 当前位置</div>
+
+      <div v-if="events.length" class="ev-list">
+        <el-card
+          v-for="e in events"
+          :key="e.id"
+          shadow="never"
+          class="ev-card"
+          :class="[`impact-${e.impact}`, { 'is-expired': e.status === 'expired' }]"
+        >
+          <div class="ev-row ev-main">
+            <span class="ev-time">{{ e.time }}</span>
+            <span class="ev-title">{{ e.title }}</span>
+            <span v-if="e.surprise_label" class="ev-surprise" :class="surpriseClass(e)">
+              {{ e.surprise_label }}
+            </span>
+            <span class="ev-status" :class="`status-${e.status}`">{{ eventStatusLabel(e) }}</span>
+            <span class="ev-toggle" @click="toggleEvent(e.id)">
+              {{ expandedEvents.includes(e.id) ? '收起' : '展开' }}
+            </span>
+          </div>
+
+          <div class="ev-row ev-impact">
+            <span class="ev-label">影响</span>
+            <span class="ev-impact-val" :class="`dir-${e.direction}`">{{ impactText(e) }}</span>
+          </div>
+
+          <div v-if="e.action" class="ev-row ev-action">
+            <span class="ev-label">怎么做</span>
+            <span>{{ e.action }}</span>
+          </div>
+
+          <div v-if="e.sectors && e.sectors.length" class="ev-row ev-sectors">
+            <span class="ev-label">相关</span>
+            <span v-for="s in e.sectors" :key="s" class="ev-tag">{{ s }}</span>
+          </div>
+
+          <div v-if="expandedEvents.includes(e.id)" class="ev-detail">
+            <div v-if="e.transmission && e.transmission.length" class="ev-trans">
+              <span v-for="(t, i) in e.transmission" :key="i" class="ev-trans-step">
+                {{ t }}<em v-if="i < e.transmission.length - 1">→</em>
+              </span>
+            </div>
+            <div v-if="e.watch" class="ev-watch">观察点：{{ e.watch }}</div>
+          </div>
+        </el-card>
+      </div>
+      <div v-else-if="eventsData && !eventsData.source_ok" class="ev-empty">
+        经济日历暂不可用，事件影响暂缺；不影响 01 今日结论
+      </div>
+      <div v-else-if="eventsData" class="ev-empty">今日无重大宏观事件，按原计划执行</div>
+
+      <!-- 今日买卖清单：盘中实时计算，与 AI 文字研判相互独立 -->
+      <section v-if="syn" class="syn-guide">
+        <div class="syn-guide-head">
+          <span class="syn-guide-title"><el-icon><TrendCharts /></el-icon> 今日买卖清单</span>
+          <span class="syn-guide-hint">盘中实时计算 · 与 01 的文字结论相互独立</span>
         </div>
-        <div class="event-list">
-          <span
-            v-for="e in visibleEvents"
-            :key="e.id"
-            class="event-chip"
-            :class="`status-${e.status}`"
-            @click="gotoEvents"
-          >
-            <b>{{ e.time }}</b>{{ shortTitle(e.title) }}
-            <em>{{ statusLabel(e) }}</em>
-          </span>
-          <span v-if="events.length > visibleEvents.length" class="event-more">
-            +{{ events.length - visibleEvents.length }} 件
-          </span>
+        <div class="syn-guide-grid">
+          <div class="syn-guide-col">
+            <div class="syn-guide-col-head">
+              <span class="buy">买入关注</span>
+              <span class="syn-guide-count">{{ buyList.length }} 只</span>
+            </div>
+            <div v-for="b in buyList" :key="'b-' + b.code" class="syn-guide-item">
+              <div class="syn-guide-row">
+                <router-link target="_blank" rel="noopener" :to="`/stocks/${b.code}`" class="syn-guide-name">{{ b.name || b.code }}</router-link>
+                <span class="syn-guide-code">{{ b.code }}</span>
+                <el-tag size="small" :type="buyTagType(b)" effect="plain">{{ buyStateLabel(b) }}</el-tag>
+              </div>
+              <div class="syn-guide-metrics">
+                <span>现价 <b class="mono">{{ fmtPrice(b.last_price) }}</b></span>
+                <span>触发价 <b class="mono">{{ fmtPrice(b.trigger_price) }}</b></span>
+                <span v-if="b.distance_pct != null" :class="{ 'is-near': isNear(b.distance_pct) }">
+                  偏离 <b class="mono">{{ fmtPct(b.distance_pct) }}</b>
+                </span>
+              </div>
+              <div class="syn-guide-advice">{{ b.advice || '等待实时价确认触发' }}</div>
+            </div>
+            <div v-if="!buyList.length" class="syn-guide-empty">暂无待触发的买入计划</div>
+          </div>
+
+          <div class="syn-guide-col">
+            <div class="syn-guide-col-head">
+              <span class="sell">持仓卖出</span>
+              <span class="syn-guide-count">{{ sellList.length }} 只</span>
+            </div>
+            <div v-for="s in sellList" :key="'s-' + s.code" class="syn-guide-item">
+              <div class="syn-guide-row">
+                <router-link target="_blank" rel="noopener" :to="`/stocks/${s.code}`" class="syn-guide-name">{{ s.name || s.code }}</router-link>
+                <span class="syn-guide-code">{{ s.code }}</span>
+                <el-tag size="small" :type="sellTagType(s)" effect="plain">{{ s.advice_label || s.advice || '持有' }}</el-tag>
+              </div>
+              <div class="syn-guide-metrics">
+                <span>现价 <b class="mono">{{ fmtPrice(s.last_price) }}</b></span>
+                <span>持仓 <b class="mono">{{ s.quantity ?? '—' }}</b></span>
+                <span v-if="s.profit_loss_rate != null" :class="clsByVal(s.profit_loss_rate)">
+                  盈亏 <b class="mono">{{ fmtPct(s.profit_loss_rate) }}</b>
+                </span>
+              </div>
+              <div class="syn-guide-advice">{{ s.advice_text || s.advice || '暂无卖出动作' }}</div>
+            </div>
+            <div v-if="!sellList.length" class="syn-guide-empty">暂无持仓卖出建议</div>
+          </div>
         </div>
+      </section>
+    </section>
+
+    <!-- 05 推理过程：默认收起，需要复盘判断依据时展开 -->
+    <section v-if="verdict" id="reason" class="mr-sec">
+      <div class="mr-sec-head">
+        <span class="mr-sec-no">05</span>
+        <span class="mr-sec-title">推理过程</span>
+        <span class="mr-sec-hint">{{ reasonSections }}</span>
       </div>
 
-      <div v-else-if="!eventsData.source_ok" class="event-empty">
-        经济日历暂不可用，仅显示手工日程（当前无）
-      </div>
-      <div v-else class="event-empty">今日无重大宏观事件，按原计划执行</div>
+      <el-collapse v-model="reasonOpen" class="syn-reason">
+        <el-collapse-item name="reason">
+          <template #title>
+            <span class="syn-reason-title"><el-icon><Document /></el-icon> 展开推理过程</span>
+            <span class="syn-reason-sub">{{ reasonSections || '现状 · 原因 · 观察 · 策略 · 风险' }}</span>
+          </template>
+
+          <div class="syn-reason-body">
+            <div v-if="verdict.status" class="syn-panel">
+              <div class="syn-panel-title status"><el-icon><DataLine /></el-icon> 现状</div>
+              <div class="syn-plain-text">{{ verdict.status }}</div>
+            </div>
+
+            <div v-if="verdict.reasons.length" class="syn-panel">
+              <div class="syn-panel-title reasons"><el-icon><InfoFilled /></el-icon> 引起现状的原因</div>
+              <ul class="syn-panel-list">
+                <li v-for="(r, i) in verdict.reasons" :key="'r' + i">▸ {{ r }}</li>
+              </ul>
+            </div>
+
+            <div v-if="verdict.external_observation || verdict.watch.length" class="syn-panel">
+              <div class="syn-panel-title watch"><el-icon><View /></el-icon> 今日观察</div>
+              <div v-if="verdict.external_observation" class="syn-ext">
+                <div class="syn-ext-label">外围传导 · 美股 / 大宗商品 → A股情绪</div>
+                <div class="syn-ext-text">{{ verdict.external_observation }}</div>
+              </div>
+              <ul v-if="verdict.watch.length" class="syn-panel-list">
+                <li v-for="(w, i) in verdict.watch" :key="'w' + i">◎ {{ w }}</li>
+              </ul>
+            </div>
+
+            <div v-if="verdict.strategy" class="syn-panel">
+              <div class="syn-panel-title strat"><el-icon><Guide /></el-icon> 操作策略</div>
+              <div class="syn-strat-text">{{ verdict.strategy }}</div>
+            </div>
+
+            <div v-if="verdict.extra.length" class="syn-panel">
+              <div class="syn-panel-title extra"><el-icon><StarFilled /></el-icon> 重点补充</div>
+              <ul class="syn-panel-list">
+                <li v-for="(e, i) in verdict.extra" :key="'e' + i">★ {{ e }}</li>
+              </ul>
+            </div>
+
+            <div v-if="verdict.risk_tips.length" class="syn-risk">
+              <span class="syn-risk-title"><el-icon><WarnTriangleFilled /></el-icon> 风险提示</span>
+              <ul class="syn-risk-list">
+                <li v-for="(tip, i) in verdict.risk_tips" :key="i">{{ tip }}</li>
+              </ul>
+            </div>
+          </div>
+        </el-collapse-item>
+      </el-collapse>
     </section>
 
     <!-- 免责声明 -->
-    <p class="disclaimer">以上数据来自公开源，仅供参考，不构成投资建议</p>
+    <p class="disclaimer">以上数据来自公开源，AI 研判仅供参考，不构成投资建议</p>
   </div>
 </template>
 
 <script setup lang="ts">
 // 显式声明组件名，供 <keep-alive :include> 匹配
-defineOptions({ name: 'ReviewOverview' })
+defineOptions({ name: 'MarketReview' })
 import { ref, computed, onMounted, onActivated, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   DataAnalysis,
@@ -476,7 +798,14 @@ import {
   Refresh,
   Loading,
   Histogram,
-  Calendar,
+  QuestionFilled,
+  TrendCharts,
+  Document,
+  InfoFilled,
+  StarFilled,
+  View,
+  Guide,
+  WarnTriangleFilled,
 } from '@element-plus/icons-vue'
 import {
   vibeApi,
@@ -485,21 +814,77 @@ import {
   type MarketEvent,
   type MarketEvents,
   type MarketMetrics,
+  type MarketPosition,
+  type MarketSynthesis,
   type MarketTemperatureItem,
   type PreOpen,
   type PreOpenBand,
+  type SynthesisBuyItem,
+  type SynthesisSellItem,
 } from '@/api/vibe'
-import { fmtPrice, fmtPct, fmtAbsPct, fmtSigned } from '@/utils/format'
+import { fmtPrice, fmtPct, fmtAbsPct, fmtSigned, clsByVal } from '@/utils/format'
 import { formatBeijingDateTimeMinute } from '@/utils/datetime'
 
+const route = useRoute()
 const loading = ref(false)
 const indices = ref<IndexQuote[]>([])
 const dashboard = ref<MarketDashboard | null>(null)
 const metrics = ref<MarketMetrics | null>(null)
-const router = useRouter()
 
 const shortTime = (v?: string | null) =>
-  v ? formatBeijingDateTimeMinute(String(v)) : ''
+  v ? formatBeijingDateTimeMinute(String(v)).slice(5, 16) : ''
+
+// ── 01 今日结论：综合研判（AI / 规则兜底），页头「AI 重新研判」唯一入口 ──
+const syn = ref<MarketSynthesis | null>(null)
+const synLoading = ref(false)
+
+async function loadSynthesis(refresh = false) {
+  synLoading.value = true
+  try {
+    // 默认走市场级缓存（秒开）；仅「AI 重新研判」传 refresh=true 强制重算
+    const res = await vibeApi.getSynthesis(refresh)
+    syn.value = res || null
+  } catch (e: any) {
+    console.error('[MarketReview] 综合研判加载失败', e)
+    ElMessage.error(e?.message || '综合研判加载失败，请稍后重试')
+  } finally {
+    synLoading.value = false
+  }
+}
+
+// ── 02 当前位置：近 10 年历史分位（估值 / 情绪 / 宽度 / 资金） ──
+const position = ref<MarketPosition | null>(null)
+const positionLoading = ref(false)
+let positionRetryTimer: number | undefined
+
+async function loadPosition(refresh = false) {
+  positionLoading.value = true
+  try {
+    const res = await vibeApi.getMarketPosition(refresh)
+    position.value = res
+    // 基线仍在后台构建：40s 后再试一次，避免用户手动刷新
+    if (!res?.ready) schedulePositionRetry()
+  } catch (e: any) {
+    console.warn('[MarketReview] 大盘位置加载失败', e?.message || e)
+  } finally {
+    positionLoading.value = false
+  }
+}
+
+function schedulePositionRetry() {
+  if (positionRetryTimer) return
+  positionRetryTimer = window.setTimeout(() => {
+    positionRetryTimer = undefined
+    if (!position.value?.ready) loadPosition(false)
+  }, 40000)
+}
+
+/** 分位配色：高位偏热、低位偏冷（仅用于分位条，不用于涨跌） */
+const posTone = (pct?: number | null) =>
+  pct == null ? 'is-muted' : pct >= 75 ? 'is-hot' : pct <= 25 ? 'is-cold' : 'is-neutral'
+
+const scrollTo = (id: string) =>
+  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 
 // ── 开盘情景：隔夜外盘定档开盘缺口 + 上一交易日情绪结构（盘前唯一的前瞻信息） ──
 const preOpen = ref<PreOpen | null>(null)
@@ -515,6 +900,9 @@ function isPreOpenWindow(): boolean {
   const hm = val('hour') * 60 + val('minute')
   return hm >= 8 * 60 + 30 && hm <= 9 * 60 + 25
 }
+
+/** 盘前窗口（08:30–09:25）：只在这段时间展示「开盘情景」这类前瞻块 */
+const isPreOpen = computed(() => isPreOpenWindow())
 
 async function loadPreOpen(refresh = false) {
   preOpenLoading.value = true
@@ -589,36 +977,60 @@ const marketState = computed(() => {
     : { label: '休市', cls: 'is-closed' }
 })
 
-// ── 今日事件：看板只展示时间与状态，影响分析在综合研判页 ──
+// ── 04 事件与类比：四行固定结构（时间+事件 / 影响 / 怎么做 / 相关） ──
 const eventsData = ref<MarketEvents | null>(null)
+const eventsLoading = ref(false)
 const events = computed<MarketEvent[]>(() => eventsData.value?.events || [])
-const visibleEvents = computed(() => events.value.slice(0, 3))
-const eventSummary = computed(() => {
-  const list = events.value
-  if (!list.length) return '今日无重大宏观事件'
-  const dir = list.filter(e => e.impact === 'direction')
-  const vol = list.filter(e => e.impact === 'volatility')
-  if (dir.length) return `今日 ${list.length} 件 · ${dir.length} 件可能改变方向`
-  if (vol.length) return `今日 ${list.length} 件 · 均不改方向，注意 ${vol[0].time} 前后波动`
-  return `今日 ${list.length} 件 · 均不改变判断`
-})
-const shortTitle = (t: string) => (t.length > 14 ? `${t.slice(0, 14)}…` : t)
-const statusLabel = (e: MarketEvent) =>
-  e.status === 'pending' ? '待公布' : e.status === 'expired' ? '已过时' : '已公布'
-const eventPct = (t: string) => {
-  const m = /^(\d{1,2}):(\d{2})$/.exec(t)
-  if (!m) return 50
-  const mins = Number(m[1]) * 60 + Number(m[2])
-  return Math.min(99, Math.max(1, (mins / 1440) * 100))
+const expandedEvents = ref<string[]>([])
+const toggleEvent = (id: string) => {
+  const i = expandedEvents.value.indexOf(id)
+  if (i >= 0) expandedEvents.value.splice(i, 1)
+  else expandedEvents.value.push(id)
 }
-const eventTicks = [
-  { label: '00:00', pct: 0 },
-  { label: '09:30 开盘', pct: (570 / 1440) * 100, open: true },
-  { label: '12:00', pct: 50 },
-  { label: '15:00', pct: (900 / 1440) * 100 },
-  { label: '24:00', pct: 99 },
-]
-const gotoEvents = () => router.push('/vibe/synthesis#events')
+const shortTitle = (t: string) => (t && t.length > 14 ? `${t.slice(0, 14)}…` : t || '')
+const dirLabel = (d?: string) => (d === 'bull' ? '偏多' : d === 'bear' ? '偏空' : '中性')
+const surpriseClass = (e: MarketEvent) => `sur-${e.direction || 'neutral'}`
+const eventStatusLabel = (e: MarketEvent) =>
+  e.status === 'pending' ? '待公布' : e.status === 'expired' ? '已过时' : '已公布'
+
+/** 影响一行说清三件事：方向 / 力度 / 时效；噪音事件明确标注「不改判断」 */
+const impactText = (e: MarketEvent) => {
+  if (e.impact === 'none') return '无影响 · 不改判断'
+  const parts = [dirLabel(e.direction)]
+  if (e.strength) parts.push(e.strength)
+  if (e.horizon) parts.push(e.horizon)
+  return parts.join(' · ')
+}
+
+/** 区块标题：件数 + 其中真正会改变方向的件数（让用户知道要不要逐条读） */
+const eventHeadline = computed(() => {
+  const list = events.value
+  if (!list.length) return ''
+  const dir = list.filter(e => e.impact === 'direction').length
+  const vol = list.filter(e => e.impact === 'volatility').length
+  if (dir) return `共 ${list.length} 件 · ${dir} 件可能改变方向`
+  if (vol) return `共 ${list.length} 件 · 仅影响 ${vol} 次盘中波动`
+  return `共 ${list.length} 件 · 均不改变判断`
+})
+
+async function loadEvents() {
+  eventsLoading.value = true
+  try {
+    const res: any = await vibeApi.getMarketEvents()
+    eventsData.value = res?.data || res || null
+  } catch (e: any) {
+    console.warn('[MarketReview] 事件加载失败', e?.message || e)
+  } finally {
+    eventsLoading.value = false
+  }
+  scrollToEventsIfNeeded()
+}
+
+// 深链 /vibe/market#events：事件块要等数据回来才渲染，数据到位后补一次定位
+const scrollToEventsIfNeeded = () => {
+  if (route.hash !== '#events' || !eventsData.value) return
+  requestAnimationFrame(() => scrollTo('events'))
+}
 
 const colorClass = (v: number | null | undefined) => {
   if (v == null) return 'flat'
@@ -636,31 +1048,94 @@ const scoreColor = (v: number) => {
   return '#12B76A'
 }
 const scoreHex = computed(() => scoreColor(dashboard.value?.emotion.score ?? 50))
-const scoreStyle = computed(() => {
-  const c = scoreHex.value
-  return { color: c, borderColor: c + '40', background: c + '14' }
+
+// ── 01 今日结论：把后端研判整理成「方向 / 信心度 / 结论 / 主攻·回避·仓位」 ──
+const verdict = computed(() => {
+  const v = syn.value?.verdict
+  if (!v) return null
+  const dir = v.direction || '中性'
+  let dirClass = 'neutral'
+  if (dir.includes('多') && !dir.includes('中性')) dirClass = 'bull'
+  else if (dir.includes('空')) dirClass = 'bear'
+  const conf = v.confidence != null ? Math.max(0, Math.min(100, Number(v.confidence))) : null
+  const op = v.operation_points || {}
+  return {
+    direction: dir,
+    directionZh: dirClass === 'bull' ? '偏多' : dirClass === 'bear' ? '偏空' : '中性',
+    dirClass,
+    confidence: conf,
+    conclusion: v.conclusion || '',
+    status: v.status || '',
+    reasons: Array.isArray(v.reasons) ? v.reasons : [],
+    operation_points: {
+      main_direction: op.main_direction || '',
+      avoid_direction: op.avoid_direction || '',
+      position_discipline: op.position_discipline || '',
+    },
+    external_observation: v.external_observation || '',
+    strategy: v.strategy || '',
+    watch: Array.isArray(v.watch) ? v.watch : [],
+    risk_tips: Array.isArray(v.risk_tips) ? v.risk_tips : [],
+    extra: Array.isArray(v.extra) ? v.extra : [],
+  }
 })
 
-// 一句话结论：先给判断，再让下面各块去支撑它
-const verdictText = computed(() => {
-  const d = dashboard.value
-  if (!d) return ''
-  const up = d.breadth.up_pct
-  const breadthWord =
-    up >= 60 ? '个股普涨' : up >= 45 ? '涨跌家数接近' : up >= 30 ? '个股偏跌' : '个股普跌'
-  const zt = d.limit?.limit_up ?? 0
-  const dt = d.limit?.limit_down ?? 0
-  const amount = metrics.value?.temperature?.find((t) => t.key === 'amount')
-  let posWord = ''
-  if (amount?.rank != null) {
-    posWord = amount.rank >= 75
-      ? `，成交额处近一年 ${amount.rank}% 高位`
-      : amount.rank <= 25
-        ? `，成交额处近一年 ${amount.rank}% 低位`
-        : `，成交额处近一年 ${amount.rank}% 分位`
-  }
-  return `${breadthWord}：上涨 ${up}%，涨停 ${zt} 家 / 跌停 ${dt} 家${posWord}。`
+/** 操作要点是否有内容可展示 */
+const hasOperationPoints = computed(() => {
+  const op = verdict.value?.operation_points
+  if (!op) return false
+  return !!(op.main_direction || op.avoid_direction || op.position_discipline)
 })
+
+/** 05 推理过程默认收起；展开后保留用户选择（keep-alive 切回仍在展开态） */
+const reasonOpen = ref<string[]>([])
+
+/** 折叠标题右侧：提示里面有哪些小节，避免用户不知道展开能看到什么 */
+const reasonSections = computed(() => {
+  const v = verdict.value
+  if (!v) return ''
+  const names: string[] = []
+  if (v.status) names.push('现状')
+  if (v.reasons.length) names.push('原因')
+  if (v.external_observation || v.watch.length) names.push('今日观察')
+  if (v.strategy) names.push('操作策略')
+  if (v.extra.length) names.push('重点补充')
+  if (v.risk_tips.length) names.push('风险提示')
+  return names.join(' · ')
+})
+
+/** 结论横幅信心度环：--pct 与 --ring-color 由方向色驱动 */
+const confRingStyle = computed(() => {
+  const v = verdict.value
+  const c = v?.confidence
+  const color = v?.dirClass === 'bull' ? '#f56c6c' : v?.dirClass === 'bear' ? '#67c23a' : '#2b6cb0'
+  return { '--pct': `${c != null ? c : 0}%`, '--ring-color': color }
+})
+
+/** 买卖清单（盘中实时计算，与 AI 文字研判相互独立） */
+const buyList = computed<SynthesisBuyItem[]>(() => syn.value?.buys || [])
+const sellList = computed<SynthesisSellItem[]>(() => syn.value?.sells || [])
+
+const isNear = (dist: number) => dist <= 2
+
+const buyStateLabel = (b: SynthesisBuyItem) => {
+  if (b.triggered) return '已触发'
+  if (b.confirmed === false) return '待确认'
+  if (b.distance_pct != null && b.distance_pct <= 2) return '接近触发'
+  return '等待回落'
+}
+type TagType = 'danger' | 'warning' | 'info' | 'success'
+const buyTagType = (b: SynthesisBuyItem): TagType => {
+  if (b.triggered) return 'danger'
+  if (b.confirmed === false) return 'info'
+  return b.distance_pct != null && b.distance_pct <= 2 ? 'warning' : 'info'
+}
+const sellTagType = (s: SynthesisSellItem): TagType => {
+  const text = `${s.advice_label || ''}${s.advice || ''}`
+  if (/清仓|止损|离场/.test(text)) return 'danger'
+  if (/减仓|止盈/.test(text)) return 'warning'
+  return /持有/.test(text) ? 'success' : 'info'
+}
 
 // 涨跌分布两端口径：与短线情绪页同源时不额外解释，仅降级时提示
 const limitNote = computed(() =>
@@ -894,23 +1369,20 @@ const loadAshare = async (refresh = false) => {
   // 开盘情景独立加载：不阻塞指数/看板，失败也不计入页头告警
   loadPreOpen(refresh)
   try {
+    // 03 盘中事实：事件（04）与研判（01/05）不在这里刷新，避免 60s 轮询连带外部数据源
     const results = await Promise.allSettled([
       withTimeout(vibeApi.getIndices(), 15000),
       withTimeout(vibeApi.getDashboard(refresh), 60000),
-      withTimeout(vibeApi.getMarketEvents(refresh), 25000),
       withTimeout(vibeApi.getMarketMetrics(refresh), 20000),
     ])
 
     // 逐个处理结果，失败不影响其他数据显示
-    const [idxRes, dashRes, evtRes, metRes] = results
+    const [idxRes, dashRes, metRes] = results
     if (idxRes.status === 'fulfilled') {
       indices.value = (idxRes.value as any).data || []
     }
     if (dashRes.status === 'fulfilled') {
       dashboard.value = (dashRes.value as any).data || null
-    }
-    if (evtRes.status === 'fulfilled') {
-      eventsData.value = (evtRes.value as any).data || null
     }
     if (metRes.status === 'fulfilled') {
       metrics.value = (metRes.value as any).data || null
@@ -932,11 +1404,15 @@ const loadAshare = async (refresh = false) => {
 onMounted(() => {
   vibeApi.getLatestTradeDate().then((d) => { if (d) tradeDate.value = d })
   loadAshare()
+  loadPosition()
+  loadSynthesis(false)
+  loadEvents()
   startAutoRefresh()
 })
 
-// 页头刷新：绕过前端缓存，确保拿到最新
-const refreshOverview = () => loadAshare(true)
+// 页头刷新：数据类接口绕过前端缓存；AI 研判不在刷新链路，避免每次刷新都消耗 LLM
+const refreshAll = () =>
+  Promise.all([loadAshare(true), loadPosition(true), loadEvents()])
 
 // 盘中每 60 秒静默刷新一次：只刷数据，不触发 AI 研判；页面隐藏时暂停
 let autoTimer: number | undefined
@@ -954,31 +1430,88 @@ function stopAutoRefresh() {
     autoTimer = undefined
   }
 }
-onUnmounted(stopAutoRefresh)
+onUnmounted(() => {
+  stopAutoRefresh()
+  if (positionRetryTimer) {
+    window.clearTimeout(positionRetryTimer)
+    positionRetryTimer = undefined
+  }
+})
 
-// keep-alive 恢复时刷新一次
-let overviewInited = false
+// keep-alive 恢复时刷新一次（研判走缓存秒开，不重跑 LLM）
+let pageInited = false
 onActivated(() => {
-  if (overviewInited) loadAshare(true)
-  overviewInited = true
+  if (pageInited) {
+    loadAshare(true)
+    loadPosition()
+    loadSynthesis(false)
+    loadEvents()
+  }
+  pageInited = true
   startAutoRefresh()
 })
 </script>
 
 <style scoped>
-.vibe-overview {
+.vibe-market {
   padding: 4px;
+}
+
+/* 五层决策链的分节头：编号 + 标题 + 一句话说明 + 右侧数据时点/操作 */
+.mr-sec {
+  margin-bottom: 24px;
+}
+.mr-sec-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+.mr-sec-no {
+  font-family: var(--app-font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--el-color-primary);
+  letter-spacing: .5px;
+}
+.mr-sec-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+}
+.mr-sec-hint {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.mr-sec-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* 01 结论区的背离预警徽标：点击直达 02 */
+.mr-div-badge {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--el-color-warning);
+  background: rgba(230, 162, 60, .12);
+  cursor: pointer;
+}
+
+/* 通用等宽数字（分位 / 收益 / 样本量） */
+.mono {
+  font-family: var(--app-font-mono);
+  font-variant-numeric: tabular-nums;
 }
 
 .block {
   margin-bottom: 24px;
-}
-
-/* 页尾汇总块：与上方内容拉开层次 */
-.block--tail {
-  margin-top: 8px;
-  padding-top: 18px;
-  border-top: 1px solid var(--el-border-color-lighter);
 }
 
 /* 区块级数据时间：标注该块数据自身的生成时刻，避免与页头「更新于」混淆 */
@@ -1633,108 +2166,6 @@ onActivated(() => {
   padding: 8px 0;
 }
 
-/* ── 今日事件：一条时间轴回答「几点有事」，不在此处放影响判断 ── */
-.event-axis {
-  padding: 6px 4px 0;
-}
-.event-track {
-  position: relative;
-  height: 26px;
-  margin: 0 10px;
-  border-top: 1px solid var(--el-border-color);
-}
-.event-tick {
-  position: absolute;
-  top: -1px;
-  width: 1px;
-  height: 6px;
-  background: var(--el-border-color);
-}
-.event-tick--open {
-  height: 10px;
-  background: var(--el-color-primary-light-5);
-}
-.event-tick-label {
-  position: absolute;
-  top: 10px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 10.5px;
-  color: var(--el-text-color-placeholder);
-  white-space: nowrap;
-}
-.event-dot {
-  position: absolute;
-  top: 0;
-  width: 8px;
-  height: 8px;
-  margin: -4px 0 0 -4px;
-  padding: 0;
-  border-radius: 50%;
-  border: 1.5px solid var(--el-border-color-darker);
-  background: var(--el-fill-color-blank);
-  cursor: pointer;
-  transition: transform 0.15s ease;
-}
-.event-dot:hover {
-  transform: scale(1.35);
-}
-.event-dot.status-released,
-.event-dot.status-expired {
-  background: var(--el-border-color-darker);
-}
-.event-dot.status-expired {
-  opacity: 0.4;
-}
-.event-dot.impact-volatility {
-  border-color: var(--el-color-warning);
-}
-.event-dot.impact-direction {
-  border-color: var(--el-color-primary);
-  background: var(--el-color-primary);
-}
-.event-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 30px;
-}
-.event-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 2px 8px;
-  border-radius: 6px;
-  background: var(--el-fill-color-light);
-  font-size: 12px;
-  color: var(--el-text-color-regular);
-  cursor: pointer;
-}
-.event-chip:hover {
-  background: var(--el-fill-color);
-}
-.event-chip b {
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-.event-chip em {
-  font-style: normal;
-  font-size: 11px;
-  color: var(--el-text-color-placeholder);
-}
-.event-chip.status-pending em {
-  color: var(--el-color-warning);
-}
-.event-more {
-  font-size: 12px;
-  color: var(--el-text-color-placeholder);
-}
-.event-empty {
-  padding: 6px 4px;
-  font-size: 12.5px;
-  color: var(--el-text-color-secondary);
-}
-
 /* ── 开盘情景：结论先行，刻度+明细两层，弱化装饰只保留方向色 ── */
 .preopen-block {
   margin-bottom: 20px;
@@ -2271,5 +2702,761 @@ onActivated(() => {
   .bw-canvas { height: 140px; }
   .bw-yaxis { height: 140px; }
   .snap-row { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   01 今日结论 / 05 推理过程（原综合研判页搬入，保持同一视觉语言）
+   ══════════════════════════════════════════════════════════════════════ */
+
+.syn-loading {
+  padding: 8px 0;
+}
+.syn-loading-tip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
+
+/* 信心度「含事件」角标 + 悬浮明细 */
+.conf-badge {
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 6px;
+  font-style: normal;
+  font-size: 9px;
+  background: rgba(43, 108, 176, .14);
+  color: #2b6cb0;
+}
+.conf-pop-title {
+  margin-bottom: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--el-text-color-secondary);
+}
+.conf-pop-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12.5px;
+  line-height: 1.9;
+  color: var(--el-text-color-regular);
+}
+.conf-pop-row em { font-style: normal; font-weight: 600; white-space: nowrap; }
+.dir-bull { color: var(--app-up); }
+.dir-bear { color: var(--app-down); }
+.dir-neutral { color: var(--el-text-color-secondary); }
+
+/* ── 04 事件四行卡 ── */
+.ev-list { display: flex; flex-direction: column; gap: 8px; }
+.ev-card {
+  border-left: 3px solid var(--el-border-color);
+  box-shadow: none;
+}
+.ev-card.impact-volatility {
+  border-left-color: var(--el-color-warning);
+  background: rgba(230, 162, 60, .04);
+}
+.ev-card.impact-direction {
+  border-left-color: var(--el-color-primary);
+  background: rgba(43, 108, 176, .04);
+}
+.ev-card.is-expired { opacity: .72; }
+.ev-card :deep(.el-card__body) { padding: 10px 12px; }
+
+.ev-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  font-size: 13px;
+}
+.ev-row + .ev-row { margin-top: 6px; }
+.ev-main { font-weight: 600; }
+.ev-time {
+  flex: none;
+  font-family: var(--app-font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+}
+.ev-title {
+  color: var(--el-text-color-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ev-surprise {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  background: var(--el-fill-color);
+}
+.ev-surprise.sur-bull { color: var(--app-up); background: rgba(245, 108, 108, .12); }
+.ev-surprise.sur-bear { color: var(--app-down); background: rgba(103, 194, 58, .12); }
+.ev-surprise.sur-neutral { color: var(--el-text-color-secondary); }
+.ev-status {
+  flex: none;
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--el-text-color-placeholder);
+}
+.ev-status.status-pending { color: var(--el-color-warning); }
+.ev-toggle {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--el-color-primary);
+  cursor: pointer;
+}
+.ev-label {
+  flex: none;
+  width: 34px;
+  font-size: 11.5px;
+  color: var(--el-text-color-placeholder);
+}
+.ev-impact-val { font-weight: 600; }
+.ev-action {
+  align-items: flex-start;
+  line-height: 1.6;
+  color: var(--el-text-color-regular);
+}
+.ev-sectors { flex-wrap: wrap; }
+.ev-tag {
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-size: 11px;
+  background: var(--el-fill-color);
+  color: var(--el-text-color-secondary);
+}
+.ev-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--el-border-color-lighter);
+}
+.ev-trans {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--el-text-color-regular);
+}
+.ev-trans-step em {
+  font-style: normal;
+  margin-left: 4px;
+  color: var(--el-text-color-placeholder);
+}
+.ev-watch { font-size: 12px; line-height: 1.6; color: #2b6cb0; }
+.ev-empty {
+  padding: 14px 0;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--el-text-color-placeholder);
+}
+
+/* ── 01 结论横幅 ── */
+.syn-hero {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--app-radius-lg);
+  background: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color-light);
+  box-shadow: var(--app-shadow);
+  padding: 20px 22px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.syn-hero--bull { border-top: 3px solid var(--app-up); }
+.syn-hero--bear { border-top: 3px solid var(--app-down); }
+.syn-hero--neutral { border-top: 3px solid var(--el-color-primary); }
+
+.syn-hero-top {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  position: relative;
+}
+.syn-direc-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 92px;
+}
+.syn-direc-zh { font-size: 12px; color: var(--el-text-color-placeholder); }
+.syn-direc-main {
+  font-size: 32px;
+  font-weight: 800;
+  letter-spacing: 3px;
+  line-height: 1.05;
+}
+.syn-hero--bull .syn-direc-main { color: var(--app-up); }
+.syn-hero--bear .syn-direc-main { color: var(--app-down); }
+.syn-hero--neutral .syn-direc-main { color: var(--el-color-primary); }
+
+.syn-conf-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 0 18px;
+  border-right: 1px dashed var(--el-border-color-lighter);
+  border-left: 1px dashed var(--el-border-color-lighter);
+}
+.syn-conf-ring {
+  --pct: 0%;
+  --ring-color: #2b6cb0;
+  width: 60px; height: 60px;
+  border-radius: 50%;
+  background: conic-gradient(var(--ring-color) var(--pct), var(--el-fill-color-extra-light) 0);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+.syn-conf-ring::before {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  border-radius: 50%;
+  background: #fff;
+}
+.syn-conf-num {
+  position: relative;
+  z-index: 1;
+  font-family: var(--app-font-mono);
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+  line-height: 1;
+}
+.syn-conf-unit {
+  position: relative;
+  z-index: 1;
+  font-size: 9px;
+  color: var(--el-text-color-placeholder);
+  margin-top: 1px;
+}
+.syn-conf-label { font-size: 11px; color: var(--el-text-color-placeholder); }
+
+.syn-tags {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.syn-hero-concl .syn-concl-text {
+  font-size: 15px;
+  line-height: 1.85;
+  color: var(--el-text-color-primary);
+}
+
+/* 首屏决策卡：主攻 / 回避 / 仓位 */
+.syn-decision {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.syn-dec-card {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color-lighter);
+  border-left-width: 3px;
+}
+.syn-dec-card--main {
+  border-left-color: var(--app-up);
+  background: rgba(245, 108, 108, .05);
+}
+.syn-dec-card--avoid {
+  border-left-color: var(--app-down);
+  background: rgba(103, 194, 58, .05);
+}
+.syn-dec-card--pos {
+  border-left-color: var(--el-color-warning);
+  background: rgba(230, 162, 60, .06);
+}
+.syn-dec-label {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  margin-bottom: 4px;
+}
+.syn-dec-card--main .syn-dec-label { color: var(--app-up); }
+.syn-dec-card--avoid .syn-dec-label { color: var(--app-down); }
+.syn-dec-card--pos .syn-dec-label { color: var(--el-color-warning); }
+.syn-dec-text {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--el-text-color-regular);
+}
+
+/* ── 05 推理过程 ── */
+.syn-panel {
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: var(--el-fill-color-lighter);
+}
+.syn-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.syn-panel-title.watch { color: var(--el-color-primary); }
+.syn-panel-title.strat { color: var(--el-color-warning); }
+.syn-panel-title.status { color: #2b6cb0; }
+.syn-panel-title.reasons { color: var(--el-color-info); }
+.syn-panel-title.extra { color: #805ad5; }
+.syn-panel-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.syn-panel-list li {
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: var(--el-text-color-regular);
+}
+.syn-plain-text,
+.syn-strat-text {
+  font-size: 13.5px;
+  line-height: 1.75;
+  color: var(--el-text-color-regular);
+}
+
+.syn-reason {
+  border-top: 1px solid var(--el-border-color-lighter);
+  border-bottom: none;
+}
+.syn-reason :deep(.el-collapse-item__header) {
+  height: auto;
+  padding: 8px 2px;
+  border-bottom: none;
+  gap: 10px;
+  line-height: 1.5;
+}
+.syn-reason :deep(.el-collapse-item__wrap) {
+  border-bottom: none;
+}
+.syn-reason-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-regular);
+}
+.syn-reason-sub {
+  margin-left: auto;
+  padding-right: 8px;
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--el-text-color-placeholder);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.syn-reason-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 2px 0 4px;
+}
+
+/* 今日观察 · 外围传导 */
+.syn-ext {
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(43, 108, 176, .06);
+  border: 1px solid rgba(43, 108, 176, .18);
+}
+.syn-ext-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #2b6cb0;
+  margin-bottom: 4px;
+}
+.syn-ext-text {
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: var(--el-text-color-regular);
+}
+
+/* 风险提示 */
+.syn-risk {
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(230, 162, 60, .08);
+  border: 1px solid rgba(230, 162, 60, .22);
+}
+.syn-risk-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #b7791f;
+  margin-bottom: 4px;
+}
+.syn-risk-list { margin: 0; padding-left: 18px; }
+.syn-risk-list li {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--el-text-color-regular);
+}
+
+/* ── 今日买卖清单 ── */
+.syn-guide {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border-radius: var(--app-radius-lg);
+  background: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color-light);
+  box-shadow: var(--app-shadow);
+}
+.syn-guide-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.syn-guide-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+}
+.syn-guide-hint {
+  font-size: 12px;
+  color: var(--el-text-color-placeholder);
+}
+.syn-guide-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.syn-guide-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.syn-guide-col-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12.5px;
+  font-weight: 700;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+.syn-guide-col-head .buy { color: var(--app-up); }
+.syn-guide-col-head .sell { color: var(--app-down); }
+.syn-guide-count {
+  font-weight: 500;
+  color: var(--el-text-color-placeholder);
+}
+.syn-guide-item {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--el-fill-color-lighter);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.syn-guide-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.syn-guide-name {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.syn-guide-name:hover { color: var(--el-color-primary); }
+.syn-guide-code {
+  font-family: var(--app-font-mono);
+  font-size: 11.5px;
+  color: var(--el-text-color-placeholder);
+}
+.syn-guide-row :deep(.el-tag) { margin-left: auto; flex: none; }
+.syn-guide-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.syn-guide-metrics .is-near { color: var(--el-color-warning); }
+.syn-guide-metrics .up { color: var(--app-up); }
+.syn-guide-metrics .down { color: var(--app-down); }
+.syn-guide-metrics .mono {
+  font-family: var(--app-font-mono);
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+.syn-guide-metrics .up .mono { color: var(--app-up); }
+.syn-guide-metrics .down .mono { color: var(--app-down); }
+.syn-guide-advice {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--el-text-color-regular);
+}
+.syn-guide-empty {
+  padding: 14px 0;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--el-text-color-placeholder);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   02 当前位置：四分位卡 / 背离 chips / 未来 20 日收益 5 档
+   ══════════════════════════════════════════════════════════════════════ */
+
+.pos-pending {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 18px;
+  border-radius: var(--app-radius-lg);
+  border: 1px dashed var(--el-border-color);
+  font-size: 12.5px;
+  color: var(--el-text-color-secondary);
+}
+
+.pos-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 12px 16px;
+  border-radius: var(--app-radius-lg);
+  background: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color-light);
+  border-left-width: 3px;
+  box-shadow: var(--app-shadow);
+}
+.pos-summary.zone-overheated { border-left-color: var(--app-up); }
+.pos-summary.zone-warm { border-left-color: var(--el-color-warning); }
+.pos-summary.zone-neutral { border-left-color: var(--el-color-primary); }
+.pos-summary.zone-cool { border-left-color: var(--el-color-success); }
+.pos-summary.zone-oversold { border-left-color: var(--app-down); }
+
+.pos-zone {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.pos-zone-label {
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--el-text-color-primary);
+}
+.pos-zone-pct {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.pos-zone-pct b {
+  font-family: var(--app-font-mono);
+  font-size: 14px;
+  color: var(--el-text-color-primary);
+}
+.pos-advice {
+  flex: 1 1 320px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--el-text-color-regular);
+}
+.pos-meta {
+  font-size: 11.5px;
+  color: var(--el-text-color-placeholder);
+}
+
+.pos-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+.pos-card {
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color-lighter);
+  min-width: 0;
+}
+.pos-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  cursor: help;
+}
+.pos-value {
+  margin: 4px 0 8px;
+  font-family: var(--app-font-mono);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+  line-height: 1.1;
+}
+.pos-value em {
+  margin-left: 3px;
+  font-style: normal;
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--el-text-color-placeholder);
+}
+.pos-track {
+  position: relative;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--el-fill-color-light);
+  overflow: hidden;
+}
+.pos-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 3px;
+}
+.pos-fill.is-hot { background: var(--app-up); }
+.pos-fill.is-cold { background: var(--app-down); }
+.pos-fill.is-neutral { background: var(--el-color-primary); }
+.pos-fill.is-muted { background: var(--el-border-color); }
+.pos-median {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  left: 50%;
+  width: 1px;
+  background: var(--el-text-color-placeholder);
+  opacity: .7;
+}
+.pos-foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--el-text-color-secondary);
+}
+.pos-foot b { font-family: var(--app-font-mono); color: var(--el-text-color-primary); }
+.pos-foot .mono { color: var(--el-text-color-placeholder); }
+
+.pos-div-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.pos-div-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color-lighter);
+}
+.pos-div-chip b { flex: none; font-weight: 700; }
+.pos-div-chip.is-warning { border-color: rgba(230, 162, 60, .35); background: rgba(230, 162, 60, .08); }
+.pos-div-chip.is-danger { border-color: rgba(245, 108, 108, .35); background: rgba(245, 108, 108, .08); }
+.pos-div-chip.is-info { border-color: rgba(43, 108, 176, .3); background: rgba(43, 108, 176, .06); }
+
+.pos-fwd {
+  margin-top: 12px;
+  padding: 12px 16px;
+  border-radius: var(--app-radius-lg);
+  background: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color-light);
+}
+.pos-fwd-head {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+  margin-bottom: 8px;
+}
+.pos-fwd-head .dist-note { display: inline; margin-left: 8px; }
+.pos-fwd-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pos-fwd-row {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr .8fr;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  color: var(--el-text-color-regular);
+}
+.pos-fwd-row.is-head {
+  font-size: 11.5px;
+  color: var(--el-text-color-placeholder);
+  background: transparent;
+}
+.pos-fwd-row.is-current {
+  background: rgba(43, 108, 176, .08);
+  font-weight: 600;
+}
+.pos-fwd-row .fwd-label em {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 5px;
+  font-style: normal;
+  font-size: 10.5px;
+  color: var(--el-color-primary);
+  background: rgba(43, 108, 176, .12);
+}
+
+@media (max-width: 1200px) {
+  .pos-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  .syn-decision { grid-template-columns: 1fr; }
+  .syn-guide-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 768px) {
+  .pos-grid { grid-template-columns: 1fr; }
+  .syn-hero { padding: 16px; }
+  .syn-hero-top { flex-wrap: wrap; gap: 12px; }
+  .syn-tags { margin-left: 0; }
+  .syn-direc-main { font-size: 26px; }
+  .syn-conf-wrap { padding: 0 12px; }
+  .pos-fwd-row { grid-template-columns: 1.4fr 1fr 1fr .8fr; font-size: 11.5px; }
 }
 </style>

@@ -291,6 +291,52 @@ export interface MarketEvents {
   source?: string
 }
 
+export interface MarketPositionMetric {
+  key: 'valuation' | 'sentiment' | 'breadth' | 'funds' | string
+  label: string
+  unit: string
+  value: number | null
+  percentile: number | null
+  window_years: number
+  samples: number
+  desc: string
+}
+
+export interface MarketPositionBin {
+  key: string
+  label: string
+  lo: number
+  hi: number
+  n: number
+  median_return: number | null
+  win_rate: number | null
+}
+
+export interface MarketPosition {
+  ready: boolean
+  as_of: string
+  updated: string
+  window_years: number
+  samples: number
+  position: MarketPositionMetric[]
+  composite: {
+    percentile: number | null
+    label: string
+    zone: 'overheated' | 'warm' | 'neutral' | 'cool' | 'oversold' | 'unknown' | string
+    advice: string
+  }
+  forward: {
+    day: number
+    samples: number
+    window_years: number
+    bins: MarketPositionBin[]
+    current_bin: string | null
+    current_percentile: number | null
+  } | null
+  divergence: { level: 'danger' | 'warning' | 'info' | string; title: string; detail: string }[]
+  note: string
+}
+
 // 大盘增强指标：温度分位 / 宽度曲线 / 风格轮动 / 成交额集中度 / 盘中预警
 export interface MarketTemperatureItem {
   key: string
@@ -729,6 +775,13 @@ export const vibeApi = {
   async getPreOpen(refresh = false) {
     if (refresh) clearCache('/api/vibe/market/pre-open')
     return cachedGet<PreOpen>('/api/vibe/market/pre-open', undefined, 120000, { timeout: 30000 })
+  },
+
+  // 大盘位置：近 10 年历史分位 / 历史分位映射未来收益 / 背离（后端首次构建中会返回 ready=false）
+  async getMarketPosition(refresh = false) {
+    if (refresh) clearCache('/api/vibe/market/position')
+    const res = await ApiClient.get<any>('/api/vibe/market/position', undefined, { timeout: 40000 })
+    return (res?.data || { ready: false, position: [], divergence: [] }) as MarketPosition
   },
 
   async getEmotion(refresh = false) {
