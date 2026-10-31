@@ -35,11 +35,18 @@ _STALE_CHECK_TS = 0.0
 _STALE_CHECK_INTERVAL = 6 * 3600
 
 _ZONE_MAP = [
-    (80, "overheated", "高位区", "情绪与资金同时处在历史高位，追高性价比下降，优先控制仓位、留出撤退空间"),
-    (60, "warm", "偏高位", "位置偏高但趋势仍强，持仓为主，新增仓位等回踩确认"),
-    (40, "neutral", "中位区", "位置中性，跟随趋势与事件交易，不做位置层面的加减仓"),
-    (20, "cool", "偏低区", "位置偏低，可关注修复机会，等待宽度与量能同步改善"),
-    (0, "oversold", "低位区", "处于历史低位区，恐慌释放后留意反转信号，但需右侧确认"),
+    (80, "overheated", "高位区",
+     "「逃顶」信号区：多项指标同时处于历史最热 20%，继续追高的赔率下降；"
+     "操作上分批止盈、不追高，宽度与量能同步走弱时加快撤退"),
+    (60, "warm", "偏高位",
+     "位置偏高但趋势仍强，继续追高的性价比下降；持仓为主，新增仓位等回踩确认"),
+    (40, "neutral", "中位区",
+     "位置中性，跟随趋势与事件交易，不做位置层面的加减仓"),
+    (20, "cool", "偏低区",
+     "位置偏低，可开始关注修复机会，但仍需宽度与量能同步改善才算确认"),
+    (0, "oversold", "低位区",
+     "「判断底部」观察区：多项指标同时处于历史最冷 20%，下跌惯性往往仍在；"
+     "只做观察、不抢跑，需宽度回升 + 波动率回落 + 年线偏离收窄确认后再分批建仓"),
 ]
 
 _SOURCE_PRIO = {"tushare": 0, "baostock": 1, "akshare": 2, "sina": 3}
@@ -137,6 +144,10 @@ def _aggregate_quotes(db, start: str, end: str | None) -> list[dict]:
             "sym": {"$first": "$symbol"},
             "vol": {"$first": "$volume"},
             "close": {"$first": "$close"},
+            # 振幅 / 低价股占比：同一天同一只票多源只取一条（按数据源优先级）
+            "hi": {"$first": "$high"},
+            "lo": {"$first": "$low"},
+            "pc": {"$first": "$pre_close"},
         }},
         # 脏数据防护：成交额应与 收盘价 × 成交量（股）量级一致
         {"$addFields": {
@@ -173,29 +184,55 @@ def _aggregate_quotes(db, start: str, end: str | None) -> list[dict]:
             "zt": {"$sum": {"$cond": [{"$gte": ["$pct", {"$subtract": ["$lim", 0.2]}]}, 1, 0]}},
             "amount": {"$sum": "$amt"},
             "avg_pct": {"$avg": "$pct"},
+            # 全市场平均振幅（%）：(最高-最低)/昨收，衡量日内波动与情绪
+            "amp": {"$avg": {"$cond": [
+                {"$and": [
+                    {"$gt": [{"$ifNull": ["$hi", 0]}, 0]},
+                    {"$gt": [{"$ifNull": ["$lo", 0]}, 0]},
+                    {"$gt": [{"$ifNull": ["$pc", 0]}, 0]},
+                ]},
+                {"$multiply": [
+                    {"$divide": [{"$subtract": ["$hi", "$lo"]}, "$pc"]},
+                    100,
+                ]},
+                None,
+            ]}},
+            # 收盘价低于 3 元的个股数（底部特征：熊市末期低价股扎堆）
+            "low_small": {"$sum": {"$cond": [
+                {"$and": [{"$gt": [{"$ifNull": ["$close", 0]}, 0]}, {"$lt": ["$close", 3]}]},
+                1, 0,
+            ]}},
         }},
         {"$sort": {"_id": 1}},
     ]
     return list(db["stock_daily_quotes"].aggregate(pipeline, allowDiskUse=True))
 
 
-def _aggregate_valuation(db, start: str, end: str | None) -> dict[str, float]:
-    """按交易日计算全市场平均 PE（仅取有效正数，剔除极端脏值）。"""
+def _aggregate_valuation(db, start: str, end: str | None) -> dict[str, tuple[float | None, float | None]]:
+    """按交易日计算全市场平均 PE / PB（仅取有效正数，剔除极端脏值）。"""
     date_match: dict[str, Any] = {"$gte": start}
     if end:
         date_match["$lte"] = end
     pipeline = [
-        {"$match": {
-            "trade_date": date_match,
-            "pe": {"$gt": 0, "$lte": 500},
+        {"$match": {"trade_date": date_match}},
+        {"$group": {
+            "_id": "$trade_date",
+            "pe": {"$avg": {"$cond": [
+                {"$and": [{"$gt": ["$pe", 0]}, {"$lte": ["$pe", 500]}]}, "$pe", None,
+            ]}},
+            "pb": {"$avg": {"$cond": [
+                {"$and": [{"$gt": ["$pb", 0]}, {"$lte": ["$pb", 50]}]}, "$pb", None,
+            ]}},
         }},
-        {"$group": {"_id": "$trade_date", "pe": {"$avg": "$pe"}}},
     ]
-    out: dict[str, float] = {}
+    out: dict[str, tuple[float | None, float | None]] = {}
     for r in db["stock_daily_basic"].aggregate(pipeline, allowDiskUse=True):
         d = _normalize_date(r.get("_id"))
-        if d and r.get("pe") is not None:
-            out[d] = round(_f(r["pe"]), 2)
+        if not d:
+            continue
+        pe = round(_f(r["pe"]), 2) if r.get("pe") is not None else None
+        pb = round(_f(r["pb"]), 2) if r.get("pb") is not None else None
+        out[d] = (pe, pb)
     return out
 
 
@@ -243,6 +280,7 @@ def _build_sync(full: bool = False) -> int:
             if not d or n <= 0:
                 continue
             up = int(r.get("up") or 0)
+            pe, pb = valuation.get(d, (None, None))
             docs.append({
                 "date": d,
                 "n": n,
@@ -252,7 +290,11 @@ def _build_sync(full: bool = False) -> int:
                 "zt": int(r.get("zt") or 0),
                 "amount": round(_f(r.get("amount")) / 1e8, 2),
                 "avg_pct": round(_f(r.get("avg_pct")), 3),
-                "avg_pe": valuation.get(d),
+                # 平均振幅（%）与低价股（<3 元）占比（%）
+                "amp_pct": round(_f(r.get("amp")), 2) if r.get("amp") is not None else None,
+                "low_pct": round(int(r.get("low_small") or 0) / n * 100, 2),
+                "avg_pe": pe,
+                "avg_pb": pb,
                 "updated_at": now,
             })
         total += _upsert_docs(db, docs)
@@ -335,19 +377,90 @@ def _window_years(dates: list[str]) -> float:
     return round((b - a).days / 365.25, 1)
 
 
-def _forward_stats(rows: list[dict], composite_series: list[int | None]) -> dict[str, Any] | None:
-    """把历史按合成分位分成 5 档，统计未来 20 日等权收益的中位数与胜率。"""
-    if len(rows) < MIN_FORWARD_ROWS:
-        return None
+def _pct_series(series: list[float | None]) -> list[int | None]:
+    """对整条序列做扩展窗口分位（无未来函数）。"""
+    return _rank_series([_f(v) if v is not None else None for v in series])
 
-    log_ret: list[float] = []
+
+def _heat_of(pct: int | None, higher_is_hot: bool) -> int | None:
+    """把「指标分位」统一成「热度分位」：越高越热。"""
+    if pct is None:
+        return None
+    return pct if higher_is_hot else 100 - pct
+
+
+def _index_series(rows: list[dict]) -> list[float]:
+    """等权全市场指数（用当日个股等权平均涨跌幅复利累乘）。"""
+    idx = 100.0
+    out: list[float] = []
     for r in rows:
         v = r.get("avg_pct")
-        log_ret.append(math.log1p(_f(v) / 100) if v is not None else 0.0)
-    # 前缀和：prefix[i] = sum(log_ret[:i])
+        idx *= 1 + (_f(v) / 100 if v is not None else 0.0)
+        out.append(idx)
+    return out
+
+
+def _drawdown_series(idx: list[float], window: int = 250) -> list[float | None]:
+    """距近 250 个交易日最高点的回撤（%，正数表示低于高点多少）。"""
+    out: list[float | None] = []
+    for i, v in enumerate(idx):
+        hi = max(idx[max(0, i - window + 1): i + 1])
+        out.append(round((hi - v) / hi * 100, 2) if hi > 0 else None)
+    return out
+
+
+def _ma_dev_series(idx: list[float], window: int = 250) -> list[float | None]:
+    """相对 250 日均线（年线）的偏离（%），正值为年线上方。"""
+    out: list[float | None] = []
+    for i, v in enumerate(idx):
+        seg = idx[max(0, i - window + 1): i + 1]
+        ma = sum(seg) / len(seg)
+        out.append(round((v / ma - 1) * 100, 2) if ma > 0 else None)
+    return out
+
+
+def _volatility_series(rows: list[dict], window: int = 20) -> list[float | None]:
+    """等权指数近 N 日日收益的年化标准差（%）。"""
+    rets = [
+        math.log1p(_f(r.get("avg_pct")) / 100) if r.get("avg_pct") is not None else None
+        for r in rows
+    ]
+    out: list[float | None] = []
+    for i in range(len(rows)):
+        seg = [v for v in rets[max(0, i - window + 1): i + 1] if v is not None]
+        if len(seg) < 5:
+            out.append(None)
+            continue
+        m = sum(seg) / len(seg)
+        var = sum((v - m) ** 2 for v in seg) / len(seg)
+        out.append(round(math.sqrt(var) * math.sqrt(252) * 100, 2))
+    return out
+
+
+def _forward_returns(rows: list[dict]) -> list[float | None]:
+    """每个时点之后 FORWARD_DAYS 个交易日的等权收益（%）。"""
+    log_ret = [
+        math.log1p(_f(r.get("avg_pct")) / 100) if r.get("avg_pct") is not None else 0.0
+        for r in rows
+    ]
     prefix = [0.0]
     for v in log_ret:
         prefix.append(prefix[-1] + v)
+    out: list[float | None] = []
+    for i in range(len(rows)):
+        j = i + FORWARD_DAYS
+        if j + 1 >= len(prefix):
+            out.append(None)
+        else:
+            out.append(round(math.expm1(prefix[j + 1] - prefix[i + 1]) * 100, 2))
+    return out
+
+
+def _forward_stats(rows: list[dict], composite_series: list[int | None],
+                   fwd_returns: list[float | None]) -> dict[str, Any] | None:
+    """把历史按合成分位分成 5 档，统计未来 20 日等权收益的中位数与胜率。"""
+    if len(rows) < MIN_FORWARD_ROWS:
+        return None
 
     bins = [
         {"key": f"b{i}", "label": f"{i * 20}–{i * 20 + 20}%", "lo": i * 20, "hi": i * 20 + 20,
@@ -355,37 +468,36 @@ def _forward_stats(rows: list[dict], composite_series: list[int | None]) -> dict
         for i in range(5)
     ]
     for i, pct in enumerate(composite_series):
-        j = i + FORWARD_DAYS
-        if pct is None or j >= len(rows):
+        ret = fwd_returns[i]
+        if pct is None or ret is None:
             continue
-        if j + 1 >= len(prefix):
-            continue
-        fwd = math.expm1(prefix[j + 1] - prefix[i + 1])
         idx = min(4, pct // 20)
         bins[idx]["n"] += 1
-        bins[idx]["returns"].append(fwd * 100)
+        bins[idx]["returns"].append(ret)
 
     total_n = sum(b["n"] for b in bins)
     if total_n < 100:
         return None
 
+    def stat(rets: list[float]) -> dict[str, Any]:
+        return {
+            "n": len(rets),
+            "median_return": round(_median(rets) or 0.0, 2) if rets else None,
+            "win_rate": round(sum(1 for v in rets if v > 0) / len(rets) * 100, 1) if rets else None,
+        }
+
     out_bins = []
     for b in bins:
-        rets = b["returns"]
         out_bins.append({
             "key": b["key"],
             "label": b["label"],
             "lo": b["lo"],
             "hi": b["hi"],
-            "n": b["n"],
-            "median_return": round(_median(rets) or 0.0, 2) if rets else None,
-            "win_rate": round(sum(1 for v in rets if v > 0) / len(rets) * 100, 1) if rets else None,
+            **stat(b["returns"]),
         })
 
     current = composite_series[-1] if composite_series else None
-    current_bin = None
-    if current is not None:
-        current_bin = f"b{min(4, current // 20)}"
+    current_bin = f"b{min(4, current // 20)}" if current is not None else None
     return {
         "day": FORWARD_DAYS,
         "samples": total_n,
@@ -393,23 +505,118 @@ def _forward_stats(rows: list[dict], composite_series: list[int | None]) -> dict
         "bins": out_bins,
         "current_bin": current_bin,
         "current_percentile": current,
+        # 逃顶 / 判断底部的历史证据：最热 20% 与最冷 20% 的未来 20 日表现
+        "zones": {
+            "hot": {"label": "合成分位 ≥80%（历史最热 20%）", **stat(bins[4]["returns"])},
+            "cold": {"label": "合成分位 ≤20%（历史最冷 20%）", **stat(bins[0]["returns"])},
+        },
     }
 
 
-def _divergence(position: dict[str, dict], composite: float | None) -> list[dict[str, Any]]:
-    val = position.get("valuation", {}).get("percentile")
-    breadth = position.get("breadth", {}).get("percentile")
-    funds = position.get("funds", {}).get("percentile")
-    sentiment = position.get("sentiment", {}).get("percentile")
+def _analogs(rows: list[dict], dims: list[list[int | None]], composite_series: list[int | None],
+             fwd_returns: list[float | None], top_n: int = 6, min_gap: int = 30) -> dict[str, Any] | None:
+    """历史类比：在「热度分位」空间里找最像今天的交易日，统计其未来 20 日表现。"""
+    n = len(rows)
+    if n < MIN_FORWARD_ROWS:
+        return None
+    target = [d[-1] for d in dims]
+    if any(t is None for t in target):
+        return None
+
+    usable = [
+        i for i in range(n)
+        if fwd_returns[i] is not None and all(d[i] is not None for d in dims)
+    ]
+    if len(usable) < 50:
+        return None
+
+    dist = {i: sum((d[i] - t) ** 2 for d, t in zip(dims, target)) for i in usable}
+    picked: list[int] = []
+    for i in sorted(usable, key=lambda k: dist[k]):
+        if any(abs(i - p) < min_gap for p in picked):
+            continue
+        picked.append(i)
+        if len(picked) >= top_n:
+            break
+    if not picked:
+        return None
+
+    cases = []
+    for i in picked:
+        rms = math.sqrt(dist[i] / len(dims))
+        cases.append({
+            "date": rows[i]["date"],
+            "composite": composite_series[i],
+            "forward_return": fwd_returns[i],
+            "similarity": int(round(max(0, 100 - rms))),
+        })
+    rets = [c["forward_return"] for c in cases]
+    return {
+        "metric": "合成分位 + 回撤 + 宽度 + 成交额 + 振幅",
+        "day": FORWARD_DAYS,
+        "n": len(cases),
+        "median_return": round(_median(rets) or 0.0, 2),
+        "win_rate": round(sum(1 for v in rets if v > 0) / len(rets) * 100, 1),
+        "cases": cases,
+        "note": "在历史热度分位空间里找最像今天的交易日（相邻样本至少间隔 30 个交易日）；"
+                "收益为之后 20 个交易日的等权涨跌幅，仅作历史统计，不代表未来",
+    }
+
+
+def _guidance(zone: dict[str, Any], composite: float | None,
+              fwd: dict[str, Any] | None) -> dict[str, Any]:
+    """把「逃顶 / 判断底部」的判据与历史证据整理成前端可直接渲染的说明块。"""
+    zones = (fwd or {}).get("zones") or {}
+
+    def stat_text(z: dict[str, Any] | None, default: str) -> str:
+        if not z or not z.get("n"):
+            return default
+        med = z.get("median_return")
+        win = z.get("win_rate")
+        if med is None or win is None:
+            return default
+        return (f"历史 {z['n']} 个同类交易日，其后 {FORWARD_DAYS} 日等权收益中位数 {med}%，"
+                f"上涨概率 {win}%")
+
+    short = "历史样本不足 3 年，暂不给出统计"
+    return {
+        "top": {
+            "key": "top",
+            "title": "逃顶（高位区）",
+            "rule": "合成分位 ≥80：位置、情绪、参与度多数处于历史高位",
+            "stats": stat_text(zones.get("hot"), short),
+            "active": bool(composite is not None and composite >= 80),
+            "advice": "优先减仓兑现，不追高；宽度与量能同步走弱时加快撤退",
+        },
+        "bottom": {
+            "key": "bottom",
+            "title": "判断底部（低位区）",
+            "rule": "合成分位 ≤20：回撤接近历史极值、低价股占比抬升、波动率处于高位",
+            "stats": stat_text(zones.get("cold"), short),
+            "active": bool(composite is not None and composite <= 20),
+            "advice": "低位区只是观察区，不抢跑；需宽度回升 + 波动率回落 + 年线偏离收窄确认后再分批建仓",
+        },
+        "current": {"zone": zone.get("zone"), "label": zone.get("label"),
+                    "percentile": composite, "advice": zone.get("advice", "")},
+    }
+
+
+def _divergence(percentiles: dict[str, int | None], composite: float | None) -> list[dict[str, Any]]:
+    """用当前位置指标分位识别背离（指标分位，不是热度分位）。"""
+    val = percentiles.get("valuation_pe")
+    breadth = percentiles.get("up_pct")
+    funds = percentiles.get("amount")
+    dd = percentiles.get("drawdown")
+    vol = percentiles.get("volatility")
 
     out: list[dict[str, Any]] = []
     if val is not None and breadth is not None:
         if val >= 70 and breadth <= 35:
             out.append({"level": "danger", "title": "估值与宽度背离",
-                        "detail": f"估值处 {val}% 高位，但上涨家数仅 {breadth}% 分位，指数可能由少数权重支撑"})
+                        "detail": f"PE 处 {val}% 高位，但上涨家数仅 {breadth}% 分位，指数可能由少数权重支撑"})
         elif val <= 30 and breadth >= 65:
             out.append({"level": "info", "title": "估值与宽度背离",
-                        "detail": f"估值处 {val}% 低位，但宽度已回升至 {breadth}% 分位，留意估值修复"})
+                        "detail": f"PE 处 {val}% 低位，但宽度已回升至 {breadth}% 分位，留意估值修复"})
     if breadth is not None and funds is not None:
         if breadth >= 65 and funds <= 35:
             out.append({"level": "warning", "title": "量价背离",
@@ -417,17 +624,47 @@ def _divergence(position: dict[str, dict], composite: float | None) -> list[dict
         elif breadth <= 35 and funds >= 70:
             out.append({"level": "warning", "title": "放量下跌",
                         "detail": f"上涨家数仅 {breadth}% 分位，成交额却在 {funds}% 高位，抛压需要时间消化"})
-    if sentiment is not None and breadth is not None and sentiment >= 80 and breadth <= 35:
-        out.append({"level": "warning", "title": "情绪与宽度背离",
-                    "detail": f"短线情绪 {sentiment}% 高位，但下跌家数仍多，赚钱效应集中在少数强势股"})
+    if dd is not None and vol is not None and dd >= 80 and vol >= 80:
+        out.append({"level": "danger", "title": "深回撤 + 高波动",
+                    "detail": f"指数距 250 日高点回撤深度处 {dd}% 分位，波动率同时处于 {vol}% 高位，"
+                              "属于下跌加速段，不宜抢反弹"})
     if composite is not None and composite >= 80 and not out:
         out.append({"level": "info", "title": "位置进入高位区",
-                    "detail": "情绪、宽度与资金同时处于历史高位，继续追高需要更强的催化"})
+                    "detail": "位置、情绪与参与度同时处于历史高位，继续追高需要更强的催化"})
+    if composite is not None and composite <= 20 and not out:
+        out.append({"level": "info", "title": "位置进入低位区",
+                    "detail": "多项指标同时处于历史低位，进入「判断底部」观察区，等宽度回升与波动率回落再确认"})
     return out[:3]
 
 
+def _series_metric(rows: list[dict], series: list[float | None], *, key: str, group: str, label: str,
+                   unit: str, higher_is_hot: bool, desc: str) -> dict[str, Any]:
+    """由一条序列生成指标卡：当前值 + 当前值在历史中的分位。"""
+    valid = [i for i, v in enumerate(series) if v is not None]
+    if not valid:
+        return {"key": key, "group": group, "label": label, "unit": unit, "value": None,
+                "percentile": None, "window_years": 0, "samples": 0,
+                "higher_is_hot": higher_is_hot, "desc": desc}
+    cur_i = valid[-1]
+    hist = [series[i] for i in valid if i < cur_i]
+    cur = round(_f(series[cur_i]), 2)
+    pct = _rank([_f(v) for v in hist], cur) if hist else None
+    return {
+        "key": key,
+        "group": group,
+        "label": label,
+        "unit": unit,
+        "value": cur,
+        "percentile": pct,
+        "window_years": _window_years([rows[i]["date"] for i in valid]),
+        "samples": len(hist),
+        "higher_is_hot": higher_is_hot,
+        "desc": desc,
+    }
+
+
 def compute_position_payload(rows: list[dict]) -> dict[str, Any]:
-    """由历史日度行计算当前位置、未来收益分布与背离（纯函数）。"""
+    """由历史日度行计算当前位置、历史类比、未来收益分布与背离（纯函数）。"""
     if not rows:
         return _empty_payload("历史样本为空")
 
@@ -435,58 +672,67 @@ def compute_position_payload(rows: list[dict]) -> dict[str, Any]:
     latest = rows[-1]
     history = rows[:-1]
 
-    def build_metric(key: str, label: str, unit: str, field: str, desc: str) -> dict[str, Any]:
-        vals = [r.get(field) for r in rows if r.get(field) is not None]
-        hist_vals = [r.get(field) for r in history if r.get(field) is not None]
-        dates = [r["date"] for r in rows if r.get(field) is not None]
-        cur_raw = latest.get(field)
-        cur = round(_f(cur_raw), 2) if cur_raw is not None else None
-        pct = _rank([_f(v) for v in hist_vals], _f(cur_raw)) if (cur_raw is not None and hist_vals) else None
-        return {
-            "key": key,
-            "label": label,
-            "unit": unit,
-            "value": cur,
-            "percentile": pct,
-            "window_years": _window_years(dates),
-            "samples": len(hist_vals),
-            "desc": desc,
-        }
+    idx = _index_series(rows)
+    specs = [
+        # key, group, label, unit, series, higher_is_hot, desc, 是否参与合成
+        ("valuation_pe", "估值", "PE 均值", "倍", [r.get("avg_pe") for r in rows], True,
+         "全市场平均市盈率，越高代表整体估值越贵；样本自 2024-07 起", False),
+        ("valuation_pb", "估值", "PB 均值", "倍", [r.get("avg_pb") for r in rows], True,
+         "全市场平均市净率，越低代表资产价格越便宜；样本自 2024-07 起", False),
+        ("drawdown", "位置", "距 250 日高点回撤", "%", _drawdown_series(idx), False,
+         "等权全市场指数距近 250 个交易日最高点还差多少，回撤越深位置越低（分位越高越冷）", True),
+        ("ma250_dev", "位置", "年线偏离", "%", _ma_dev_series(idx), True,
+         "等权指数相对 250 日均线（年线）的偏离，正值为年线上方，越高越热", True),
+        ("amplitude", "情绪", "平均振幅", "%", [r.get("amp_pct") for r in rows], True,
+         "全市场个股日内振幅（最高-最低）/昨收 的平均值，越高说明日内博弈越激烈", True),
+        ("volatility", "情绪", "20 日波动率", "%", _volatility_series(rows), True,
+         "等权指数近 20 日收益的年化标准差，越高说明市场越不稳定", True),
+        ("amount", "参与度", "成交额", "亿", [r.get("amount") for r in rows], True,
+         "全市场成交额，越高说明资金参与越活跃", True),
+        ("up_pct", "参与度", "上涨家数占比", "%", [r.get("up_pct") for r in rows], True,
+         "上涨家数占全市场比重，越高说明上涨越普遍", True),
+        ("low_price", "底部特征", "3 元以下个股占比", "%", [r.get("low_pct") for r in rows], False,
+         "收盘价低于 3 元的个股占比，熊市末期往往明显抬升（分位越高越冷）", True),
+    ]
 
-    position = {
-        "valuation": build_metric("valuation", "估值", "倍", "avg_pe",
-                                  "全市场平均 PE，越高代表整体估值越贵"),
-        "sentiment": build_metric("sentiment", "情绪", "家", "zt",
-                                  "涨停家数，越多代表短线做多情绪越强"),
-        "breadth": build_metric("breadth", "宽度", "%", "up_pct",
-                                "上涨家数占比，越高代表上涨越普遍"),
-        "funds": build_metric("funds", "资金", "亿", "amount",
-                              "全市场成交额，越高代表资金参与度越强"),
-    }
+    metrics: list[dict[str, Any]] = []
+    for key, group, label, unit, series, hot, desc, in_composite in specs:
+        m = _series_metric(rows, series, key=key, group=group, label=label, unit=unit,
+                           higher_is_hot=hot, desc=desc)
+        m["in_composite"] = in_composite
+        metrics.append(m)
 
-    # 合成分位：宽度 / 情绪 / 资金；估值窗口不足 3 年时不参与合成，避免短样本主导
-    usable = []
-    for key in ("breadth", "sentiment", "funds"):
-        p = position[key]["percentile"]
-        if p is not None:
-            usable.append(p)
-    if position["valuation"]["window_years"] >= 3 and position["valuation"]["percentile"] is not None:
-        usable.append(position["valuation"]["percentile"])
-    composite = round(sum(usable) / len(usable)) if usable else None
+    # 合成分位：长历史指标统一折算成热度分位后取均值；估值样本不足 3 年时不参与合成
+    series_by_key = {spec[0]: spec[4] for spec in specs}
+    hot_by_key = {spec[0]: spec[5] for spec in specs}
+    long_keys = [spec[0] for spec in specs if spec[7]]
 
-    breadth_series = [r.get("up_pct") for r in rows]
-    sentiment_series = [r.get("zt") for r in rows]
-    funds_series = [r.get("amount") for r in rows]
-    rank_series = []
-    for s in (breadth_series, sentiment_series, funds_series):
-        rank_series.append(_rank_series([_f(v) if v is not None else None for v in s]))
+    heat_series = [
+        [_heat_of(p, hot_by_key[k]) for p in _pct_series(series_by_key[k])]
+        for k in long_keys
+    ]
     composite_series: list[int | None] = []
     for i in range(len(rows)):
-        vals = [rs[i] for rs in rank_series if rs[i] is not None]
+        vals = [hs[i] for hs in heat_series if hs[i] is not None]
         composite_series.append(round(sum(vals) / len(vals)) if vals else None)
+    composite = composite_series[-1] if composite_series else None
 
     zone = _zone_of(composite)
-    divergence = _divergence(position, composite)
+    fwd_returns = _forward_returns(rows)
+    fwd = _forward_stats(rows, composite_series, fwd_returns)
+    percentiles = {m["key"]: m["percentile"] for m in metrics}
+
+    # 历史类比用的状态向量：整体热度 + 回撤深度 + 宽度 + 成交额 + 振幅（均已折算成热度）
+    def heat_of_key(key: str) -> list[int | None]:
+        return [_heat_of(p, hot_by_key[key]) for p in _pct_series(series_by_key[key])]
+
+    dims = [
+        composite_series,
+        heat_of_key("drawdown"),
+        heat_of_key("up_pct"),
+        heat_of_key("amount"),
+        heat_of_key("amplitude"),
+    ]
 
     return {
         "ready": True,
@@ -494,16 +740,19 @@ def compute_position_payload(rows: list[dict]) -> dict[str, Any]:
         "updated": now_tz().isoformat(),
         "window_years": _window_years([r["date"] for r in rows]),
         "samples": len(history),
-        "position": [position[k] for k in ("valuation", "sentiment", "breadth", "funds")],
+        "position": metrics,
         "composite": {
             "percentile": composite,
             "label": zone["label"],
             "zone": zone["zone"],
             "advice": zone["advice"],
+            "components": [m["key"] for m in metrics if m["in_composite"]],
         },
-        "forward": _forward_stats(rows, composite_series),
-        "divergence": divergence,
-        "note": "分位窗口固定近 10 年；估值仅统计全市场平均 PE，样本自 2024-07 起，不足 3 年时不参与合成",
+        "forward": fwd,
+        "guidance": _guidance(zone, composite, fwd),
+        "analogs": _analogs(rows, dims, composite_series, fwd_returns),
+        "divergence": _divergence(percentiles, composite),
+        "note": "分位窗口固定近 10 年；PE / PB 仅有 2024-07 之后的样本，不足 3 年不参与合成",
     }
 
 
@@ -515,8 +764,10 @@ def _empty_payload(note: str = "历史分位基线首次构建中") -> dict[str,
         "window_years": 0,
         "samples": 0,
         "position": [],
-        "composite": {"percentile": None, "label": "构建中", "zone": "unknown", "advice": ""},
+        "composite": {"percentile": None, "label": "构建中", "zone": "unknown", "advice": "", "components": []},
         "forward": None,
+        "guidance": _guidance({"zone": "unknown", "label": "构建中", "advice": ""}, None, None),
+        "analogs": None,
         "divergence": [],
         "note": f"{note}，首次构建约需 1~2 分钟，完成后自动显示",
     }

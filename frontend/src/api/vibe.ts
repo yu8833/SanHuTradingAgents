@@ -292,13 +292,19 @@ export interface MarketEvents {
 }
 
 export interface MarketPositionMetric {
-  key: 'valuation' | 'sentiment' | 'breadth' | 'funds' | string
+  key: string
+  /** 指标分组：估值 / 位置 / 情绪 / 参与度 / 底部特征 */
+  group: string
   label: string
   unit: string
   value: number | null
   percentile: number | null
   window_years: number
   samples: number
+  /** 数值越高越热（长期分位用于热度换算）；false 表示越高越冷 */
+  higher_is_hot: boolean
+  /** 是否参与合成分位 */
+  in_composite: boolean
   desc: string
 }
 
@@ -310,6 +316,39 @@ export interface MarketPositionBin {
   n: number
   median_return: number | null
   win_rate: number | null
+}
+
+export interface MarketPositionZoneStat {
+  label: string
+  n: number
+  median_return: number | null
+  win_rate: number | null
+}
+
+export interface MarketPositionGuide {
+  key: string
+  title: string
+  rule: string
+  stats: string
+  active: boolean
+  advice: string
+}
+
+export interface MarketPositionAnalogCase {
+  date: string
+  composite: number | null
+  forward_return: number | null
+  similarity: number
+}
+
+export interface MarketPositionAnalogs {
+  metric: string
+  day: number
+  n: number
+  median_return: number | null
+  win_rate: number | null
+  cases: MarketPositionAnalogCase[]
+  note: string
 }
 
 export interface MarketPosition {
@@ -324,6 +363,7 @@ export interface MarketPosition {
     label: string
     zone: 'overheated' | 'warm' | 'neutral' | 'cool' | 'oversold' | 'unknown' | string
     advice: string
+    components: string[]
   }
   forward: {
     day: number
@@ -332,7 +372,15 @@ export interface MarketPosition {
     bins: MarketPositionBin[]
     current_bin: string | null
     current_percentile: number | null
+    zones: { hot: MarketPositionZoneStat; cold: MarketPositionZoneStat }
   } | null
+  /** 逃顶 / 判断底部的判据与历史证据 */
+  guidance: {
+    top: MarketPositionGuide
+    bottom: MarketPositionGuide
+    current: { zone: string; label: string; percentile: number | null; advice: string }
+  } | null
+  analogs: MarketPositionAnalogs | null
   divergence: { level: 'danger' | 'warning' | 'info' | string; title: string; detail: string }[]
   note: string
 }

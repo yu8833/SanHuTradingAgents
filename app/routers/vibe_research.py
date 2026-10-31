@@ -136,9 +136,12 @@ async def market_position(current_user: dict = Depends(get_optional_current_user
     except Exception as e:
         logger.error(f"大盘位置查询异常: {e}")
         return ok({
-            "ready": False, "as_of": "", "updated": "", "position": [],
-            "composite": {"percentile": None, "label": "构建中", "zone": "unknown", "advice": ""},
-            "forward": None, "divergence": [], "note": "历史基线暂不可用",
+            "ready": False, "as_of": "", "updated": "", "window_years": 0, "samples": 0,
+            "position": [],
+            "composite": {"percentile": None, "label": "构建中", "zone": "unknown",
+                          "advice": "", "components": []},
+            "forward": None, "guidance": None, "analogs": None,
+            "divergence": [], "note": "历史基线暂不可用",
         })
 
 

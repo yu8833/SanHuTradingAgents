@@ -112,7 +112,7 @@
       <div class="mr-sec-head">
         <span class="mr-sec-no">02</span>
         <span class="mr-sec-title">当前位置</span>
-        <span class="mr-sec-hint">估值 / 情绪 / 宽度 / 资金的历史分位，用于逃顶与判断底部</span>
+        <span class="mr-sec-hint">估值 / 位置 / 情绪 / 参与度 / 底部特征的历史分位（近 10 年），用来判断「接近顶部」还是「接近底部」</span>
         <span class="mr-sec-actions">
           <span v-if="position?.as_of" class="data-time">数据 {{ position.as_of }}</span>
         </span>
@@ -139,28 +139,55 @@
             <span class="pos-zone-pct">合成分位 <b>{{ position.composite.percentile ?? '—' }}%</b></span>
           </div>
           <p class="pos-advice">{{ position.composite.advice }}</p>
-          <span class="pos-meta">历史 {{ position.window_years }} 年 · n={{ position.samples }} · 截至 {{ position.as_of }}</span>
+          <span class="pos-meta">历史 {{ position.window_years }} 年 · 共 {{ position.samples }} 个交易日样本 · 截至 {{ position.as_of }}</span>
         </div>
 
-        <div class="pos-grid">
-          <div v-for="m in position.position" :key="m.key" class="pos-card">
-            <el-tooltip :content="m.desc" placement="top" :show-after="200">
-              <div class="pos-label">{{ m.label }}<el-icon><QuestionFilled /></el-icon></div>
-            </el-tooltip>
-            <div class="pos-value">
-              {{ m.value == null ? '—' : m.value }}<em>{{ m.unit }}</em>
+        <!-- 逃顶 / 判断底部：判据 + 历史同档位的真实表现（不是口号） -->
+        <div v-if="posGuides.length" class="pos-guide">
+          <div
+            v-for="g in posGuides"
+            :key="g.key"
+            class="pos-guide-card"
+            :class="[`is-${g.key}`, { 'is-active': g.active }]"
+          >
+            <div class="pos-guide-head">
+              <span class="pos-guide-title">{{ g.title }}</span>
+              <em v-if="g.active" class="pos-guide-flag">当前已进入该区</em>
             </div>
-            <div class="pos-track">
-              <i v-if="m.percentile != null" class="pos-fill" :class="posTone(m.percentile)" :style="{ width: m.percentile + '%' }" />
-              <i class="pos-median" title="中位 = 50% 分位" />
-            </div>
-            <div class="pos-foot">
-              <span v-if="m.percentile != null">
-                <template v-if="m.window_years >= 0.1">近 {{ m.window_years }} 年</template>
-                <b>{{ m.percentile }}%</b> 分位
-              </span>
-              <span v-else>样本构建中</span>
-              <span class="mono">n={{ m.samples }}</span>
+            <div class="pos-guide-rule">{{ g.rule }}</div>
+            <div class="pos-guide-stats">{{ g.stats }}</div>
+            <div class="pos-guide-advice">{{ g.advice }}</div>
+          </div>
+        </div>
+
+        <div v-for="grp in positionGroups" :key="grp.group" class="pos-group">
+          <div class="pos-group-head">
+            {{ grp.group }}<span class="pos-group-hint">{{ grp.hint }}</span>
+          </div>
+          <div class="pos-grid">
+            <div v-for="m in grp.items" :key="m.key" class="pos-card">
+              <el-tooltip :content="m.desc" placement="top" :show-after="200">
+                <div class="pos-label">
+                  {{ m.label }}<el-icon><QuestionFilled /></el-icon>
+                </div>
+              </el-tooltip>
+              <div class="pos-value">
+                {{ m.value == null ? '—' : m.value }}<em>{{ m.unit }}</em>
+              </div>
+              <div class="pos-track">
+                <i
+                  v-if="m.percentile != null"
+                  class="pos-fill"
+                  :class="posTone(heatOfMetric(m))"
+                  :style="{ width: m.percentile + '%' }"
+                />
+                <i class="pos-median" title="中位 = 50% 分位" />
+              </div>
+              <div class="pos-foot">
+                <span v-if="m.percentile != null"><b>{{ m.percentile }}%</b> 分位</span>
+                <span v-else>样本不足，暂不分位</span>
+                <span class="mono">{{ m.samples }} 日样本</span>
+              </div>
             </div>
           </div>
         </div>
@@ -602,7 +629,7 @@
       <div class="mr-sec-head">
         <span class="mr-sec-no">04</span>
         <span class="mr-sec-title">事件与类比</span>
-        <span class="mr-sec-hint">{{ eventHeadline || '只保留会改变判断的事件，噪音事件明确标注不改判断' }}</span>
+        <span class="mr-sec-hint">{{ eventHeadline || '只保留会改变判断的事件' }} · 历史类比看「像今天这样的环境后来怎么走」</span>
         <span class="mr-sec-actions">
           <span v-if="eventsData?.updated" class="data-time">更新 {{ shortTime(eventsData.updated) }}</span>
         </span>
@@ -662,6 +689,32 @@
         经济日历暂不可用，事件影响暂缺；不影响 01 今日结论
       </div>
       <div v-else-if="eventsData" class="ev-empty">今日无重大宏观事件，按原计划执行</div>
+
+      <!-- 历史类比：在热度分位空间找最像今天的交易日，看其后 20 日实际表现 -->
+      <section v-if="position?.analogs" class="pos-analog">
+        <div class="pos-analog-head">
+          <span class="pos-analog-title"><el-icon><DataLine /></el-icon> 历史类比</span>
+          <span class="dist-note">{{ position.analogs.metric }} · 相邻样本间隔 ≥30 个交易日</span>
+        </div>
+        <div class="pos-analog-summary">
+          <span>
+            最像今天的 {{ position.analogs.n }} 个交易日，其后 {{ position.analogs.day }} 日
+            <b class="mono" :class="clsByVal(position.analogs.median_return)">
+              中位 {{ signedPct(position.analogs.median_return) }}
+            </b>
+            <b class="mono">上涨 {{ position.analogs.win_rate == null ? '—' : position.analogs.win_rate + '%' }}</b>
+          </span>
+        </div>
+        <div class="pos-analog-grid">
+          <div v-for="c in position.analogs.cases" :key="c.date" class="pos-analog-case">
+            <span class="pos-analog-date">{{ c.date }}</span>
+            <span class="pos-analog-sim">相似度 {{ c.similarity }}%</span>
+            <span class="mono" :class="clsByVal(c.forward_return)">后 {{ position.analogs.day }} 日 {{ signedPct(c.forward_return) }}</span>
+            <span class="pos-analog-comp mono">当时分位 {{ c.composite ?? '—' }}%</span>
+          </div>
+        </div>
+        <p class="cap">{{ position.analogs.note }}</p>
+      </section>
 
       <!-- 今日买卖清单：盘中实时计算，与 AI 文字研判相互独立 -->
       <section v-if="syn" class="syn-guide">
@@ -815,6 +868,7 @@ import {
   type MarketEvents,
   type MarketMetrics,
   type MarketPosition,
+  type MarketPositionMetric,
   type MarketSynthesis,
   type MarketTemperatureItem,
   type PreOpen,
@@ -882,6 +936,34 @@ function schedulePositionRetry() {
 /** 分位配色：高位偏热、低位偏冷（仅用于分位条，不用于涨跌） */
 const posTone = (pct?: number | null) =>
   pct == null ? 'is-muted' : pct >= 75 ? 'is-hot' : pct <= 25 ? 'is-cold' : 'is-neutral'
+
+/** 位置指标分组顺序 + 每组一句话解释 */
+const POSITION_GROUP_HINTS: Record<string, string> = {
+  估值: '贵不贵',
+  位置: '指数自身的高低',
+  情绪: '日内博弈与稳定性',
+  参与度: '资金与广度',
+  底部特征: '熊市末期特征',
+}
+
+const positionGroups = computed(() => {
+  const list = position.value?.position || []
+  const order = Object.keys(POSITION_GROUP_HINTS)
+  const rank = (s: string) => (order.indexOf(s) < 0 ? 99 : order.indexOf(s))
+  return [...new Set(list.map(m => m.group))]
+    .map(g => ({ group: g, hint: POSITION_GROUP_HINTS[g] || '', items: list.filter(m => m.group === g) }))
+    .sort((a, b) => rank(a.group) - rank(b.group))
+})
+
+/** 逃顶 / 判断底部：后端整理的判据 + 历史证据 */
+const posGuides = computed(() => {
+  const g = position.value?.guidance
+  return g ? [g.top, g.bottom] : []
+})
+
+/** 反向指标（越高越冷）取热度分位，仅用于配色 */
+const heatOfMetric = (m: MarketPositionMetric) =>
+  m.percentile == null ? null : (m.higher_is_hot ? m.percentile : 100 - m.percentile)
 
 const scrollTo = (id: string) =>
   document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -3301,6 +3383,115 @@ onActivated(() => {
   color: var(--el-text-color-placeholder);
 }
 
+/* 逃顶 / 判断底部：判据 + 历史证据 */
+.pos-guide {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+.pos-guide-card {
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-left: 3px solid var(--el-border-color);
+  background: var(--el-fill-color-blank);
+}
+.pos-guide-card.is-top { border-left-color: var(--app-up); }
+.pos-guide-card.is-bottom { border-left-color: var(--app-down); }
+.pos-guide-card.is-active { background: var(--el-fill-color-light); }
+.pos-guide-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.pos-guide-title { font-size: 13px; font-weight: 700; color: var(--el-text-color-primary); }
+.pos-guide-flag {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 8px;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--el-color-warning);
+  background: rgba(230, 162, 60, .12);
+}
+.pos-guide-rule { margin-top: 4px; font-size: 12px; color: var(--el-text-color-secondary); }
+.pos-guide-stats { margin-top: 4px; font-size: 12px; color: var(--el-text-color-regular); }
+.pos-guide-advice { margin-top: 4px; font-size: 12px; color: var(--el-text-color-placeholder); }
+
+/* 指标分组：估值 / 位置 / 情绪 / 参与度 / 底部特征 */
+.pos-group { margin-top: 12px; }
+.pos-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+}
+.pos-group-hint {
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--el-text-color-placeholder);
+}
+.pos-group .pos-grid { margin-top: 6px; }
+
+/* 历史类比（04） */
+.pos-analog {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--el-border-color-lighter);
+  background: var(--el-fill-color-blank);
+}
+.pos-analog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pos-analog-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+}
+.pos-analog-summary {
+  margin-top: 6px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.pos-analog-summary b { margin-left: 4px; }
+.pos-analog-summary b.up { color: var(--app-up); }
+.pos-analog-summary b.down { color: var(--app-down); }
+.pos-analog-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+.pos-analog-case {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--el-fill-color-light);
+  font-size: 12px;
+}
+.pos-analog-date { font-weight: 700; color: var(--el-text-color-primary); }
+.pos-analog-sim,
+.pos-analog-comp { font-size: 11.5px; color: var(--el-text-color-placeholder); }
+.pos-analog-case .up { color: var(--app-up); }
+.pos-analog-case .down { color: var(--app-down); }
+
 .pos-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -3445,13 +3636,16 @@ onActivated(() => {
 
 @media (max-width: 1200px) {
   .pos-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pos-analog-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 900px) {
   .syn-decision { grid-template-columns: 1fr; }
   .syn-guide-grid { grid-template-columns: 1fr; }
+  .pos-guide { grid-template-columns: 1fr; }
 }
 @media (max-width: 768px) {
   .pos-grid { grid-template-columns: 1fr; }
+  .pos-analog-grid { grid-template-columns: 1fr; }
   .syn-hero { padding: 16px; }
   .syn-hero-top { flex-wrap: wrap; gap: 12px; }
   .syn-tags { margin-left: 0; }
