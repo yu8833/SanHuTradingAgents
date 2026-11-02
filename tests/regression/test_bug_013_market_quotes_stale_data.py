@@ -147,6 +147,20 @@ async def test_bug_013_market_quotes_consistency_with_daily_quotes():
             pytest.skip("stock_daily_quotes 为空")
         latest_td = latest_doc.get("trade_date")
 
+        # 盘中日线只同步了部分个股（同日 trade_date 但覆盖不足），此时与实时快照
+        # 比较必然不一致；覆盖率不足 60% 视为「日线未完成」，跳过单位一致性校验。
+        mq_total = await db["market_quotes"].count_documents(
+            {"trade_date": {"$in": [str(latest_td), str(latest_td).replace("-", "")]}}
+        )
+        daily_n = await db["stock_daily_quotes"].count_documents(
+            {"period": "daily", "trade_date": latest_td}
+        )
+        if mq_total and daily_n < mq_total * 0.6:
+            pytest.skip(
+                f"最新交易日 {latest_td} 日线仅 {daily_n}/{mq_total} 只（盘中未同步完成），"
+                "跳过 market_quotes 与日线的单位一致性校验"
+            )
+
         # 数据治理（bug-013 日终校准）：非交易时段先清掉收盘前滞留快照
         # （updated_at 早于当日 15:00 的盘中最后快照），避免抽样误报。
         # 交易时段内 calibrate 自动跳过（实时快照与日线口径不一致属正常）。
@@ -285,6 +299,8 @@ async def test_bug_013_calibrate_repairs_stale_snapshot():
         pytest.skip("非容器环境，跳过 DB 集成测试")
 
     from datetime import datetime, timezone
+    from unittest.mock import patch
+    from zoneinfo import ZoneInfo
 
     from app.core.database import close_database, get_mongo_db, init_database
     from app.services.quotes_ingestion_service import QuotesIngestionService
@@ -301,6 +317,20 @@ async def test_bug_013_calibrate_repairs_stale_snapshot():
         sq = await db["stock_daily_quotes"].find_one({"code": "300750", "trade_date": latest_td})
         if not sq or not sq.get("amount"):
             pytest.skip("300750 无当日日线数据")
+
+        # 日终校准的前提是「日线已同步完成」。盘中日线只有部分个股时，校准逻辑
+        # 会按覆盖率守卫跳过（也会污染实时快照），因此该集成用例不适用。
+        daily_n = await db["stock_daily_quotes"].count_documents(
+            {"period": "daily", "trade_date": latest_td}
+        )
+        mq_total = await db["market_quotes"].count_documents(
+            {"trade_date": {"$in": [str(latest_td), str(latest_td).replace("-", "")]}}
+        )
+        if mq_total and daily_n < mq_total * 0.6:
+            pytest.skip(
+                f"最新交易日 {latest_td} 日线仅 {daily_n}/{mq_total} 只（盘中未同步完成），"
+                "日终校准校验不适用"
+            )
 
         # 人为制造滞留快照：amount/volume 缩水 ~1.7%，updated_at 设为北京 14:59（UTC 06:59）
         # 并同步把 trade_date 对齐到日线最新交易日（非交易日时 market_quotes.trade_date
@@ -324,7 +354,13 @@ async def test_bug_013_calibrate_repairs_stale_snapshot():
 
         svc = QuotesIngestionService()
         svc._is_trading_time = lambda: False  # 绕过盘中跳过，强制走校准分支
-        calibrated = await svc.calibrate_to_daily_close(latest_td)
+        # 校准只在收盘缓冲期（15:30）之后执行：显式模拟收盘后，避免测试在盘中时段被守卫拦下
+        after_close = datetime(
+            int(td_date[:4]), int(td_date[4:6]), int(td_date[6:8]), 16, 0, 0,
+            tzinfo=ZoneInfo("Asia/Shanghai"),
+        )
+        with patch("app.services.quotes_ingestion_service.now_tz", return_value=after_close):
+            calibrated = await svc.calibrate_to_daily_close(latest_td)
         assert calibrated >= 1, "应至少校准 1 只滞留股票"
 
         mq = await db["market_quotes"].find_one({"code": "300750"})
@@ -365,6 +401,8 @@ async def test_bug_013_calibrate_idempotent():
         pytest.skip("非容器环境，跳过 DB 集成测试")
 
     from datetime import datetime, timezone
+    from unittest.mock import patch
+    from zoneinfo import ZoneInfo
 
     from app.core.database import close_database, get_mongo_db, init_database
     from app.services.quotes_ingestion_service import QuotesIngestionService
@@ -381,6 +419,18 @@ async def test_bug_013_calibrate_idempotent():
         sq = await db["stock_daily_quotes"].find_one({"code": "300750", "trade_date": latest_td})
         if not sq or not sq.get("amount"):
             pytest.skip("300750 无当日日线数据")
+
+        daily_n = await db["stock_daily_quotes"].count_documents(
+            {"period": "daily", "trade_date": latest_td}
+        )
+        mq_total = await db["market_quotes"].count_documents(
+            {"trade_date": {"$in": [str(latest_td), str(latest_td).replace("-", "")]}}
+        )
+        if mq_total and daily_n < mq_total * 0.6:
+            pytest.skip(
+                f"最新交易日 {latest_td} 日线仅 {daily_n}/{mq_total} 只（盘中未同步完成），"
+                "日终校准幂等校验不适用"
+            )
 
         # 构造「已校准」状态：amount=日线值、updated_at=收盘后（北京 16:00 = UTC 08:00）
         td_date = latest_td.replace("-", "")
@@ -399,7 +449,12 @@ async def test_bug_013_calibrate_idempotent():
 
         svc = QuotesIngestionService()
         svc._is_trading_time = lambda: False
-        n2 = await svc.calibrate_to_daily_close(latest_td)
+        after_close = datetime(
+            int(td_date[:4]), int(td_date[4:6]), int(td_date[6:8]), 16, 0, 0,
+            tzinfo=ZoneInfo("Asia/Shanghai"),
+        )
+        with patch("app.services.quotes_ingestion_service.now_tz", return_value=after_close):
+            n2 = await svc.calibrate_to_daily_close(latest_td)
         assert n2 == 0, "已校准过的数据不应再次命中"
     finally:
         await close_database()

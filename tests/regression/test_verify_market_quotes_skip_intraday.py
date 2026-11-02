@@ -30,6 +30,10 @@ class _FakeColl:
     async def find_one(self, *args, **kwargs):
         return self._doc
 
+    async def count_documents(self, *args, **kwargs):
+        # 覆盖率守卫读取样本数；返回 0 表示未知 → 守卫不生效，继续走原校验逻辑
+        return 0
+
     def find(self, *args, **kwargs):
         class _Cursor:
             def limit(self, n):
