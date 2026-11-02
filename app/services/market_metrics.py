@@ -554,7 +554,30 @@ _TEMP_DEFS = [
 ]
 
 
-def _temperature(history: list[dict], live: dict) -> list[dict]:
+def _session_progress(now: datetime | None = None) -> float:
+    """当日已交易分钟占全天 240 分钟的比例（0~1）。
+
+    成交额 / 平均换手是「当日累计值」，盘中直接与全天历史比会系统性偏低，
+    必须按交易进度折算后再算分位，否则午间会出现「成交额 0% 分位」这类假警报。
+    """
+    t = now or now_tz()
+    m = t.hour * 60 + t.minute
+    if m < 9 * 60 + 30:
+        return 0.0
+    if m >= 15 * 60:
+        return 1.0
+    if m >= 13 * 60:
+        return (120 + min(120, m - 13 * 60)) / 240
+    if m >= 11 * 60 + 30:
+        return 0.5
+    return min(120, m - (9 * 60 + 30)) / 240
+
+
+# 需要按交易进度折算的累计型指标（其余为瞬时值，不用折算）
+_CUMULATIVE_KEYS = {"amount", "avg_turnover"}
+
+
+def _temperature(history: list[dict], live: dict, progress: float = 1.0) -> list[dict]:
     out = []
     for key, label, unit, hot, desc in _TEMP_DEFS:
         # 历史分位排除当日实时点，避免"自己和自己比"
@@ -569,9 +592,13 @@ def _temperature(history: list[dict], live: dict) -> list[dict]:
         cur_f = _f(cur)
         # 涨跌停家数展示用封板池口径，但历史基线是阈值口径，分位改用同口径值计算
         rank_val = _f(live.get(f"{key}_th")) if live.get(f"{key}_th") is not None else cur_f
+        # 累计型指标（成交额/换手）盘中只是半天数据，先按交易进度折算再比全天历史
+        scaled = key in _CUMULATIVE_KEYS and 0.0 < progress < 0.995 and cur_f > 0
+        if scaled:
+            rank_val = cur_f / progress
         rank = _rank(vals, rank_val)
         med = _median(vals)
-        out.append({
+        item = {
             "key": key,
             "label": label,
             "unit": unit,
@@ -581,7 +608,11 @@ def _temperature(history: list[dict], live: dict) -> list[dict]:
             "samples": len(vals),
             "higher_is_hot": hot,
             "desc": desc,
-        })
+        }
+        if scaled:
+            item["projected"] = round(rank_val, 2)
+            item["desc"] = desc + f"（盘中按交易进度 {round(progress * 100)}% 折算后比较分位）"
+        out.append(item)
     return out
 
 
@@ -618,7 +649,8 @@ def _alerts(temp: list[dict], live: dict) -> list[dict]:
 
     amt = by_key.get("amount")
     if amt and amt.get("rank") is not None and amt["rank"] <= 20:
-        add("warning", "成交额萎缩", f"成交额 {amt['value']}亿，处于近一年 {amt['rank']}% 分位")
+        proj = f"（按盘中进度折算约 {amt['projected']}亿）" if amt.get("projected") else ""
+        add("warning", "成交额萎缩", f"成交额 {amt['value']}亿{proj}，处于近一年 {amt['rank']}% 分位")
 
     up = by_key.get("up_pct")
     if up and up.get("rank") is not None and up["rank"] <= 25:
@@ -669,15 +701,17 @@ async def _build_metrics() -> dict[str, Any]:
         # 基线缺失：后台构建，本次先返回实时点（不缓存空结果）
         _kick_backfill()
 
-    temp = _temperature(history, live) if live else []
-    series = _breadth_series(history, live) if live else []
-
     # 交易状态：只有真实处于盘中时段才叫「实时」；收盘后当日数据已不再变化，
     # 显示「已收盘」，周末/节假日显示「休市」
     from app.utils.trading_time import get_trading_status, is_trading_day
 
     status = get_trading_status()
     live_session = status in ("morning_session", "noon_break", "afternoon_session")
+    today_str = now_tz().strftime("%Y-%m-%d")
+    # 仅当日盘中快照才按交易进度折算；历史/收盘后数据本身就是全天值
+    progress = _session_progress() if live.get("date") == today_str and live_session else 1.0
+    temp = _temperature(history, live, progress) if live else []
+    series = _breadth_series(history, live) if live else []
     status_label = {
         "pre_market": "盘前",
         "morning_session": "盘中",

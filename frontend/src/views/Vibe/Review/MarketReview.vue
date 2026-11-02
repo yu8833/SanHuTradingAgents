@@ -8,7 +8,7 @@
         </div>
         <div class="page-hero-text">
           <h2 class="page-hero-title">{{ titleDate }}<em v-if="weekday" class="title-weekday">（{{ weekday }}）</em> · 大盘研判</h2>
-          <p class="page-hero-sub">今日结论 → 当前位置 → 盘中事实 → 事件与类比，一条决策链</p>
+          <p class="page-hero-sub">今日结论 → 盘中事实 → 当前位置 → 事件与类比，一条决策链</p>
         </div>
       </div>
       <div class="page-hero-meta">
@@ -27,7 +27,7 @@
         <span class="mr-sec-title">今日结论</span>
         <span class="mr-sec-hint">先看结论，下面各层都是它的依据</span>
         <span v-if="position?.divergence?.length" class="mr-div-badge" @click="scrollTo('position')">
-          背离预警 {{ position.divergence.length }}
+          背离预警 {{ position.divergence.length }}<em v-if="position.as_of" class="mr-div-date">（截至 {{ position.as_of.slice(5) }}{{ position.live ? ' 实时' : '' }}）</em>
         </span>
         <span class="mr-sec-actions">
           <span v-if="syn?.as_of" class="data-time">研判 {{ shortTime(syn.as_of) }}</span>
@@ -107,238 +107,10 @@
       />
     </section>
 
-    <!-- 02 当前位置：把今天放进近 10 年历史，回答「贵不贵、热不热、接近顶还是底」 -->
-    <section id="position" class="mr-sec">
-      <div class="mr-sec-head">
-        <span class="mr-sec-no">02</span>
-        <span class="mr-sec-title">当前位置</span>
-        <span class="mr-sec-hint">估值 / 位置 / 情绪 / 参与度 / 底部特征的历史分位（近 10 年），用来判断「接近顶部」还是「接近底部」</span>
-        <span class="mr-sec-actions">
-          <span v-if="position?.as_of" class="data-time">数据 {{ position.as_of }}</span>
-        </span>
-      </div>
-
-      <div v-if="positionLoading && !position" class="syn-loading">
-        <el-skeleton :rows="4" animated />
-        <div class="syn-loading-tip">
-          <el-icon class="is-loading"><Loading /></el-icon>
-          正在计算历史分位（首次构建需 1~2 分钟）…
-        </div>
-      </div>
-
-      <div v-else-if="!position || !position.ready" class="pos-pending">
-        <el-icon class="is-loading"><Loading /></el-icon>
-        <span>{{ position?.note || '历史分位基线构建中，完成后自动显示' }}</span>
-        <el-button link type="primary" @click="loadPosition(true)">立即重试</el-button>
-      </div>
-
-      <template v-else>
-        <!-- 位置标尺：0–100 分位 + 五档分区 + 指针；回答「现在离顶 / 离底有多远」 -->
-        <div class="pos-hero" :class="'zone-' + position.composite.zone">
-          <div class="pos-hero-head">
-            <div class="pos-hero-left">
-              <span class="pos-zone-badge">{{ position.composite.label }}</span>
-              <div class="pos-verdict">
-                <div class="pos-verdict-title">{{ posVerdict.title }}</div>
-                <div class="pos-verdict-sub">{{ posVerdict.sub }}</div>
-              </div>
-            </div>
-            <div class="pos-hero-score">
-              <div class="pos-score-num">{{ compositePct ?? '—' }}<em>%</em></div>
-              <div class="pos-score-cap">合成分位</div>
-            </div>
-          </div>
-
-          <div class="pos-gauge">
-            <div class="pos-gauge-bar">
-              <i
-                v-for="z in GAUGE_BANDS"
-                :key="z.key"
-                class="pos-gauge-band"
-                :class="z.key"
-                :style="{ width: z.width + '%' }"
-              >{{ z.name }}</i>
-              <i v-if="compositePct != null" class="pos-gauge-needle" :style="{ left: compositePct + '%' }" />
-              <em v-if="compositePct != null" class="pos-gauge-bubble" :style="{ left: compositePct + '%' }">{{ compositePct }}%</em>
-            </div>
-            <div class="pos-gauge-scale">
-              <span v-for="t in GAUGE_TICKS" :key="t" :style="{ left: t + '%' }">{{ t }}</span>
-            </div>
-            <div class="pos-gauge-dots">
-              <el-tooltip
-                v-for="d in heatDots"
-                :key="d.key"
-                :content="`${d.label}：热度分位 ${d.pct}%`"
-                placement="top"
-              >
-                <span
-                  class="pos-gauge-dot"
-                  :class="[d.tone, { 'is-low': d.row }]"
-                  :style="{ left: d.pct + '%' }"
-                />
-              </el-tooltip>
-            </div>
-          </div>
-
-          <div class="pos-distance">
-            <span
-              v-for="c in posDistance"
-              :key="c.key"
-              class="pos-distance-chip"
-              :class="c.tone"
-            >{{ c.text }}</span>
-            <span class="pos-distance-chip is-meta">
-              {{ position.window_years }} 年 · {{ position.samples }} 个交易日样本 · 截至 {{ position.as_of }}
-            </span>
-          </div>
-
-          <p class="pos-advice">{{ position.composite.advice }}</p>
-        </div>
-
-        <!-- 逃顶 / 判断底部：触发阈值 + 历史同档位的真实表现（不是口号） -->
-        <div v-if="posGuides.length" class="pos-guide">
-          <div
-            v-for="g in posGuides"
-            :key="g.key"
-            class="pos-guide-card"
-            :class="[`is-${g.key}`, { 'is-active': g.active }]"
-          >
-            <div class="pos-guide-head">
-              <span class="pos-guide-title">{{ g.title }}</span>
-              <em class="pos-guide-flag" :class="{ 'is-on': g.active }">
-                {{ g.active ? '当前已进入该区' : `触发 ${g.key === 'top' ? '≥' : '≤'}${g.threshold ?? (g.key === 'top' ? 80 : 20)}` }}
-              </em>
-            </div>
-            <div class="pos-guide-track">
-              <i class="pos-guide-zone" :class="`is-${g.key}`" />
-              <i v-if="compositePct != null" class="pos-guide-cursor" :style="{ left: compositePct + '%' }">
-                <b>{{ compositePct }}</b>
-              </i>
-            </div>
-            <div class="pos-guide-rule">{{ g.rule }}</div>
-            <div class="pos-guide-stats">{{ g.stats }}</div>
-            <div class="pos-guide-advice">{{ g.advice }}</div>
-          </div>
-        </div>
-
-        <!-- 合成分位是什么：7 项热度分位的平均 + 当前内部结构 -->
-        <div class="pos-explain">
-          <div class="pos-explain-text">
-            <el-icon><InfoFilled /></el-icon>
-            <span>
-              合成分位 = 把 {{ componentHeat.length }} 个长历史指标各自折算成 0–100 的「热度分位」再取平均：
-              0% ≈ 近 {{ position.window_years }} 年最冷，100% ≈ 最热；≥80 为逃顶信号区，≤20 为判底观察区。
-            </span>
-          </div>
-          <div class="pos-comp-chips">
-            <span
-              v-for="c in componentHeat"
-              :key="c.key"
-              class="pos-comp-chip"
-              :class="c.tone"
-            >
-              <i /><em>{{ c.label }}</em><b>{{ c.pct }}%</b>
-            </span>
-          </div>
-          <div v-if="heatSpread" class="pos-spread">
-            <el-icon><WarnTriangleFilled /></el-icon>
-            <span>{{ heatSpread.text }}</span>
-          </div>
-        </div>
-
-        <!-- 近 10 年合成分位走势：红线 80 逃顶、绿线 20 判底 -->
-        <div v-if="compositeChartOption" class="pos-chart">
-          <div class="pos-block-head">
-            近 {{ position.window_years }} 年合成分位走势
-            <span class="dist-note">虚线：上 80 逃顶 / 下 20 判底 · 每个点为一个交易日（等距抽稀）</span>
-          </div>
-          <VChart :option="compositeChartOption" autoresize class="chart-200" />
-        </div>
-
-        <!-- 单项指标：分组横条（分位越靠右越热，竖线为 50% 中位） -->
-        <div class="pos-metrics">
-          <div v-for="grp in positionGroups" :key="grp.group" class="pos-group">
-            <div class="pos-group-head">
-              {{ grp.group }}<span class="pos-group-hint">{{ grp.hint }}</span>
-            </div>
-            <div class="pos-bullets">
-              <div v-for="m in grp.items" :key="m.key" class="pos-bullet">
-                <el-tooltip :content="m.desc" placement="top" :show-after="200">
-                  <span class="pos-bullet-label">{{ m.label }}<el-icon><QuestionFilled /></el-icon></span>
-                </el-tooltip>
-                <div class="pos-bullet-track">
-                  <i
-                    v-if="m.percentile != null"
-                    class="pos-bullet-fill"
-                    :class="posTone(heatOfMetric(m))"
-                    :style="{ width: m.percentile + '%' }"
-                  />
-                  <i class="pos-bullet-med" title="中位 = 50% 分位" />
-                </div>
-                <span class="pos-bullet-value">{{ m.value == null ? '—' : m.value }}<em>{{ m.unit }}</em></span>
-                <span class="pos-bullet-pct" :class="posTone(heatOfMetric(m))">
-                  {{ m.percentile == null ? '—' : m.percentile + '%' }}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div v-if="position.divergence.length" class="pos-div-row">
-          <span
-            v-for="d in position.divergence"
-            :key="d.title + d.detail"
-            class="pos-div-chip"
-            :class="'is-' + d.level"
-          >
-            <b>{{ d.title }}</b><span>{{ d.detail }}</span>
-          </span>
-        </div>
-
-        <!-- 历史分位 → 未来 20 日收益：以 0 为中轴的发散条形 -->
-        <div v-if="position.forward" class="pos-fwd">
-          <div class="pos-block-head">
-            历史分位 → 未来 {{ position.forward.day }} 日收益
-            <span class="dist-note">
-              等权全市场组合 · n={{ position.forward.samples }} · 近 {{ position.forward.window_years }} 年
-            </span>
-          </div>
-          <div class="pos-fwd-rows">
-            <div
-              v-for="b in position.forward.bins"
-              :key="b.key"
-              class="pos-fwd-row"
-              :class="{ 'is-current': b.key === position.forward.current_bin }"
-            >
-              <span class="pos-fwd-label">
-                {{ b.label }}
-                <em v-if="b.key === position.forward.current_bin">当前</em>
-              </span>
-              <div class="pos-fwd-track">
-                <i class="pos-fwd-zero" />
-                <i
-                  class="pos-fwd-bar"
-                  :class="(b.median_return ?? 0) >= 0 ? 'up' : 'down'"
-                  :style="fwdBarStyle(b.median_return)"
-                />
-              </div>
-              <span class="pos-fwd-val mono" :class="clsByVal(b.median_return)">{{ signedPct(b.median_return) }}</span>
-              <span class="pos-fwd-meta mono">
-                胜率 {{ b.win_rate == null ? '—' : b.win_rate + '%' }} · n={{ b.n }}
-              </span>
-            </div>
-          </div>
-          <p class="cap">分位越高代表当时市场越热；收益为未来 {{ position.forward.day }} 个交易日的等权平均涨跌幅，仅作历史统计，不代表未来。</p>
-        </div>
-
-        <p class="cap">{{ position.note }}</p>
-      </template>
-    </section>
-
-    <!-- 03 盘中事实 -->
+    <!-- 02 盘中事实 -->
     <section id="facts" class="mr-sec">
       <div class="mr-sec-head">
-        <span class="mr-sec-no">03</span>
+        <span class="mr-sec-no">02</span>
         <span class="mr-sec-title">盘中事实</span>
         <span class="mr-sec-hint">指数 / 涨跌分布 / 宽度 / 风格 / 集中度</span>
         <span class="mr-sec-actions">
@@ -551,7 +323,7 @@
         <span class="block-title"><el-icon><DataAnalysis /></el-icon> 市场温度与资金结构</span>
         <span class="fresh-tag is-hist">分位=近一年历史</span>
         <span class="block-hint">
-          {{ metrics.status_label || '已收盘' }}{{ metrics.is_live ? '（读数仍在跳动）' : '（当日数据已定）' }}
+          {{ metrics.status_label || '已收盘' }}{{ liveHint }}
           <em v-if="metrics.as_of" class="data-time">数据 {{ metrics.as_of }} · 更新 {{ shortTime(metrics.updated) }}</em>
         </span>
       </div>
@@ -587,6 +359,7 @@
             </span>
             <span v-else class="temp-pending">历史基线构建中…</span>
             <span v-if="t.median != null" class="temp-med">中位 {{ t.median }}{{ t.unit }}</span>
+            <span v-if="t.projected != null" class="temp-med">折算全天 ≈ {{ t.projected }}{{ t.unit }}</span>
           </div>
         </div>
       </div>
@@ -721,6 +494,239 @@
         </el-card>
       </div>
     </section>
+    </section>
+
+    <!-- 03 当前位置：把今天放进近 10 年历史，回答「贵不贵、热不热、接近顶还是底」 -->
+    <section id="position" class="mr-sec">
+      <div class="mr-sec-head">
+        <span class="mr-sec-no">03</span>
+        <span class="mr-sec-title">当前位置</span>
+        <span class="mr-sec-hint">估值 / 位置 / 情绪 / 参与度 / 底部特征的历史分位（近 10 年），用来判断「接近顶部」还是「接近底部」；盘中自动纳入今日实时数据</span>
+        <span class="mr-sec-actions">
+          <span v-if="position?.as_of" class="data-time">
+            数据 {{ position.as_of }}<em v-if="position.live" class="pos-live-tag">今日实时</em>
+          </span>
+        </span>
+      </div>
+
+      <div v-if="positionLoading && !position" class="syn-loading">
+        <el-skeleton :rows="4" animated />
+        <div class="syn-loading-tip">
+          <el-icon class="is-loading"><Loading /></el-icon>
+          正在计算历史分位（首次构建需 1~2 分钟）…
+        </div>
+      </div>
+
+      <div v-else-if="!position || !position.ready" class="pos-pending">
+        <el-icon class="is-loading"><Loading /></el-icon>
+        <span>{{ position?.note || '历史分位基线构建中，完成后自动显示' }}</span>
+        <el-button link type="primary" @click="loadPosition(true)">立即重试</el-button>
+      </div>
+
+      <template v-else>
+        <!-- 位置标尺：0–100 分位 + 五档分区 + 指针；回答「现在离顶 / 离底有多远」 -->
+        <div class="pos-hero" :class="'zone-' + position.composite.zone">
+          <div class="pos-hero-head">
+            <div class="pos-hero-left">
+              <span class="pos-zone-badge">{{ position.composite.label }}</span>
+              <div class="pos-verdict">
+                <div class="pos-verdict-title">{{ posVerdict.title }}</div>
+                <div class="pos-verdict-sub">{{ posVerdict.sub }}</div>
+              </div>
+            </div>
+            <div class="pos-hero-score">
+              <div class="pos-score-num">{{ compositePct ?? '—' }}<em>%</em></div>
+              <div class="pos-score-cap">合成分位</div>
+            </div>
+          </div>
+
+          <div class="pos-gauge">
+            <div class="pos-gauge-bar">
+              <i
+                v-for="z in GAUGE_BANDS"
+                :key="z.key"
+                class="pos-gauge-band"
+                :class="z.key"
+                :style="{ width: z.width + '%' }"
+              >{{ z.name }}</i>
+              <i v-if="compositePct != null" class="pos-gauge-needle" :style="{ left: compositePct + '%' }" />
+              <em v-if="compositePct != null" class="pos-gauge-bubble" :style="{ left: compositePct + '%' }">{{ compositePct }}%</em>
+            </div>
+            <div class="pos-gauge-scale">
+              <span v-for="t in GAUGE_TICKS" :key="t" :style="{ left: t + '%' }">{{ t }}</span>
+            </div>
+            <div class="pos-gauge-dots">
+              <el-tooltip
+                v-for="d in heatDots"
+                :key="d.key"
+                :content="`${d.label}：热度分位 ${d.pct}%`"
+                placement="top"
+              >
+                <span
+                  class="pos-gauge-dot"
+                  :class="[d.tone, { 'is-low': d.row }]"
+                  :style="{ left: d.pct + '%' }"
+                />
+              </el-tooltip>
+            </div>
+          </div>
+
+          <div class="pos-distance">
+            <span
+              v-for="c in posDistance"
+              :key="c.key"
+              class="pos-distance-chip"
+              :class="c.tone"
+            >{{ c.text }}</span>
+            <span class="pos-distance-chip is-meta">
+              {{ position.window_years }} 年 · {{ position.samples }} 个历史交易日样本 · 截至 {{ position.as_of }}{{ position.live ? '（含今日实时值）' : '' }}
+            </span>
+          </div>
+
+          <p class="pos-advice">{{ position.composite.advice }}</p>
+        </div>
+
+        <!-- 逃顶 / 判断底部：触发阈值 + 历史同档位的真实表现（不是口号） -->
+        <div v-if="posGuides.length" class="pos-guide">
+          <div
+            v-for="g in posGuides"
+            :key="g.key"
+            class="pos-guide-card"
+            :class="[`is-${g.key}`, { 'is-active': g.active }]"
+          >
+            <div class="pos-guide-head">
+              <span class="pos-guide-title">{{ g.title }}</span>
+              <em class="pos-guide-flag" :class="{ 'is-on': g.active }">
+                {{ g.active ? '当前已进入该区' : `触发 ${g.key === 'top' ? '≥' : '≤'}${g.threshold ?? (g.key === 'top' ? 80 : 20)}` }}
+              </em>
+            </div>
+            <div class="pos-guide-track">
+              <i class="pos-guide-zone" :class="`is-${g.key}`" />
+              <i v-if="compositePct != null" class="pos-guide-cursor" :style="{ left: compositePct + '%' }">
+                <b>{{ compositePct }}</b>
+              </i>
+            </div>
+            <div class="pos-guide-rule">{{ g.rule }}</div>
+            <div class="pos-guide-stats">{{ g.stats }}</div>
+            <div class="pos-guide-advice">{{ g.advice }}</div>
+          </div>
+        </div>
+
+        <!-- 合成分位是什么：7 项热度分位的平均 + 当前内部结构 -->
+        <div class="pos-explain">
+          <div class="pos-explain-text">
+            <el-icon><InfoFilled /></el-icon>
+            <span>
+              合成分位 = 把 {{ componentHeat.length }} 个长历史指标各自折算成 0–100 的「热度分位」再取平均：
+              0% ≈ 近 {{ position.window_years }} 年最冷，100% ≈ 最热；≥80 为逃顶信号区，≤20 为判底观察区。
+            </span>
+          </div>
+          <div class="pos-comp-chips">
+            <span
+              v-for="c in componentHeat"
+              :key="c.key"
+              class="pos-comp-chip"
+              :class="c.tone"
+            >
+              <i /><em>{{ c.label }}</em><b>{{ c.pct }}%</b>
+            </span>
+          </div>
+          <div v-if="heatSpread" class="pos-spread">
+            <el-icon><WarnTriangleFilled /></el-icon>
+            <span>{{ heatSpread.text }}</span>
+          </div>
+        </div>
+
+        <!-- 近 10 年合成分位走势：红线 80 逃顶、绿线 20 判底 -->
+        <div v-if="compositeChartOption" class="pos-chart">
+          <div class="pos-block-head">
+            近 {{ position.window_years }} 年合成分位走势
+            <span class="dist-note">虚线：上 80 逃顶 / 下 20 判底 · 每个点为一个交易日（等距抽稀）</span>
+          </div>
+          <VChart :option="compositeChartOption" autoresize class="chart-200" />
+        </div>
+
+        <!-- 单项指标：分组横条（统一按热度分位：越靠右越热，竖线为 50% 中位） -->
+        <div class="pos-metrics">
+          <p class="cap pos-metrics-cap">横条统一为热度分位（0 = 最冷 / 100 = 最热）；悬停指标名可查看原始分位与计算口径。</p>
+          <div v-for="grp in positionGroups" :key="grp.group" class="pos-group">
+            <div class="pos-group-head">
+              {{ grp.group }}<span class="pos-group-hint">{{ grp.hint }}</span>
+            </div>
+            <div class="pos-bullets">
+              <div v-for="m in grp.items" :key="m.key" class="pos-bullet">
+                <el-tooltip :content="posMetricTip(m)" placement="top" :show-after="200">
+                  <span class="pos-bullet-label">{{ m.label }}<el-icon><QuestionFilled /></el-icon></span>
+                </el-tooltip>
+                <div class="pos-bullet-track">
+                  <i
+                    v-if="m.percentile != null"
+                    class="pos-bullet-fill"
+                    :class="posTone(heatOfMetric(m))"
+                    :style="{ width: (heatOfMetric(m) ?? 0) + '%' }"
+                  />
+                  <i class="pos-bullet-med" title="中位 = 50% 分位" />
+                </div>
+                <span class="pos-bullet-value">{{ m.value == null ? '—' : m.value }}<em>{{ m.unit }}</em></span>
+                <span class="pos-bullet-pct" :class="posTone(heatOfMetric(m))">
+                  {{ m.percentile == null ? '—' : (heatOfMetric(m) ?? 0) + '%' }}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <p v-if="posDataNote" class="cap pos-data-note">{{ posDataNote }}</p>
+
+        <div v-if="position.divergence.length" class="pos-div-row">
+          <span
+            v-for="d in position.divergence"
+            :key="d.title + d.detail"
+            class="pos-div-chip"
+            :class="'is-' + d.level"
+          >
+            <b>{{ d.title }}</b><span>{{ d.detail }}</span>
+          </span>
+        </div>
+
+        <!-- 历史分位 → 未来 20 日收益：以 0 为中轴的发散条形 -->
+        <div v-if="position.forward" class="pos-fwd">
+          <div class="pos-block-head">
+            历史分位 → 未来 {{ position.forward.day }} 日收益
+            <span class="dist-note">
+              等权全市场组合 · n={{ position.forward.samples }} · 近 {{ position.forward.window_years }} 年
+            </span>
+          </div>
+          <div class="pos-fwd-rows">
+            <div
+              v-for="b in position.forward.bins"
+              :key="b.key"
+              class="pos-fwd-row"
+              :class="{ 'is-current': b.key === position.forward.current_bin }"
+            >
+              <span class="pos-fwd-label">
+                {{ b.label }}
+                <em v-if="b.key === position.forward.current_bin">当前</em>
+              </span>
+              <div class="pos-fwd-track">
+                <i class="pos-fwd-zero" />
+                <i
+                  class="pos-fwd-bar"
+                  :class="(b.median_return ?? 0) >= 0 ? 'up' : 'down'"
+                  :style="fwdBarStyle(b.median_return)"
+                />
+              </div>
+              <span class="pos-fwd-val mono" :class="clsByVal(b.median_return)">{{ signedPct(b.median_return) }}</span>
+              <span class="pos-fwd-meta mono">
+                胜率 {{ b.win_rate == null ? '—' : b.win_rate + '%' }} · n={{ b.n }}
+              </span>
+            </div>
+          </div>
+          <p class="cap">分位越高代表当时市场越热；收益为未来 {{ position.forward.day }} 个交易日的等权平均涨跌幅，仅作历史统计，不代表未来。</p>
+        </div>
+
+        <p class="cap">{{ position.note }}</p>
+      </template>
     </section>
 
     <!-- 04 事件与类比：只回答「会不会改变判断」+ 今日买卖清单 -->
@@ -941,7 +947,7 @@
 <script setup lang="ts">
 // 显式声明组件名，供 <keep-alive :include> 匹配
 defineOptions({ name: 'MarketReview' })
-import { ref, computed, onMounted, onActivated, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onActivated, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
@@ -991,6 +997,9 @@ const loading = ref(false)
 const indices = ref<IndexQuote[]>([])
 const dashboard = ref<MarketDashboard | null>(null)
 const metrics = ref<MarketMetrics | null>(null)
+// 时钟心跳：让依赖「当前时间」的 computed（盘中/休市、盘前窗口）每分钟重算，
+// 否则它们没有响应依赖会被 Vue 永久缓存。
+const clockTick = ref(0)
 
 const shortTime = (v?: string | null) =>
   v ? formatBeijingDateTimeMinute(String(v)).slice(5, 16) : ''
@@ -1068,9 +1077,44 @@ const posGuides = computed(() => {
   return g ? [g.top, g.bottom] : []
 })
 
-/** 反向指标（越高越冷）取热度分位，仅用于配色 */
+/** 反向指标（越高越冷）统一折算成热度分位：横条长度、配色与数值都用它 */
 const heatOfMetric = (m: MarketPositionMetric) =>
   m.percentile == null ? null : (m.higher_is_hot ? m.percentile : 100 - m.percentile)
+
+/** 单项指标 tooltip：原始分位方向 + 图中统一折算后的热度分位 */
+function posMetricTip(m: MarketPositionMetric): string {
+  const parts: string[] = [m.desc]
+  if (m.percentile != null) {
+    const dir = m.higher_is_hot ? '越高越热' : '越高越冷'
+    parts.push(`当前值处于历史 ${m.percentile}% 分位（${dir}），横条按热度分位 ${heatOfMetric(m)}% 展示`)
+  }
+  if (m.samples) parts.push(`样本 ${m.samples} 个交易日 / 近 ${m.window_years} 年，不含今日实时值`)
+  const p = position.value
+  if (p?.live && m.as_of && m.as_of !== p.as_of) parts.push(`数据日期 ${m.as_of}（非今日实时）`)
+  return parts.join('。')
+}
+
+/** 数据口径说明：今日实时 / 盘中成交额折算 / 估值滞后 */
+const posDataNote = computed(() => {
+  const p = position.value
+  if (!p?.ready || !p.position.length) return ''
+  const notes: string[] = []
+  if (p.live) {
+    const amt = p.position.find(m => m.key === 'amount')
+    if (p.amount_projected != null && amt?.value != null) {
+      const prog = p.progress ? Math.round(p.progress * 100) : null
+      notes.push(`成交额实际 ${amt.value} 亿${prog ? `（交易进度 ${prog}%）` : ''}，折算全天约 ${p.amount_projected} 亿后计算分位`)
+    }
+    const vals = p.position.filter(
+      m => (m.key === 'valuation_pe' || m.key === 'valuation_pb') && m.as_of && m.as_of !== p.as_of,
+    )
+    if (vals.length) notes.push(`PE / PB 取 ${String(vals[0].as_of).slice(5)} 日线基本面（实时快照不含估值）`)
+    if (!notes.length) notes.push('全部指标均为今日实时数据')
+  } else {
+    notes.push(`数据为 ${p.as_of} 收盘后固化的完整交易日`)
+  }
+  return notes.join('；')
+})
 
 // 位置标尺：五档分区（0–100 各占 20 分位）+ 刻度
 const GAUGE_BANDS = [
@@ -1284,7 +1328,11 @@ function isPreOpenWindow(): boolean {
 }
 
 /** 盘前窗口（08:30–09:25）：只在这段时间展示「开盘情景」这类前瞻块 */
-const isPreOpen = computed(() => isPreOpenWindow())
+const isPreOpen = computed(() => {
+  // 依赖时钟心跳：否则本组件长期驻留时，盘前块会一直停留在打开页面那一刻的状态
+  void clockTick.value
+  return isPreOpenWindow()
+})
 
 async function loadPreOpen(refresh = false) {
   preOpenLoading.value = true
@@ -1298,6 +1346,11 @@ async function loadPreOpen(refresh = false) {
     preOpenLoading.value = false
   }
 }
+
+// 页面在 08:30 前就已打开时，自动刷新尚未启动；进入盘前窗口时补拉一次，避免块一直空着
+watch(isPreOpen, (open, prev) => {
+  if (open && !prev) loadPreOpen(false)
+})
 
 const signedPct = (v?: number | null) => (v == null ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(2)}%`)
 const deltaText = (v?: number | null, unit = '') =>
@@ -1350,13 +1403,42 @@ function beijingClock() {
   const val = (t: string) => parts.find(p => p.type === t)?.value || ''
   return { wd: val('weekday'), hm: Number(val('hour')) * 60 + Number(val('minute')) }
 }
+function beijingDateKey() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date())
+  const val = (t: string) => parts.find(p => p.type === t)?.value || ''
+  return `${val('year')}-${val('month')}-${val('day')}`
+}
+/** 后端在「今天」明确返回休市：节假日判断比本地星期更可靠（周末本地即可判定） */
+function backendClosedToday(m: MarketMetrics | null): boolean {
+  if (!m || m.status !== 'closed' || m.status_label !== '休市') return false
+  // updated 是本次响应的生成时刻：只有今天的响应才能证明今天是节假日
+  return String(m.updated || '').slice(0, 10) === beijingDateKey()
+}
+// 时钟心跳（clockTick）在文件上方定义：避免 computed 无响应依赖被永久缓存
 const marketState = computed(() => {
+  void clockTick.value
   const { wd, hm } = beijingClock()
   const weekdayOk = wd !== 'Sat' && wd !== 'Sun'
-  const trading = (hm >= 570 && hm <= 690) || (hm >= 780 && hm <= 900)
-  return weekdayOk && trading
-    ? { label: '盘中', cls: 'is-open' }
-    : { label: '休市', cls: 'is-closed' }
+  if (!weekdayOk || backendClosedToday(metrics.value)) return { label: '休市', cls: 'is-closed' }
+  // 交易时段以本地时钟为准：后端 status 只在请求时更新，跨时段会滞后；
+  // 若优先信任滞后的「午间休市/已收盘」，自动刷新又被 is-closed 挡住，状态会永久卡住。
+  if ((hm >= 570 && hm <= 690) || (hm >= 780 && hm <= 900)) return { label: '盘中', cls: 'is-open' }
+  if (hm > 690 && hm < 780) return { label: '午间休市', cls: 'is-closed' }
+  if (hm < 540) return { label: '未开盘', cls: 'is-closed' }
+  if (hm < 570) return { label: '盘前', cls: 'is-closed' }
+  return { label: '已收盘', cls: 'is-closed' }
+})
+
+// 自动刷新窗口：09:30–11:30 / 13:00–15:30。15:00 收盘后仍需刷新到最终值
+// （15:30 前行情入库持续做收盘校准），否则页面会停在 15:00 的盘中快照。
+const autoRefreshable = computed(() => {
+  void clockTick.value
+  const { wd, hm } = beijingClock()
+  const weekdayOk = wd !== 'Sat' && wd !== 'Sun'
+  if (!weekdayOk || backendClosedToday(metrics.value)) return false
+  return (hm >= 570 && hm <= 690) || (hm >= 780 && hm <= 930)
 })
 
 // ── 04 事件与类比：四行固定结构（时间+事件 / 影响 / 怎么做 / 相关） ──
@@ -1592,11 +1674,8 @@ const distMax = computed(() =>
 const distHeight = (count: number) =>
   count <= 0 ? 0 : Math.max(4, (count / distMax.value) * 86)
 
-// 反转后端分布（跌→涨）为 涨→平→跌，使红色(涨)在左、绿色(跌)在右，与广度条一致
-const distDisplay = computed(() => {
-  const dist = dashboard.value?.distribution || []
-  return dist.slice().reverse()
-})
+// 保持后端升序（跌停 → 平盘 → 涨停），与涨跌幅横轴一致：左侧最弱、右侧最强
+const distDisplay = computed(() => dashboard.value?.distribution || [])
 const distBarClass = (dir: -1 | 0 | 1 | undefined) => {
   if (dir === 0) return 'dist-flat'
   if (dir === 1) return 'dist-up'
@@ -1631,6 +1710,16 @@ const breadthDownW = computed(() => {
 
 // ── 市场温度与结构：分位 / 宽度曲线 / 风格 / 集中度 ──
 const breadthSeries = computed(() => metrics.value?.breadth?.series || [])
+
+// 场景说明：午间休市是 11:30 快照，写成「读数仍在跳动」会误导
+const liveHint = computed(() => {
+  const s = metrics.value?.status
+  if (s === 'morning_session' || s === 'afternoon_session') return '（读数仍在跳动）'
+  if (s === 'noon_break') return '（11:30 快照，午后继续）'
+  if (s === 'pre_market') return '（展示最近一个交易日）'
+  if (s === 'closed' && metrics.value?.status_label === '休市') return '（非交易日，展示最近一个交易日）'
+  return '（当日数据已定）'
+})
 
 // 分位配色：热度指标高分为热（红），低分为冷（绿），中间中性
 const rankTone = (t: MarketTemperatureItem) => {
@@ -1748,8 +1837,9 @@ const withTimeout = <T>(promise: Promise<T>, timeoutMs: number = 15000): Promise
 
 const loadAshare = async (refresh = false) => {
   loading.value = true
-  // 开盘情景独立加载：不阻塞指数/看板，失败也不计入页头告警
-  loadPreOpen(refresh)
+  // 开盘情景独立加载：不阻塞指数/看板，失败也不计入页头告警。
+  // 只在 08:30–09:25 窗口内抓取：盘中该块被 v-if 隐藏，60s 轮询不应为它反复清缓存请求外部接口。
+  if (isPreOpen.value) loadPreOpen(refresh)
   try {
     // 03 盘中事实：事件（04）与研判（01/05）不在这里刷新，避免 60s 轮询连带外部数据源
     const results = await Promise.allSettled([
@@ -1789,6 +1879,7 @@ onMounted(() => {
   loadPosition()
   loadSynthesis(false)
   loadEvents()
+  startClock()
   startAutoRefresh()
 })
 
@@ -1798,11 +1889,23 @@ const refreshAll = () =>
 
 // 盘中每 60 秒静默刷新一次：只刷数据，不触发 AI 研判；页面隐藏时暂停
 let autoTimer: number | undefined
+let clockTimer: number | undefined
+function startClock() {
+  if (clockTimer) return
+  clockTimer = window.setInterval(() => { clockTick.value += 1 }, 60000)
+}
+function stopClock() {
+  if (clockTimer) {
+    window.clearInterval(clockTimer)
+    clockTimer = undefined
+  }
+}
 function startAutoRefresh() {
   stopAutoRefresh()
   autoTimer = window.setInterval(() => {
     if (document.hidden) return
-    if (marketState.value.cls !== 'is-open') return
+    // 用 autoRefreshable 而非「是否盘中」：15:00–15:30 收盘校准期间也要继续拉最终值
+    if (!autoRefreshable.value) return
     loadAshare(true)
   }, 60000)
 }
@@ -1814,6 +1917,7 @@ function stopAutoRefresh() {
 }
 onUnmounted(() => {
   stopAutoRefresh()
+  stopClock()
   if (positionRetryTimer) {
     window.clearTimeout(positionRetryTimer)
     positionRetryTimer = undefined
@@ -1885,6 +1989,12 @@ onActivated(() => {
   background: rgba(230, 162, 60, .12);
   cursor: pointer;
 }
+/* 背离信号来自「当前位置」基线（最近一个完整交易日），必须在徽标上标明日期 */
+.mr-div-date {
+  font-style: normal;
+  font-weight: 400;
+  opacity: .85;
+}
 
 /* 通用等宽数字（分位 / 收益 / 样本量） */
 .mono {
@@ -1904,6 +2014,19 @@ onActivated(() => {
   color: var(--el-text-color-placeholder);
   margin-left: 8px;
 }
+/* 当前位置：今日实时标记 + 数据口径说明 */
+.pos-live-tag {
+  margin-left: 6px;
+  padding: 1px 5px;
+  font-style: normal;
+  font-weight: 600;
+  font-size: 10.5px;
+  color: var(--el-color-primary);
+  background: var(--el-fill-color-light);
+  border-radius: 8px;
+}
+.pos-data-note { margin: 8px 2px 0; }
+.pos-metrics-cap { margin: 0 2px 6px; }
 
 /* 数据时点标签：只标注「非今日实时」的部分（历史基线/历史收盘） */
 .fresh-tag {

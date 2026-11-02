@@ -29,8 +29,8 @@ from app.core.numeric_sanitizer import (
 )
 from app.models.stock_models import MarketQuotesDB, detect_db_extra_fields
 from app.services.data_sources.manager import DataSourceManager
-from app.utils.timezone import get_tz
-from app.utils.trading_time import prev_trading_day
+from app.utils.timezone import get_tz, now_tz
+from app.utils.trading_time import is_trading_day, prev_trading_day
 
 logger = logging.getLogger(__name__)
 
@@ -1047,8 +1047,8 @@ class QuotesIngestionService:
             mq_newest = await db["market_quotes"].find_one(
                 {}, {"trade_date": 1}, sort=[("trade_date", -1)]
             )
+            mq_td = str(mq_newest.get("trade_date") or "").replace("-", "") if mq_newest else ""
             if mq_newest:
-                mq_td = str(mq_newest.get("trade_date") or "").replace("-", "")
                 daily_td = str(latest_td).replace("-", "")
                 if mq_td > daily_td:
                     logger.info(
@@ -1069,6 +1069,19 @@ class QuotesIngestionService:
                 logger.info("⏭️ 交易时段内，跳过日终校准（实时快照与日线口径不一致属正常）")
 
             # 抽样 20 只股票对比
+            # 覆盖度守卫：日线尚未同步完成时（如同步进行中只有部分个股），
+            # 抽样对比必然大量不一致，触发「强制重建」会用残缺日线覆盖实时快照。
+            daily_n = await db["stock_daily_quotes"].count_documents(
+                {"trade_date": latest_td, "period": "daily"}
+            )
+            mq_total = await db[self.collection_name].count_documents({"trade_date": mq_td})
+            if mq_total and daily_n < mq_total * 0.6:
+                logger.info(
+                    f"⏳ 日线 {latest_td} 仅 {daily_n}/{mq_total} 只（<60%），"
+                    f"视为未同步完成，跳过一致性抽样与强制重建"
+                )
+                return True
+
             sample_mq = await db["market_quotes"].find({}, {"_id": 0}).limit(20).to_list(length=20)
             if not sample_mq:
                 logger.info("✅ market_quotes 为空，跳过一致性校验")
@@ -1130,6 +1143,12 @@ class QuotesIngestionService:
             本次校准的股票数量
         """
         if self._is_trading_time():
+            return 0
+        # 午间休市（11:30–13:00）不属于 is_trading_time，但当日日线此时只是盘中
+        # 不完整数据；此时校准会把较早的盘中价覆盖进实时快照（实测午间重启后
+        # 2019 只个股被回滚）。交易日内统一要求收盘缓冲期（15:30）之后再校准。
+        now = now_tz()
+        if is_trading_day(now) and now.time() < dtime(15, 30):
             return 0
         db = get_mongo_db()
         if not latest_td:
@@ -1199,6 +1218,17 @@ class QuotesIngestionService:
 
         if not quotes_map:
             logger.info(f"⏳ 日终校准：{td_compact} 日线数据尚未同步完成，跳过本轮")
+            return 0
+
+        # 覆盖率守卫：日线只回填了少量个股时（如同步进行中/数据源缺页），
+        # 不能拿它校准全市场快照，否则被覆盖的个股会永久停在残缺值。
+        # 以当日快照总数为基准，低于 60% 视为日线未完成，等下一轮重试。
+        mq_total = await db[self.collection_name].count_documents({"trade_date": td_compact})
+        if mq_total and len(quotes_map) < mq_total * 0.6:
+            logger.info(
+                f"⏳ 日终校准：{td_compact} 日线仅 {len(quotes_map)}/{mq_total} 只"
+                f"（<60%），视为日线未同步完成，跳过本轮"
+            )
             return 0
 
         await self._bulk_upsert(quotes_map, td_compact, "daily_close_calibrate")

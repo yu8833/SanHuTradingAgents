@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from app.services.cache_layer import cached
+from app.services.market_metrics import _session_progress
 from app.utils.timezone import now_tz
 
 logger = logging.getLogger("webapi")
@@ -124,6 +125,100 @@ def _status_sync(db) -> tuple[int, str]:
     except Exception:
         logger.exception("📊 [position] 历史基线状态查询失败")
         return 0, ""
+
+
+def _live_row_sync(db) -> dict[str, Any] | None:
+    """用当日全市场实时快照补出「今天」这一行，让当前位置包含今日数据。
+
+    历史基线只写完整交易日（收盘后固化），当日日线在盘中并不完整，会被
+    `_build_sync` 的覆盖率守卫跳过，导致 as_of 倒退到上一个完整交易日。
+    这里按与日线相同的口径从 `market_quotes`（120s 全量快照）重算今天的
+    涨跌家数 / 成交额 / 振幅 / 低价股占比；PE/PB 快照没有，取最新一日
+    `stock_daily_basic` 并在返回值里单独标注日期。
+    """
+    try:
+        quotes = db["market_quotes"]
+        newest = next(quotes.find({}, {"trade_date": 1}).sort("updated_at", -1).limit(1), None)
+        date = _normalize_date((newest or {}).get("trade_date"))
+        if not date:
+            return None
+        _, last = _status_sync(db)
+        if last and date <= last:
+            return None  # 基线已包含该交易日，无需重复补行
+
+        pipeline = [
+            {"$match": {"trade_date": {"$in": [date, date.replace("-", "")]},
+                        "pct_chg": {"$ne": None}}},
+            {"$addFields": {"amt": {"$cond": [
+                {"$gt": [{"$ifNull": ["$amount", 0]}, _MAX_STOCK_AMOUNT]},
+                0,
+                {"$ifNull": ["$amount", 0]},
+            ]}}},
+            {"$group": {
+                "_id": None,
+                "n": {"$sum": 1},
+                "up": {"$sum": {"$cond": [{"$gt": ["$pct_chg", 0]}, 1, 0]}},
+                "down": {"$sum": {"$cond": [{"$lt": ["$pct_chg", 0]}, 1, 0]}},
+                "amount": {"$sum": "$amt"},
+                "avg_pct": {"$avg": "$pct_chg"},
+                "amp": {"$avg": {"$cond": [
+                    {"$and": [
+                        {"$gt": [{"$ifNull": ["$high", 0]}, 0]},
+                        {"$gt": [{"$ifNull": ["$low", 0]}, 0]},
+                        {"$gt": [{"$ifNull": ["$pre_close", 0]}, 0]},
+                    ]},
+                    {"$multiply": [{"$divide": [{"$subtract": ["$high", "$low"]}, "$pre_close"]}, 100]},
+                    None,
+                ]}},
+                "low_small": {"$sum": {"$cond": [
+                    {"$and": [{"$gt": [{"$ifNull": ["$close", 0]}, 0]}, {"$lt": ["$close", 3]}]},
+                    1, 0,
+                ]}},
+            }},
+        ]
+        agg = next(quotes.aggregate(pipeline, allowDiskUse=True), None)
+        n = int((agg or {}).get("n") or 0)
+        refs = [int(r.get("n") or 0) for r in db[COLLECTION].find({}, {"n": 1}).sort("date", -1).limit(30)]
+        ref_n = int(_median([v for v in refs if v > 0]) or 0)
+        if not n or (ref_n and n < ref_n * 0.6):
+            logger.info(f"📊 [position] 今日快照仅 {n} 只（参考 {ref_n}），视为不完整，跳过实时行")
+            return None
+
+        # 估值：取最新一日的全市场均值（快照本身没有 PE/PB）
+        vrow = next(db["stock_daily_basic"].find({}, {"trade_date": 1}).sort("trade_date", -1).limit(1), None)
+        vdate = _normalize_date((vrow or {}).get("trade_date"))
+        avg_pe = avg_pb = None
+        if vdate:
+            vagg = next(db["stock_daily_basic"].aggregate([
+                {"$match": {"trade_date": {"$in": [vdate, vdate.replace("-", "")]}}},
+                {"$group": {"_id": None,
+                            "pe": {"$avg": {"$cond": [
+                                {"$and": [{"$gt": ["$pe", 0]}, {"$lte": ["$pe", 500]}]}, "$pe", None]}},
+                            "pb": {"$avg": {"$cond": [
+                                {"$and": [{"$gt": ["$pb", 0]}, {"$lte": ["$pb", 50]}]}, "$pb", None]}}}},
+            ], allowDiskUse=True), None)
+            if vagg:
+                avg_pe = round(_f(vagg["pe"]), 2) if vagg.get("pe") is not None else None
+                avg_pb = round(_f(vagg["pb"]), 2) if vagg.get("pb") is not None else None
+
+        up = int((agg or {}).get("up") or 0)
+        return {
+            "date": date,
+            "n": n,
+            "up": up,
+            "down": int((agg or {}).get("down") or 0),
+            "up_pct": round(up / n * 100, 2),
+            "amount": round(_f((agg or {}).get("amount")) / 1e8, 2),
+            "avg_pct": round(_f((agg or {}).get("avg_pct")), 3),
+            "amp_pct": round(_f((agg or {}).get("amp")), 2) if (agg or {}).get("amp") is not None else None,
+            "low_pct": round(int((agg or {}).get("low_small") or 0) / n * 100, 2),
+            "avg_pe": avg_pe,
+            "avg_pb": avg_pb,
+            "valuation_date": vdate,
+        }
+    except Exception:
+        logger.exception("📊 [position] 今日实时行计算失败")
+        return None
 
 
 def _aggregate_quotes(db, start: str, end: str | None) -> list[dict]:
@@ -273,16 +368,30 @@ def _build_sync(full: bool = False) -> int:
     total = 0
     cursor = start_dt
     now = now_tz()
+    # 参考样本数：最近已入库的 30 个交易日 + 本次已处理块的样本数中位数。
+    # 低于参考 60% 的交易日视为「行情数据不完整」（当日盘中快照、分源回填中途），
+    # 直接跳过不写库，避免把半天的成交额/涨跌家数写进 10 年基线。
+    stored_ns = [
+        int(r.get("n") or 0)
+        for r in db[COLLECTION].find({}, {"n": 1}).sort("date", -1).limit(30)
+        if int(r.get("n") or 0) > 0
+    ]
+    batch_ns: list[int] = []
     while cursor <= latest_dt:
         chunk_end = min(cursor + timedelta(days=CHUNK_DAYS - 1), latest_dt)
         s, e = cursor.strftime("%Y-%m-%d"), chunk_end.strftime("%Y-%m-%d")
         quotes = _aggregate_quotes(db, s, e)
         valuation = _aggregate_valuation(db, s, e)
+        ref_ns = stored_ns + batch_ns
+        ref_n = int(_median(ref_ns) or 0) if ref_ns else 0
         docs = []
         for r in quotes:
             d = _normalize_date(r.get("_id"))
             n = int(r.get("n") or 0)
             if not d or n <= 0:
+                continue
+            if ref_n and n < ref_n * 0.6:
+                logger.info(f"📊 [position] 跳过不完整交易日 {d}：仅 {n} 只个股（参考 {ref_n}）")
                 continue
             up = int(r.get("up") or 0)
             pe, pb = valuation.get(d, (None, None))
@@ -302,6 +411,7 @@ def _build_sync(full: bool = False) -> int:
                 "avg_pb": pb,
                 "updated_at": now,
             })
+        batch_ns.extend(int(r.get("n") or 0) for r in quotes if int(r.get("n") or 0) > 0)
         total += _upsert_docs(db, docs)
         cursor = chunk_end + timedelta(days=1)
 
@@ -659,17 +769,23 @@ def _divergence(percentiles: dict[str, int | None], composite: float | None) -> 
 
 
 def _series_metric(rows: list[dict], series: list[float | None], *, key: str, group: str, label: str,
-                   unit: str, higher_is_hot: bool, desc: str) -> dict[str, Any]:
-    """由一条序列生成指标卡：当前值 + 当前值在历史中的分位。"""
+                   unit: str, higher_is_hot: bool, desc: str,
+                   rank_series: list[float | None] | None = None) -> dict[str, Any]:
+    """由一条序列生成指标卡：当前值 + 当前值在历史中的分位。
+
+    rank_series 用于「展示值与分位口径不同」的指标（如盘中成交额按交易进度
+    折算后再比全天历史），未传时与展示序列一致。
+    """
     valid = [i for i, v in enumerate(series) if v is not None]
     if not valid:
         return {"key": key, "group": group, "label": label, "unit": unit, "value": None,
-                "percentile": None, "window_years": 0, "samples": 0,
+                "percentile": None, "window_years": 0, "samples": 0, "as_of": "",
                 "higher_is_hot": higher_is_hot, "desc": desc}
     cur_i = valid[-1]
-    hist = [series[i] for i in valid if i < cur_i]
+    rank_src = rank_series if rank_series is not None else series
+    hist = [_f(rank_src[i]) for i in valid if i < cur_i]
     cur = round(_f(series[cur_i]), 2)
-    pct = _rank([_f(v) for v in hist], cur) if hist else None
+    pct = _rank(hist, _f(rank_src[cur_i])) if hist else None
     return {
         "key": key,
         "group": group,
@@ -679,19 +795,28 @@ def _series_metric(rows: list[dict], series: list[float | None], *, key: str, gr
         "percentile": pct,
         "window_years": _window_years([rows[i]["date"] for i in valid]),
         "samples": len(hist),
+        # 当前值实际所属交易日（估值取 daily_basic，可能比实时行早一天）
+        "as_of": rows[cur_i]["date"],
         "higher_is_hot": higher_is_hot,
         "desc": desc,
     }
 
 
-def compute_position_payload(rows: list[dict]) -> dict[str, Any]:
-    """由历史日度行计算当前位置、历史类比、未来收益分布与背离（纯函数）。"""
+def compute_position_payload(rows: list[dict], live_row: dict[str, Any] | None = None,
+                             progress: float = 1.0) -> dict[str, Any]:
+    """由历史日度行计算当前位置、历史类比、未来收益分布与背离（纯函数）。
+
+    live_row 为当日实时快照补出的行（由 _live_row_sync 生成），传入后「最新一行」
+    即为今天，合成分位、背离、历史类比都会用今天的数据；progress 是当日交易进度，
+    用于把盘中累计成交额折算成全天口径后再比历史分位（否则午间必然显示低分位）。
+    """
     if not rows:
         return _empty_payload("历史样本为空")
 
     rows = sorted(rows, key=lambda r: r["date"])
     latest = rows[-1]
     history = rows[:-1]
+    is_live = bool(live_row) and latest["date"] == _normalize_date((live_row or {}).get("date"))
 
     idx = _index_series(rows)
     specs = [
@@ -716,20 +841,42 @@ def compute_position_payload(rows: list[dict]) -> dict[str, Any]:
          "收盘价低于 3 元的个股占比，熊市末期往往明显抬升（分位越高越冷）", True),
     ]
 
+    series_by_key = {spec[0]: spec[4] for spec in specs}
+    # 分位口径序列：仅「成交额」在盘中改用按交易进度折算的全天估算值，
+    # 展示值仍保留实际累计成交额，避免把估算值当成真实成交额。
+    rank_series_by_key = {k: list(v) for k, v in series_by_key.items()}
+    amount_projected = None
+    if is_live and 0.0 < progress < 0.995:
+        actual = _f(series_by_key["amount"][-1])
+        if actual > 0:
+            amount_projected = round(actual / progress, 2)
+            rank_series_by_key["amount"][-1] = amount_projected
+
     metrics: list[dict[str, Any]] = []
     for key, group, label, unit, series, hot, desc, in_composite in specs:
         m = _series_metric(rows, series, key=key, group=group, label=label, unit=unit,
-                           higher_is_hot=hot, desc=desc)
+                           higher_is_hot=hot, desc=desc, rank_series=rank_series_by_key[key])
         m["in_composite"] = in_composite
+        if is_live:
+            m["live"] = True
+            # 估值来自 daily_basic，若其日期早于实时行，卡片需标注真实数据日期
+            if key in ("valuation_pe", "valuation_pb"):
+                vdate = _normalize_date((live_row or {}).get("valuation_date"))
+                if vdate:
+                    m["as_of"] = vdate
+                    m["live"] = False
+            if key == "amount" and amount_projected is not None:
+                m["projected_value"] = amount_projected
+                m["progress"] = round(progress, 4)
+                m["desc"] = f"{desc}（盘中按交易进度 {round(progress * 100)}% 折算后比较分位）"
         metrics.append(m)
 
     # 合成分位：长历史指标统一折算成热度分位后取均值；估值样本不足 3 年时不参与合成
-    series_by_key = {spec[0]: spec[4] for spec in specs}
     hot_by_key = {spec[0]: spec[5] for spec in specs}
     long_keys = [spec[0] for spec in specs if spec[7]]
 
     heat_series = [
-        [_heat_of(p, hot_by_key[k]) for p in _pct_series(series_by_key[k])]
+        [_heat_of(p, hot_by_key[k]) for p in _pct_series(rank_series_by_key[k])]
         for k in long_keys
     ]
     composite_series: list[int | None] = []
@@ -745,7 +892,7 @@ def compute_position_payload(rows: list[dict]) -> dict[str, Any]:
 
     # 历史类比用的状态向量：整体热度 + 回撤深度 + 宽度 + 成交额 + 振幅（均已折算成热度）
     def heat_of_key(key: str) -> list[int | None]:
-        return [_heat_of(p, hot_by_key[key]) for p in _pct_series(series_by_key[key])]
+        return [_heat_of(p, hot_by_key[key]) for p in _pct_series(rank_series_by_key[key])]
 
     dims = [
         composite_series,
@@ -758,6 +905,11 @@ def compute_position_payload(rows: list[dict]) -> dict[str, Any]:
     return {
         "ready": True,
         "as_of": latest["date"],
+        # live=True 表示最后一行来自当日实时快照（盘中），而非收盘后固化的完整日线
+        "live": is_live,
+        "baseline_as_of": history[-1]["date"] if history else "",
+        "amount_projected": amount_projected,
+        "progress": round(progress, 4) if is_live else 1.0,
         "updated": now_tz().isoformat(),
         "window_years": _window_years([r["date"] for r in rows]),
         "samples": len(history),
@@ -806,6 +958,14 @@ async def _build() -> dict[str, Any]:
         _kick_build()
         return _empty_payload()
     rows = await asyncio.to_thread(lambda: list(db[COLLECTION].find({}, {"_id": 0}).sort("date", 1)))
+    # 历史基线只含完整交易日；补一行当日实时快照，让「今日结论」真正用今天的数据。
+    # 收盘后日线补齐、基线写入当天后，_live_row_sync 会自动返回 None，回到固化口径。
+    live = await asyncio.to_thread(_live_row_sync, db)
+    if live:
+        from app.utils.date_utils import today_str
+
+        progress = _session_progress() if live.get("date") == today_str() else 1.0
+        return await asyncio.to_thread(compute_position_payload, rows + [live], live, progress)
     return await asyncio.to_thread(compute_position_payload, rows)
 
 

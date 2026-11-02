@@ -305,6 +305,14 @@ export interface MarketPositionMetric {
   higher_is_hot: boolean
   /** 是否参与合成分位 */
   in_composite: boolean
+  /** 当前值实际所属交易日（实时行 = 今天；估值取 daily_basic，可能早一天） */
+  as_of?: string
+  /** 当前值是否来自当日实时快照 */
+  live?: boolean
+  /** 盘中按交易进度折算后的全天口径值（仅成交额；分位用它计算） */
+  projected_value?: number | null
+  /** 交易进度（0~1，仅盘中成交额） */
+  progress?: number
   desc: string
 }
 
@@ -361,6 +369,14 @@ export interface MarketPositionAnalogs {
 export interface MarketPosition {
   ready: boolean
   as_of: string
+  /** 最后一行是否来自当日实时快照（盘中）；false 为收盘后固化的完整日线 */
+  live?: boolean
+  /** 历史基线最后一个完整交易日（实时行的分位参照） */
+  baseline_as_of?: string
+  /** 盘中成交额折算后的全天口径值 */
+  amount_projected?: number | null
+  /** 当日交易进度（0~1） */
+  progress?: number
   updated: string
   window_years: number
   samples: number
@@ -407,6 +423,8 @@ export interface MarketTemperatureItem {
   samples: number
   higher_is_hot: boolean
   desc: string
+  /** 盘中累计型指标（成交额/换手）按交易进度折算后的全天等效值，仅用于分位比较 */
+  projected?: number
 }
 
 export interface MarketBreadthPoint {
