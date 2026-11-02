@@ -2947,8 +2947,10 @@ onActivated(() => {
 }
 
 .radar-svg {
-  width: 260px;
-  height: 260px;
+  width: 100%;
+  max-width: 260px;
+  height: auto;
+  aspect-ratio: 1;
 }
 
 .radar-score {
@@ -3847,7 +3849,7 @@ onActivated(() => {
 .pos-guide-track {
   position: relative;
   height: 6px;
-  margin-top: 10px;
+  margin-top: 14px;
   border-radius: 3px;
   background: var(--el-fill-color-light);
 }
@@ -3870,7 +3872,7 @@ onActivated(() => {
 }
 .pos-guide-cursor b {
   position: absolute;
-  top: -15px;
+  top: -13px;
   left: 50%;
   transform: translateX(-50%);
   font-family: var(--app-font-mono);
@@ -4162,7 +4164,7 @@ onActivated(() => {
 }
 .pos-fwd-label {
   color: var(--el-text-color-secondary);
-  white-space: nowrap;
+  line-height: 1.35;
 }
 .pos-fwd-label em {
   margin-left: 5px;
@@ -4213,12 +4215,13 @@ onActivated(() => {
 
 @media (max-width: 1200px) {
   .pos-analog-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .pos-bullets { grid-template-columns: 1fr; }
 }
 @media (max-width: 900px) {
   .syn-decision { grid-template-columns: 1fr; }
   .syn-guide-grid { grid-template-columns: 1fr; }
   .pos-guide { grid-template-columns: 1fr; }
+  /* 平板竖屏也保持两列太挤，指标横条改为单列 */
+  .pos-bullets { grid-template-columns: 1fr; }
 }
 @media (max-width: 768px) {
   .pos-analog-grid { grid-template-columns: 1fr; }
@@ -4227,12 +4230,44 @@ onActivated(() => {
   .syn-tags { margin-left: 0; }
   .syn-direc-main { font-size: 26px; }
   .syn-conf-wrap { padding: 0 12px; }
+
+  /* 分节头：说明文字单独一行，避免把数据时点/按钮挤到下一行 */
+  .mr-sec-head { gap: 6px 10px; }
+  .mr-sec-hint { flex-basis: 100%; order: 3; line-height: 1.5; }
+
+  /* 02 位置标尺 */
   .pos-hero { padding: 12px 12px 10px; }
   .pos-hero-head { flex-wrap: wrap; gap: 10px; }
+  .pos-verdict-title { font-size: 16px; }
+  .pos-hero-score {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    width: 100%;
+    text-align: left;
+  }
   .pos-score-num { font-size: 26px; }
+  .pos-score-cap { margin-top: 0; }
   .pos-gauge-band { font-size: 9px; letter-spacing: 0; }
+  .chart-200 { height: 180px; }
+
+  /* 指标横条 / 未来收益条形 */
   .pos-bullet { grid-template-columns: 92px minmax(0, 1fr) 58px 38px; gap: 6px; }
-  .pos-fwd-row { grid-template-columns: 74px minmax(0, 1fr) 60px; gap: 8px; font-size: 11.5px; }
-  .pos-fwd-meta { display: none; }
+  .pos-fwd-row { grid-template-columns: 84px minmax(0, 1fr) 62px; gap: 4px 8px; font-size: 11.5px; }
+  .pos-fwd-meta { grid-column: 1 / -1; text-align: left; }
+
+  /* 04 事件卡：标题折行，状态/展开收到第二行，不再挤成一排 */
+  .ev-main { flex-wrap: wrap; row-gap: 4px; }
+  .ev-title { flex: 1 1 calc(100% - 54px); white-space: normal; line-height: 1.45; }
+  .ev-surprise { order: 2; }
+  .ev-status { order: 3; margin-left: auto; }
+  .ev-toggle { order: 4; }
+}
+@media (max-width: 480px) {
+  .pos-bullet { grid-template-columns: 84px minmax(0, 1fr) 52px 34px; }
+  .pos-distance-chip { font-size: 11px; }
+  .pos-gauge-band { font-size: 8.5px; }
+  .pos-comp-chip { font-size: 11px; }
+  .dash-card :deep(.el-card__body) { padding: 12px; }
 }
 </style>
