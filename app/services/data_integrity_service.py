@@ -15,6 +15,7 @@
 
 import asyncio
 import logging
+import uuid
 from datetime import datetime, timedelta
 from typing import Any
 from app.utils.timezone import now_tz
@@ -32,6 +33,7 @@ class DataIntegrityService:
     def __init__(self):
         self.db = None
         self.check_collection = "data_integrity_checks"
+        self._repair_inflight = False
 
     async def _get_db(self):
         if self.db is None:
@@ -336,6 +338,939 @@ class DataIntegrityService:
             logger.warning(f"⚠️ 值级校验查询失败（忽略，不影响主流程）: {e}")
             return []
         return sorted(codes)
+
+    # ==================== 缺口审计（只读） ====================
+
+    # 健康口径：某交易日「有数据的在市股票」达到全市场的 95% 视为完整
+    HEALTH_COVERAGE = 0.95
+    # 整日缺口判定：覆盖度低于 70% 视为整日缺失，走「按日期批量拉取」补数
+    WHOLE_DAY_GAP_COVERAGE = 0.70
+    # 审计窗口默认交易日数
+    DEFAULT_AUDIT_WINDOW = 20
+
+    def _latest_settled_trade_day(self) -> str:
+        """最近一个「理应已有K线数据」的交易日（YYYY-MM-DD）。
+
+        规则：get_latest_trade_day 已处理 15:00 收盘前回退到上一交易日；
+        仅当它返回「今天」且当前时间早于 18:30（当日K线尚未落地）时，再回退一个交易日。
+        这样次日白天审计时，上一交易日（已结算）不会被漏掉。
+        """
+        try:
+            from app.utils.trading_time import get_latest_trade_day, is_trading_day, prev_trading_day
+
+            now = now_tz()
+            target = get_latest_trade_day(now)
+            if target.date() == now.date() and (now.hour, now.minute) < (18, 30):
+                target = prev_trading_day(target)
+            return target.strftime("%Y-%m-%d")
+        except Exception as e:
+            logger.warning(f"⚠️ 计算最近已结算交易日失败: {e}")
+            return ""
+
+    @staticmethod
+    def _norm_date_str(value) -> str | None:
+        """把 list_date / 日期字段统一为 YYYY-MM-DD；无法识别返回 None。"""
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value.strftime("%Y-%m-%d")
+        s = str(value).strip()
+        if len(s) >= 8 and s[:8].isdigit():
+            return f"{s[:4]}-{s[4:6]}-{s[6:8]}"
+        if len(s) >= 10:
+            return s[:10]
+        return None
+
+    @staticmethod
+    def _norm_trade_date_key(value) -> str:
+        """聚合 _id 可能是 YYYYMMDD 或 YYYY-MM-DD，统一为 YYYY-MM-DD。"""
+        s = str(value).strip()
+        if len(s) == 8 and s.isdigit():
+            return f"{s[:4]}-{s[4:6]}-{s[6:8]}"
+        return s[:10]
+
+    async def _get_universe_map(self, db) -> dict[str, str | None]:
+        """在市 A 股代码 → 上市日期（YYYY-MM-DD 或 None）。
+
+        在市口径复用 _get_expected_stock_codes（is_active != False），
+        上市日期用于按交易日裁剪：未上市的股票不应计入当日应有数量。
+        """
+        codes = await self._get_expected_stock_codes(db)
+        listing: dict[str, str | None] = {c: None for c in codes}
+        if not codes:
+            return listing
+        async for doc in db.stock_basic_info.find(
+            {"code": {"$in": codes}}, {"code": 1, "list_date": 1}
+        ):
+            c = doc.get("code")
+            if not c:
+                continue
+            ld = self._norm_date_str(doc.get("list_date"))
+            if ld and listing.get(c) is None:
+                listing[c] = ld
+        return listing
+
+    async def _load_unavailable(self, db, days: list[str], scopes: tuple[str, ...]) -> dict:
+        """加载「已确认数据源无数据」的 (code, trade_date) 标记，避免反复重试。
+
+        只有成功查询了数据源、但该代码确实没有数据（停牌/未上市/无估值）时才登记；
+        接口失败不会登记，避免把瞬态故障永久当成「无数据」。
+        """
+        date_values = list(days) + [d.replace("-", "") for d in days]
+        out: dict[str, dict[str, set]] = {s: {} for s in scopes}
+        try:
+            cursor = db.data_integrity_unavailable.find(
+                {"scope": {"$in": list(scopes)}, "trade_date": {"$in": date_values}}
+            )
+            async for doc in cursor:
+                d = self._norm_trade_date_key(doc.get("trade_date"))
+                out.setdefault(doc.get("scope"), {}).setdefault(d, set()).add(doc.get("symbol"))
+        except Exception as e:
+            logger.warning(f"读取不可得数据标记失败（忽略）: {e}")
+        return out
+
+    async def _mark_unavailable(self, scope: str, pairs: list[tuple[str, str]], reason: str) -> int:
+        """登记「该代码该日期数据源确实无数据」，供后续审计跳过。"""
+        if not pairs:
+            return 0
+        try:
+            db = await self._get_db()
+            from pymongo import UpdateOne
+
+            ops = [
+                UpdateOne(
+                    {"scope": scope, "symbol": code, "trade_date": date},
+                    {"$setOnInsert": {
+                        "scope": scope,
+                        "symbol": code,
+                        "trade_date": date,
+                        "reason": reason,
+                        "created_at": now_tz(),
+                    }},
+                    upsert=True,
+                )
+                for code, date in pairs
+            ]
+            await db.data_integrity_unavailable.bulk_write(ops, ordered=False)
+            return len(ops)
+        except Exception as e:
+            logger.warning(f"登记不可得数据标记失败（忽略）: {e}")
+            return 0
+
+    async def _audit_quotes_dataset(
+        self, db, days: list[str], universe: dict[str, str | None], unavailable: dict | None = None
+    ):
+        """审计 stock_daily_quotes 逐日覆盖度与低质量记录。"""
+        date_values = list(days) + [d.replace("-", "") for d in days]
+
+        # 1) 逐日实际有数据的代码集合（一次聚合）
+        actual_by_date: dict[str, set] = {}
+        pipeline = [
+            {"$match": {"period": "daily", "trade_date": {"$in": date_values}}},
+            {"$group": {"_id": "$trade_date", "codes": {"$addToSet": {"$ifNull": ["$code", "$symbol"]}}}},
+        ]
+        async for doc in db.stock_daily_quotes.aggregate(pipeline):
+            key = self._norm_trade_date_key(doc.get("_id"))
+            actual_by_date.setdefault(key, set()).update(
+                c for c in (doc.get("codes") or []) if c
+            )
+
+        # 2) 低质量：当日该代码所有记录的 pct_chg/pre_close 均为空
+        low_quality_by_date: dict[str, set] = {}
+        pipeline_lq = [
+            {"$match": {"period": "daily", "trade_date": {"$in": date_values}}},
+            {
+                "$group": {
+                    "_id": {"d": "$trade_date", "c": "$code"},
+                    "valid": {
+                        "$sum": {
+                            "$cond": [
+                                {
+                                    "$and": [
+                                        {"$ne": [{"$ifNull": ["$pct_chg", None]}, None]},
+                                        {"$ne": [{"$ifNull": ["$pre_close", None]}, None]},
+                                    ]
+                                },
+                                1,
+                                0,
+                            ]
+                        }
+                    },
+                }
+            },
+            {"$match": {"valid": {"$lte": 0}}},
+        ]
+        async for doc in db.stock_daily_quotes.aggregate(pipeline_lq):
+            d = self._norm_trade_date_key(doc["_id"].get("d"))
+            c = doc["_id"].get("c")
+            if c:
+                low_quality_by_date.setdefault(d, set()).add(c)
+
+        details = []
+        for d in days:
+            active = {c for c, ld in universe.items() if not ld or ld <= d}
+            actual = actual_by_date.get(d, set()) & active
+            unavail = (unavailable or {}).get("quotes", {}).get(d, set())
+            missing = (active - actual) - unavail
+            low_quality = ((low_quality_by_date.get(d, set()) & active) - missing) - unavail
+            expected_n = len(active)
+            coverage = (len(actual) / expected_n) if expected_n else 0.0
+            # 完整性口径只看「去重股票数覆盖率」：≥95% 视为该日完整。
+            # 低质量（pct_chg/pre_close 为空）单独计数，不再让整日变 partial——
+            # 新股上市首日 Tushare 本身没有 pre_close/pct_chg，永久无法补齐，
+            # 若计入会让 99.8% 覆盖的日期长期显示「不完整」。
+            if coverage < self.WHOLE_DAY_GAP_COVERAGE:
+                status = "gap"
+            elif coverage < self.HEALTH_COVERAGE:
+                status = "partial"
+            else:
+                status = "ok"
+            details.append(
+                {
+                    "trade_date": d,
+                    "expected": expected_n,
+                    "actual": len(actual),
+                    "coverage_pct": round(coverage * 100, 2),
+                    "missing_count": len(missing),
+                    "low_quality_count": len(low_quality),
+                    "status": status,
+                    "missing_codes": sorted(missing)[:50],
+                    "low_quality_codes": sorted(low_quality)[:50],
+                    # 完整集合仅供内部修复使用，对外 API 会剔除
+                    "_missing_all": sorted(missing),
+                    "_low_quality_all": sorted(low_quality),
+                }
+            )
+        return details, actual_by_date, low_quality_by_date
+
+    async def _audit_simple_dataset(
+        self, db, collection: str, days: list[str], universe: dict[str, str | None],
+        unavailable: dict | None = None,
+    ):
+        """审计 daily_basic / moneyflow 这类「按 (code, trade_date) 唯一」的数据集。"""
+        date_values = list(days) + [d.replace("-", "") for d in days]
+        actual_by_date: dict[str, set] = {}
+        pipeline = [
+            {"$match": {"trade_date": {"$in": date_values}}},
+            {"$group": {"_id": "$trade_date", "codes": {"$addToSet": "$code"}}},
+        ]
+        async for doc in db[collection].aggregate(pipeline):
+            key = self._norm_trade_date_key(doc.get("_id"))
+            actual_by_date.setdefault(key, set()).update(
+                c for c in (doc.get("codes") or []) if c
+            )
+
+        details = []
+        for d in days:
+            active = {c for c, ld in universe.items() if not ld or ld <= d}
+            actual = actual_by_date.get(d, set()) & active
+            unavail = (unavailable or {}).get("daily_basic" if collection == "stock_daily_basic" else "moneyflow", {}).get(d, set())
+            missing = (active - actual) - unavail
+            expected_n = len(active)
+            coverage = (len(actual) / expected_n) if expected_n else 0.0
+            status = "ok" if coverage >= self.HEALTH_COVERAGE else "gap"
+            details.append(
+                {
+                    "trade_date": d,
+                    "expected": expected_n,
+                    "actual": len(actual),
+                    "coverage_pct": round(coverage * 100, 2),
+                    "missing_count": len(missing),
+                    "status": status,
+                    "missing_codes": sorted(missing)[:50],
+                    "_missing_all": sorted(missing),
+                }
+            )
+        return details, actual_by_date
+
+    async def _last_record_update(self, db, collection: str, date_field: str) -> dict[str, Any]:
+        """取集合最近更新时间与总记录数（用于财务/新闻这类非逐日数据集）。"""
+        try:
+            doc = await db[collection].find_one(
+                {}, sort=[(date_field, -1)], projection={date_field: 1}
+            )
+            count = await db[collection].estimated_document_count()
+            latest = doc.get(date_field) if doc else None
+            if isinstance(latest, datetime):
+                latest = latest.isoformat()
+            return {"last_update": latest, "count": count}
+        except Exception as e:
+            logger.warning(f"读取 {collection} 更新时间失败: {e}")
+            return {"last_update": None, "count": 0}
+
+    async def audit_coverage(
+        self,
+        window_trading_days: int = DEFAULT_AUDIT_WINDOW,
+        include_codes: bool = False,
+    ) -> dict[str, Any]:
+        """审计最近 N 个交易日的逐日覆盖度，返回缺口清单（不写库）。
+
+        Args:
+            window_trading_days: 审计窗口（交易日数）
+            include_codes: 是否返回每个日期的完整缺失/低质量代码集合（内部修复用，
+                           对外 API 会剔除，避免响应过大）
+        """
+        db = await self._get_db()
+        window_end = self._latest_settled_trade_day() or await self._get_latest_trade_date(db)
+        if not window_end:
+            return {
+                "generated_at": now_tz().isoformat(),
+                "has_gaps": False,
+                "window_trading_days": 0,
+                "message": "stock_daily_quotes 为空，无法审计",
+                "quotes": {"dates": [], "gap_dates": [], "scattered_dates": []},
+                "daily_basic": {"dates": []},
+                "moneyflow": {"dates": []},
+                "totals": {},
+                "estimated_seconds": 0,
+            }
+
+        try:
+            from app.services.trade_calendar_service import query_trade_days
+
+            probe_start = (
+                datetime.strptime(window_end, "%Y-%m-%d")
+                - timedelta(days=max(1, window_trading_days) * 2 + 15)
+            ).strftime("%Y-%m-%d")
+            days = await query_trade_days(probe_start, window_end)
+        except Exception as e:
+            logger.warning(f"⚠️ 交易日历查询失败，退化到仅审计窗口终点: {e}")
+            days = []
+        if not days:
+            days = [window_end]
+        days = days[-max(1, int(window_trading_days)):]
+
+        universe = await self._get_universe_map(db)
+        unavailable = await self._load_unavailable(db, days, ("quotes", "daily_basic", "moneyflow"))
+        quotes_details, _, _ = await self._audit_quotes_dataset(db, days, universe, unavailable)
+        basic_details, _ = await self._audit_simple_dataset(db, "stock_daily_basic", days, universe, unavailable)
+        moneyflow_details, _ = await self._audit_simple_dataset(db, "stock_daily_moneyflow", days, universe, unavailable)
+        financial = await self._last_record_update(db, "stock_financial_data", "updated_at")
+        news = await self._last_record_update(db, "stock_news", "publish_time")
+
+        if not include_codes:
+            for d in quotes_details + basic_details + moneyflow_details:
+                d.pop("_missing_all", None)
+                d.pop("_low_quality_all", None)
+
+        gap_dates = [d for d in quotes_details if d["status"] == "gap"]
+        # 散点缺口：覆盖率达标（>=95%）但仍有个别股票缺失/低质量的日期，也要补
+        scattered_dates = [
+            d for d in quotes_details
+            if d["status"] != "gap" and (d["missing_count"] > 0 or d["low_quality_count"] > 0)
+        ]
+        basic_gaps = [d for d in basic_details if d["missing_count"] > 0]
+        moneyflow_gaps = [d for d in moneyflow_details if d["missing_count"] > 0]
+
+        total_missing = sum(d["missing_count"] for d in gap_dates + scattered_dates)
+        total_low_quality = sum(d["low_quality_count"] for d in gap_dates + scattered_dates)
+        has_gaps = bool(gap_dates or scattered_dates or basic_gaps or moneyflow_gaps)
+
+        # 粗估耗时：整日缺口按每日 20s，散点按每只 1.5s，估值/资金每日 10s
+        estimated = (
+            len(gap_dates) * 20
+            + sum(d["missing_count"] for d in scattered_dates) * 1.5
+            + len(basic_gaps) * 10
+            + len(moneyflow_gaps) * 10
+        )
+        estimated = int(min(max(estimated, 5), 3600)) if has_gaps else 0
+
+        result: dict[str, Any] = {
+            "generated_at": now_tz().isoformat(),
+            "window_trading_days": len(days),
+            "window_start": days[0],
+            "window_end": days[-1],
+            "universe_count": len(universe),
+            "has_gaps": has_gaps,
+            "health_coverage_pct": round(self.HEALTH_COVERAGE * 100, 1),
+            "whole_day_gap_pct": round(self.WHOLE_DAY_GAP_COVERAGE * 100, 1),
+            "totals": {
+                "quotes_missing": total_missing,
+                "quotes_low_quality": total_low_quality,
+                "quotes_gap_dates": len(gap_dates),
+                "quotes_scattered_dates": len(scattered_dates),
+                "daily_basic_gap_dates": len(basic_gaps),
+                "moneyflow_gap_dates": len(moneyflow_gaps),
+            },
+            "quotes": {
+                "dates": quotes_details,
+                "gap_dates": [
+                    {"trade_date": d["trade_date"], "missing_count": d["missing_count"],
+                     "coverage_pct": d["coverage_pct"]}
+                    for d in gap_dates
+                ],
+                "scattered_dates": [
+                    {"trade_date": d["trade_date"], "missing_count": d["missing_count"],
+                     "low_quality_count": d["low_quality_count"], "coverage_pct": d["coverage_pct"]}
+                    for d in scattered_dates
+                ],
+            },
+            "daily_basic": {
+                "dates": basic_details,
+                "gap_dates": [
+                    {"trade_date": d["trade_date"], "missing_count": d["missing_count"]}
+                    for d in basic_gaps
+                ],
+            },
+            "moneyflow": {
+                "dates": moneyflow_details,
+                "gap_dates": [
+                    {"trade_date": d["trade_date"], "missing_count": d["missing_count"]}
+                    for d in moneyflow_gaps
+                ],
+            },
+            "financial": financial,
+            "news": news,
+            "estimated_seconds": estimated,
+        }
+
+        if include_codes:
+            result["_code_sets"] = {
+                "quotes": {
+                    d["trade_date"]: {
+                        "expected": d["expected"],
+                        "actual": d["actual"],
+                        "coverage": (d["actual"] / d["expected"]) if d["expected"] else 0.0,
+                        "missing": d.get("_missing_all", []),
+                        "low_quality": d.get("_low_quality_all", []),
+                    }
+                    for d in quotes_details
+                },
+                "daily_basic": {
+                    d["trade_date"]: {
+                        "coverage": (d["actual"] / d["expected"]) if d["expected"] else 0.0,
+                        "missing": d.get("_missing_all", []),
+                    }
+                    for d in basic_details
+                },
+                "moneyflow": {
+                    d["trade_date"]: {
+                        "coverage": (d["actual"] / d["expected"]) if d["expected"] else 0.0,
+                        "missing": d.get("_missing_all", []),
+                    }
+                    for d in moneyflow_details
+                },
+            }
+        return result
+
+    # ==================== 缺口修复（按缺口驱动补数） ====================
+
+    async def start_repair(self, window_trading_days: int = DEFAULT_AUDIT_WINDOW) -> dict[str, Any]:
+        """启动一次缺口修复（后台执行），立即返回 run_id 供前端轮询。
+
+        单飞约束：进程内标记 + Redis 分布式锁；重复点击不会再开第二个任务。
+        """
+        db = await self._get_db()
+        if self._repair_inflight:
+            return {"status": "busy", "message": "已有修复任务正在执行"}
+
+        now = now_tz()
+        recent = await db["data_integrity_repairs"].find_one(
+            {"status": "running"}, sort=[("started_at", -1)]
+        )
+        if recent and isinstance(recent.get("started_at"), datetime):
+            started = recent["started_at"]
+            if started.tzinfo is None:
+                started = started.replace(tzinfo=now.tzinfo)
+            if (now - started).total_seconds() < 7200:
+                return {
+                    "status": "busy",
+                    "message": "已有修复任务正在执行",
+                    "run_id": recent.get("run_id"),
+                }
+
+        run_id = uuid.uuid4().hex
+        doc = {
+            "run_id": run_id,
+            "status": "running",
+            "window_trading_days": int(window_trading_days),
+            "started_at": now,
+            "updated_at": now,
+            "progress": 0,
+            "message": "正在审计数据缺口…",
+            "written": {"quotes": 0, "daily_basic": 0, "moneyflow": 0},
+            "errors": [],
+        }
+        await db["data_integrity_repairs"].insert_one(doc)
+        self._repair_inflight = True
+        asyncio.create_task(self._execute_repair(run_id, window_trading_days))
+        return {"status": "started", "run_id": run_id, "message": "已开始修复数据缺口"}
+
+    async def _update_repair_run(self, run_id: str, **fields) -> None:
+        fields["updated_at"] = now_tz()
+        try:
+            db = await self._get_db()
+            await db["data_integrity_repairs"].update_one(
+                {"run_id": run_id}, {"$set": fields}
+            )
+        except Exception as e:
+            logger.warning(f"更新修复任务状态失败: {e}")
+
+    async def _execute_repair(self, run_id: str, window_trading_days: int) -> None:
+        """执行缺口修复：整日缺口按日期批量拉取，散点缺口按股票合并区间拉取。
+
+        硬约束：只写「缺失 ∪ 低质量」的 (code, trade_date)，不整批写、不删除历史行、
+        不写 market_quotes；写入依赖 (symbol, trade_date, data_source, period) 唯一索引幂等。
+        """
+        redis_service = None
+        lock_value = None
+        redis_ok = False
+        written = {"quotes": 0, "daily_basic": 0, "moneyflow": 0}
+        errors: list[dict] = []
+        rollback_keys: list[dict] = []
+        try:
+            try:
+                from app.core.redis_client import get_redis_service
+
+                redis_service = get_redis_service()
+                lock_value = await redis_service.acquire_lock(
+                    "lock:data_integrity:repair", timeout=3600
+                )
+                redis_ok = True
+            except Exception as e:
+                logger.warning(f"Redis 锁不可用，退化为进程内单飞: {e}")
+                redis_ok = False
+
+            if redis_ok and not lock_value:
+                await self._update_repair_run(
+                    run_id, status="busy", progress=100,
+                    finished_at=now_tz(), message="已有修复任务正在执行（分布式锁）",
+                )
+                return
+
+            audit = await self.audit_coverage(window_trading_days, include_codes=True)
+            code_sets = audit.pop("_code_sets", {})
+            await self._update_repair_run(
+                run_id, audit_before=audit, message="审计完成，开始补数"
+            )
+
+            if not audit.get("has_gaps"):
+                await self._update_repair_run(
+                    run_id, status="no_gaps", progress=100, finished_at=now_tz(),
+                    message="数据完整，无需修复", audit_after=audit,
+                )
+                return
+
+            from app.services.data_sources.tushare_adapter import TushareAdapter
+
+            adapter = TushareAdapter()
+
+            # 1) 行情：整日缺口 → 按日期批量；散点 → 按股票合并区间
+            quote_sets = code_sets.get("quotes", {})
+            missing_pairs = {
+                (c, d) for d, info in quote_sets.items() for c in (info.get("missing") or [])
+            }
+            stock_dates: dict[str, set] = {}
+            total_dates = len([1 for info in quote_sets.values() if info.get("missing") or info.get("low_quality")])
+            done_dates = 0
+            for date, info in quote_sets.items():
+                missing = set(info.get("missing") or [])
+                low_quality = set(info.get("low_quality") or [])
+                targets = missing | low_quality
+                if not targets:
+                    continue
+                if info.get("coverage", 0.0) < self.WHOLE_DAY_GAP_COVERAGE:
+                    res = await self._repair_quotes_by_date(adapter, date, targets, missing)
+                    written["quotes"] += res["written"]
+                    if res.get("error"):
+                        errors.append({"scope": "quotes", "trade_date": date, "error": res["error"]})
+                    rollback_keys.extend(res.get("rollback_keys") or [])
+                else:
+                    for c in targets:
+                        stock_dates.setdefault(c, set()).add(date)
+                done_dates += 1
+                await self._update_repair_run(
+                    run_id,
+                    progress=min(60, int(done_dates / max(1, total_dates) * 60)),
+                    message=f"行情整日缺口处理中 {date}",
+                    written=dict(written),
+                )
+
+            if stock_dates:
+                total_stocks = len(stock_dates)
+                for i, (code, dates) in enumerate(stock_dates.items(), start=1):
+                    res = await self._repair_quotes_by_stock(adapter, code, dates)
+                    written["quotes"] += res["written"]
+                    if res.get("error"):
+                        errors.append({"scope": "quotes", "code": code, "error": res["error"]})
+                    for d in dates:
+                        if (code, d) in missing_pairs:
+                            rollback_keys.append({"symbol": code, "trade_date": d})
+                    if i % 20 == 0 or i == total_stocks:
+                        await self._update_repair_run(
+                            run_id,
+                            progress=min(85, 60 + int(i / total_stocks * 25)),
+                            message=f"散点缺口补数中 {code} ({i}/{total_stocks})",
+                            written=dict(written),
+                        )
+                    await asyncio.sleep(0.15)  # Tushare 频控保护
+
+            # 2) 估值 / 资金流：逐日按缺失代码补写（唯一键，不会产生重复）
+            for collection, scope, adapter_fn in (
+                ("stock_daily_basic", "daily_basic", adapter.get_daily_basic),
+                ("stock_daily_moneyflow", "moneyflow", adapter.get_moneyflow),
+            ):
+                dataset_sets = code_sets.get(scope, {})
+                for date, info in dataset_sets.items():
+                    missing = info.get("missing") or []
+                    if not missing:
+                        continue
+                    res = await self._repair_simple_dataset(
+                        collection, scope, adapter_fn, date, set(missing)
+                    )
+                    written[scope] += res["written"]
+                    if res.get("error"):
+                        errors.append({"scope": scope, "trade_date": date, "error": res["error"]})
+                    await self._update_repair_run(
+                        run_id, progress=min(95, 85 + len(written) * 3),
+                        message=f"{scope} 补数中 {date}",
+                        written=dict(written),
+                    )
+
+            # 3) 复检（只回传汇总，不再回传代码集合）
+            after = await self.audit_coverage(window_trading_days, include_codes=False)
+            status = "completed" if not after.get("has_gaps") else "partial"
+            await self._update_repair_run(
+                run_id,
+                status=status,
+                progress=100,
+                finished_at=now_tz(),
+                message="修复完成" if status == "completed" else "修复完成，仍有缺口未自愈",
+                written=dict(written),
+                errors=errors[:50],
+                audit_after=after,
+                rollback={
+                    "collection": "stock_daily_quotes",
+                    "data_source": "tushare",
+                    "keys": rollback_keys[:20000],
+                    "truncated": len(rollback_keys) > 20000,
+                },
+            )
+            logger.info(
+                f"✅ 缺口修复完成: run={run_id}, 写入={written}, "
+                f"新增可回滚={len(rollback_keys)}, 错误={len(errors)}"
+            )
+        except Exception as e:
+            logger.error(f"❌ 缺口修复失败: {e}", exc_info=True)
+            await self._update_repair_run(
+                run_id, status="failed", progress=100, finished_at=now_tz(),
+                message=f"修复失败: {e}", written=dict(written), errors=errors[:50] + [{"error": str(e)}],
+            )
+        finally:
+            self._repair_inflight = False
+            if redis_ok and redis_service and lock_value:
+                try:
+                    await redis_service.release_lock("lock:data_integrity:repair", lock_value)
+                except Exception as e:
+                    logger.warning(f"释放修复锁失败: {e}")
+
+    @staticmethod
+    def _to_ts_code(code: str) -> str:
+        if code.startswith(("6", "90")):
+            return f"{code}.SH"
+        if code.startswith(("8", "4", "92")):
+            return f"{code}.BJ"
+        return f"{code}.SZ"
+
+    @staticmethod
+    def _build_quote_row(row, trade_date: str) -> dict | None:
+        """把 Tushare pro.daily 一行转换为统一口径的入库行（volume=股, amount=元）。"""
+        def _f(key):
+            v = row.get(key)
+            if v is None:
+                return None
+            try:
+                x = float(v)
+            except (TypeError, ValueError):
+                return None
+            return None if x != x else x  # NaN
+
+        close = _f("close")
+        if close is None or close <= 0:
+            return None
+        high, low = _f("high"), _f("low")
+        if high is not None and low is not None and high < low:
+            return None
+        amount = _f("amount")
+        amount = amount * 1000.0 if amount is not None else None  # 千元 → 元
+        if amount is not None and amount < 0:
+            return None
+        volume = _f("vol")
+        volume = volume * 100.0 if volume is not None else None  # 手 → 股
+        pct_chg = _f("pct_chg")
+        # 新股上市首日涨幅可远超 100%（如 +400%），这是真实数据；只拦截明显异常值
+        if pct_chg is not None and not (-100.0 <= pct_chg <= 1000.0):
+            return None
+        return {
+            "trade_date": trade_date,
+            "open": _f("open"),
+            "high": high,
+            "low": low,
+            "close": close,
+            "pre_close": _f("pre_close"),
+            "pct_chg": pct_chg,
+            "volume": volume,
+            "amount": amount,
+        }
+
+    def _extract_quote_rows(self, df, trade_date: str, targets: set) -> list[tuple[str, dict]]:
+        rows: list[tuple[str, dict]] = []
+        for _, r in df.iterrows():
+            ts_code = str(r.get("ts_code") or "")
+            if "." not in ts_code:
+                continue
+            code = ts_code.split(".")[0].zfill(6)
+            if targets and code not in targets:
+                continue
+            row = self._build_quote_row(r, trade_date)
+            if row is None:
+                continue
+            rows.append((code, row))
+        return rows
+
+    @staticmethod
+    def _codes_in_df(df, targets: set) -> set:
+        """从 Tushare 返回的 DataFrame 中提取目标代码集合。"""
+        present = set()
+        for _, r in df.iterrows():
+            ts_code = str(r.get("ts_code") or "")
+            if "." in ts_code:
+                c = ts_code.split(".")[0].zfill(6)
+                if c in targets:
+                    present.add(c)
+        return present
+
+    async def _write_quote_rows(self, rows: list[tuple[str, dict]]) -> dict[str, Any]:
+        """按 (symbol, trade_date, data_source, period) 幂等 upsert，只写传入的行。"""
+        if not rows:
+            return {"written": 0, "errors": []}
+        try:
+            from pymongo import ReplaceOne
+            from app.services.historical_data_service import get_historical_data_service
+
+            service = await get_historical_data_service()
+            if service.collection is None:
+                await service.initialize()
+
+            ops = []
+            for code, row in rows:
+                doc = service._standardize_record(
+                    code, row, "tushare", "CN", "daily", row["trade_date"]
+                )
+                # 新股首日涨跌幅可能超过标准化器的 ±35% 上限，按 Tushare 原始值落库
+                if row.get("pct_chg") is not None:
+                    doc["pct_chg"] = round(float(row["pct_chg"]), 4)
+                if row.get("pre_close") is not None:
+                    doc["pre_close"] = round(float(row["pre_close"]), 4)
+                ops.append(
+                    ReplaceOne(
+                        {
+                            "symbol": code,
+                            "trade_date": row["trade_date"],
+                            "data_source": "tushare",
+                            "period": "daily",
+                        },
+                        doc,
+                        upsert=True,
+                    )
+                )
+
+            written = 0
+            errors: list[str] = []
+            for i in range(0, len(ops), 500):
+                batch = ops[i:i + 500]
+                for attempt in range(3):
+                    try:
+                        res = await service.collection.bulk_write(batch, ordered=False)
+                        written += res.upserted_count + res.modified_count
+                        break
+                    except Exception as e:
+                        if attempt == 2:
+                            errors.append(str(e))
+                            logger.error(f"❌ 缺口行情写入失败（批次 {i // 500 + 1}）: {e}")
+                        else:
+                            await asyncio.sleep(1.5 * (attempt + 1))
+            return {"written": written, "errors": errors}
+        except Exception as e:
+            logger.error(f"❌ 缺口行情写入异常: {e}")
+            return {"written": 0, "errors": [str(e)]}
+
+    async def _repair_quotes_by_date(
+        self, adapter, trade_date: str, targets: set, missing_targets: set
+    ) -> dict[str, Any]:
+        """整日缺口：一次 pro.daily(trade_date) 拉全市场，按目标代码过滤后 upsert。"""
+        try:
+            df = await asyncio.to_thread(
+                adapter.get_daily_by_date, trade_date.replace("-", "")
+            )
+        except Exception as e:
+            return {"written": 0, "rollback_keys": [], "error": str(e)}
+        if df is None:
+            return {"written": 0, "rollback_keys": [], "error": f"{trade_date} 接口调用失败"}
+        if getattr(df, "empty", True):
+            # 接口成功但整日无数据：登记后不再反复重试
+            await self._mark_unavailable(
+                "quotes", [(c, trade_date) for c in targets], "source_no_data"
+            )
+            return {"written": 0, "rollback_keys": []}
+
+        present = self._codes_in_df(df, targets)
+        absent = targets - present
+        if absent:
+            await self._mark_unavailable(
+                "quotes", [(c, trade_date) for c in absent], "source_no_data"
+            )
+        rows = self._extract_quote_rows(df, trade_date, present)
+        res = await self._write_quote_rows(rows)
+        rollback_keys = [
+            {"symbol": c, "trade_date": trade_date} for c, _ in rows if c in missing_targets
+        ]
+        if res["errors"]:
+            return {**res, "rollback_keys": rollback_keys, "error": "; ".join(res["errors"][:3])}
+        return {**res, "rollback_keys": rollback_keys}
+
+    async def _repair_quotes_by_stock(self, adapter, code: str, dates: set) -> dict[str, Any]:
+        """散点缺口：每股一次 API（合并日期区间），结果只保留目标日期后 upsert。"""
+        try:
+            start = min(dates).replace("-", "")
+            end = max(dates).replace("-", "")
+            df = await asyncio.to_thread(
+                adapter.get_daily_by_stock, self._to_ts_code(code), start, end
+            )
+        except Exception as e:
+            return {"written": 0, "error": str(e)}
+        if df is None:
+            return {"written": 0}  # 接口失败：不登记「无数据」，下次重试
+        if getattr(df, "empty", True):
+            await self._mark_unavailable(
+                "quotes", [(code, d) for d in dates], "stock_no_data"
+            )
+            return {"written": 0}
+
+        present_dates = set()
+        for _, r in df.iterrows():
+            d = self._norm_date_str(r.get("trade_date"))
+            if d in dates:
+                present_dates.add(d)
+        absent = dates - present_dates
+        if absent:
+            await self._mark_unavailable(
+                "quotes", [(code, d) for d in absent], "stock_no_data"
+            )
+
+        rows = []
+        for _, r in df.iterrows():
+            d = self._norm_date_str(r.get("trade_date"))
+            if d not in dates:
+                continue
+            row = self._build_quote_row(r, d)
+            if row is not None:
+                rows.append((code, row))
+        res = await self._write_quote_rows(rows)
+        if res["errors"]:
+            return {**res, "error": "; ".join(res["errors"][:3])}
+        return res
+
+    async def _repair_simple_dataset(
+        self, collection: str, scope: str, adapter_fn, trade_date: str, targets: set
+    ) -> dict[str, Any]:
+        """daily_basic / moneyflow：按日期拉全市场，仅写目标代码（唯一键幂等）。"""
+        try:
+            df = await asyncio.to_thread(adapter_fn, trade_date.replace("-", ""))
+        except Exception as e:
+            return {"written": 0, "error": str(e)}
+        if df is None:
+            return {"written": 0, "error": f"{trade_date} 无返回数据"}
+        if getattr(df, "empty", True):
+            return {"written": 0}
+
+        present = self._codes_in_df(df, targets)
+        absent = targets - present
+        if absent:
+            await self._mark_unavailable(
+                scope, [(c, trade_date) for c in absent], "source_no_data"
+            )
+
+        def _f(v):
+            try:
+                x = float(v)
+                return None if x != x else x
+            except (TypeError, ValueError):
+                return None
+
+        from pymongo import UpdateOne
+
+        ops = []
+        for _, row in df.iterrows():
+            ts_code = str(row.get("ts_code") or "")
+            if "." not in ts_code:
+                continue
+            code = ts_code.split(".")[0].zfill(6)
+            if code not in targets:
+                continue
+            if scope == "moneyflow":
+                doc = {
+                    "symbol": code,
+                    "code": code,
+                    "ts_code": ts_code,
+                    "trade_date": trade_date,
+                    "main_net": _f(row.get("main_net")),
+                    "data_source": "tushare",
+                    "updated_at": now_tz(),
+                }
+            else:
+                total_mv, circ_mv = _f(row.get("total_mv")), _f(row.get("circ_mv"))
+                doc = {
+                    "symbol": code,
+                    "code": code,
+                    "ts_code": ts_code,
+                    "trade_date": trade_date,
+                    "total_mv": round(total_mv / 10000.0, 6) if total_mv is not None else None,
+                    "circ_mv": round(circ_mv / 10000.0, 6) if circ_mv is not None else None,
+                    "pe": _f(row.get("pe")),
+                    "pb": _f(row.get("pb")),
+                    "ps": _f(row.get("ps")),
+                    "pe_ttm": _f(row.get("pe_ttm")),
+                    "pb_mrq": _f(row.get("pb_mrq")),
+                    "ps_ttm": _f(row.get("ps_ttm")),
+                    "turnover_rate": _f(row.get("turnover_rate")),
+                    "volume_ratio": _f(row.get("volume_ratio")),
+                    "total_share": _f(row.get("total_share")),
+                    "float_share": _f(row.get("float_share")),
+                    "data_source": "tushare",
+                    "updated_at": now_tz(),
+                }
+            ops.append(UpdateOne({"code": code, "trade_date": trade_date}, {"$set": doc}, upsert=True))
+
+        if not ops:
+            return {"written": 0}
+        try:
+            db = await self._get_db()
+            res = await db[collection].bulk_write(ops, ordered=False)
+            return {"written": res.upserted_count + res.modified_count}
+        except Exception as e:
+            return {"written": 0, "error": str(e)}
+
+    async def get_latest_repair_run(self) -> dict | None:
+        """最近一次修复任务状态（含进度），供前端轮询。"""
+        try:
+            db = await self._get_db()
+            doc = await db["data_integrity_repairs"].find_one({}, sort=[("started_at", -1)])
+            if not doc:
+                return None
+            doc.pop("_id", None)
+            for field in ("started_at", "updated_at", "finished_at"):
+                v = doc.get(field)
+                if isinstance(v, datetime):
+                    doc[field] = v.isoformat()
+            for field in ("audit_before", "audit_after"):
+                v = doc.get(field)
+                if isinstance(v, dict):
+                    v.pop("_code_sets", None)
+            return doc
+        except Exception as e:
+            logger.warning(f"读取修复任务状态失败: {e}")
+            return None
 
     async def _remediate_missing(
         self,

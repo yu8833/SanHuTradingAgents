@@ -850,3 +850,59 @@ async def get_latest_integrity_check(
             return ok(data=None, message="尚未执行过完整性检查")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取检查结果失败: {str(e)}") from e
+
+
+@router.post("/data-integrity/audit")
+async def audit_data_integrity(
+    window_trading_days: int = Query(20, ge=1, le=60, description="审计窗口（交易日数）"),
+    user: dict = Depends(get_current_user),
+):
+    """审计最近 N 个交易日的逐日覆盖度（只读，不写库）。
+
+    返回每个交易日的应有/实有股票数、缺失数量、低质量数量，以及估值/资金流缺口，
+    供前端在点击「修复缺口」前展示预览。
+    """
+    try:
+        from app.services.data_integrity_service import get_data_integrity_service
+        service = await get_data_integrity_service()
+        result = await service.audit_coverage(
+            window_trading_days=window_trading_days, include_codes=False
+        )
+        return ok(
+            data=result,
+            message=(
+                f"审计完成：{result.get('window_start')} ~ {result.get('window_end')}，"
+                f"{'存在缺口' if result.get('has_gaps') else '数据完整'}"
+            ),
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"数据缺口审计失败: {str(e)}") from e
+
+
+@router.post("/data-integrity/repair")
+async def trigger_data_repair(
+    window_trading_days: int = Query(20, ge=1, le=60, description="修复窗口（交易日数）"),
+    user: dict = Depends(get_current_user),
+):
+    """启动缺口修复（后台执行，立即返回 run_id）。只补缺失/低质量数据。"""
+    try:
+        from app.services.data_integrity_service import get_data_integrity_service
+        service = await get_data_integrity_service()
+        result = await service.start_repair(window_trading_days=window_trading_days)
+        return ok(data=result, message=result.get("message", "修复任务已提交"))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"启动缺口修复失败: {str(e)}") from e
+
+
+@router.get("/data-integrity/repair/status")
+async def get_data_repair_status(
+    user: dict = Depends(get_current_user),
+):
+    """获取最近一次缺口修复任务状态与进度（供前端轮询）。"""
+    try:
+        from app.services.data_integrity_service import get_data_integrity_service
+        service = await get_data_integrity_service()
+        result = await service.get_latest_repair_run()
+        return ok(data=result, message="获取修复状态成功" if result else "尚未执行过缺口修复")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取修复状态失败: {str(e)}") from e

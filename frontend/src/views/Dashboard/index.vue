@@ -41,7 +41,7 @@
     <!-- 顶部核心监控：数据健康 + 模拟账户 + 自选股行情 -->
     <el-row :gutter="24" class="monitor-top">
       <el-col :xs="24" :md="8">
-        <DataHealthCard @open-sync="openSyncConfirm" @open-full-sync="openFullSyncConfirm" />
+        <DataHealthCard @open-sync="openSyncConfirm" />
       </el-col>
 
       <el-col :xs="24" :md="8">
@@ -157,64 +157,86 @@
       </el-col>
     </el-row>
 
-    <!-- 全量同步对话框 -->
+    <!-- 数据缺口修复对话框 -->
     <el-dialog
-      v-model="syncConfirmVisible"
-      :title="forceFullSync ? '全量同步全部数据' : '补齐最新数据缺口'"
-      width="520px"
+      v-model="repairVisible"
+      title="修复数据缺口"
+      width="560px"
       :close-on-click-modal="false"
     >
-      <div v-if="!syncRunning" class="confirm-body">
-        <el-alert
-          :title="forceFullSync ? '全量同步：忽略新鲜度判断，重新拉取所有数据类型，预计耗时 10~30 分钟' : '增量同步：只补齐已过期的数据，通常数秒到数分钟'"
-          :type="forceFullSync ? 'warning' : 'info'"
-          :closable="false"
-          show-icon
-        />
-        <div class="confirm-tip" style="margin-top: 16px;">
-          <div class="tip-line"><el-icon><List /></el-icon><span>同步顺序：股票基础信息 → 历史K线 → 财务数据 → 新闻数据</span></div>
-          <div class="tip-line" v-if="forceFullSync"><el-icon><Timer /></el-icon><span>预估耗时：10 ~ 30 分钟</span></div>
-          <div class="tip-line" v-else><el-icon><Timer /></el-icon><span>预估耗时：数秒到数分钟，只处理过期项</span></div>
-          <div class="tip-line"><el-icon><Refresh /></el-icon><span>同步完成后会自动刷新数据新鲜度</span></div>
-          <div class="tip-line"><el-icon><Warning /></el-icon><span>历史K线同步耗时较长，请耐心等待</span></div>
-        </div>
+      <div v-if="repairAuditLoading" class="confirm-body">
+        <div class="tip-line"><el-icon><Loading /></el-icon><span>正在审计最近 {{ repairWindowDays }} 个交易日的覆盖度…</span></div>
+      </div>
+      <div v-else-if="!repairRunning" class="confirm-body">
+        <template v-if="repairAudit">
+          <el-alert
+            v-if="repairAudit.has_gaps"
+            type="warning"
+            :closable="false"
+            show-icon
+            :title="`发现缺口：行情缺失 ${repairAudit.totals?.quotes_missing || 0} 只、低质量 ${repairAudit.totals?.quotes_low_quality || 0} 只，整日缺口 ${repairAudit.totals?.quotes_gap_dates || 0} 天`"
+          />
+          <el-alert
+            v-else
+            type="success"
+            :closable="false"
+            show-icon
+            title="最近交易日数据完整，无需修复"
+          />
+          <div class="confirm-tip" style="margin-top: 16px;">
+            <div class="tip-line">
+              <el-icon><List /></el-icon>
+              <span>窗口 {{ repairAudit.window_start }} ~ {{ repairAudit.window_end }}（{{ repairAudit.window_trading_days }} 交易日），在市 {{ repairAudit.universe_count }} 只</span>
+            </div>
+            <div v-if="repairAudit.has_gaps" class="tip-line">
+              <el-icon><Timer /></el-icon>
+              <span>预计耗时 {{ humanDuration(repairAudit.estimated_seconds) }}（仅补缺口，不重拉全量）</span>
+            </div>
+            <div v-if="repairAudit.totals?.quotes_gap_dates" class="tip-line">
+              <el-icon><Warning /></el-icon>
+              <span>整日缺口：{{ gapDateText(repairAudit.quotes?.gap_dates) }}</span>
+            </div>
+            <div v-if="repairAudit.totals?.quotes_scattered_dates" class="tip-line">
+              <el-icon><Warning /></el-icon>
+              <span>散点缺口：{{ repairAudit.totals.quotes_scattered_dates }} 个交易日存在个别股票缺失/低质量</span>
+            </div>
+            <div v-if="repairAudit.totals?.daily_basic_gap_dates || repairAudit.totals?.moneyflow_gap_dates" class="tip-line">
+              <el-icon><Warning /></el-icon>
+              <span>估值缺口 {{ repairAudit.totals?.daily_basic_gap_dates || 0 }} 天，资金流缺口 {{ repairAudit.totals?.moneyflow_gap_dates || 0 }} 天</span>
+            </div>
+            <div class="tip-line"><el-icon><Refresh /></el-icon><span>修复按缺失项补数，已有记录不会重复写入</span></div>
+          </div>
+        </template>
+        <el-alert v-else type="info" :closable="false" title="未能获取审计结果，请关闭后重试" />
       </div>
       <div v-else class="progress-body">
         <div class="progress-title">
           <el-icon style="color: var(--el-color-primary); margin-right:8px;"><Loading /></el-icon>
-          {{ syncPhaseLabel }}
+          {{ repairMessage || '正在修复数据缺口…' }}
         </div>
         <el-progress
-          :percentage="syncProgress"
-          :status="syncError ? 'exception' : undefined"
+          :percentage="repairProgress"
+          :status="repairFailed ? 'exception' : undefined"
           :stroke-width="16"
           :text-inside="false"
         />
-        <div class="sync-phases">
-          <div v-for="(p, i) in syncPhases" :key="i" :class="['sync-phase-item', syncPhase === p.id ? 'active' : '', syncPhase > p.id ? 'done' : '', skippedPhases.has(p.id) ? 'skipped' : '']">
-            <span class="sync-phase-icon">
-              <el-icon v-if="skippedPhases.has(p.id)"><DArrowRight /></el-icon>
-              <el-icon v-else-if="syncPhase > p.id" class="phase-done"><CircleCheckFilled /></el-icon>
-              <el-icon v-else-if="syncPhase === p.id" class="phase-running"><Loading /></el-icon>
-              <el-icon v-else><Remove /></el-icon>
-            </span>
-            <span class="sync-phase-name">{{ p.label }}</span>
-          </div>
-        </div>
         <div class="progress-meta">
-          <div>状态：<b>{{ syncStatusMessage }}</b></div>
-          <div v-if="syncPhase === 1 && syncTotal > 0">
-            基础信息：{{ syncDone }} / {{ syncTotal }}（新增 {{ syncInserted }}，更新 {{ syncUpdated }}）
-          </div>
+          <div>已写入：行情 {{ repairWritten.quotes }} 条 / 估值 {{ repairWritten.daily_basic }} 条 / 资金流 {{ repairWritten.moneyflow }} 条</div>
         </div>
       </div>
       <template #footer>
-        <el-button v-if="!syncRunning" @click="syncConfirmVisible = false">取消</el-button>
-        <el-button v-if="!syncRunning" type="primary" :loading="syncStarting" @click="doSync">
-          {{ forceFullSync ? '开始全量同步' : '开始补齐' }}
+        <el-button v-if="!repairRunning" @click="repairVisible = false">取消</el-button>
+        <el-button
+          v-if="!repairRunning"
+          type="primary"
+          :loading="repairStarting"
+          :disabled="!repairAudit?.has_gaps"
+          @click="doRepair"
+        >
+          开始修复
         </el-button>
-        <el-button v-if="syncRunning" :disabled="!syncFinished" @click="syncConfirmVisible = false">
-          {{ syncFinished ? '关闭' : '同步中...' }}
+        <el-button v-if="repairRunning" :disabled="!repairFinished" @click="repairVisible = false">
+          {{ repairFinished ? '关闭' : '修复中...' }}
         </el-button>
       </template>
     </el-dialog>
@@ -228,14 +250,11 @@ import { ref, reactive, computed, onMounted, onBeforeUnmount, onActivated } from
 import { useRouter } from 'vue-router'
 import {
   ArrowRight,
-  CircleCheckFilled,
-  DArrowRight,
   InfoFilled,
   List,
   Loading,
   Odometer,
   Refresh,
-  Remove,
   Timer,
   Warning,
 } from '@element-plus/icons-vue'
@@ -244,7 +263,6 @@ import DataHealthCard from '@/components/Dashboard/DataHealthCard.vue'
 import MonitorSummary from '@/components/Dashboard/MonitorSummary.vue'
 import { favoritesApi } from '@/api/favorites'
 import { paperApi, type PaperAccountSummary } from '@/api/paper'
-import * as syncApi from '@/api/sync'
 import * as schedulerApi from '@/api/scheduler'
 import { monitorApi } from '@/api/monitor'
 import { screeningApi } from '@/api/screening'
@@ -352,7 +370,7 @@ const loadTodos = async () => {
   todoLoading.value = false
 }
 
-// ---------- 数据新鲜度（供全量同步对话框判断跳过阶段） ----------
+// ---------- 数据新鲜度（供待办提示判断） ----------
 const freshness = reactive({
   overall_is_fresh: false,
   overall_stale_days: 0,
@@ -366,410 +384,136 @@ const freshness = reactive({
   expected_total: 0,
 })
 
-// ---------- 全量同步对话框 ----------
-const syncConfirmVisible = ref(false)
-const syncStarting = ref(false)
-const syncRunning = ref(false)
-const syncFinished = ref(false)
-const syncError = ref(false)
-const syncProgress = ref(0)
-const syncStatusMessage = ref('准备同步')
-const syncTotal = ref(0)
-const syncDone = ref(0)
-const syncInserted = ref(0)
-const syncUpdated = ref(0)
-const syncErrors = ref(0)
+// ---------- 数据缺口修复（审计 → 只补缺口） ----------
+const repairWindowDays = 20
+const repairVisible = ref(false)
+const repairAuditLoading = ref(false)
+const repairAudit = ref<any | null>(null)
+const repairStarting = ref(false)
+const repairRunning = ref(false)
+const repairFinished = ref(false)
+const repairFailed = ref(false)
+const repairProgress = ref(0)
+const repairMessage = ref('')
+const repairWritten = reactive({ quotes: 0, daily_basic: 0, moneyflow: 0 })
+let repairPollTimer: ReturnType<typeof setInterval> | null = null
 
-// 同步阶段：1=基础信息 2=历史K线 3=财务数据 4=新闻数据 5=主力资金
-const syncPhase = ref(0)
-// 触发失败标记（供轮询检测）
-const triggerFailed = ref(false)
-// 阶段1触发后等待同步启动的轮询计数（用于检测触发失败）
-const phase1WaitCount = ref(0)
-// 记录哪些阶段需要跳过（数据已最新）
-const skippedPhases = ref<Set<number>>(new Set())
-const syncPhases = [
-  { id: 1, label: '股票基础信息', job: 'basics_sync_service', freshnessKey: 'basics', range: [0, 15] },
-  { id: 2, label: '历史K线数据', job: 'tushare_historical_sync', freshnessKey: 'quotes', range: [15, 62] },
-  { id: 3, label: '财务数据', job: 'tushare_financial_sync', freshnessKey: 'financial', range: [62, 80] },
-  { id: 4, label: '新闻数据', job: 'news_sync', freshnessKey: 'news', range: [80, 90] },
-  { id: 5, label: '主力资金', job: 'tushare_daily_moneyflow_sync', freshnessKey: 'moneyflow', range: [90, 100] },
-]
-const syncPhaseLabel = computed(() => {
-  const p = syncPhases.find(p => p.id === syncPhase.value)
-  return p ? `正在同步：${p.label}...` : '正在同步数据...'
-})
-
-// 检查某个数据类型是否已最新（根据 freshness.items）
-const isPhaseFresh = (phaseId: number): boolean => {
-  const phase = syncPhases.find(p => p.id === phaseId)
-  if (!phase) return false
-  const item = freshness.items?.find((i: any) => i.key === phase.freshnessKey)
-  return item?.is_fresh === true
-}
-
-const forceFullSync = ref(false)
-const openSyncConfirm = () => {
-  forceFullSync.value = false
-  resetSyncDialog()
-}
-const openFullSyncConfirm = () => {
-  forceFullSync.value = true
-  resetSyncDialog()
-}
-const resetSyncDialog = () => {
-  syncRunning.value = false
-  syncFinished.value = false
-  syncError.value = false
-  syncProgress.value = 0
-  syncPhase.value = 0
-  triggerFailed.value = false
-  phase1WaitCount.value = 0
-  skippedPhases.value = new Set()
-  syncStatusMessage.value = '准备同步'
-  syncConfirmVisible.value = true
-}
-
-const closeSyncPoll = ref<any>(null)
-const closeSyncTimer = ref<any>(null)
-const stopSyncPoll = () => {
-  if (closeSyncPoll.value) {
-    clearInterval(closeSyncPoll.value)
-    closeSyncPoll.value = null
-  }
-}
-const stopSyncTimer = () => {
-  if (closeSyncTimer.value) {
-    clearTimeout(closeSyncTimer.value)
-    closeSyncTimer.value = null
+const stopRepairPoll = () => {
+  if (repairPollTimer) {
+    clearInterval(repairPollTimer)
+    repairPollTimer = null
   }
 }
 
-// 检查调度任务是否正在运行
-const checkJobRunning = async (jobId: string): Promise<boolean> => {
+const resetRepairState = () => {
+  stopRepairPoll()
+  repairAudit.value = null
+  repairAuditLoading.value = false
+  repairStarting.value = false
+  repairRunning.value = false
+  repairFinished.value = false
+  repairFailed.value = false
+  repairProgress.value = 0
+  repairMessage.value = ''
+  repairWritten.quotes = 0
+  repairWritten.daily_basic = 0
+  repairWritten.moneyflow = 0
+}
+
+const unwrap = (res: any) => (res as any)?.data?.data || (res as any)?.data || {}
+
+const applyRepairRun = (run: any) => {
+  if (!run) return
+  repairProgress.value = Number(run.progress || 0)
+  repairMessage.value = run.message || ''
+  const w = run.written || {}
+  repairWritten.quotes = Number(w.quotes || 0)
+  repairWritten.daily_basic = Number(w.daily_basic || 0)
+  repairWritten.moneyflow = Number(w.moneyflow || 0)
+  if (run.status && run.status !== 'running') {
+    repairFinished.value = true
+    repairFailed.value = run.status === 'failed'
+    stopRepairPoll()
+    if (run.status === 'completed') ElMessage.success('数据缺口已修复')
+    else if (run.status === 'partial') ElMessage.warning('修复完成，但仍有缺口未能自愈（可能为停牌/退市数据）')
+    else if (run.status === 'failed') ElMessage.error(run.message || '修复失败')
+  }
+}
+
+const pollRepairStatus = async () => {
   try {
-    const res = await schedulerApi.getJobExecutions({ job_id: jobId, status: 'running', limit: 1 })
-    const items = (res as any)?.data?.data?.items || (res as any)?.data?.items || []
-    return items.length > 0
-  } catch {
-    return false
+    const res = await schedulerApi.getDataRepairStatus()
+    const run = unwrap(res)
+    if (run?.run_id) applyRepairRun(run)
+  } catch (e) {
+    console.warn('获取修复进度失败', e)
   }
 }
 
-// 检查调度任务最近一次是否已完成（在给定时间之后）
-// 后端执行记录的 status 为 'success'/'failed'/'running'/'missed'（非 'completed'）
-// 时间字段为 updated_at（完成时间）或 timestamp（创建时间），无 end_time/created_at
-const checkJobCompleted = async (jobId: string, sinceTs: number): Promise<{ done: boolean; failed: boolean }> => {
+const startRepairPoll = () => {
+  stopRepairPoll()
+  repairPollTimer = setInterval(pollRepairStatus, 2000)
+}
+
+const openSyncConfirm = async () => {
+  resetRepairState()
+  repairVisible.value = true
+  repairAuditLoading.value = true
   try {
-    // 查询最近的执行记录（不限状态），客户端筛选已完成且时间匹配的记录
-    const res = await schedulerApi.getJobExecutions({ job_id: jobId, limit: 5 })
-    const items = (res as any)?.data?.data?.items || (res as any)?.data?.items || []
-    // 5秒容差，避免客户端与服务端时钟差异导致漏判
-    const threshold = sinceTs - 5000
-    for (const item of items) {
-      if (item.status === 'success' || item.status === 'failed') {
-        const timeStr = item.updated_at || item.timestamp
-        if (timeStr) {
-          const ts = toTimestamp(timeStr)
-          if (ts !== null && ts >= threshold) {
-            return { done: true, failed: item.status === 'failed' }
-          }
-        }
-      }
-    }
-    return { done: false, failed: false }
-  } catch {
-    return { done: false, failed: false }
-  }
-}
-
-// 跳转到下一个需要同步的阶段，跳过已最新的阶段
-const advanceToNextPhase = async (_syncStartTime: number) => {
-  // 先重新加载新鲜度（静默模式，避免 UI 闪烁）
-  await loadFreshness(true)
-
-  // 🔥 修复：验证刚完成的阶段是否真正生效。
-  // 之前仅凭任务状态记 success 就继续推进，若该阶段被时段门控跳过或数据源返回 0 条，
-  // 任务同样记 success（耗时 0.00s），最终误报"全部数据同步完成"。
-  // 这里在阶段结束后重新读取新鲜度，若该阶段数据仍未变新鲜，如实报告失败而非误报成功。
-  const finishedPhase = syncPhase.value
-  if (finishedPhase > 0 && finishedPhase <= syncPhases.length && !isPhaseFresh(finishedPhase)) {
-    syncError.value = true
-    syncFinished.value = true
-    const failLabel = syncPhases.find(p => p.id === finishedPhase)?.label || ''
-    syncStatusMessage.value = `${failLabel}同步任务已结束但数据仍未更新（数据源可能异常或返回 0 条），请在「数据同步/任务中心」查看详情后重试`
-    ElMessage.error(syncStatusMessage.value)
-    return false
-  }
-
-  for (let nextPhase = syncPhase.value + 1; nextPhase <= syncPhases.length; nextPhase++) {
-    if (!forceFullSync.value && isPhaseFresh(nextPhase)) {
-      // 该数据类型已最新，跳过
-      skippedPhases.value.add(nextPhase)
-      const nextRange = syncPhases.find(p => p.id === nextPhase + 1)?.range?.[0] ?? 100
-      syncProgress.value = nextRange
-      continue
-    }
-    // 找到需要同步的阶段
-    syncPhase.value = nextPhase
-    const phase = syncPhases.find(p => p.id === nextPhase)
-    if (!phase) break
-    syncProgress.value = phase.range[0]
-    syncStatusMessage.value = `开始同步${phase.label}...`
-
-    if (nextPhase === 1) {
-      // 阶段1：触发基础信息同步（非阻塞，立即开始轮询进度）
-      // 后端 run_full_sync 会立即将状态持久化为 'running'，前端轮询 getSyncStatus 即可获取进度
-      syncApi.runStockBasicsSync({ force: true }).catch(e => {
-        console.warn('触发基础信息同步失败', e)
-        triggerFailed.value = true
-      })
-    } else {
-      // 阶段2-5：触发调度任务（triggerJob 是非阻塞的，立即返回）
-      try {
-        await schedulerApi.triggerJob(phase.job, true)
-      } catch (e) {
-        console.warn(`触发${phase.label}失败`, e)
-        triggerFailed.value = true
-      }
-    }
-    return true
-  }
-
-  // 所有阶段都已完成或跳过
-  return false
-}
-
-const doSync = async () => {
-  syncStarting.value = true
-  skippedPhases.value = new Set()
-  triggerFailed.value = false
-  phase1WaitCount.value = 0
-  try {
-    // 先加载最新新鲜度，确定哪些阶段需要跳过
-    await loadFreshness()
-
-    // 从阶段1开始，如果阶段1已最新则跳到下一个
-    syncRunning.value = true
-    syncTotal.value = 0
-    syncDone.value = 0
-    syncInserted.value = 0
-    syncUpdated.value = 0
-    syncErrors.value = 0
-
-    // 找到第一个需要同步的阶段
-    let firstPhase = 0
-    for (let i = 1; i <= syncPhases.length; i++) {
-      if (!isPhaseFresh(i)) {
-        firstPhase = i
-        break
-      } else {
-        skippedPhases.value.add(i)
-      }
-    }
-
-    if (firstPhase === 0) {
-      // 所有数据都最新
-      syncProgress.value = 100
-      syncStatusMessage.value = '所有数据均为最新，无需同步'
-      syncFinished.value = true
-      ElMessage.success('所有数据均为最新')
-      syncStarting.value = false
-      closeSyncTimer.value = setTimeout(() => {
-        syncConfirmVisible.value = false
-      }, 2000)
+    // 已有修复任务在跑时直接进入进度视图，避免重复触发
+    const statusRes = await schedulerApi.getDataRepairStatus()
+    const run = unwrap(statusRes)
+    if (run && run.status === 'running') {
+      repairRunning.value = true
+      repairFinished.value = false
+      applyRepairRun(run)
+      startRepairPoll()
       return
     }
-
-    // 触发第一个阶段
-    syncPhase.value = firstPhase
-    const firstPhaseInfo = syncPhases.find(p => p.id === firstPhase)!
-    syncProgress.value = firstPhaseInfo.range[0]
-    syncStatusMessage.value = `开始同步${firstPhaseInfo.label}...`
-
-    // 记录同步开始时间（在触发之前，用于后续判断同步是否已启动）
-    const syncStartTime = Date.now()
-
-    if (firstPhase === 1) {
-      // 阶段1：非阻塞触发，立即开始轮询进度（避免 HTTP 请求阻塞导致进度条卡住）
-      syncApi.runStockBasicsSync({ force: true }).catch(e => {
-        console.warn('触发基础信息同步失败', e)
-        triggerFailed.value = true
-      })
-    } else {
-      // 阶段2-5：triggerJob 是非阻塞的，立即返回
-      try {
-        await schedulerApi.triggerJob(firstPhaseInfo.job, true)
-      } catch (e) {
-        console.warn(`触发${firstPhaseInfo.label}失败`, e)
-        triggerFailed.value = true
-      }
-    }
-
-    let pollCount = 0
-    const MAX_POLL = 720
-    stopSyncPoll()
-    closeSyncPoll.value = setInterval(async () => {
-      pollCount++
-
-      // 检测触发失败
-      if (triggerFailed.value) {
-        stopSyncPoll()
-        syncError.value = true
-        syncFinished.value = true
-        const failLabel = syncPhases.find(p => p.id === syncPhase.value)?.label || ''
-        syncStatusMessage.value = `触发${failLabel}同步失败，请检查权限或稍后重试`
-        ElMessage.error(syncStatusMessage.value)
-        return
-      }
-
-      if (pollCount >= MAX_POLL) {
-        stopSyncPoll()
-        syncStatusMessage.value = '同步超时，任务可能仍在后台执行，请在任务中心查看'
-        syncProgress.value = 95
-        syncFinished.value = true
-        await loadFreshness(true)
-        return
-      }
-      try {
-        // 阶段1：轮询基础信息同步状态
-        if (syncPhase.value === 1) {
-          const res = await syncApi.getSyncStatus()
-          const status = (res as any)?.data?.data || (res as any)?.data || {}
-          syncTotal.value = status.total || 0
-          syncInserted.value = status.inserted || 0
-          syncUpdated.value = status.updated || 0
-          syncErrors.value = status.errors || 0
-          syncDone.value = (status.inserted || 0) + (status.updated || 0)
-
-          // 判断新同步是否已启动（started_at 在 syncStartTime 之后，含10秒容差）
-          const startedAtTs = status.started_at ? (toTimestamp(status.started_at) ?? 0) : 0
-          const syncStarted = startedAtTs >= syncStartTime - 10000
-
-          if (status.status === 'running') {
-            phase1WaitCount.value = 0
-            syncStatusMessage.value = '同步股票基础信息中...'
-            if (syncTotal.value > 0) {
-              syncProgress.value = Math.min(15, Math.round((syncDone.value / syncTotal.value) * 15))
-            } else {
-              syncProgress.value = Math.min(15, syncProgress.value + 0.5)
-            }
-          } else if ((status.status === 'success' || status.status === 'success_with_errors' || status.status === 'failed') && syncStarted) {
-            // 新同步已完成（通过 started_at 确认是新的一次同步，而非旧状态）
-            phase1WaitCount.value = 0
-            const advanced = await advanceToNextPhase(syncStartTime)
-            if (!advanced) {
-              stopSyncPoll()
-              // 阶段完成但数据未变新鲜（advanceToNextPhase 已置 syncError 并提示），不再误报成功
-              if (syncError.value) {
-                syncFinished.value = true
-                await loadFreshness(true)
-                closeSyncTimer.value = setTimeout(() => {
-                  syncConfirmVisible.value = false
-                }, 2500)
-                return
-              }
-              syncProgress.value = 100
-              syncStatusMessage.value = '数据同步完成'
-              syncFinished.value = true
-              ElMessage.success('数据同步完成')
-              await loadFreshness(true)
-              closeSyncTimer.value = setTimeout(() => {
-                syncConfirmVisible.value = false
-              }, 2500)
-            }
-          } else {
-            // 同步尚未启动（可能是旧的 success 状态或 idle），等待后端启动
-            phase1WaitCount.value++
-            syncProgress.value = Math.min(15, syncProgress.value + 0.3)
-            syncStatusMessage.value = '正在启动基础信息同步...'
-            // 连续6次（30秒）仍未启动，判定触发失败
-            if (phase1WaitCount.value > 6) {
-              stopSyncPoll()
-              syncError.value = true
-              syncFinished.value = true
-              syncStatusMessage.value = '基础信息同步启动超时，请稍后重试'
-              ElMessage.error('基础信息同步启动超时')
-            }
-          }
-          return
-        }
-
-        // 阶段2-5：轮询调度任务状态
-        if (syncPhase.value >= 2 && syncPhase.value <= syncPhases.length) {
-          const phase = syncPhases.find(p => p.id === syncPhase.value)!
-          const running = await checkJobRunning(phase.job)
-          if (running) {
-            syncStatusMessage.value = `同步${phase.label}中...`
-            syncProgress.value = Math.min(phase.range[1], syncProgress.value + 0.3)
-          } else {
-            const result = await checkJobCompleted(phase.job, syncStartTime)
-            if (result.done) {
-              // 任务执行失败（failed）：如实报告，不再误当成功推进
-              if (result.failed) {
-                stopSyncPoll()
-                syncError.value = true
-                syncFinished.value = true
-                syncStatusMessage.value = `${phase.label}同步任务执行失败，请在任务中心查看详情`
-                ElMessage.error(syncStatusMessage.value)
-                await loadFreshness(true)
-                return
-              }
-              // 当前阶段完成，尝试跳到下一个
-              const advanced = await advanceToNextPhase(syncStartTime)
-              if (!advanced) {
-                stopSyncPoll()
-                // 阶段完成但数据未变新鲜（advanceToNextPhase 已置 syncError 并提示），
-                // 不再误报"全部数据同步完成"
-                if (syncError.value) {
-                  syncFinished.value = true
-                  await loadFreshness(true)
-                  closeSyncTimer.value = setTimeout(() => {
-                    syncConfirmVisible.value = false
-                  }, 2500)
-                  return
-                }
-                syncProgress.value = 100
-                syncStatusMessage.value = '全部数据同步完成'
-                syncFinished.value = true
-                ElMessage.success('全部数据同步完成')
-                await loadFreshness(true)
-                closeSyncTimer.value = setTimeout(() => {
-                  syncConfirmVisible.value = false
-                }, 2500)
-              }
-            } else {
-              syncProgress.value = Math.min(phase.range[1], syncProgress.value + 0.2)
-              syncStatusMessage.value = `等待${phase.label}同步任务调度...`
-            }
-          }
-          return
-        }
-      } catch (_e) {
-        // 轮询失败不终止
-      }
-    }, 5000)
-
-    syncStarting.value = false
-    syncConfirmVisible.value = true
+    const auditRes = await schedulerApi.auditDataGaps(repairWindowDays)
+    repairAudit.value = unwrap(auditRes)
   } catch (e: any) {
-    syncError.value = true
-    syncFinished.value = true
-    syncStatusMessage.value = `启动失败：${e?.message || '未知错误'}`
-    ElMessage.error('启动同步失败：' + (e?.message || '未知错误'))
+    ElMessage.error(`数据审计失败：${e?.message || '未知错误'}`)
+    repairAudit.value = null
   } finally {
-    syncStarting.value = false
+    repairAuditLoading.value = false
   }
 }
 
-const loadFreshness = async (_silent = false) => {
+const doRepair = async () => {
+  repairStarting.value = true
   try {
-    const res = await screeningApi.checkDataFreshness()
-    const data = (res as any)?.data?.data || (res as any)?.data || {}
-    Object.assign(freshness, data)
-  } catch (e) {
-    console.warn('加载数据新鲜度失败', e)
+    const res = await schedulerApi.startDataRepair(repairWindowDays)
+    const data = unwrap(res)
+    if (data.status === 'busy') {
+      ElMessage.warning('已有修复任务正在执行')
+      repairRunning.value = true
+      startRepairPoll()
+      return
+    }
+    repairRunning.value = true
+    repairFinished.value = false
+    repairFailed.value = false
+    repairProgress.value = 0
+    repairMessage.value = '任务已提交，正在审计…'
+    startRepairPoll()
+  } catch (e: any) {
+    ElMessage.error(`启动修复失败：${e?.message || '未知错误'}`)
+  } finally {
+    repairStarting.value = false
   }
+}
+
+const humanDuration = (seconds: number) => {
+  const s = Number(seconds || 0)
+  if (s <= 0) return '数秒'
+  if (s < 60) return `约 ${s} 秒`
+  return `约 ${Math.ceil(s / 60)} 分钟`
+}
+
+const gapDateText = (rows: any[]) => {
+  if (!rows || !rows.length) return '无'
+  return rows.map((r: any) => `${r.trade_date}（缺 ${r.missing_count}）`).join('、')
 }
 
 // ---------- 通用 ----------
@@ -808,8 +552,7 @@ const activeCurrencies = computed(() => {
 })
 
 onBeforeUnmount(() => {
-  stopSyncPoll()
-  stopSyncTimer()
+  stopRepairPoll()
   favSseUnsubscribe?.()
 })
 

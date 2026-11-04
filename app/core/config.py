@@ -304,12 +304,13 @@ class Settings(BaseSettings):
     )
 
     # 数据健康卡片「近段完整性」配置（逐日覆盖度窗口）
-    # 窗口取近 N 个已完成交易日，判定单日为「完整」的阈值 = 窗口内条数中位数 × MIN_RATIO
+    # 窗口默认 20 个交易日，与「修复数据缺口」的审计窗口完全对齐，避免卡片显示的天数
+    # 超出补数范围（出现"卡片说有缺口、点修复却说无缺口"）。
     DATA_COMPLETENESS_WINDOW_TRADING_DAYS: int = Field(
-        default=30,
+        default=20,
         ge=5,
         le=120,
-        description="完整性统计窗口（交易日数，默认近30个交易日）",
+        description="完整性统计窗口（交易日数，默认近20个交易日，与缺口修复窗口一致）",
     )
     DATA_COMPLETENESS_MIN_RATIO: float = Field(
         default=0.95,

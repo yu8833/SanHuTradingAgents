@@ -238,3 +238,28 @@ export function deleteExecution(executionId: string) {
 export function deleteAllExecutions() {
   return ApiClient.delete<{ deleted: number; kept_running: number }>('/api/scheduler/executions')
 }
+
+/**
+ * 数据缺口审计（只读）
+ */
+export function auditDataGaps(windowTradingDays: number = 20) {
+  return ApiClient.post<any>('/api/scheduler/data-integrity/audit', null, {
+    params: { window_trading_days: windowTradingDays },
+  })
+}
+
+/**
+ * 启动缺口修复（后台执行，立即返回 run_id）
+ */
+export function startDataRepair(windowTradingDays: number = 20) {
+  return ApiClient.post<any>('/api/scheduler/data-integrity/repair', null, {
+    params: { window_trading_days: windowTradingDays },
+  })
+}
+
+/**
+ * 获取最近一次缺口修复任务状态
+ */
+export function getDataRepairStatus() {
+  return ApiClient.get<any>('/api/scheduler/data-integrity/repair/status')
+}

@@ -199,6 +199,72 @@ class TushareAdapter(DataSourceAdapter):
         return None
 
 
+    def _pro_api(self):
+        """初始化并返回 tushare pro_api；token 缺失或初始化失败返回 None。"""
+        if not self.is_available():
+            return None
+        try:
+            import tushare as ts
+            token = getattr(self._provider, 'token', None)
+            if not token:
+                import os
+                token = os.getenv('TUSHARE_TOKEN', '').strip().strip('"').strip("'")
+            if not token:
+                return None
+            ts.set_token(token)
+            return ts.pro_api()
+        except Exception as e:
+            logger.error(f"Tushare: init pro_api failed: {e}")
+            return None
+
+    def get_daily_by_date(self, trade_date: str) -> pd.DataFrame | None:
+        """获取全市场单日未复权日线（pro.daily 按交易日批量）。
+
+        Args:
+            trade_date: YYYYMMDD（与 Tushare 原生格式一致）
+
+        返回保留原始列（ts_code/trade_date/open/high/low/close/pre_close/pct_chg/vol/amount），
+        vol 单位为手、amount 单位为千元，由调用方按项目统一口径换算（volume×100、amount×1000）。
+        """
+        pro = self._pro_api()
+        if pro is None:
+            return None
+        try:
+            fields = "ts_code,trade_date,open,high,low,close,pre_close,pct_chg,vol,amount"
+            df = pro.daily(trade_date=trade_date, fields=fields)
+            if df is None:
+                return None
+            if df.empty:
+                logger.info(f"Tushare: daily empty for {trade_date}")
+                return df  # 返回空 DataFrame（可区分「接口成功但无数据」与「调用失败」）
+            logger.info(f"Tushare: Successfully fetched daily for {trade_date}, {len(df)} records")
+            return df
+        except Exception as e:
+            logger.error(f"Tushare: Failed to fetch daily for {trade_date}: {e}")
+            return None
+
+    def get_daily_by_stock(self, ts_code: str, start_date: str, end_date: str) -> pd.DataFrame | None:
+        """获取单只股票区间未复权日线（pro.daily 按股票）。
+
+        Args:
+            ts_code: 带交易所后缀，如 600519.SH
+            start_date / end_date: YYYYMMDD
+        """
+        pro = self._pro_api()
+        if pro is None:
+            return None
+        try:
+            fields = "ts_code,trade_date,open,high,low,close,pre_close,pct_chg,vol,amount"
+            df = pro.daily(ts_code=ts_code, start_date=start_date, end_date=end_date, fields=fields)
+            if df is None:
+                return None
+            if df.empty:
+                return df  # 接口成功但该股票区间无数据（停牌/退市等）
+            return df
+        except Exception as e:
+            logger.error(f"Tushare: Failed to fetch daily for {ts_code} {start_date}~{end_date}: {e}")
+            return None
+
     def get_dividend_data(self, ts_code: str) -> pd.DataFrame | None:
         """获取个股分红送配数据（Tushare pro.dividend）。
 

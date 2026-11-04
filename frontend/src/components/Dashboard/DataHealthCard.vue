@@ -8,20 +8,11 @@
         </div>
         <div class="card-actions">
           <el-button
-            v-if="!overallHealthy"
             type="warning"
             size="small"
             @click="$emit('open-sync')"
           >
-            <el-icon><Refresh /></el-icon> 补最新缺口
-          </el-button>
-          <el-button
-            v-if="!overallHealthy"
-            type="text"
-            size="small"
-            @click="$emit('open-full-sync')"
-          >
-            全量同步
+            <el-icon><Refresh /></el-icon> 修复数据缺口
           </el-button>
           <el-button type="text" size="small" @click="goToSyncPage">
             管理 <el-icon><ArrowRight /></el-icon>
@@ -147,7 +138,7 @@
                 :key="pt.date"
                 class="cb-cell"
                 :class="pt.complete ? 'ok' : 'bad'"
-                :title="`${pt.date} · ${pt.count} 条`"
+                :title="`${pt.date} · 覆盖 ${pt.count}/${pt.expected || '—'} 只${pt.coverage_pct != null ? `（${pt.coverage_pct}%）` : ''}`"
               ></span>
             </div>
             <div v-if="ds.missing_days.length > 0" class="cb-missing">
@@ -155,7 +146,7 @@
                 v-for="m in ds.missing_days.slice(0, 8)"
                 :key="m.date"
                 class="cb-chip"
-              >{{ m.date.slice(5) }}({{ m.count }})</span>
+              >{{ m.date.slice(5) }}(覆盖{{ m.coverage_pct != null ? m.coverage_pct + '%' : m.count }})</span>
               <span v-if="ds.missing_days.length > 8" class="cb-more">+{{ ds.missing_days.length - 8 }}</span>
             </div>
             <div v-else class="cb-none">无缺口</div>
@@ -191,7 +182,7 @@ import { subscribeQuotesUpdate } from '@/utils/quotesSSE'
 import { formatDateTime, toTimestamp } from '@/utils/datetime'
 
 defineOptions({ name: 'DataHealthCard' })
-defineEmits<{ (e: 'open-sync'): void; (e: 'open-full-sync'): void }>()
+defineEmits<{ (e: 'open-sync'): void }>()
 
 const router = useRouter()
 
