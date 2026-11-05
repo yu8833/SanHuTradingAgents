@@ -4,12 +4,12 @@
 
 from datetime import datetime
 from typing import Any
-from app.utils.timezone import now_tz, to_display_iso
 
 from bson import ObjectId
 
 from app.core.database import get_mongo_db
 from app.services.quotes_service import get_quotes_service
+from app.utils.timezone import now_tz, to_display_iso
 
 
 class FavoritesService:
@@ -215,6 +215,47 @@ class FavoritesService:
                 codes.append(str(code))
         return codes
 
+    async def _get_raw_favorites(self, db, user_id: str) -> list[dict[str, Any]]:
+        """读取自选原始文档列表（兼容 users.favorite_stocks 与 user_favorites 两种存储）。"""
+        if self._is_valid_object_id(user_id):
+            user = await db.users.find_one({"_id": ObjectId(user_id)})
+            if user is None:
+                user = await db.users.find_one({"_id": user_id})
+            return (user or {}).get("favorite_stocks", []) or []
+        doc = await db.user_favorites.find_one({"user_id": user_id})
+        return (doc or {}).get("favorites", []) or []
+
+    async def get_strategy_favorites(
+        self, user_id: str, strategy_id: str, tag: str | None = None
+    ) -> list[dict[str, Any]]:
+        """列出由指定策略自动纳入的自选条目。
+
+        识别规则（只管理策略自己并入的股票，绝不碰手动自选）：
+          1. 显式来源标记 `source_strategy == strategy_id`；
+          2. 兼容历史数据：无来源标记但带有该策略标签的条目。
+        """
+        if not user_id:
+            return []
+        db = await self._get_db()
+        favorites = await self._get_raw_favorites(db, user_id)
+        out: list[dict[str, Any]] = []
+        for fav in favorites:
+            raw_code = str(fav.get("stock_code") or fav.get("symbol") or "").strip()
+            if not raw_code:
+                continue
+            code = raw_code.zfill(6) if raw_code.isdigit() else raw_code
+            src = fav.get("source_strategy")
+            tags = [str(t) for t in (fav.get("tags") or [])]
+            if src == strategy_id or (not src and tag and tag in tags):
+                out.append({
+                    "stock_code": code,
+                    "source_strategy": src,
+                    "tags": tags,
+                    "strategy_entry_score": fav.get("strategy_entry_score"),
+                    "added_at": fav.get("added_at"),
+                })
+        return out
+
     async def add_favorite(
         self,
         user_id: str,
@@ -224,7 +265,9 @@ class FavoritesService:
         tags: list[str] = None,
         notes: str = "",
         alert_price_high: float | None = None,
-        alert_price_low: float | None = None
+        alert_price_low: float | None = None,
+        source_strategy: str | None = None,
+        strategy_entry_score: float | None = None,
     ) -> bool:
         """添加股票到自选股（兼容字符串ID与ObjectId）"""
         import logging
@@ -246,6 +289,11 @@ class FavoritesService:
                 "alert_price_high": alert_price_high,
                 "alert_price_low": alert_price_low
             }
+            # 策略自动纳入的来源标记：用于「策略池」按离场信号自动移出，
+            # 未标记来源的手动自选永远不会被自动移出。
+            if source_strategy:
+                favorite_stock["source_strategy"] = source_strategy
+                favorite_stock["strategy_entry_score"] = strategy_entry_score
 
             logger.info(f"🔧 [add_favorite] 自选股数据构建完成: {favorite_stock}")
 

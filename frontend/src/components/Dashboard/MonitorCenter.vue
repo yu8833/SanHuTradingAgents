@@ -16,7 +16,7 @@
       <div class="flow-title">
         <el-icon><Connection /></el-icon>
         <span>策略监控流程</span>
-        <span class="flow-sub">常用策略命中自动入自选 → 触发买入待确认 → 建仓后监控卖出 → 卖出离场</span>
+        <span class="flow-sub">常用策略命中即入自选（按策略口径不设上限）→ 触发买入待确认 → 建仓后监控卖出 → 触发离场自动移出</span>
       </div>
       <div class="flow-track">
         <div class="flow-node">
@@ -150,7 +150,7 @@
               :image-size="80"
             >
               <p class="empty-hint">
-                常用策略命中自动入自选并生成买入指令；建仓后持仓触发离场信号生成卖出指令。点击「立即评估」即时生成指令。
+                常用策略命中即自动入自选（命中多少纳入多少，触发离场自动移出，手动自选与持仓不受影响），并生成买入指令；建仓后持仓触发离场信号生成卖出指令。点击「立即评估」即时生成指令。
               </p>
             </el-empty>
             <div v-else class="tbs-list">

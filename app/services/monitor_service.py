@@ -24,14 +24,12 @@
   - 触发记录: monitor_alerts 集合（含 severity/message/price 等，按创建时间倒序）
 """
 from __future__ import annotations
-from app.utils.timezone import now_tz
 
+import hashlib
 import json
 import logging
 import re
 import time
-import hashlib
-from datetime import datetime
 from typing import Any
 
 from bson import ObjectId
@@ -39,7 +37,8 @@ from pydantic import BaseModel
 
 from app.core.database import get_mongo_db, get_mongo_db_sync
 from app.services.candidate_pool.auxiliary_signal_layer import compute_auxiliary
-from app.utils.trading_time import is_trading_time
+from app.utils.timezone import now_tz
+from app.utils.trading_time import is_trading_day, is_trading_time
 
 logger = logging.getLogger(__name__)
 
@@ -301,6 +300,8 @@ class MonitorService:
         self.tbs_orders_coll = "monitor_tbs_orders"
         # (rule_id, symbol[, signal]) -> 上次触发时间(秒)。内存态，重启后重置。
         self._last_fire: dict[tuple[str, str], float] = {}
+        # (user_id, strategy_id) -> 上次完成「策略池」维护的交易日（避免盘中反复增删）
+        self._pool_synced: dict[tuple[str, str], str] = {}
 
     async def _get_db(self):
         if self.db is None:
@@ -818,22 +819,31 @@ class MonitorService:
         return {"name": name, "close": price}
 
     async def _ensure_watchlist_tagged(self, user_id: str | None, sym: str,
-                                       item: dict, rule: dict) -> None:
-        """确保股票在自选中并带策略标签（用于策略买入命中同步自选池）。"""
+                                       item: dict, rule: dict,
+                                       entry_score: float | None = None) -> bool:
+        """确保股票在自选中并带策略标签（用于策略买入命中同步自选池）。
+
+        同时写入 source_strategy，标记该条目由策略自动纳入，供离场时自动移出。
+        返回是否真正新增（已在自选则为 False）。
+        """
         if not user_id:
-            return
+            return False
         try:
             from app.services.favorites_service import favorites_service
             if await favorites_service.is_favorite(user_id, sym):
-                return
+                return False
             tag = rule.get("tag") or rule.get("name") or "策略监控"
             await favorites_service.add_favorite(
                 user_id=user_id, stock_code=sym,
                 stock_name=item.get("name") or sym, market="A股",
                 tags=[tag],
+                source_strategy=rule.get("strategy_id"),
+                strategy_entry_score=entry_score,
             )
+            return True
         except Exception as e:
             logger.warning(f"⚠️ 策略监控同步自选失败 {sym}: {e}")
+            return False
 
     def _strategy_order_exists(self, rules_orders: list[dict], rule_id: str,
                                sym: str, sig_type: str) -> bool:
@@ -926,6 +936,7 @@ class MonitorService:
                 {"rule_id": r["id"], "status": {"$in": _DEDUP_STATUSES}}
             ).to_list(length=None)
 
+            entry_scores: dict[str, float] = {}
             if tbs_dir in ("buy", "both"):
                 try:
                     if buy_intraday:
@@ -938,10 +949,13 @@ class MonitorService:
                 except Exception as e:
                     logger.error(f"❌ 策略 {strategy_id} 买入监控扫描失败: {e}", exc_info=True)
                     sig_res = {"entry": [], "exit": []}
+                entry_scores = sig_res.get("entry_scores") or {}
+                # 严格按策略口径：命中多少只就纳入多少只（不设上限、不做评分截断）
                 for sym in sig_res.get("entry", []):
                     item = await self._strategy_item(sym)
                     # 买入命中：同步到自选池并带策略标签
-                    await self._ensure_watchlist_tagged(user_id, sym, item, r)
+                    await self._ensure_watchlist_tagged(
+                        user_id, sym, item, r, entry_scores.get(sym))
                     sig_type = "entry"
                     if self._strategy_order_exists(existing_orders, r["id"], sym, sig_type):
                         continue
@@ -1026,9 +1040,67 @@ class MonitorService:
                     await self._publish_new_order(order)
                     created += 1
 
+            # 策略池维护：仅在收盘后执行一次（盘中信号反复变化，避免自选来回增删）
+            if not trading and scope == "watchlist" and user_id:
+                try:
+                    await self._sync_strategy_pool(user_id, r)
+                except Exception as e:
+                    logger.error(f"❌ 策略池维护失败 {strategy_id}: {e}", exc_info=True)
+
         if created:
             logger.info(f"✅ 策略监控: 生成 {created} 条待确认指令")
         return created
+
+    async def _sync_strategy_pool(self, user_id: str, rule: dict) -> dict[str, Any]:
+        """收盘后严格按策略口径维护自选池：入场命中即纳入，触发离场即移出。
+
+        - 纳入：由买入扫描完成（命中多少只纳入多少只，不设上限、不按评分截断）；
+        - 移出：策略离场信号触发（收盘持续在 MA5 下方）即移出；
+        - 只处理策略自动纳入的条目，手动自选与当前持仓不受影响；
+        - 每个交易日只执行一次（按 as_of 幂等），避免盘中反复增删。
+        """
+        import asyncio
+
+        from app.services.favorites_service import favorites_service
+        from app.strategy_system import screener
+
+        strategy_id = rule.get("strategy_id")
+        if not strategy_id:
+            return {}
+        tag = rule.get("tag") or rule.get("name") or "策略监控"
+        db_sync = get_mongo_db_sync()
+        as_of = await asyncio.to_thread(screener._resolve_as_of, db_sync, None)
+        today = now_tz().strftime("%Y-%m-%d")
+        # 交易日必须等当日日线入库后再维护，避免用昨日数据误判离场
+        if is_trading_day(today) and as_of != today:
+            return {}
+        key = (user_id, strategy_id)
+        if self._pool_synced.get(key) == as_of:
+            return {}
+
+        owned = await favorites_service.get_strategy_favorites(user_id, strategy_id, tag)
+        if not owned:
+            self._pool_synced[key] = as_of
+            return {}
+        codes = [o["stock_code"] for o in owned]
+        held = set(await self._resolve_position_symbols(user_id))
+
+        try:
+            sig = await asyncio.to_thread(
+                screener.run_strategy_signals, db_sync, strategy_id, codes, None, True)
+        except Exception as e:
+            logger.error(f"❌ 策略池离场信号计算失败 {strategy_id}: {e}", exc_info=True)
+            return {}
+        remove = sorted((set(sig.get("exit") or []) & set(codes)) - held)
+        if remove:
+            removed_count = await favorites_service.remove_favorites_batch(user_id, remove)
+            logger.info(
+                f"🧹 策略池 {strategy_id}: 离场移出 {removed_count} 只，"
+                f"剩余 {len(codes) - removed_count} 只"
+            )
+        self._pool_synced[key] = as_of
+        kept = [c for c in codes if c not in set(remove)]
+        return {"kept": kept, "removed": remove}
 
     async def list_tbs_orders(self, user_id: str | None, status: str | None = None,
                               limit: int = 200) -> list[dict]:

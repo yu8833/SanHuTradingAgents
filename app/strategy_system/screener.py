@@ -1067,6 +1067,13 @@ def run_strategy_signals(
     # 买入：策略筛选过滤命中
     mask = run_strategy_filter(strategy_id, target, {}).fillna(False)
     entry_codes = [str(s) for s in target.loc[mask, "symbol"]]
+    # 命中评分（与筛选页同一套打分口径，供监控写入自选条目的入场评分）
+    scores = _score_rank(target, strategy.get("scoring", {}), mask)
+    entry_scores = {
+        str(sym): round(float(sc), 2)
+        for sym, sc in zip(
+            target.loc[mask, "symbol"].astype(str), scores[mask.to_numpy()], strict=False)
+    }
 
     # 卖出：任一 exit_signal 布尔列触发（persistent_exit 时含持续离场）
     exit_codes: list[str] = []
@@ -1085,6 +1092,7 @@ def run_strategy_signals(
     return {
         "entry": entry_codes,
         "exit": exit_codes,
+        "entry_scores": entry_scores,
         "entry_reasons": _describe_hits(strategy, target, entry_codes, "entry"),
         "exit_reasons": _describe_hits(strategy, target, exit_codes, "exit"),
         # 🔥 新增：信号完整上下文（用于历史追溯）
@@ -1220,6 +1228,13 @@ def run_strategy_signals_intraday(
     # 买入：策略筛选过滤命中
     mask = run_strategy_filter(strategy_id, target, {}).fillna(False)
     entry_codes = [str(s) for s in target.loc[mask, "symbol"]]
+    # 命中评分（与筛选页同一套打分口径，供监控写入自选条目的入场评分）
+    scores = _score_rank(target, strategy.get("scoring", {}), mask)
+    entry_scores = {
+        str(sym): round(float(sc), 2)
+        for sym, sc in zip(
+            target.loc[mask, "symbol"].astype(str), scores[mask.to_numpy()], strict=False)
+    }
 
     # 卖出：任一 exit_signal 布尔列触发（persistent_exit 时含持续离场）
     exit_codes: list[str] = []
@@ -1238,6 +1253,7 @@ def run_strategy_signals_intraday(
     return {
         "entry": entry_codes,
         "exit": exit_codes,
+        "entry_scores": entry_scores,
         "entry_reasons": _describe_hits(strategy, target, entry_codes, "entry"),
         "exit_reasons": _describe_hits(strategy, target, exit_codes, "exit"),
         # 🔥 新增：信号完整上下文（用于历史追溯）
