@@ -896,8 +896,9 @@ export const vibeApi = {
 
   async getStockQuadrantSlim(refresh = false) {
     // 首屏轻量：仅最新帧 + meta + dates（约 150KB gzip），弱网秒开；历史帧走 day 接口按需
+    // 冷构建实测约 22s（缓存命中毫秒级），20s 会稳定误判超时导致个股趋势多张图空白，故与全局超时对齐到 60s
     if (refresh) clearCache('/api/vibe/market/stock-quadrant/slim')
-    return cachedGet<StockQuadrantSlim>('/api/vibe/market/stock-quadrant/slim', undefined, 120000, { timeout: 20000 })
+    return cachedGet<StockQuadrantSlim>('/api/vibe/market/stock-quadrant/slim', undefined, 120000, { timeout: 60000 })
   },
 
   async getStockQuadrantDay(date: string) {
