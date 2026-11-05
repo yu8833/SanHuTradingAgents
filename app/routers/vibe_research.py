@@ -146,6 +146,23 @@ async def market_position(current_user: dict = Depends(get_optional_current_user
         })
 
 
+@router.get("/market/position/industry-at")
+async def market_position_industry_at(date: str, mode: str = "day",
+                                      current_user: dict = Depends(get_optional_current_user)):
+    """同分位时点行业榜：date 当日（mode=day）或其后 20 日（mode=fwd20）行业涨跌 Top5。"""
+    try:
+        from app.services.market_position import get_industry_at
+
+        data = await get_industry_at(date, mode)
+        if data is None:
+            return ok({"ready": False, "date": date, "mode": mode,
+                       "note": "行业表现基线构建中或该日期无数据"})
+        return ok({"ready": True, **data})
+    except Exception as e:
+        logger.error(f"行业榜查询异常: {e}")
+        return ok({"ready": False, "date": date, "mode": mode, "note": "行业榜暂不可用"})
+
+
 @router.get("/market/trade-date")
 async def market_trade_date(current_user: dict = Depends(get_optional_current_user)):
     """市场页当前参考交易日（交易时段=当日，盘前=最近已完成交易日），

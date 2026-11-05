@@ -305,6 +305,8 @@ export interface MarketPositionMetric {
   higher_is_hot: boolean
   /** 是否参与合成分位 */
   in_composite: boolean
+  /** 近 1 年分位（与 10 年分位对照，识别长期漂移；样本不足为 null） */
+  percentile_1y?: number | null
   /** 当前值实际所属交易日（实时行 = 今天；估值取 daily_basic，可能早一天） */
   as_of?: string
   /** 当前值是否来自当日实时快照 */
@@ -366,6 +368,37 @@ export interface MarketPositionAnalogs {
   note: string
 }
 
+/** 与当前合成分位同档（±2）的历史时点，供主图橙点与行业榜联动 */
+export interface MarketPositionSameLevel {
+  date: string
+  pct: number
+  fwd20: number | null
+}
+
+/** 同分位时点行业榜行：行业等权指数涨跌幅 + 上涨占比 + 成分家数 */
+export interface PositionIndustryRow {
+  industry: string
+  /** 行业指数涨跌幅 %（等权行业指数口径） */
+  pct: number
+  /** 行业成分上涨占比 %，fwd20 模式为 null */
+  up_pct: number | null
+  /** 成分股家数 */
+  n: number
+}
+
+export interface PositionIndustryAt {
+  ready: boolean
+  date: string
+  mode: 'day' | 'fwd20' | string
+  up: PositionIndustryRow[]
+  down: PositionIndustryRow[]
+  /** fwd20 模式：20 日窗口结束日 */
+  end?: string
+  /** fwd20 模式：实际交易日数 */
+  days?: number
+  note?: string
+}
+
 export interface MarketPosition {
   ready: boolean
   as_of: string
@@ -379,7 +412,11 @@ export interface MarketPosition {
   progress?: number
   updated: string
   window_years: number
+  /** 近 10 年窗口真实起止日期（前端标题用「近 10 年 · start ~ end」） */
+  window?: { start: string; end: string; years: number }
   samples: number
+  /** 与当前合成分位同档（±2）的历史时点，主图橙点 + 行业榜联动 */
+  same_level?: MarketPositionSameLevel[]
   position: MarketPositionMetric[]
   composite: {
     percentile: number | null
@@ -859,6 +896,16 @@ export const vibeApi = {
     if (refresh) clearCache('/api/vibe/market/position')
     const res = await ApiClient.get<any>('/api/vibe/market/position', undefined, { timeout: 40000 })
     return (res?.data || { ready: false, position: [], divergence: [] }) as MarketPosition
+  },
+
+  // 同分位时点行业榜：某交易日「当日 / 其后20日」行业涨跌 Top5（基线构建中返回 ready=false）
+  async getPositionIndustryAt(date: string, mode: 'day' | 'fwd20' = 'day'): Promise<PositionIndustryAt> {
+    const res = await ApiClient.get<any>(
+      '/api/vibe/market/position/industry-at',
+      { date, mode },
+      { timeout: 30000 }
+    )
+    return (res?.data || { ready: false, date, mode, up: [], down: [] }) as PositionIndustryAt
   },
 
   async getEmotion(refresh = false) {

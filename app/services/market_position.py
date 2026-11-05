@@ -23,6 +23,8 @@ from app.utils.timezone import now_tz
 logger = logging.getLogger("webapi")
 
 COLLECTION = "market_position_daily"
+# 行业日度表现基线（同分位时点行业榜数据源）：{date, industry, avg_pct, up_pct, n}
+INDUSTRY_PERF_COLLECTION = "industry_daily_perf"
 POSITION_YEARS = 10
 # 约 3 年交易日：不足则隐藏「历史分位→未来收益」分布
 MIN_FORWARD_ROWS = 750
@@ -416,6 +418,13 @@ def _build_sync(full: bool = False) -> int:
         cursor = chunk_end + timedelta(days=1)
 
     logger.info(f"📊 [position] 历史分位基线构建完成：{total} 个交易日（{start_dt.date()} ~ {latest_dt.date()}）")
+    # 行业表现基线随位置基线同步增量（幂等 upsert），供「同分位时点行业榜」查询
+    try:
+        ind_total = _build_industry_perf_sync(
+            db, start_dt.strftime("%Y-%m-%d"), latest_dt.strftime("%Y-%m-%d"))
+        logger.info(f"📊 [position] 行业表现基线同步完成：{ind_total} 条")
+    except Exception:
+        logger.exception("📊 [position] 行业表现基线同步失败（不影响位置基线）")
     return total
 
 
@@ -457,7 +466,10 @@ def _maybe_refresh_stale(db) -> bool:
 # -----------------------------------------------------------------------------
 
 def _rank_series(values: list[float | None]) -> list[int | None]:
-    """按扩展窗口计算每个点的历史分位（只用当天之前的数据，避免未来函数）。"""
+    """按扩展窗口计算每个点的历史分位（只用当天之前的数据，避免未来函数）。
+
+    与 _rank 同为中位秩口径（重复值取两侧均值），保证历史曲线与指标卡分位一致。
+    """
     prev: list[float] = []
     out: list[int | None] = []
     for v in values:
@@ -467,7 +479,8 @@ def _rank_series(values: list[float | None]) -> list[int | None]:
         if len(prev) < MIN_HISTORY_ROWS:
             out.append(None)
         else:
-            out.append(round(bisect.bisect_right(prev, v) / len(prev) * 100))
+            mid_rank = (bisect.bisect_left(prev, v) + bisect.bisect_right(prev, v)) / 2
+            out.append(round(mid_rank / len(prev) * 100))
         bisect.insort(prev, v)
     return out
 
@@ -512,6 +525,31 @@ def _index_series(rows: list[dict]) -> list[float]:
         v = r.get("avg_pct")
         idx *= 1 + (_f(v) / 100 if v is not None else 0.0)
         out.append(idx)
+    return out
+
+
+# 量比基准要求的最少历史天数（约 1 年）：不足则量比为 None，曲线该段不参与合成
+RATIO_MIN_BASE_DAYS = 200
+
+
+def _ratio_series(values: list[float | None], window: int = 250) -> list[float | None]:
+    """量比序列：当日值 ÷ 前 window 日均值（不含当日）。
+
+    成交额等累计型指标随市场扩容长期上行，绝对值分位在 10 年窗口里必然持续偏高，
+    改用「相对近一年常态的放量倍数」算分位，剔除扩容趋势；前 RATIO_MIN_BASE_DAYS
+    天基准不足返回 None（曲线该段本就是「参照系未成形」阴影区）。
+    """
+    out: list[float | None] = []
+    for i, v in enumerate(values):
+        if v is None:
+            out.append(None)
+            continue
+        base = [x for x in values[max(0, i - window): i] if x is not None and x > 0]
+        if len(base) < RATIO_MIN_BASE_DAYS:
+            out.append(None)
+            continue
+        mean = sum(base) / len(base)
+        out.append(round(_f(v) / mean, 4) if mean > 0 else None)
     return out
 
 
@@ -629,8 +667,13 @@ def _forward_stats(rows: list[dict], composite_series: list[int | None],
 
 
 def _composite_points(rows: list[dict], composite_series: list[int | None],
-                      max_points: int = MAX_SERIES_POINTS) -> list[dict[str, Any]]:
-    """合成分位历史曲线（等距抽稀，末点固定为最新交易日）。"""
+                      max_points: int = MAX_SERIES_POINTS,
+                      keep_dates: set[str] | None = None) -> list[dict[str, Any]]:
+    """合成分位历史曲线（等距抽稀，末点固定为最新交易日）。
+
+    keep_dates：必须保留在曲线上的日期（如同分位历史时点），否则抽稀后
+    前端散点找不到对应 x 轴位置而丢失。
+    """
     pts = [(rows[i]["date"], v) for i, v in enumerate(composite_series) if v is not None]
     if not pts:
         return []
@@ -639,6 +682,10 @@ def _composite_points(rows: list[dict], composite_series: list[int | None],
     step = (len(pts) - 1) / (max_points - 1)
     picked = [pts[int(round(i * step))] for i in range(max_points)]
     picked[-1] = pts[-1]
+    if keep_dates:
+        have = {d for d, _ in picked}
+        picked.extend(p for p in pts if p[0] in keep_dates and p[0] not in have)
+        picked.sort(key=lambda p: p[0])
     return [{"date": d, "pct": int(v)} for d, v in picked]
 
 
@@ -779,13 +826,25 @@ def _series_metric(rows: list[dict], series: list[float | None], *, key: str, gr
     valid = [i for i, v in enumerate(series) if v is not None]
     if not valid:
         return {"key": key, "group": group, "label": label, "unit": unit, "value": None,
-                "percentile": None, "window_years": 0, "samples": 0, "as_of": "",
-                "higher_is_hot": higher_is_hot, "desc": desc}
+                "percentile": None, "percentile_1y": None, "window_years": 0, "samples": 0,
+                "as_of": "", "higher_is_hot": higher_is_hot, "desc": desc}
     cur_i = valid[-1]
     rank_src = rank_series if rank_series is not None else series
-    hist = [_f(rank_src[i]) for i in valid if i < cur_i]
+    # 分位序列可能含 None（如量比的基准未成形段），必须过滤，避免被 _f 压成 0 污染分位
+    hist = [_f(rank_src[i]) for i in valid if i < cur_i and rank_src[i] is not None]
     cur = round(_f(series[cur_i]), 2)
-    pct = _rank(hist, _f(rank_src[cur_i])) if hist else None
+    pct = (_rank(hist, _f(rank_src[cur_i]))
+           if hist and rank_src[cur_i] is not None else None)
+    # 近 1 年分位对照：短窗口受长期趋势漂移影响小；与 10 年分位差距大即提示结构性漂移
+    try:
+        cutoff_1y = (datetime.strptime(rows[cur_i]["date"], "%Y-%m-%d")
+                     - timedelta(days=365)).strftime("%Y-%m-%d")
+    except ValueError:
+        cutoff_1y = ""
+    hist_1y = [_f(rank_src[i]) for i in valid
+               if i < cur_i and rank_src[i] is not None and rows[i]["date"] >= cutoff_1y]
+    pct_1y = (_rank(hist_1y, _f(rank_src[cur_i]))
+              if len(hist_1y) >= MIN_HISTORY_ROWS and rank_src[cur_i] is not None else None)
     return {
         "key": key,
         "group": group,
@@ -793,6 +852,7 @@ def _series_metric(rows: list[dict], series: list[float | None], *, key: str, gr
         "unit": unit,
         "value": cur,
         "percentile": pct,
+        "percentile_1y": pct_1y,
         "window_years": _window_years([rows[i]["date"] for i in valid]),
         "samples": len(hist),
         # 当前值实际所属交易日（估值取 daily_basic，可能比实时行早一天）
@@ -834,7 +894,8 @@ def compute_position_payload(rows: list[dict], live_row: dict[str, Any] | None =
         ("volatility", "情绪", "20 日波动率", "%", _volatility_series(rows), True,
          "等权指数近 20 日收益的年化标准差，越高说明市场越不稳定", True),
         ("amount", "参与度", "成交额", "亿", [r.get("amount") for r in rows], True,
-         "全市场成交额，越高说明资金参与越活跃", True),
+         "全市场成交额（亿）；分位按「当日 ÷ 近 250 日均值」的量比计算，"
+         "剔除市场扩容带来的长期上行趋势，越高说明资金参与越活跃", True),
         ("up_pct", "参与度", "上涨家数占比", "%", [r.get("up_pct") for r in rows], True,
          "上涨家数占全市场比重，越高说明上涨越普遍", True),
         ("low_price", "底部特征", "3 元以下个股占比", "%", [r.get("low_pct") for r in rows], False,
@@ -842,15 +903,18 @@ def compute_position_payload(rows: list[dict], live_row: dict[str, Any] | None =
     ]
 
     series_by_key = {spec[0]: spec[4] for spec in specs}
-    # 分位口径序列：仅「成交额」在盘中改用按交易进度折算的全天估算值，
-    # 展示值仍保留实际累计成交额，避免把估算值当成真实成交额。
+    # 分位口径序列：成交额改用「量比」（当日 ÷ 近 250 日均值）比分位，剔除扩容趋势；
+    # 展示值仍是实际成交额（亿）。盘中先按交易进度折算全天成交额再算量比。
     rank_series_by_key = {k: list(v) for k, v in series_by_key.items()}
+    rank_series_by_key["amount"] = _ratio_series(series_by_key["amount"])
     amount_projected = None
     if is_live and 0.0 < progress < 0.995:
         actual = _f(series_by_key["amount"][-1])
         if actual > 0:
             amount_projected = round(actual / progress, 2)
-            rank_series_by_key["amount"][-1] = amount_projected
+            base = [x for x in series_by_key["amount"][-1 - 250: -1] if x is not None and x > 0]
+            if len(base) >= RATIO_MIN_BASE_DAYS:
+                rank_series_by_key["amount"][-1] = round(amount_projected / (sum(base) / len(base)), 4)
 
     metrics: list[dict[str, Any]] = []
     for key, group, label, unit, series, hot, desc, in_composite in specs:
@@ -868,7 +932,7 @@ def compute_position_payload(rows: list[dict], live_row: dict[str, Any] | None =
             if key == "amount" and amount_projected is not None:
                 m["projected_value"] = amount_projected
                 m["progress"] = round(progress, 4)
-                m["desc"] = f"{desc}（盘中按交易进度 {round(progress * 100)}% 折算后比较分位）"
+                m["desc"] = f"{desc}（盘中按交易进度 {round(progress * 100)}% 折算全天后算量比）"
         metrics.append(m)
 
     # 合成分位：长历史指标统一折算成热度分位后取均值；估值样本不足 3 年时不参与合成
@@ -889,6 +953,7 @@ def compute_position_payload(rows: list[dict], live_row: dict[str, Any] | None =
     fwd_returns = _forward_returns(rows)
     fwd = _forward_stats(rows, composite_series, fwd_returns)
     percentiles = {m["key"]: m["percentile"] for m in metrics}
+    same_level = _same_level_points(rows, composite_series, fwd_returns)
 
     # 历史类比用的状态向量：整体热度 + 回撤深度 + 宽度 + 成交额 + 振幅（均已折算成热度）
     def heat_of_key(key: str) -> list[int | None]:
@@ -911,6 +976,8 @@ def compute_position_payload(rows: list[dict], live_row: dict[str, Any] | None =
         "amount_projected": amount_projected,
         "progress": round(progress, 4) if is_live else 1.0,
         "updated": now_tz().isoformat(),
+        # 分位窗口：固定近 10 年设计值 + 真实起止日期（前端统一展示，不再显示「10.1 年」）
+        "window": {"start": rows[0]["date"], "end": latest["date"], "years": POSITION_YEARS},
         "window_years": _window_years([r["date"] for r in rows]),
         "samples": len(history),
         "position": metrics,
@@ -920,16 +987,41 @@ def compute_position_payload(rows: list[dict], live_row: dict[str, Any] | None =
             "zone": zone["zone"],
             "advice": zone["advice"],
             "components": [m["key"] for m in metrics if m["in_composite"]],
-            # 历史合成分位曲线 + 逃顶 / 判底阈值，供前端画折线图与标线
-            "series": _composite_points(rows, composite_series),
+            # 历史合成分位曲线 + 逃顶 / 判底阈值；same_level 日期强制保留在曲线上
+            "series": _composite_points(rows, composite_series,
+                                        keep_dates={p["date"] for p in same_level}),
             "thresholds": {"top": TOP_THRESHOLD, "bottom": BOTTOM_THRESHOLD},
         },
         "forward": fwd,
         "guidance": _guidance(zone, composite, fwd),
         "analogs": _analogs(rows, dims, composite_series, fwd_returns),
         "divergence": _divergence(percentiles, composite),
-        "note": "分位窗口固定近 10 年；PE / PB 仅有 2024-07 之后的样本，不足 3 年不参与合成",
+        # 与当前合成分位相同（±2）的历史时点：走势图高亮 + 行业榜联动
+        "same_level": same_level,
+        "note": "分位窗口固定近 10 年；成交额按「当日 ÷ 近 250 日均值」量比分位以剔除扩容趋势；"
+                "PE / PB 仅有 2024-07 之后的样本，不足 3 年不参与合成，仅供参考",
     }
+
+
+def _same_level_points(rows: list[dict], composite_series: list[int | None],
+                       fwd_returns: list[float | None], band: int = 2,
+                       max_points: int = 20) -> list[dict[str, Any]]:
+    """与当前合成分位相同（±band）的历史时点（时间均匀抽稀，供走势图高亮与行业榜联动）。"""
+    if not composite_series or composite_series[-1] is None:
+        return []
+    cur = composite_series[-1]
+    cands = [
+        i for i in range(len(rows) - 1)
+        if composite_series[i] is not None and abs(composite_series[i] - cur) <= band
+        and fwd_returns[i] is not None
+    ]
+    if len(cands) > max_points:
+        step = len(cands) / max_points
+        cands = [cands[int(i * step)] for i in range(max_points)]
+    return [
+        {"date": rows[i]["date"], "pct": composite_series[i], "fwd20": fwd_returns[i]}
+        for i in cands
+    ]
 
 
 def _empty_payload(note: str = "历史分位基线首次构建中") -> dict[str, Any]:
@@ -937,6 +1029,7 @@ def _empty_payload(note: str = "历史分位基线首次构建中") -> dict[str,
         "ready": False,
         "as_of": "",
         "updated": now_tz().isoformat(),
+        "window": {"start": "", "end": "", "years": POSITION_YEARS},
         "window_years": 0,
         "samples": 0,
         "position": [],
@@ -947,6 +1040,7 @@ def _empty_payload(note: str = "历史分位基线首次构建中") -> dict[str,
         "guidance": _guidance({"zone": "unknown", "label": "构建中", "advice": ""}, None, None),
         "analogs": None,
         "divergence": [],
+        "same_level": [],
         "note": f"{note}，首次构建约需 1~2 分钟，完成后自动显示",
     }
 
@@ -987,3 +1081,254 @@ async def get_market_position() -> dict[str, Any]:
 
     ttl = 300 if is_trading_time() else 900
     return await cached("vibe:market:position", _build, ttl=ttl)
+
+
+# ---------------------------------------------------------------------------
+# 行业日度表现基线（industry_daily_perf）：「同分位时点行业榜」数据源
+# ---------------------------------------------------------------------------
+
+# THS_TO_LOCAL_INDUSTRIES 未覆盖的本地行业名补充（仅用于本聚合口径，不改筛选行为）；
+# 目标名为同花顺行业口径（含该表缺失的 种植业与林业 / 养殖业 两个真同花顺行业）。
+_INDUSTRY_LOCAL_SUPPLEMENT = {
+    "机械基件": "通用设备",
+    "建筑工程": "建筑装饰",
+    "运输设备": "轨交设备",
+    "农业综合": "种植业与林业",
+    "种植业": "种植业与林业",
+    "畜牧业": "养殖业",
+    "渔业": "养殖业",
+    "矿物制品": "非金属材料",
+    "其他建材": "建筑材料",
+    "机床制造": "通用设备",
+    "饲料": "农产品加工",
+    "综合类": "其他社会服务",
+    "路桥": "公路铁路运输",
+    "水务": "环境治理",
+    "农用机械": "专用设备",
+    "化工机械": "专用设备",
+    "摩托车": "汽车整车",
+}
+
+_INDUSTRY_MAP_CACHE: dict[str, str] | None = None
+
+
+def _symbol_industry_map(db) -> dict[str, str]:
+    """symbol -> 同花顺行业名：THS_TO_LOCAL_INDUSTRIES 反向映射 + 补充表（进程内缓存）。
+
+    口径说明：行业归属取当前 stock_basic_info 快照，回算历史存在轻微口径漂移
+    （公司行业变更 / 新上市），对「行业等权涨跌榜」级别的展示影响可忽略。
+    """
+    global _INDUSTRY_MAP_CACHE
+    if _INDUSTRY_MAP_CACHE is not None:
+        return _INDUSTRY_MAP_CACHE
+    from app.services.candidate_pool.candidate_pool_service import THS_TO_LOCAL_INDUSTRIES
+
+    local2ths: dict[str, str] = {}
+    for ths, locals_ in THS_TO_LOCAL_INDUSTRIES.items():
+        for loc in locals_:
+            local2ths.setdefault(loc, ths)
+    for loc, ths in _INDUSTRY_LOCAL_SUPPLEMENT.items():
+        local2ths.setdefault(loc, ths)
+
+    out: dict[str, str] = {}
+    for row in db["stock_basic_info"].find({}, {"symbol": 1, "industry": 1}):
+        sym = str(row.get("symbol") or "")
+        ths = local2ths.get(str(row.get("industry") or ""))
+        if sym and ths:
+            out[sym] = ths
+    _INDUSTRY_MAP_CACHE = out
+    return out
+
+
+def _industry_perf_status(db) -> str:
+    try:
+        doc = db[INDUSTRY_PERF_COLLECTION].find({}, {"date": 1}).sort("date", -1).limit(1)
+        row = next(doc, None)
+        return (row or {}).get("date", "")
+    except Exception:
+        return ""
+
+
+def _industry_perf_earliest(db) -> str:
+    try:
+        doc = db[INDUSTRY_PERF_COLLECTION].find({}, {"date": 1}).sort("date", 1).limit(1)
+        row = next(doc, None)
+        return (row or {}).get("date", "")
+    except Exception:
+        return ""
+
+
+def _build_industry_perf_sync(db, start: str, end: str) -> int:
+    """按日聚合行业等权涨跌幅（复用日线数据源优先级去重），写入 industry_daily_perf。"""
+    sym_ind = _symbol_industry_map(db)
+    if not sym_ind:
+        return 0
+    try:
+        db[INDUSTRY_PERF_COLLECTION].create_index(
+            [("date", 1), ("industry", 1)], unique=True,
+            name="date_industry_uniq", background=True)
+    except Exception:
+        pass  # 索引已存在或并发创建冲突，不影响写入
+    pipeline = [
+        {"$match": {"period": "daily", "trade_date": {"$gte": start, "$lte": end},
+                    "pct_chg": {"$ne": None}}},
+        {"$addFields": {"prio": {"$switch": {
+            "branches": [
+                {"case": {"$eq": ["$data_source", "tushare"]}, "then": 0},
+                {"case": {"$eq": ["$data_source", "baostock"]}, "then": 1},
+                {"case": {"$eq": ["$data_source", "akshare"]}, "then": 2},
+            ],
+            "default": 3,
+        }}}},
+        {"$sort": {"trade_date": 1, "symbol": 1, "prio": 1}},
+        # 同一 (交易日, 股票) 跨源重复时按数据源优先级取一条
+        {"$group": {"_id": {"d": "$trade_date", "s": "$symbol"},
+                    "pct": {"$first": "$pct_chg"}}},
+    ]
+    # (date, industry) -> [涨跌幅和, 家数, 上涨家数]
+    acc: dict[tuple[str, str], list[float]] = {}
+    for r in db["stock_daily_quotes"].aggregate(pipeline, allowDiskUse=True):
+        d = _normalize_date(r["_id"]["d"])
+        ind = sym_ind.get(str(r["_id"]["s"]))
+        if not d or not ind:
+            continue
+        pct = _f(r.get("pct"))
+        cell = acc.setdefault((d, ind), [0.0, 0.0, 0.0])
+        cell[0] += pct
+        cell[1] += 1
+        cell[2] += 1 if pct > 0 else 0
+
+    from pymongo import UpdateOne
+
+    ops = []
+    for (d, ind), (s, n, up) in acc.items():
+        if n <= 0:
+            continue
+        ops.append(UpdateOne(
+            {"date": d, "industry": ind},
+            {"$set": {"date": d, "industry": ind,
+                      "avg_pct": round(s / n, 3),
+                      "up_pct": round(up / n * 100, 2),
+                      "n": int(n),
+                      "updated_at": now_tz()}},
+            upsert=True,
+        ))
+    if ops:
+        db[INDUSTRY_PERF_COLLECTION].bulk_write(ops, ordered=False)
+    return len(ops)
+
+
+async def ensure_industry_perf_history(force: bool = False) -> int:
+    """行业表现基线与位置基线同窗口增量构建（后台任务调用，幂等 upsert）。"""
+    db = _sync_db()
+
+    def _run() -> int:
+        latest = _latest_quote_date(db)
+        if not latest:
+            return 0
+        latest_dt = datetime.strptime(latest, "%Y-%m-%d")
+        window_start_dt = latest_dt - timedelta(days=POSITION_YEARS * 365 + 30)
+        last = _industry_perf_status(db)
+        if force or not last:
+            start_dt = window_start_dt
+        else:
+            try:
+                start_dt = datetime.strptime(last, "%Y-%m-%d") + timedelta(days=1)
+            except ValueError:
+                start_dt = window_start_dt
+        total = 0
+        # 头部缺口：历史回填若中断，最新日期已到但首日远晚于窗口起点，先补齐头部
+        earliest = _industry_perf_earliest(db)
+        if not force and earliest:
+            try:
+                earliest_dt = datetime.strptime(earliest, "%Y-%m-%d")
+            except ValueError:
+                earliest_dt = None
+            if earliest_dt and earliest_dt > window_start_dt + timedelta(days=5):
+                cursor = window_start_dt
+                head_end = earliest_dt - timedelta(days=1)
+                while cursor <= head_end:
+                    chunk_end = min(cursor + timedelta(days=CHUNK_DAYS - 1), head_end)
+                    total += _build_industry_perf_sync(
+                        db, cursor.strftime("%Y-%m-%d"), chunk_end.strftime("%Y-%m-%d"))
+                    cursor = chunk_end + timedelta(days=1)
+        if start_dt > latest_dt:
+            return total
+        cursor = start_dt
+        while cursor <= latest_dt:
+            chunk_end = min(cursor + timedelta(days=CHUNK_DAYS - 1), latest_dt)
+            total += _build_industry_perf_sync(
+                db, cursor.strftime("%Y-%m-%d"), chunk_end.strftime("%Y-%m-%d"))
+            cursor = chunk_end + timedelta(days=1)
+        return total
+
+    return await asyncio.to_thread(_run)
+
+
+def _industry_at_sync(date: str, mode: str) -> dict[str, Any] | None:
+    """指定交易日的行业涨跌榜：mode=day 当日 / mode=fwd20 其后 20 日累计。"""
+    db = _sync_db()
+    date = _normalize_date(date)
+    if not date:
+        return None
+    coll = db[INDUSTRY_PERF_COLLECTION]
+
+    def top_rows(rows: list[dict], pct_key: str) -> dict[str, list[dict]]:
+        rows = [r for r in rows if r.get(pct_key) is not None]
+        rows.sort(key=lambda r: r[pct_key], reverse=True)
+        def pick(rr: list[dict]) -> list[dict]:
+            return [{"industry": r["industry"], "pct": round(r[pct_key], 2),
+                     "up_pct": r.get("up_pct"), "n": r.get("n")} for r in rr]
+        return {"up": pick(rows[:5]), "down": pick([*reversed(rows[-5:])]) if len(rows) >= 5 else []}
+
+    if mode == "day":
+        rows = list(coll.find({"date": date}, {"_id": 0}))
+        if not rows:
+            return None
+        return {"date": date, "mode": mode, **top_rows(rows, "avg_pct")}
+
+    # fwd20：该日期之后 FORWARD_DAYS 个交易日的行业等权累计收益（复利）
+    dates = sorted(coll.distinct("date", {"date": {"$gt": date}}))[:FORWARD_DAYS]
+    if len(dates) < FORWARD_DAYS:
+        return None
+    acc: dict[str, dict[str, float]] = {}
+    for r in coll.find({"date": {"$in": dates}}, {"_id": 0}):
+        cell = acc.setdefault(r["industry"], {"ret": 1.0, "up_sum": 0.0, "days": 0, "n": 0})
+        cell["ret"] *= 1 + _f(r.get("avg_pct")) / 100
+        cell["up_sum"] += _f(r.get("up_pct"))
+        cell["days"] += 1
+        cell["n"] = r.get("n") or 0
+    rows = [{"industry": k,
+             "cum_pct": round((v["ret"] - 1) * 100, 2),
+             "up_pct": round(v["up_sum"] / v["days"], 2) if v["days"] else None,
+             "n": int(v["n"])}
+            for k, v in acc.items() if v["days"] >= FORWARD_DAYS * 0.9]
+    if not rows:
+        return None
+    return {"date": date, "mode": mode, "days": len(dates),
+            "end": dates[-1], **top_rows(rows, "cum_pct")}
+
+
+_INDUSTRY_BACKFILL_TASK: asyncio.Task | None = None
+
+
+async def get_industry_at(date: str, mode: str = "day") -> dict[str, Any] | None:
+    """行业榜查询（Redis 缓存 30 分钟；基线缺失时后台补建后返回 None）。"""
+    global _INDUSTRY_BACKFILL_TASK
+    if mode not in ("day", "fwd20"):
+        mode = "day"
+
+    async def _run() -> dict[str, Any] | None:
+        global _INDUSTRY_BACKFILL_TASK
+        db = _sync_db()
+        status = await asyncio.to_thread(_industry_perf_status, db)
+        result = await asyncio.to_thread(_industry_at_sync, date, mode) if status else None
+        if result is None:
+            # 基线未建 / 该日未覆盖（头部缺口）：后台补建（幂等，任务去重），本次先返回 None
+            if _INDUSTRY_BACKFILL_TASK is None or _INDUSTRY_BACKFILL_TASK.done():
+                _INDUSTRY_BACKFILL_TASK = asyncio.get_running_loop().create_task(
+                    ensure_industry_perf_history(False))
+            return None
+        return result
+
+    return await cached(f"vibe:market:position:industry-at:{date}:{mode}", _run, ttl=1800)

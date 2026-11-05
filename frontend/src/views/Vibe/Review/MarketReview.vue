@@ -112,7 +112,7 @@
       <div class="mr-sec-head">
         <span class="mr-sec-no">02</span>
         <span class="mr-sec-title">盘中事实</span>
-        <span class="mr-sec-hint">指数 / 涨跌分布 / 宽度 / 风格 / 集中度</span>
+        <span class="mr-sec-hint">指数 / 涨跌分布 / 风格 / 集中度（宽度趋势已并入 03 当前位置）</span>
         <span class="mr-sec-actions">
           <span v-if="metrics?.updated" class="data-time">指标 {{ shortTime(metrics.updated) }}</span>
         </span>
@@ -317,11 +317,10 @@
       </div>
     </section>
 
-    <!-- 市场温度与资金结构：把今天的读数放进近一年分位/趋势，回答「今天算热还是冷、钱去了哪」 -->
+    <!-- 今日盘面结构：预警 / 市值风格 / 成交额集中度，回答「钱去了哪、盘面有没有异常」 -->
     <section v-if="metrics" class="block">
       <div class="block-head">
-        <span class="block-title"><el-icon><DataAnalysis /></el-icon> 市场温度与资金结构</span>
-        <span class="fresh-tag is-hist">分位=近一年历史</span>
+        <span class="block-title"><el-icon><DataAnalysis /></el-icon> 今日盘面结构</span>
         <span class="block-hint">
           {{ metrics.status_label || '已收盘' }}{{ liveHint }}
           <em v-if="metrics.as_of" class="data-time">数据 {{ metrics.as_of }} · 更新 {{ shortTime(metrics.updated) }}</em>
@@ -336,105 +335,6 @@
       <div v-else-if="metrics.ready" class="alert-row alert-row--calm">
         <span class="alert-chip is-ok">无异常信号 · 温度与广度均在正常区间</span>
       </div>
-
-      <!-- 温度分位：每项一条分位条，中位刻度固定在 50% -->
-      <div class="temp-headline">
-        今日读数 · 近一年分位
-        <span class="dist-note">条越长越接近近一年极值；竖线 = 中位数（50% 分位）</span>
-      </div>
-      <div class="temp-grid">
-        <div v-for="t in metrics.temperature" :key="t.key" class="temp-item" :title="t.desc">
-          <div class="temp-head">
-            <span class="temp-label">{{ t.label }}</span>
-            <span class="temp-value">{{ t.value }}<em>{{ t.unit }}</em></span>
-          </div>
-          <div class="temp-track">
-            <i v-if="t.rank != null" class="temp-fill" :class="rankTone(t)" :style="{ width: t.rank + '%' }" />
-            <i class="temp-median" title="近一年中位数 = 50% 分位" />
-          </div>
-          <div class="temp-foot">
-            <span v-if="t.rank != null">
-              近一年 <b :class="rankTone(t)">{{ t.rank }}%</b> 分位
-              <em v-if="!t.higher_is_hot" class="temp-rev">越高越冷</em>
-            </span>
-            <span v-else class="temp-pending">历史基线构建中…</span>
-            <span v-if="t.median != null" class="temp-med">中位 {{ t.median }}{{ t.unit }}</span>
-            <span v-if="t.projected != null" class="temp-med">折算全天 ≈ {{ t.projected }}{{ t.unit }}</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- 市场宽度：60 日趋势，回答「涨跌是在扩散还是收敛」 -->
-      <el-card shadow="never" class="dash-card width-card">
-        <div class="card-title card-title--flex">
-          市场宽度趋势
-          <span class="dist-note">前 {{ breadthSeries.length - 1 }} 日 = 历史收盘</span>
-          <div v-if="bwChart" class="bw-readout">
-            <span class="ro ro--up">今日上涨率 <b>{{ bwChart.today.up_pct }}%</b></span>
-            <span v-if="bwChart.today.ma20_above != null" class="ro ro--ma">
-              站上 20 日线 <b>{{ bwChart.today.ma20_above }}%</b>
-            </span>
-            <span class="ro ro--med">一年中位 {{ bwChart.today.median }}%</span>
-          </div>
-        </div>
-        <div v-if="bwChart" class="bw-plot">
-          <div class="bw-yaxis">
-            <span v-for="t in bwChart.yTicks" :key="t.v" :style="{ bottom: t.v + '%' }">{{ t.v }}%</span>
-          </div>
-          <div class="bw-canvas">
-            <div
-              v-for="t in bwChart.yTicks"
-              :key="'g' + t.v"
-              class="bw-gline"
-              :class="{ 'is-mid': t.v === 50 }"
-              :style="{ bottom: t.v + '%' }"
-            />
-            <svg class="bw-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
-              <defs>
-                <linearGradient :id="'bwFill'" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stop-color="var(--el-color-primary)" stop-opacity="0.28" />
-                  <stop offset="100%" stop-color="var(--el-color-primary)" stop-opacity="0.02" />
-                </linearGradient>
-              </defs>
-              <polygon :points="bwChart.area" :fill="'url(#bwFill)'" />
-              <polyline :points="bwChart.upLine" class="bw-up" vector-effect="non-scaling-stroke" />
-              <polyline
-                v-for="(seg, i) in bwChart.maSegs"
-                :key="'ma' + i"
-                :points="seg"
-                class="bw-ma"
-                vector-effect="non-scaling-stroke"
-              />
-            </svg>
-            <!-- 今日竖线：标示曲线末端对应的交易日 -->
-            <div class="bw-today" />
-            <div
-              v-for="d in bwChart.dots"
-              :key="d.k"
-              class="bw-pt"
-              :style="{ left: d.xp + '%', bottom: d.yp + '%' }"
-            >
-              <span class="bw-tip">{{ d.tip }}</span>
-            </div>
-            <div
-              v-for="l in bwChart.xTicks"
-              :key="l.k"
-              class="bw-xaxis"
-              :style="{ left: l.xp + '%', transform: l.align }"
-            >{{ l.text }}</div>
-          </div>
-        </div>
-        <div v-else class="rank-empty">暂无足够交易日数据</div>
-        <div class="bw-legend">
-          <span class="bw-key"><i class="k-up" />上涨个股占比</span>
-          <span class="bw-key"><i class="k-ma" />站上 20 日线占比</span>
-          <span class="bw-key"><i class="k-mid" />50% 多空分界</span>
-        </div>
-        <p class="cap">
-          上涨率高于 50% = 赚钱效应扩散到多数个股；连续多日低于 30% 说明下跌在扩散，指数再涨也可能只是少数权重在拉。
-          站上 20 日线的比例代表中期趋势还在的个股有多少。
-        </p>
-      </el-card>
 
       <div class="mini-grid">
         <!-- 市值风格：全市场按流通市值三等分，比较各组平均涨跌幅 -->
@@ -579,7 +479,7 @@
               :class="c.tone"
             >{{ c.text }}</span>
             <span class="pos-distance-chip is-meta">
-              {{ position.window_years }} 年 · {{ position.samples }} 个历史交易日样本 · 截至 {{ position.as_of }}{{ position.live ? '（含今日实时值）' : '' }}
+              近 10 年（{{ position.window?.start }} ~ {{ position.window?.end }}）· {{ position.samples }} 个交易日样本 · 截至 {{ position.as_of }}{{ position.live ? '（含今日实时值）' : '' }}
             </span>
           </div>
 
@@ -618,7 +518,7 @@
             <el-icon><InfoFilled /></el-icon>
             <span>
               合成分位 = 把 {{ componentHeat.length }} 个长历史指标各自折算成 0–100 的「热度分位」再取平均：
-              0% ≈ 近 {{ position.window_years }} 年最冷，100% ≈ 最热；≥80 为逃顶信号区，≤20 为判底观察区。
+              0% ≈ 近 10 年最冷，100% ≈ 最热；≥80 为逃顶信号区，≤20 为判底观察区。
             </span>
           </div>
           <div class="pos-comp-chips">
@@ -637,18 +537,94 @@
           </div>
         </div>
 
-        <!-- 近 10 年合成分位走势：红线 80 逃顶、绿线 20 判底 -->
+        <!-- 近 10 年合成分位走势：红线 80 逃顶、绿线 20 判底；橙点 = 与当前同分位的历史时点，点击看当日行业 -->
         <div v-if="compositeChartOption" class="pos-chart">
           <div class="pos-block-head">
-            近 {{ position.window_years }} 年合成分位走势
-            <span class="dist-note">虚线：上 80 逃顶 / 下 20 判底 · 每个点为一个交易日（等距抽稀）</span>
+            近 10 年合成分位走势
+            <span class="dist-note">
+              虚线：上 80 逃顶 / 下 20 判底 · 灰色区为参照系未成形 · 橙点 = 与当前同分位的历史时点 · 点击曲线看当日行业涨跌
+            </span>
           </div>
-          <VChart :option="compositeChartOption" autoresize class="chart-200" />
+          <VChart
+            :option="compositeChartOption"
+            autoresize
+            class="chart-360"
+            @click="onCompositeClick"
+          />
         </div>
 
-        <!-- 单项指标：分组横条（统一按热度分位：越靠右越热，竖线为 50% 中位） -->
+        <!-- 时点联动卡：选中日期 + 同分位时点 + 当日/其后20日行业涨跌榜 -->
+        <div v-if="selectedDate" class="pos-link">
+          <div class="pos-link-left">
+            <div class="pos-link-date">
+              <b>{{ selectedDate }}</b>
+              <span v-if="selectedPoint" class="pos-link-pct" :class="posTone(selectedPoint.pct)">
+                合成分位 {{ selectedPoint.pct }}%
+              </span>
+            </div>
+            <div v-if="selectedSameLevel?.fwd20 != null" class="pos-link-fwd">
+              其后 20 日等权收益
+              <b :class="clsByVal(selectedSameLevel.fwd20)">{{ signedPct(selectedSameLevel.fwd20) }}</b>
+            </div>
+            <div class="pos-link-chips">
+              <span class="pos-link-chips-cap">同分位时点（±2）：</span>
+              <span
+                v-for="s in position.same_level"
+                :key="s.date"
+                class="pos-link-chip"
+                :class="{ 'is-on': s.date === selectedDate }"
+                @click="selectDate(s.date)"
+              >{{ s.date.slice(2) }}</span>
+            </div>
+          </div>
+          <div class="pos-link-right">
+            <div class="pos-ind-head">
+              <el-radio-group v-model="industryMode" size="small" @change="loadIndustryAt">
+                <el-radio-button value="day">当日行业涨跌</el-radio-button>
+                <el-radio-button value="fwd20">其后 20 日行业涨跌</el-radio-button>
+              </el-radio-group>
+              <span v-if="industryData?.mode === 'fwd20' && industryData.end" class="pos-ind-range">
+                {{ industryData.date }} ~ {{ industryData.end }} · {{ industryData.days }} 个交易日
+              </span>
+            </div>
+            <div v-if="industryLoading" class="pos-ind-empty">
+              <el-icon class="is-loading"><Loading /></el-icon> 正在聚合行业数据…
+            </div>
+            <div v-else-if="!industryData?.ready" class="pos-ind-empty">
+              {{ industryData?.note || '行业基线构建中，稍后自动刷新' }}
+            </div>
+            <div v-else class="pos-ind-cols">
+              <div class="pos-ind-col">
+                <div class="pos-ind-col-title is-up">领涨 Top5</div>
+                <div v-for="r in industryData.up" :key="'u' + r.industry" class="pos-ind-row" :title="industryTip(r)">
+                  <span class="pos-ind-name">{{ r.industry }}</span>
+                  <div class="pos-ind-track">
+                    <i class="pos-ind-bar up" :style="{ width: industryBarW(r.pct) + '%' }" />
+                  </div>
+                  <span class="pos-ind-pct up">{{ signedPct(r.pct) }}</span>
+                  <span class="pos-ind-meta">{{ r.up_pct == null ? '' : `涨 ${r.up_pct}% · ` }}{{ r.n }} 家</span>
+                </div>
+              </div>
+              <div class="pos-ind-col">
+                <div class="pos-ind-col-title is-down">领跌 Top5</div>
+                <div v-for="r in industryData.down" :key="'d' + r.industry" class="pos-ind-row" :title="industryTip(r)">
+                  <span class="pos-ind-name">{{ r.industry }}</span>
+                  <div class="pos-ind-track">
+                    <i class="pos-ind-bar down" :style="{ width: industryBarW(r.pct) + '%' }" />
+                  </div>
+                  <span class="pos-ind-pct down">{{ signedPct(r.pct) }}</span>
+                  <span class="pos-ind-meta">{{ r.up_pct == null ? '' : `涨 ${r.up_pct}% · ` }}{{ r.n }} 家</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 单项指标：分组横条（统一按热度分位：越靠右越热，竖线为 50% 中位；细条为近 1 年分位对照） -->
         <div class="pos-metrics">
-          <p class="cap pos-metrics-cap">横条统一为热度分位（0 = 最冷 / 100 = 最热）；悬停指标名可查看原始分位与计算口径。</p>
+          <p class="cap pos-metrics-cap">
+            粗条 = 近 10 年热度分位（0 最冷 / 100 最热）；细条 = 近 1 年分位对照，用来识别长期漂移；悬停指标名查看口径。
+          </p>
           <div v-for="grp in positionGroups" :key="grp.group" class="pos-group">
             <div class="pos-group-head">
               {{ grp.group }}<span class="pos-group-hint">{{ grp.hint }}</span>
@@ -665,9 +641,18 @@
                     :class="posTone(heatOfMetric(m))"
                     :style="{ width: (heatOfMetric(m) ?? 0) + '%' }"
                   />
+                  <i
+                    v-if="m.percentile_1y != null"
+                    class="pos-bullet-1y"
+                    :title="`近 1 年分位 ${m.percentile_1y}%（与近 10 年分位对照，识别长期漂移）`"
+                    :style="{ left: (m.higher_is_hot ? m.percentile_1y : 100 - m.percentile_1y) + '%' }"
+                  />
                   <i class="pos-bullet-med" title="中位 = 50% 分位" />
                 </div>
-                <span class="pos-bullet-value">{{ m.value == null ? '—' : m.value }}<em>{{ m.unit }}</em></span>
+                <span class="pos-bullet-value">
+                  {{ m.value == null ? '—' : m.value }}<em>{{ m.unit }}</em>
+                  <em v-if="!m.in_composite" class="pos-bullet-tag">样本短·未纳入合成</em>
+                </span>
                 <span class="pos-bullet-pct" :class="posTone(heatOfMetric(m))">
                   {{ m.percentile == null ? '—' : (heatOfMetric(m) ?? 0) + '%' }}
                 </span>
@@ -675,6 +660,78 @@
             </div>
           </div>
         </div>
+
+        <!-- 市场宽度：60 日趋势，回答「涨跌是在扩散还是收敛」（自 02 并入，作为位置判断的确认信号） -->
+        <el-card v-if="metrics" shadow="never" class="dash-card width-card">
+          <div class="card-title card-title--flex">
+            市场宽度趋势
+            <span class="dist-note">前 {{ breadthSeries.length - 1 }} 日 = 历史收盘</span>
+            <div v-if="bwChart" class="bw-readout">
+              <span class="ro ro--up">今日上涨率 <b>{{ bwChart.today.up_pct }}%</b></span>
+              <span v-if="bwChart.today.ma20_above != null" class="ro ro--ma">
+                站上 20 日线 <b>{{ bwChart.today.ma20_above }}%</b>
+              </span>
+              <span class="ro ro--med">一年中位 {{ bwChart.today.median }}%</span>
+            </div>
+          </div>
+          <div v-if="bwChart" class="bw-plot">
+            <div class="bw-yaxis">
+              <span v-for="t in bwChart.yTicks" :key="t.v" :style="{ bottom: t.v + '%' }">{{ t.v }}%</span>
+            </div>
+            <div class="bw-canvas">
+              <div
+                v-for="t in bwChart.yTicks"
+                :key="'g' + t.v"
+                class="bw-gline"
+                :class="{ 'is-mid': t.v === 50 }"
+                :style="{ bottom: t.v + '%' }"
+              />
+              <svg class="bw-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
+                <defs>
+                  <linearGradient :id="'bwFill'" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="var(--el-color-primary)" stop-opacity="0.28" />
+                    <stop offset="100%" stop-color="var(--el-color-primary)" stop-opacity="0.02" />
+                  </linearGradient>
+                </defs>
+                <polygon :points="bwChart.area" :fill="'url(#bwFill)'" />
+                <polyline :points="bwChart.upLine" class="bw-up" vector-effect="non-scaling-stroke" />
+                <polyline
+                  v-for="(seg, i) in bwChart.maSegs"
+                  :key="'ma' + i"
+                  :points="seg"
+                  class="bw-ma"
+                  vector-effect="non-scaling-stroke"
+                />
+              </svg>
+              <!-- 今日竖线：标示曲线末端对应的交易日 -->
+              <div class="bw-today" />
+              <div
+                v-for="d in bwChart.dots"
+                :key="d.k"
+                class="bw-pt"
+                :style="{ left: d.xp + '%', bottom: d.yp + '%' }"
+              >
+                <span class="bw-tip">{{ d.tip }}</span>
+              </div>
+              <div
+                v-for="l in bwChart.xTicks"
+                :key="l.k"
+                class="bw-xaxis"
+                :style="{ left: l.xp + '%', transform: l.align }"
+              >{{ l.text }}</div>
+            </div>
+          </div>
+          <div v-else class="rank-empty">暂无足够交易日数据</div>
+          <div class="bw-legend">
+            <span class="bw-key"><i class="k-up" />上涨个股占比</span>
+            <span class="bw-key"><i class="k-ma" />站上 20 日线占比</span>
+            <span class="bw-key"><i class="k-mid" />50% 多空分界</span>
+          </div>
+          <p class="cap">
+            上涨率高于 50% = 赚钱效应扩散到多数个股；连续多日低于 30% 说明下跌在扩散，指数再涨也可能只是少数权重在拉。
+            站上 20 日线的比例代表中期趋势还在的个股有多少；判底确认需要宽度同步回升。
+          </p>
+        </el-card>
 
         <p v-if="posDataNote" class="cap pos-data-note">{{ posDataNote }}</p>
 
@@ -975,7 +1032,8 @@ import {
   type MarketPosition,
   type MarketPositionMetric,
   type MarketSynthesis,
-  type MarketTemperatureItem,
+  type PositionIndustryAt,
+  type PositionIndustryRow,
   type PreOpen,
   type PreOpenBand,
   type SynthesisBuyItem,
@@ -984,13 +1042,13 @@ import {
 import { fmtPrice, fmtPct, fmtAbsPct, fmtSigned, clsByVal } from '@/utils/format'
 import { formatBeijingDateTimeMinute } from '@/utils/datetime'
 import { use as echartsUse } from 'echarts/core'
-import { LineChart } from 'echarts/charts'
-import { GridComponent, TooltipComponent, MarkLineComponent } from 'echarts/components'
+import { LineChart, ScatterChart } from 'echarts/charts'
+import { GridComponent, TooltipComponent, MarkLineComponent, MarkAreaComponent, MarkPointComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
 import type { EChartsOption } from 'echarts'
 
-echartsUse([CanvasRenderer, LineChart, GridComponent, TooltipComponent, MarkLineComponent])
+echartsUse([CanvasRenderer, LineChart, ScatterChart, GridComponent, TooltipComponent, MarkLineComponent, MarkAreaComponent, MarkPointComponent])
 
 const route = useRoute()
 const loading = ref(false)
@@ -1034,6 +1092,7 @@ async function loadPosition(refresh = false) {
     position.value = res
     // 基线仍在后台构建：40s 后再试一次，避免用户手动刷新
     if (!res?.ready) schedulePositionRetry()
+    else initSelectedDate()
   } catch (e: any) {
     console.warn('[MarketReview] 大盘位置加载失败', e?.message || e)
   } finally {
@@ -1048,6 +1107,81 @@ function schedulePositionRetry() {
     if (!position.value?.ready) loadPosition(false)
   }, 40000)
 }
+
+// ── 同分位时点行业榜联动（主图橙点 / 点击曲线 → 当日·其后20日行业涨跌） ──
+const selectedDate = ref('')
+const industryMode = ref<'day' | 'fwd20'>('day')
+const industryData = ref<PositionIndustryAt | null>(null)
+const industryLoading = ref(false)
+let industryRetryTimer: number | undefined
+
+/** 默认选中「当前时点」：曲线最后一个交易日 */
+function initSelectedDate() {
+  const pts = position.value?.composite.series || []
+  const last = pts[pts.length - 1]?.date
+  if (last && !selectedDate.value) selectDate(last)
+}
+
+function selectDate(date: string) {
+  if (!date || date === selectedDate.value) {
+    if (date) loadIndustryAt()
+    return
+  }
+  selectedDate.value = date
+  loadIndustryAt()
+}
+
+/** 选中日期在曲线上的点（合成分位）；抽稀曲线未覆盖该日则为 null */
+const selectedPoint = computed(() => {
+  const pts = position.value?.composite.series || []
+  return pts.find(p => p.date === selectedDate.value) || null
+})
+
+/** 选中日期若是同分位历史时点，给出其后 20 日收益 */
+const selectedSameLevel = computed(() =>
+  (position.value?.same_level || []).find(s => s.date === selectedDate.value) || null,
+)
+
+async function loadIndustryAt() {
+  if (!selectedDate.value) return
+  industryLoading.value = true
+  if (industryRetryTimer) { clearTimeout(industryRetryTimer); industryRetryTimer = undefined }
+  try {
+    const res = await vibeApi.getPositionIndustryAt(selectedDate.value, industryMode.value)
+    industryData.value = res
+    // 行业基线仍在回填：30s 后自动重试一次
+    if (!res?.ready) {
+      industryRetryTimer = window.setTimeout(() => {
+        industryRetryTimer = undefined
+        if (industryData.value && !industryData.value.ready) loadIndustryAt()
+      }, 30000)
+    }
+  } catch (e: any) {
+    console.warn('[MarketReview] 同分位行业榜加载失败', e?.message || e)
+    industryData.value = null
+  } finally {
+    industryLoading.value = false
+  }
+}
+
+/** 主图点击：取该点日期 → 联动行业榜 */
+function onCompositeClick(params: any) {
+  const date = String(params?.name || '')
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date)) selectDate(date)
+}
+
+/** 行业榜条形宽度：按两榜最大绝对涨跌幅归一化 */
+const industryMaxAbs = computed(() => {
+  const rows = [...(industryData.value?.up || []), ...(industryData.value?.down || [])]
+  return Math.max(0.5, ...rows.map(r => Math.abs(r.pct || 0)))
+})
+
+const industryBarW = (pct: number) =>
+  Math.max(6, Math.min(100, (Math.abs(pct || 0) / industryMaxAbs.value) * 100))
+
+const industryTip = (r: PositionIndustryRow) =>
+  `${r.industry}：行业等权指数涨跌幅 ${r.pct > 0 ? '+' : ''}${r.pct}%（${r.n} 家成分股等权）` +
+  (r.up_pct == null ? '' : `，其中 ${r.up_pct}% 个股上涨`)
 
 /** 分位配色：高位偏热、低位偏冷（仅用于分位条，不用于涨跌） */
 const posTone = (pct?: number | null) =>
@@ -1088,7 +1222,8 @@ function posMetricTip(m: MarketPositionMetric): string {
     const dir = m.higher_is_hot ? '越高越热' : '越高越冷'
     parts.push(`当前值处于历史 ${m.percentile}% 分位（${dir}），横条按热度分位 ${heatOfMetric(m)}% 展示`)
   }
-  if (m.samples) parts.push(`样本 ${m.samples} 个交易日 / 近 ${m.window_years} 年，不含今日实时值`)
+  if (m.percentile_1y != null) parts.push(`近 1 年分位 ${m.percentile_1y}%（与近 10 年分位对照，识别长期漂移）`)
+  if (m.samples) parts.push(`样本 ${m.samples} 个交易日，不含今日实时值`)
   const p = position.value
   if (p?.live && m.as_of && m.as_of !== p.as_of) parts.push(`数据日期 ${m.as_of}（非今日实时）`)
   return parts.join('。')
@@ -1207,10 +1342,9 @@ const posDistance = computed(() => {
 const posVerdict = computed(() => {
   const pct = compositePct.value
   const zone = position.value?.composite.zone
-  const yrs = position.value?.window_years ?? 10
   if (pct == null) return { title: '暂无合成分位', sub: '历史样本不足，先看下方单项指标' }
   if (zone === 'overheated') {
-    return { title: '接近顶部（逃顶信号区）', sub: `合成分位 ${pct}%，多数指标处于近 ${yrs} 年最热 20%；追高赔率下降` }
+    return { title: '接近顶部（逃顶信号区）', sub: `合成分位 ${pct}%，多数指标处于近 10 年最热 20%；追高赔率下降` }
   }
   if (zone === 'warm') {
     return { title: '偏高但还不是顶', sub: `合成分位 ${pct}%，位于偏热区（60–80）；持仓为主，新增仓位等回踩确认` }
@@ -1219,7 +1353,7 @@ const posVerdict = computed(() => {
     return { title: '偏低但还不是底', sub: `合成分位 ${pct}%，位于偏冷区（20–40）；关注修复信号，不急着抢跑` }
   }
   if (zone === 'oversold') {
-    return { title: '接近底部（判底观察区）', sub: `合成分位 ${pct}%，多项指标处于近 ${yrs} 年最冷 20%；等宽度回升与波动率回落再分批建仓` }
+    return { title: '接近底部（判底观察区）', sub: `合成分位 ${pct}%，多项指标处于近 10 年最冷 20%；等宽度回升与波动率回落再分批建仓` }
   }
   return {
     title: '既不是顶，也不是底',
@@ -1227,24 +1361,52 @@ const posVerdict = computed(() => {
   }
 })
 
-/** 近 10 年合成分位走势（标线：80 逃顶 / 20 判底） */
+/** 近 10 年合成分位走势（标线：80 逃顶 / 20 判底；橙点：同分位历史时点；灰区：参照系未成形） */
 const compositeChartOption = computed<EChartsOption | null>(() => {
   const pts = position.value?.composite.series || []
   if (pts.length < 2) return null
   const th = position.value?.composite.thresholds || { top: 80, bottom: 20 }
+  const dates = pts.map(p => p.date)
+  // 曲线前 365 天为参照系未成形区（量比基准需约 200 个交易日成形）
+  const winStart = position.value?.window?.start || dates[0]
+  const immatureEnd = (() => {
+    const d = new Date(`${winStart}T00:00:00`)
+    d.setDate(d.getDate() + 365)
+    const iso = d.toISOString().slice(0, 10)
+    return dates.find(x => x >= iso) || dates[Math.min(dates.length - 1, 40)]
+  })()
+  // 同分位历史时点 → 橙点（日期已在后端并入曲线 x 轴，可直接按类目匹配）
+  const sameDots = (position.value?.same_level || [])
+    .map(s => {
+      const i = dates.indexOf(s.date)
+      return i < 0 ? null : { coord: [i, s.pct], date: s.date, pct: s.pct, fwd20: s.fwd20 }
+    })
+    .filter(Boolean) as { coord: [number, number]; date: string; pct: number; fwd20: number | null }[]
+  const cur = position.value?.composite.percentile
+  const lastIdx = dates.length - 1
   const option: EChartsOption = {
-    grid: { left: 6, right: 46, top: 12, bottom: 4, containLabel: true },
+    grid: { left: 6, right: 46, top: 18, bottom: 4, containLabel: true },
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'line' },
       formatter: (p: any) => {
-        const it = Array.isArray(p) ? p[0] : p
-        return `${it?.axisValue ?? ''}<br/>合成分位 <b>${it?.value ?? '—'}%</b>`
+        const arr = Array.isArray(p) ? p : [p]
+        const it = arr[0]
+        const date = String(it?.axisValue ?? '')
+        const line = arr.find((x: any) => x?.seriesType === 'line')
+        const dot = sameDots.find(s => s.date === date)
+        let html = `${date}<br/>合成分位 <b>${line?.value ?? '—'}%</b>`
+        if (dot) {
+          html += `<br/><span style="color:#e6a23c">● 与当前同分位时点</span>`
+          if (dot.fwd20 != null) html += `<br/>其后 20 日收益 <b>${dot.fwd20 > 0 ? '+' : ''}${dot.fwd20}%</b>`
+        }
+        html += '<br/><span style="color:#9aa0a6;font-size:11px">点击看当日行业涨跌</span>'
+        return html
       },
     },
     xAxis: {
       type: 'category',
-      data: pts.map(p => p.date),
+      data: dates,
       boundaryGap: false,
       axisTick: { show: false },
       axisLine: { lineStyle: { color: '#e5e7eb' } },
@@ -1291,6 +1453,28 @@ const compositeChartOption = computed<EChartsOption | null>(() => {
             },
           ],
         },
+        markArea: {
+          silent: true,
+          itemStyle: { color: 'rgba(154,160,166,.10)' },
+          label: { color: '#9aa0a6', fontSize: 10, position: 'insideTop' },
+          data: [[{ name: '参照系未成形', xAxis: dates[0] }, { xAxis: immatureEnd }]],
+        },
+        markPoint: {
+          silent: true,
+          symbol: 'pin',
+          symbolSize: 42,
+          itemStyle: { color: '#2b6cb0' },
+          label: { color: '#fff', fontSize: 10, fontWeight: 700, formatter: '今' },
+          data: cur == null ? [] : [{ coord: [lastIdx, cur] }],
+        },
+      },
+      {
+        type: 'scatter',
+        name: '同分位时点',
+        data: sameDots.map(s => s.coord),
+        symbolSize: 9,
+        itemStyle: { color: '#e6a23c', borderColor: '#fff', borderWidth: 1.5 },
+        z: 5,
       },
     ],
   }
@@ -1720,14 +1904,6 @@ const liveHint = computed(() => {
   if (s === 'closed' && metrics.value?.status_label === '休市') return '（非交易日，展示最近一个交易日）'
   return '（当日数据已定）'
 })
-
-// 分位配色：热度指标高分为热（红），低分为冷（绿），中间中性
-const rankTone = (t: MarketTemperatureItem) => {
-  if (t.rank == null) return 'is-muted'
-  // 反向指标（跌停家数）：分位越高说明越冷，配色需翻转，避免「高跌停=红色热」的误读
-  const hot = t.higher_is_hot ? t.rank : 100 - t.rank
-  return hot >= 75 ? 'is-hot' : hot <= 25 ? 'is-cold' : 'is-neutral'
-}
 
 // 宽度曲线：上涨率（实线+渐变面积）与站上20日线占比（虚线）同为 0-100%，共用一根纵轴。
 // SVG 用 0-100 归一坐标（preserveAspectRatio="none"）保证任意宽度都能铺满；
@@ -2190,126 +2366,6 @@ onActivated(() => {
 
 .alert-row--calm {
   margin-bottom: 10px;
-}
-
-/* 温度分位卡：一条分位条 + 中位刻度（50%） */
-.temp-headline {
-  margin: 2px 0 8px;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
-}
-
-.temp-headline .dist-note {
-  display: inline;
-  margin: 0 0 0 10px;
-  font-weight: 400;
-}
-
-.temp-grid {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 10px;
-  margin-bottom: 12px;
-}
-
-.temp-item {
-  background: var(--el-fill-color-blank);
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
-  padding: 12px 14px;
-}
-
-.temp-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.temp-label {
-  font-size: 12.5px;
-  color: var(--el-text-color-regular);
-}
-
-.temp-value {
-  font-family: var(--app-font-mono);
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
-}
-
-.temp-value em {
-  font-style: normal;
-  font-size: 11px;
-  font-weight: 400;
-  color: var(--el-text-color-secondary);
-  margin-left: 2px;
-}
-
-.temp-track {
-  position: relative;
-  height: 6px;
-  border-radius: 3px;
-  background: var(--el-fill-color-lighter);
-  margin: 10px 0 6px;
-}
-
-.temp-fill {
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  border-radius: 3px;
-  transition: width 0.3s ease;
-}
-
-.temp-fill.is-hot { background: var(--app-up); }
-.temp-fill.is-cold { background: var(--app-down); }
-.temp-fill.is-neutral { background: var(--el-color-primary); }
-.temp-fill.is-muted { background: var(--el-border-color); }
-
-.temp-median {
-  position: absolute;
-  left: 50%;
-  top: -2px;
-  bottom: -2px;
-  width: 1px;
-  background: var(--el-text-color-placeholder);
-  opacity: 0.7;
-}
-
-.temp-foot {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 6px;
-  font-size: 11.5px;
-  color: var(--el-text-color-secondary);
-}
-
-.temp-foot b.is-hot { color: var(--app-up); }
-.temp-foot b.is-cold { color: var(--app-down); }
-.temp-foot b.is-neutral { color: var(--el-color-primary); }
-.temp-foot b.is-muted { color: var(--el-text-color-placeholder); }
-
-.temp-med {
-  color: var(--el-text-color-placeholder);
-}
-
-/* 反向指标标注（跌停家数：分位越高越冷） */
-.temp-rev {
-  font-style: normal;
-  margin-left: 4px;
-  padding: 0 4px;
-  border-radius: 4px;
-  font-size: 10px;
-  color: var(--el-text-color-placeholder);
-  background: var(--el-fill-color-light);
-}
-
-.temp-pending {
-  color: var(--el-text-color-placeholder);
 }
 
 /* 宽度曲线（整行） */
@@ -3195,17 +3251,12 @@ onActivated(() => {
 .dist-foot b.up { color: var(--app-up); }
 .dist-foot b.down { color: var(--app-down); }
 
-@media (max-width: 1200px) {
-  .temp-grid { grid-template-columns: repeat(3, 1fr); }
-}
-
 @media (max-width: 900px) {
   .mini-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 768px) {
   .dash-main { grid-template-columns: 1fr; }
-  .temp-grid { grid-template-columns: repeat(2, 1fr); }
   .bw-canvas { height: 140px; }
   .bw-yaxis { height: 140px; }
   .snap-row { grid-template-columns: repeat(3, 1fr); gap: 8px; }
@@ -4243,6 +4294,133 @@ onActivated(() => {
 .pos-bullet-pct.is-hot { color: var(--app-up); }
 .pos-bullet-pct.is-cold { color: var(--app-down); }
 .pos-bullet-pct.is-neutral { color: var(--el-text-color-regular); }
+/* 近 1 年分位对照细刻度：竖立在 10 年分位条上的小刻度线 */
+.pos-bullet-1y {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--el-text-color-secondary);
+  opacity: .85;
+}
+.pos-bullet-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 16px;
+  color: var(--el-text-color-placeholder);
+  background: var(--el-fill-color);
+  white-space: nowrap;
+}
+
+/* ── 同分位时点行业榜联动卡 ── */
+.chart-360 { width: 100%; height: 360px; }
+.pos-link {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 14px;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  background: var(--el-bg-color-page);
+}
+.pos-link-date { display: flex; align-items: baseline; gap: 8px; }
+.pos-link-date b {
+  font-family: var(--app-font-mono);
+  font-size: 16px;
+  color: var(--el-text-color-primary);
+}
+.pos-link-pct { font-size: 12px; font-weight: 600; }
+.pos-link-pct.is-hot { color: var(--app-up); }
+.pos-link-pct.is-cold { color: var(--app-down); }
+.pos-link-pct.is-neutral { color: var(--el-color-primary); }
+.pos-link-pct.is-muted { color: var(--el-text-color-placeholder); }
+.pos-link-fwd { margin-top: 8px; font-size: 12px; color: var(--el-text-color-secondary); }
+.pos-link-fwd b { margin-left: 4px; font-family: var(--app-font-mono); font-size: 13px; }
+.pos-link-chips {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+.pos-link-chips-cap { font-size: 11px; color: var(--el-text-color-placeholder); }
+.pos-link-chip {
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--el-border-color-lighter);
+  font-family: var(--app-font-mono);
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  transition: all .15s;
+}
+.pos-link-chip:hover { border-color: #e6a23c; color: #e6a23c; }
+.pos-link-chip.is-on {
+  border-color: #e6a23c;
+  background: #e6a23c;
+  color: #fff;
+}
+.pos-ind-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.pos-ind-range { font-size: 11px; color: var(--el-text-color-placeholder); }
+.pos-ind-empty {
+  padding: 24px 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--el-text-color-placeholder);
+}
+.pos-ind-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.pos-ind-col-title { font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+.pos-ind-col-title.is-up { color: var(--app-up); }
+.pos-ind-col-title.is-down { color: var(--app-down); }
+.pos-ind-row {
+  display: grid;
+  grid-template-columns: 76px 1fr 62px auto;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 12px;
+}
+.pos-ind-name {
+  color: var(--el-text-color-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pos-ind-track {
+  position: relative;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--el-fill-color-light);
+  overflow: hidden;
+}
+.pos-ind-bar { position: absolute; inset: 0 auto 0 0; border-radius: 4px; }
+.pos-ind-bar.up { background: var(--app-up); }
+.pos-ind-bar.down { background: var(--app-down); }
+.pos-ind-pct { font-family: var(--app-font-mono); font-weight: 700; text-align: right; }
+.pos-ind-pct.up { color: var(--app-up); }
+.pos-ind-pct.down { color: var(--app-down); }
+.pos-ind-meta {
+  font-size: 10.5px;
+  color: var(--el-text-color-placeholder);
+  white-space: nowrap;
+}
 
 .pos-div-row {
   display: flex;
@@ -4373,6 +4551,11 @@ onActivated(() => {
   .pos-score-cap { margin-top: 0; }
   .pos-gauge-band { font-size: 9px; letter-spacing: 0; }
   .chart-200 { height: 180px; }
+  .chart-360 { height: 260px; }
+
+  /* 行业榜联动卡：窄屏单列 */
+  .pos-link { grid-template-columns: 1fr; }
+  .pos-ind-cols { grid-template-columns: 1fr; }
 
   /* 指标横条 / 未来收益条形 */
   .pos-bullet { grid-template-columns: 92px minmax(0, 1fr) 58px 38px; gap: 6px; }
