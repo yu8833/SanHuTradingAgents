@@ -401,7 +401,7 @@
       <div class="mr-sec-head">
         <span class="mr-sec-no">03</span>
         <span class="mr-sec-title">当前位置</span>
-        <span class="mr-sec-hint">估值 / 位置 / 情绪 / 参与度 / 底部特征的历史分位（近 10 年），用来判断「接近顶部」还是「接近底部」；盘中自动纳入今日实时数据</span>
+        <span class="mr-sec-hint">把今天的读数放进近 10 年里排队，看它排在哪个位置</span>
         <span class="mr-sec-actions">
           <span v-if="position?.as_of" class="data-time">
             数据 {{ position.as_of }}<em v-if="position.live" class="pos-live-tag">今日实时</em>
@@ -424,19 +424,15 @@
       </div>
 
       <template v-else>
-        <!-- 位置标尺：0–100 分位 + 五档分区 + 指针；回答「现在离顶 / 离底有多远」 -->
+        <!-- 位置标尺：0–100 分位 + 五档分区 + 指针；结论、距离、操作建议全部收在这一块 -->
         <div class="pos-hero" :class="'zone-' + position.composite.zone">
           <div class="pos-hero-head">
             <div class="pos-hero-left">
-              <span class="pos-zone-badge">{{ position.composite.label }}</span>
-              <div class="pos-verdict">
-                <div class="pos-verdict-title">{{ posVerdict.title }}</div>
-                <div class="pos-verdict-sub">{{ posVerdict.sub }}</div>
-              </div>
+              <div class="pos-verdict-title">{{ posVerdict.title }}</div>
             </div>
             <div class="pos-hero-score">
               <div class="pos-score-num">{{ compositePct ?? '—' }}<em>%</em></div>
-              <div class="pos-score-cap">合成分位</div>
+              <div class="pos-score-cap">近 10 年合成分位</div>
             </div>
           </div>
 
@@ -455,82 +451,32 @@
             <div class="pos-gauge-scale">
               <span v-for="t in GAUGE_TICKS" :key="t" :style="{ left: t + '%' }">{{ t }}</span>
             </div>
-            <div class="pos-gauge-dots">
-              <el-tooltip
-                v-for="d in heatDots"
-                :key="d.key"
-                :content="`${d.label}：热度分位 ${d.pct}%`"
-                placement="top"
-              >
-                <span
-                  class="pos-gauge-dot"
-                  :class="[d.tone, { 'is-low': d.row }]"
-                  :style="{ left: d.pct + '%' }"
-                />
-              </el-tooltip>
-            </div>
           </div>
 
-          <div class="pos-distance">
+          <div class="pos-hero-foot">
             <span
               v-for="c in posDistance"
               :key="c.key"
               class="pos-distance-chip"
               :class="c.tone"
             >{{ c.text }}</span>
-            <span class="pos-distance-chip is-meta">
-              近 10 年（{{ position.window?.start }} ~ {{ position.window?.end }}）· {{ position.samples }} 个交易日样本 · 截至 {{ position.as_of }}{{ position.live ? '（含今日实时值）' : '' }}
-            </span>
+            <span class="pos-advice-inline">{{ position.composite.advice }}</span>
           </div>
 
-          <p class="pos-advice">{{ position.composite.advice }}</p>
-        </div>
-
-        <!-- 逃顶 / 判断底部：触发阈值 + 历史同档位的真实表现（不是口号） -->
-        <div v-if="posGuides.length" class="pos-guide">
-          <div
-            v-for="g in posGuides"
-            :key="g.key"
-            class="pos-guide-card"
-            :class="[`is-${g.key}`, { 'is-active': g.active }]"
-          >
-            <div class="pos-guide-head">
-              <span class="pos-guide-title">{{ g.title }}</span>
-              <em class="pos-guide-flag" :class="{ 'is-on': g.active }">
-                {{ g.active ? '当前已进入该区' : `触发 ${g.key === 'top' ? '≥' : '≤'}${g.threshold ?? (g.key === 'top' ? 80 : 20)}` }}
-              </em>
-            </div>
-            <div class="pos-guide-track">
-              <i class="pos-guide-zone" :class="`is-${g.key}`" />
-              <i v-if="compositePct != null" class="pos-guide-cursor" :style="{ left: compositePct + '%' }">
-                <b>{{ compositePct }}</b>
-              </i>
-            </div>
-            <div class="pos-guide-rule">{{ g.rule }}</div>
-            <div class="pos-guide-stats">{{ g.stats }}</div>
-            <div class="pos-guide-advice">{{ g.advice }}</div>
-          </div>
-        </div>
-
-        <!-- 合成分位是什么：7 项热度分位的平均 + 当前内部结构 -->
-        <div class="pos-explain">
-          <div class="pos-explain-text">
-            <el-icon><InfoFilled /></el-icon>
-            <span>
-              合成分位 = 把 {{ componentHeat.length }} 个长历史指标各自折算成 0–100 的「热度分位」再取平均：
-              0% ≈ 近 10 年最冷，100% ≈ 最热；≥80 为逃顶信号区，≤20 为判底观察区。
-            </span>
-          </div>
-          <div class="pos-comp-chips">
+          <!-- 历史同分位时点的真实表现：只说数据，不重复阈值与建议 -->
+          <div v-if="posGuides.length" class="pos-guide-line">
             <span
-              v-for="c in componentHeat"
-              :key="c.key"
-              class="pos-comp-chip"
-              :class="c.tone"
+              v-for="g in posGuides"
+              :key="g.key"
+              class="pos-guide-item"
+              :class="[`is-${g.key}`, { 'is-active': g.active }]"
             >
-              <i /><em>{{ c.label }}</em><b>{{ c.pct }}%</b>
+              <b>{{ g.title.split('（')[0] }}</b>
+              <span>{{ g.stats }}</span>
+              <em v-if="g.active">当前已触发</em>
             </span>
           </div>
+
           <div v-if="heatSpread" class="pos-spread">
             <el-icon><WarnTriangleFilled /></el-icon>
             <span>{{ heatSpread.text }}</span>
@@ -541,9 +487,7 @@
         <div v-if="compositeChartOption" class="pos-chart">
           <div class="pos-block-head">
             近 10 年合成分位走势
-            <span class="dist-note">
-              虚线：上 80 逃顶 / 下 20 判底 · 灰色区为参照系未成形 · 橙点 = 与当前同分位的历史时点 · 点击曲线看当日行业涨跌
-            </span>
+            <span class="dist-note">点曲线任一点 → 看那天各行业涨跌</span>
           </div>
           <VChart
             :option="compositeChartOption"
@@ -1067,12 +1011,12 @@ import { fmtPrice, fmtPct, fmtAbsPct, fmtSigned, clsByVal } from '@/utils/format
 import { formatBeijingDateTimeMinute } from '@/utils/datetime'
 import { use as echartsUse } from 'echarts/core'
 import { LineChart, ScatterChart } from 'echarts/charts'
-import { GridComponent, TooltipComponent, MarkLineComponent, MarkAreaComponent, MarkPointComponent } from 'echarts/components'
+import { GridComponent, TooltipComponent, LegendComponent, MarkLineComponent, MarkAreaComponent, MarkPointComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
 import type { EChartsOption } from 'echarts'
 
-echartsUse([CanvasRenderer, LineChart, ScatterChart, GridComponent, TooltipComponent, MarkLineComponent, MarkAreaComponent, MarkPointComponent])
+echartsUse([CanvasRenderer, LineChart, ScatterChart, GridComponent, TooltipComponent, LegendComponent, MarkLineComponent, MarkAreaComponent, MarkPointComponent])
 
 const route = useRoute()
 const loading = ref(false)
@@ -1298,59 +1242,21 @@ const GAUGE_BANDS = [
 ]
 const GAUGE_TICKS = [0, 20, 40, 60, 80, 100]
 
-/** 指标简称（标尺刻点与内部结构 chips 用） */
-const POSITION_SHORT: Record<string, string> = {
-  drawdown: '回撤',
-  ma250_dev: '年线偏离',
-  amplitude: '振幅',
-  volatility: '波动率',
-  amount: '成交额',
-  up_pct: '上涨家数',
-  low_price: '低价股',
-  valuation_pe: 'PE',
-  valuation_pb: 'PB',
-}
-
 const compositePct = computed(() => position.value?.composite.percentile ?? null)
-
-/** 参与合成的指标：折算成热度分位后的刻点（标尺上的小圆点） */
-const heatDots = computed(() => {
-  const list = (position.value?.position || []).filter(m => m.in_composite && m.percentile != null)
-  return list.map((m, i) => {
-    const pct = heatOfMetric(m) as number
-    return {
-      key: m.key,
-      label: POSITION_SHORT[m.key] || m.label,
-      pct,
-      tone: posTone(pct),
-      row: i % 2 === 1,
-    }
-  })
-})
-
-/** 参与合成的指标按热度从高到低排列（内部结构 chips） */
-const componentHeat = computed(() =>
-  (position.value?.position || [])
-    .filter(m => m.in_composite && m.percentile != null)
-    .map(m => ({
-      key: m.key,
-      label: POSITION_SHORT[m.key] || m.label,
-      pct: heatOfMetric(m) as number,
-      tone: posTone(heatOfMetric(m)),
-    }))
-    .sort((a, b) => b.pct - a.pct),
-)
 
 /** 内部高度分化时给一句话解释：为什么合成分位不高不低 */
 const heatSpread = computed(() => {
-  const c = componentHeat.value
+  const c = (position.value?.position || [])
+    .filter(m => m.in_composite && m.percentile != null)
+    .map(m => ({ label: m.label, pct: heatOfMetric(m) as number }))
+    .sort((a, b) => b.pct - a.pct)
   if (c.length < 2) return null
   const hot = c[0]
   const cold = c[c.length - 1]
   const gap = hot.pct - cold.pct
   if (gap < 40) return null
   const tail = position.value?.composite.zone === 'neutral'
-    ? '两端相互抵消，合成值落在中位区，所以现在既不像顶、也不像底'
+    ? '两端相互抵消，合成值看着中性，内部其实在撕裂'
     : '合成值由多数指标决定，极端项需结合下方单项指标判断'
   return {
     hot,
@@ -1377,25 +1283,13 @@ const posDistance = computed(() => {
 
 /** 一句话判定：现在到底是顶、底，还是都不是 */
 const posVerdict = computed(() => {
-  const pct = compositePct.value
   const zone = position.value?.composite.zone
-  if (pct == null) return { title: '暂无合成分位', sub: '历史样本不足，先看下方单项指标' }
-  if (zone === 'overheated') {
-    return { title: '接近顶部（逃顶信号区）', sub: `合成分位 ${pct}%，多数指标处于近 10 年最热 20%；追高赔率下降` }
-  }
-  if (zone === 'warm') {
-    return { title: '偏高但还不是顶', sub: `合成分位 ${pct}%，位于偏热区（60–80）；持仓为主，新增仓位等回踩确认` }
-  }
-  if (zone === 'cool') {
-    return { title: '偏低但还不是底', sub: `合成分位 ${pct}%，位于偏冷区（20–40）；关注修复信号，不急着抢跑` }
-  }
-  if (zone === 'oversold') {
-    return { title: '接近底部（判底观察区）', sub: `合成分位 ${pct}%，多项指标处于近 10 年最冷 20%；等宽度回升与波动率回落再分批建仓` }
-  }
-  return {
-    title: '既不是顶，也不是底',
-    sub: `合成分位 ${pct}%，落在中位区（40–60）；位置层面不做加减仓，跟随趋势与事件交易`,
-  }
+  if (compositePct.value == null) return { title: '暂无合成分位' }
+  if (zone === 'overheated') return { title: '接近顶部（逃顶信号区）' }
+  if (zone === 'warm') return { title: '偏高，但还不是顶' }
+  if (zone === 'cool') return { title: '偏低，但还不是底' }
+  if (zone === 'oversold') return { title: '接近底部（判底观察区）' }
+  return { title: '位置中性' }
 })
 
 /** 近 10 年合成分位走势（标线：80 逃顶 / 20 判底；橙点：同分位历史时点；灰区：参照系未成形） */
@@ -1422,7 +1316,17 @@ const compositeChartOption = computed<EChartsOption | null>(() => {
   const cur = position.value?.composite.percentile
   const lastIdx = dates.length - 1
   const option: EChartsOption = {
-    grid: { left: 6, right: 46, top: 18, bottom: 4, containLabel: true },
+    grid: { left: 6, right: 46, top: 40, bottom: 4, containLabel: true },
+    legend: {
+      top: 2,
+      left: 2,
+      itemWidth: 14,
+      itemHeight: 8,
+      itemGap: 16,
+      icon: 'roundRect',
+      textStyle: { fontSize: 11, color: '#9aa0a6' },
+      data: ['合成分位', '同分位历史时点'],
+    },
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'line' },
@@ -1507,7 +1411,7 @@ const compositeChartOption = computed<EChartsOption | null>(() => {
       },
       {
         type: 'scatter',
-        name: '同分位时点',
+        name: '同分位历史时点',
         data: sameDots.map(s => s.coord),
         symbolSize: 9,
         itemStyle: { color: '#e6a23c', borderColor: '#fff', borderWidth: 1.5 },
@@ -3932,19 +3836,6 @@ onActivated(() => {
   gap: 12px;
   min-width: 0;
 }
-.pos-zone-badge {
-  flex: none;
-  padding: 3px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-.pos-hero.zone-overheated .pos-zone-badge { color: #fff; background: var(--app-up); }
-.pos-hero.zone-warm .pos-zone-badge { color: #b26a00; background: rgba(230, 162, 60, .16); }
-.pos-hero.zone-neutral .pos-zone-badge { color: var(--el-color-primary); background: rgba(43, 108, 176, .12); }
-.pos-hero.zone-cool .pos-zone-badge { color: #3f8a2e; background: rgba(103, 194, 58, .14); }
-.pos-hero.zone-oversold .pos-zone-badge { color: #fff; background: var(--app-down); }
 .pos-verdict-title {
   font-size: 18px;
   font-weight: 800;
@@ -4043,26 +3934,6 @@ onActivated(() => {
   font-size: 10.5px;
   color: var(--el-text-color-placeholder);
 }
-.pos-gauge-dots {
-  position: relative;
-  height: 24px;
-  margin-top: 1px;
-}
-.pos-gauge-dot {
-  position: absolute;
-  top: 2px;
-  width: 8px;
-  height: 8px;
-  margin-left: -4px;
-  border-radius: 50%;
-  box-shadow: 0 0 0 2px var(--el-fill-color-blank);
-}
-.pos-gauge-dot.is-low { top: 14px; }
-.pos-gauge-dot.is-hot { background: var(--app-up); }
-.pos-gauge-dot.is-cold { background: var(--app-down); }
-.pos-gauge-dot.is-neutral { background: var(--el-color-primary); }
-.pos-gauge-dot.is-muted { background: var(--el-border-color); }
-
 .pos-distance {
   display: flex;
   flex-wrap: wrap;
@@ -4088,77 +3959,57 @@ onActivated(() => {
   color: var(--el-text-color-regular);
 }
 
-/* 逃顶 / 判断底部：触发阈值条 + 历史证据 */
-.pos-guide {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+/* 距离 + 操作建议合并成一行，避免与色带、结论重复 */
+.pos-hero-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
   margin-top: 10px;
 }
-.pos-guide-card {
-  padding: 12px 14px;
-  border-radius: 10px;
-  border: 1px solid var(--el-border-color-lighter);
-  border-top: 3px solid var(--el-border-color);
-  background: var(--el-fill-color-blank);
+.pos-advice-inline {
+  font-size: 12.5px;
+  color: var(--el-text-color-regular);
 }
-.pos-guide-card.is-top { border-top-color: var(--app-up); }
-.pos-guide-card.is-bottom { border-top-color: var(--app-down); }
-.pos-guide-card.is-active { background: var(--el-fill-color-light); }
-.pos-guide-head {
+
+/* 历史同档位表现：只留数据，阈值由色带承担 */
+.pos-guide-line {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px dashed var(--el-border-color-lighter);
+  font-size: 11.5px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.6;
 }
-.pos-guide-title { font-size: 13px; font-weight: 700; color: var(--el-text-color-primary); }
-.pos-guide-flag {
+.pos-guide-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+  flex: 1 1 320px;
+  min-width: 0;
+}
+.pos-guide-item b {
   flex: none;
   padding: 0 6px;
-  border-radius: 8px;
-  font-style: normal;
+  border-radius: 4px;
   font-size: 11px;
-  color: var(--el-text-color-placeholder);
-  background: var(--el-fill-color-light);
+  font-weight: 600;
+  color: #fff;
+  background: var(--el-text-color-placeholder);
 }
-.pos-guide-flag.is-on { color: var(--el-color-warning); background: rgba(230, 162, 60, .14); }
-.pos-guide-track {
-  position: relative;
-  height: 6px;
-  margin-top: 14px;
-  border-radius: 3px;
-  background: var(--el-fill-color-light);
+.pos-guide-item.is-top b { background: var(--app-up); }
+.pos-guide-item.is-bottom b { background: var(--app-down); }
+.pos-guide-item > span { min-width: 0; }
+.pos-guide-item em {
+  flex: none;
+  font-style: normal;
+  color: var(--app-up);
+  font-weight: 600;
 }
-.pos-guide-zone {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  border-radius: 3px;
-}
-.pos-guide-zone.is-top { left: 80%; right: 0; background: linear-gradient(90deg, rgba(232, 115, 108, .35), var(--app-up)); }
-.pos-guide-zone.is-bottom { left: 0; width: 20%; background: linear-gradient(90deg, var(--app-down), rgba(92, 184, 122, .35)); }
-.pos-guide-cursor {
-  position: absolute;
-  top: -3px;
-  bottom: -3px;
-  width: 2px;
-  margin-left: -1px;
-  border-radius: 2px;
-  background: var(--el-text-color-primary);
-}
-.pos-guide-cursor b {
-  position: absolute;
-  top: -13px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-family: var(--app-font-mono);
-  font-size: 10px;
-  color: var(--el-text-color-primary);
-}
-.pos-guide-rule { margin-top: 14px; font-size: 12px; color: var(--el-text-color-secondary); }
-.pos-guide-stats { margin-top: 4px; font-size: 12px; color: var(--el-text-color-regular); }
-.pos-guide-advice { margin-top: 4px; font-size: 12px; color: var(--el-text-color-placeholder); }
-
 /* 指标分组：估值 / 位置 / 情绪 / 参与度 / 底部特征 */
 .pos-group { margin-top: 12px; }
 .pos-group-head {
@@ -4176,56 +4027,7 @@ onActivated(() => {
 }
 .pos-group .pos-bullets { margin-top: 6px; }
 
-/* 合成分位说明 + 内部结构 chips + 分化提示 */
-.pos-explain {
-  margin-top: 10px;
-  padding: 10px 14px;
-  border-radius: 10px;
-  border: 1px dashed var(--el-border-color);
-  background: var(--el-fill-color-lighter);
-}
-.pos-explain-text {
-  display: flex;
-  gap: 6px;
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--el-text-color-regular);
-}
-.pos-explain-text .el-icon {
-  flex: none;
-  margin-top: 2px;
-  color: var(--el-color-primary);
-}
-.pos-comp-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
-}
-.pos-comp-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 11.5px;
-  background: var(--el-fill-color-blank);
-  border: 1px solid var(--el-border-color-lighter);
-}
-.pos-comp-chip i {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-}
-.pos-comp-chip em { font-style: normal; color: var(--el-text-color-secondary); }
-.pos-comp-chip b { font-family: var(--app-font-mono); font-size: 11.5px; }
-.pos-comp-chip.is-hot i { background: var(--app-up); }
-.pos-comp-chip.is-hot b { color: var(--app-up); }
-.pos-comp-chip.is-cold i { background: var(--app-down); }
-.pos-comp-chip.is-cold b { color: var(--app-down); }
-.pos-comp-chip.is-neutral i { background: var(--el-color-primary); }
-.pos-comp-chip.is-neutral b { color: var(--el-color-primary); }
-.pos-comp-chip.is-muted i { background: var(--el-border-color); }
+/* 内部高度分化提示 */
 .pos-spread {
   display: flex;
   gap: 6px;
