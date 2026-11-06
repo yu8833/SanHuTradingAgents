@@ -525,34 +525,6 @@
               <span><i class="gk-hole" />样本短未参与 {{ dotCounts.outside }} 项</span>
               <span class="gk-hint">每一颗点 = 一项指标的近 10 年分位</span>
             </div>
-
-            <!-- 同一把分位尺的下半层：历史上待在该分位区间时，其后 20 日的真实表现 -->
-            <div v-if="position.forward" class="pos-gauge-fwd">
-              <i class="pf-zero" />
-              <span
-                v-for="b in position.forward.bins"
-                :key="b.key"
-                class="pf-col"
-                :class="{ 'is-current': b.key === position.forward.current_bin }"
-                :style="{ left: b.lo + '%', width: (b.hi - b.lo) + '%' }"
-                :title="`${b.label}：历史 n=${b.n}，其后 ${position.forward.day} 日等权涨跌幅中位 ${signedPct(b.median_return)}，胜率 ${b.win_rate == null ? '—' : b.win_rate + '%'}`"
-              >
-                <i
-                  class="pf-bar"
-                  :class="(b.median_return ?? 0) >= 0 ? 'up' : 'down'"
-                  :style="fwdBarStyle(b.median_return)"
-                />
-              </span>
-              <i v-if="compositePct != null" class="pf-now" :style="{ left: compositePct + '%' }" />
-            </div>
-            <p v-if="position.forward" class="pos-gauge-fwd-cap">
-              柱 = 历史上待在同一分位区间时，其后 {{ position.forward.day }} 日等权涨跌幅中位数
-              <template v-if="forwardBin">
-                ；当前落在「{{ forwardBin.label }}」，历史上该区间中位
-                <b :class="clsByVal(forwardBin.median_return)">{{ signedPct(forwardBin.median_return) }}</b>、胜率
-                {{ forwardBin.win_rate == null ? '—' : forwardBin.win_rate + '%' }}
-              </template>
-            </p>
           </div>
 
           <div class="pos-hero-foot">
@@ -661,66 +633,6 @@
                   <span class="pos-ind-pct down">{{ signedPct(r.pct) }}</span>
                   <span class="pos-ind-meta">{{ r.up_pct == null ? '' : `涨 ${r.up_pct}% · ` }}{{ r.n }} 家</span>
                 </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 单项指标：分组横条（统一按热度分位：越靠右越热，竖线为 50% 中位；细条为近 1 年分位对照） -->
-        <div class="pos-metrics">
-          <div class="pos-metrics-cap">
-            <p class="pm-legends">
-              <span class="pm-legend"><i class="lg-bar" />横条 + 圆点 = 当前值近 10 年分位</span>
-              <span class="pm-legend"><i class="lg-tick" />琥珀刻度 = 同一个值近 1 年分位</span>
-              <span class="pm-legend"><i class="lg-mid" />灰线 = 50% 中位</span>
-              <span class="pm-note-inline">最右数字为近 10 年分位；两处差距大 = 近一年常态已不同于十年</span>
-            </p>
-          </div>
-          <div v-for="grp in positionGroups" :key="grp.group" class="pos-group">
-            <div class="pos-group-head">
-              {{ grp.group }}<span class="pos-group-hint">{{ grp.hint }}</span>
-            </div>
-            <div class="pos-bullets">
-              <div v-for="m in grp.items" :key="m.key" class="pos-bullet">
-                <el-tooltip :content="posMetricTip(m)" placement="top" :show-after="200">
-                  <span class="pos-bullet-label">
-                    <span class="pos-bullet-name">{{ m.label }}</span>
-                    <em
-                      v-if="!m.in_composite"
-                      class="pos-bullet-short"
-                      title="该指标历史样本不足 3 年，暂不参与合成分位计算"
-                    >样本短</em>
-                    <el-icon><QuestionFilled /></el-icon>
-                  </span>
-                </el-tooltip>
-                <div class="pos-bullet-track">
-                  <i
-                    v-if="m.percentile != null"
-                    class="pos-bullet-fill"
-                    :class="posTone(heatOfMetric(m))"
-                    :style="{ width: (heatOfMetric(m) ?? 0) + '%' }"
-                  />
-                  <i
-                    v-if="m.percentile_1y != null"
-                    class="pos-bullet-1y"
-                    :title="`同一个当前值，在近 1 年里排 ${heat1yOfMetric(m)}%（近 10 年为 ${heatOfMetric(m)}%）`"
-                    :style="{ left: (heat1yOfMetric(m) ?? 0) + '%' }"
-                  />
-                  <i class="pos-bullet-med" title="中位 = 50% 分位" />
-                  <i
-                    v-if="m.percentile != null"
-                    class="pos-bullet-tip"
-                    :class="posTone(heatOfMetric(m))"
-                    :style="{ left: (heatOfMetric(m) ?? 0) + '%' }"
-                    :title="`当前值：近 10 年 ${heatOfMetric(m)}% 分位`"
-                  />
-                </div>
-                <span class="pos-bullet-value">
-                  {{ m.value == null ? '—' : m.value }}<em>{{ m.unit }}</em>
-                </span>
-                <span class="pos-bullet-pct" :class="posTone(heatOfMetric(m))">
-                  {{ m.percentile == null ? '—' : (heatOfMetric(m) ?? 0) + '%' }}
-                </span>
               </div>
             </div>
           </div>
@@ -1165,15 +1077,6 @@ const POSITION_GROUP_HINTS: Record<string, string> = {
   底部特征: '熊市末期特征',
 }
 
-const positionGroups = computed(() => {
-  const list = position.value?.position || []
-  const order = Object.keys(POSITION_GROUP_HINTS)
-  const rank = (s: string) => (order.indexOf(s) < 0 ? 99 : order.indexOf(s))
-  return [...new Set(list.map(m => m.group))]
-    .map(g => ({ group: g, hint: POSITION_GROUP_HINTS[g] || '', items: list.filter(m => m.group === g) }))
-    .sort((a, b) => rank(a.group) - rank(b.group))
-})
-
 /** 逃顶 / 判断底部：后端整理的判据 + 历史证据 */
 const posGuides = computed(() => {
   const g = position.value?.guidance
@@ -1183,33 +1086,6 @@ const posGuides = computed(() => {
 /** 反向指标（越高越冷）统一折算成热度分位：横条长度、配色与数值都用它 */
 const heatOfMetric = (m: MarketPositionMetric) =>
   m.percentile == null ? null : (m.higher_is_hot ? m.percentile : 100 - m.percentile)
-
-/** 近 1 年分位同样折算成热度口径（0 最冷 / 100 最热），与横条同一把尺 */
-const heat1yOfMetric = (m: MarketPositionMetric) =>
-  m.percentile_1y == null ? null : (m.higher_is_hot ? m.percentile_1y : 100 - m.percentile_1y)
-
-/** 单项指标 tooltip：原始分位方向 + 图中统一折算后的热度分位 */
-function posMetricTip(m: MarketPositionMetric): string {
-  const parts: string[] = [m.desc]
-  if (m.percentile != null) {
-    const dir = m.higher_is_hot ? '越高越热' : '越高越冷'
-    parts.push(`当前值处于历史 ${m.percentile}% 分位（${dir}），横条按热度分位 ${heatOfMetric(m)}% 展示`)
-  }
-  if (m.percentile_1y != null && m.percentile != null) {
-    const gap = Math.round(Math.abs((heat1yOfMetric(m) ?? 0) - (heatOfMetric(m) ?? 0)))
-    parts.push(
-      `同一个当前值放进近 1 年排队是 ${heat1yOfMetric(m)}%，与近 10 年相差 ${gap} 个百分点` +
-      (gap >= 20 ? '，说明近一年常态已明显偏离十年常态，判位置时要两者一起看' : '，两个参照区间基本一致')
-    )
-  } else if (m.percentile_1y != null) {
-    parts.push(`同一个当前值放进近 1 年排队是 ${heat1yOfMetric(m)}%`)
-  }
-  if (m.samples) parts.push(`样本 ${m.samples} 个交易日，不含今日实时值`)
-  if (!m.in_composite) parts.push('历史样本不足 3 年，暂不参与合成分位计算，仅供单项参考')
-  const p = position.value
-  if (p?.live && m.as_of && m.as_of !== p.as_of) parts.push(`数据日期 ${m.as_of}（非今日实时）`)
-  return parts.join('。')
-}
 
 /** 数据口径说明：今日实时 / 盘中成交额折算 / 估值滞后 */
 const posDataNote = computed(() => {
@@ -1273,25 +1149,6 @@ const dotCounts = computed(() => ({
   outside: (position.value?.position || []).filter(m => !m.in_composite && m.percentile != null).length,
 }))
 
-/** 未来收益柱的满格基准：取各分位区间中位收益的最大绝对值 */
-const fwdMaxAbs = computed(() => {
-  const bins = position.value?.forward?.bins || []
-  return Math.max(0.01, ...bins.map(b => Math.abs(b.median_return ?? 0)))
-})
-
-/** 柱以 0 为中轴：正收益向上、负收益向下，高度按绝对值占比 */
-const fwdBarStyle = (r: number | null) => {
-  const h = Math.max(2, (Math.abs(r ?? 0) / fwdMaxAbs.value) * 24)
-  return { height: `${h}px`, top: (r ?? 0) >= 0 ? `${28 - h}px` : '28px' }
-}
-
-/** 当前合成分位所落的分位区间 */
-const forwardBin = computed(() => {
-  const f = position.value?.forward
-  if (!f) return null
-  return f.bins.find(b => b.key === f.current_bin) || null
-})
-
 /** 内部高度分化时给一句话解释：为什么合成分位不高不低 */
 const heatSpread = computed(() => {
   const c = (position.value?.position || [])
@@ -1305,7 +1162,7 @@ const heatSpread = computed(() => {
   if (gap < 40) return null
   const tail = position.value?.composite.zone === 'neutral'
     ? '两端相互抵消，合成值看着中性，内部其实在撕裂'
-    : '合成值由多数指标决定，极端项需结合下方单项指标判断'
+    : '合成值由多数指标决定，极端项看标尺上偏红或偏绿的那几颗点'
   return {
     hot,
     cold,
