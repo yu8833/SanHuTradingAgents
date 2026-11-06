@@ -100,6 +100,60 @@
         </div>
       </section>
 
+      <!-- 推理过程作为今日结论的补充：默认收起，需要复盘判断依据时展开 -->
+      <el-collapse v-if="verdict" v-model="reasonOpen" class="syn-reason syn-reason--inline">
+        <el-collapse-item name="reason">
+          <template #title>
+            <span class="syn-reason-title"><el-icon><Document /></el-icon> 研判依据与推理过程</span>
+            <span class="syn-reason-sub">{{ reasonSections }}</span>
+          </template>
+
+          <div class="syn-reason-body">
+            <div v-if="verdict.status" class="syn-panel">
+              <div class="syn-panel-title status"><el-icon><DataLine /></el-icon> 现状</div>
+              <div class="syn-plain-text">{{ verdict.status }}</div>
+            </div>
+
+            <div v-if="verdict.reasons.length" class="syn-panel">
+              <div class="syn-panel-title reasons"><el-icon><InfoFilled /></el-icon> 引起现状的原因</div>
+              <ul class="syn-panel-list">
+                <li v-for="(r, i) in verdict.reasons" :key="'r' + i">▸ {{ r }}</li>
+              </ul>
+            </div>
+
+            <div v-if="verdict.external_observation || verdict.watch.length" class="syn-panel">
+              <div class="syn-panel-title watch"><el-icon><View /></el-icon> 今日观察</div>
+              <div v-if="verdict.external_observation" class="syn-ext">
+                <div class="syn-ext-label">外围传导 · 美股 / 大宗商品 → A股情绪</div>
+                <div class="syn-ext-text">{{ verdict.external_observation }}</div>
+              </div>
+              <ul v-if="verdict.watch.length" class="syn-panel-list">
+                <li v-for="(w, i) in verdict.watch" :key="'w' + i">◎ {{ w }}</li>
+              </ul>
+            </div>
+
+            <div v-if="verdict.strategy" class="syn-panel">
+              <div class="syn-panel-title strat"><el-icon><Guide /></el-icon> 操作策略</div>
+              <div class="syn-strat-text">{{ verdict.strategy }}</div>
+            </div>
+
+            <div v-if="verdict.extra.length" class="syn-panel">
+              <div class="syn-panel-title extra"><el-icon><StarFilled /></el-icon> 重点补充</div>
+              <ul class="syn-panel-list">
+                <li v-for="(e, i) in verdict.extra" :key="'e' + i">★ {{ e }}</li>
+              </ul>
+            </div>
+
+            <div v-if="verdict.risk_tips.length" class="syn-risk">
+              <span class="syn-risk-title"><el-icon><WarnTriangleFilled /></el-icon> 风险提示</span>
+              <ul class="syn-risk-list">
+                <li v-for="(tip, i) in verdict.risk_tips" :key="i">{{ tip }}</li>
+              </ul>
+            </div>
+          </div>
+        </el-collapse-item>
+      </el-collapse>
+
       <el-empty
         v-else
         :image-size="72"
@@ -471,6 +525,34 @@
               <span><i class="gk-hole" />样本短未参与 {{ dotCounts.outside }} 项</span>
               <span class="gk-hint">每一颗点 = 一项指标的近 10 年分位</span>
             </div>
+
+            <!-- 同一把分位尺的下半层：历史上待在该分位区间时，其后 20 日的真实表现 -->
+            <div v-if="position.forward" class="pos-gauge-fwd">
+              <i class="pf-zero" />
+              <span
+                v-for="b in position.forward.bins"
+                :key="b.key"
+                class="pf-col"
+                :class="{ 'is-current': b.key === position.forward.current_bin }"
+                :style="{ left: b.lo + '%', width: (b.hi - b.lo) + '%' }"
+                :title="`${b.label}：历史 n=${b.n}，其后 ${position.forward.day} 日等权涨跌幅中位 ${signedPct(b.median_return)}，胜率 ${b.win_rate == null ? '—' : b.win_rate + '%'}`"
+              >
+                <i
+                  class="pf-bar"
+                  :class="(b.median_return ?? 0) >= 0 ? 'up' : 'down'"
+                  :style="fwdBarStyle(b.median_return)"
+                />
+              </span>
+              <i v-if="compositePct != null" class="pf-now" :style="{ left: compositePct + '%' }" />
+            </div>
+            <p v-if="position.forward" class="pos-gauge-fwd-cap">
+              柱 = 历史上待在同一分位区间时，其后 {{ position.forward.day }} 日等权涨跌幅中位数
+              <template v-if="forwardBin">
+                ；当前落在「{{ forwardBin.label }}」，历史上该区间中位
+                <b :class="clsByVal(forwardBin.median_return)">{{ signedPct(forwardBin.median_return) }}</b>、胜率
+                {{ forwardBin.win_rate == null ? '—' : forwardBin.win_rate + '%' }}
+              </template>
+            </p>
           </div>
 
           <div class="pos-hero-foot">
@@ -587,16 +669,11 @@
         <!-- 单项指标：分组横条（统一按热度分位：越靠右越热，竖线为 50% 中位；细条为近 1 年分位对照） -->
         <div class="pos-metrics">
           <div class="pos-metrics-cap">
-            <p class="pm-lead">
-              怎么读：把每项的<b>今天的读数</b>放进历史里排队，排第几位就是它当前的位置（0 = 最冷，100 = 最热）。
-            </p>
             <p class="pm-legends">
-              <span class="pm-legend"><i class="lg-bar" />横条 + 圆点 = 近 10 年排第几</span>
-              <span class="pm-legend"><i class="lg-tick" />琥珀刻度 = 同一个值在近 1 年排第几</span>
-              <span class="pm-legend"><i class="lg-mid" />灰色竖线 = 50% 中位（圆点越过 = 当前偏热）</span>
-            </p>
-            <p class="pm-note">
-              最右侧数字就是近 10 年分位；两处位置差得越远，说明近一年常态和十年常态已经不一样。
+              <span class="pm-legend"><i class="lg-bar" />横条 + 圆点 = 当前值近 10 年分位</span>
+              <span class="pm-legend"><i class="lg-tick" />琥珀刻度 = 同一个值近 1 年分位</span>
+              <span class="pm-legend"><i class="lg-mid" />灰线 = 50% 中位</span>
+              <span class="pm-note-inline">最右数字为近 10 年分位；两处差距大 = 近一年常态已不同于十年</span>
             </p>
           </div>
           <div v-for="grp in positionGroups" :key="grp.group" class="pos-group">
@@ -734,41 +811,7 @@
           </span>
         </div>
 
-        <!-- 历史分位 → 未来 20 日收益：以 0 为中轴的发散条形 -->
-        <div v-if="position.forward" class="pos-fwd">
-          <div class="pos-block-head">
-            历史分位 → 未来 {{ position.forward.day }} 日收益
-            <span class="dist-note">
-              等权全市场组合 · n={{ position.forward.samples }} · 近 {{ position.forward.window_years }} 年
-            </span>
-          </div>
-          <div class="pos-fwd-rows">
-            <div
-              v-for="b in position.forward.bins"
-              :key="b.key"
-              class="pos-fwd-row"
-              :class="{ 'is-current': b.key === position.forward.current_bin }"
-            >
-              <span class="pos-fwd-label">
-                {{ b.label }}
-                <em v-if="b.key === position.forward.current_bin">当前</em>
-              </span>
-              <div class="pos-fwd-track">
-                <i class="pos-fwd-zero" />
-                <i
-                  class="pos-fwd-bar"
-                  :class="(b.median_return ?? 0) >= 0 ? 'up' : 'down'"
-                  :style="fwdBarStyle(b.median_return)"
-                />
-              </div>
-              <span class="pos-fwd-val mono" :class="clsByVal(b.median_return)">{{ signedPct(b.median_return) }}</span>
-              <span class="pos-fwd-meta mono">
-                胜率 {{ b.win_rate == null ? '—' : b.win_rate + '%' }} · n={{ b.n }}
-              </span>
-            </div>
-          </div>
-          <p class="cap">分位越高代表当时市场越热；收益为未来 {{ position.forward.day }} 个交易日的等权平均涨跌幅，仅作历史统计，不代表未来。</p>
-        </div>
+
 
         <p class="cap">{{ position.note }}</p>
       </template>
@@ -920,68 +963,6 @@
           </div>
         </div>
       </section>
-    </section>
-
-    <!-- 05 推理过程：默认收起，需要复盘判断依据时展开 -->
-    <section v-if="verdict" id="reason" class="mr-sec">
-      <div class="mr-sec-head">
-        <span class="mr-sec-no">05</span>
-        <span class="mr-sec-title">推理过程</span>
-        <span class="mr-sec-hint">{{ reasonSections }}</span>
-      </div>
-
-      <el-collapse v-model="reasonOpen" class="syn-reason">
-        <el-collapse-item name="reason">
-          <template #title>
-            <span class="syn-reason-title"><el-icon><Document /></el-icon> 展开推理过程</span>
-            <span class="syn-reason-sub">{{ reasonSections || '现状 · 原因 · 观察 · 策略 · 风险' }}</span>
-          </template>
-
-          <div class="syn-reason-body">
-            <div v-if="verdict.status" class="syn-panel">
-              <div class="syn-panel-title status"><el-icon><DataLine /></el-icon> 现状</div>
-              <div class="syn-plain-text">{{ verdict.status }}</div>
-            </div>
-
-            <div v-if="verdict.reasons.length" class="syn-panel">
-              <div class="syn-panel-title reasons"><el-icon><InfoFilled /></el-icon> 引起现状的原因</div>
-              <ul class="syn-panel-list">
-                <li v-for="(r, i) in verdict.reasons" :key="'r' + i">▸ {{ r }}</li>
-              </ul>
-            </div>
-
-            <div v-if="verdict.external_observation || verdict.watch.length" class="syn-panel">
-              <div class="syn-panel-title watch"><el-icon><View /></el-icon> 今日观察</div>
-              <div v-if="verdict.external_observation" class="syn-ext">
-                <div class="syn-ext-label">外围传导 · 美股 / 大宗商品 → A股情绪</div>
-                <div class="syn-ext-text">{{ verdict.external_observation }}</div>
-              </div>
-              <ul v-if="verdict.watch.length" class="syn-panel-list">
-                <li v-for="(w, i) in verdict.watch" :key="'w' + i">◎ {{ w }}</li>
-              </ul>
-            </div>
-
-            <div v-if="verdict.strategy" class="syn-panel">
-              <div class="syn-panel-title strat"><el-icon><Guide /></el-icon> 操作策略</div>
-              <div class="syn-strat-text">{{ verdict.strategy }}</div>
-            </div>
-
-            <div v-if="verdict.extra.length" class="syn-panel">
-              <div class="syn-panel-title extra"><el-icon><StarFilled /></el-icon> 重点补充</div>
-              <ul class="syn-panel-list">
-                <li v-for="(e, i) in verdict.extra" :key="'e' + i">★ {{ e }}</li>
-              </ul>
-            </div>
-
-            <div v-if="verdict.risk_tips.length" class="syn-risk">
-              <span class="syn-risk-title"><el-icon><WarnTriangleFilled /></el-icon> 风险提示</span>
-              <ul class="syn-risk-list">
-                <li v-for="(tip, i) in verdict.risk_tips" :key="i">{{ tip }}</li>
-              </ul>
-            </div>
-          </div>
-        </el-collapse-item>
-      </el-collapse>
     </section>
 
     <!-- 免责声明 -->
@@ -1292,6 +1273,25 @@ const dotCounts = computed(() => ({
   outside: (position.value?.position || []).filter(m => !m.in_composite && m.percentile != null).length,
 }))
 
+/** 未来收益柱的满格基准：取各分位区间中位收益的最大绝对值 */
+const fwdMaxAbs = computed(() => {
+  const bins = position.value?.forward?.bins || []
+  return Math.max(0.01, ...bins.map(b => Math.abs(b.median_return ?? 0)))
+})
+
+/** 柱以 0 为中轴：正收益向上、负收益向下，高度按绝对值占比 */
+const fwdBarStyle = (r: number | null) => {
+  const h = Math.max(2, (Math.abs(r ?? 0) / fwdMaxAbs.value) * 24)
+  return { height: `${h}px`, top: (r ?? 0) >= 0 ? `${28 - h}px` : '28px' }
+}
+
+/** 当前合成分位所落的分位区间 */
+const forwardBin = computed(() => {
+  const f = position.value?.forward
+  if (!f) return null
+  return f.bins.find(b => b.key === f.current_bin) || null
+})
+
 /** 内部高度分化时给一句话解释：为什么合成分位不高不低 */
 const heatSpread = computed(() => {
   const c = (position.value?.position || [])
@@ -1469,18 +1469,6 @@ const compositeChartOption = computed<EChartsOption | null>(() => {
   }
   return option
 })
-
-/** 未来收益发散条：以 0 为中轴，按最大绝对值归一化 */
-const maxAbsFwd = computed(() => {
-  const bins = position.value?.forward?.bins || []
-  return Math.max(1, ...bins.map(b => Math.abs(b.median_return || 0)))
-})
-
-function fwdBarStyle(med: number | null): Record<string, string> {
-  if (med == null) return { display: 'none' }
-  const w = Math.max(2, Math.min(50, (Math.abs(med) / maxAbsFwd.value) * 50))
-  return med >= 0 ? { left: '50%', width: `${w}%` } : { right: '50%', width: `${w}%` }
-}
 
 const scrollTo = (id: string) =>
   document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -2202,16 +2190,15 @@ onActivated(() => {
   color: var(--el-text-color-secondary);
 }
 .pos-metrics-cap p { margin: 0; }
-.pm-lead { color: var(--el-text-color-regular); }
-.pm-lead b { color: var(--el-text-color-primary); }
 .pm-legends {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 4px 18px;
-  margin-top: 4px !important;
 }
-.pm-note {
-  margin-top: 4px !important;
+.pm-note-inline {
+  flex-basis: 100%;
+  margin-top: 2px;
   color: var(--el-text-color-placeholder);
 }
 
@@ -3317,7 +3304,7 @@ onActivated(() => {
 }
 
 /* ══════════════════════════════════════════════════════════════════════
-   01 今日结论 / 05 推理过程（原综合研判页搬入，保持同一视觉语言）
+   01 今日结论（推理过程已并入本区块的折叠块，保持同一视觉语言）
    ══════════════════════════════════════════════════════════════════════ */
 
 .syn-loading {
@@ -3614,7 +3601,7 @@ onActivated(() => {
   color: var(--el-text-color-regular);
 }
 
-/* ── 05 推理过程 ── */
+/* ── 01 内嵌的推理过程（原 05 并入今日结论） ── */
 .syn-panel {
   padding: 12px 16px;
   border-radius: 10px;
@@ -3657,6 +3644,11 @@ onActivated(() => {
   border-top: 1px solid var(--el-border-color-lighter);
   border-bottom: none;
 }
+.syn-reason--inline {
+  margin-top: 14px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+.syn-reason--inline :deep(.el-collapse-item__wrap) { background: transparent; }
 .syn-reason :deep(.el-collapse-item__header) {
   height: auto;
   padding: 8px 2px;
@@ -4027,6 +4019,57 @@ onActivated(() => {
 .pos-gauge-key .gk-solid { background: var(--el-text-color-secondary); }
 .pos-gauge-key .gk-hole { box-shadow: inset 0 0 0 2px var(--el-text-color-placeholder); }
 .pos-gauge-key .gk-hint { margin-left: auto; }
+
+/* 分位 → 未来收益：与色带共用同一把 0–100 横轴，当前分位竖线贯穿 */
+.pos-gauge-fwd {
+  position: relative;
+  height: 56px;
+  margin-top: 10px;
+  border-radius: 6px;
+  background: var(--el-fill-color-lighter);
+}
+.pf-zero {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 28px;
+  height: 1px;
+  background: var(--el-border-color);
+}
+.pf-col {
+  position: absolute;
+  top: 0;
+  height: 100%;
+}
+.pf-bar {
+  position: absolute;
+  left: 12%;
+  width: 76%;
+  border-radius: 3px;
+  opacity: .75;
+}
+.pf-bar.up { background: var(--app-up); }
+.pf-bar.down { background: var(--app-down); }
+.pf-col.is-current .pf-bar {
+  opacity: 1;
+  box-shadow: 0 0 0 1.5px var(--el-text-color-primary);
+}
+.pf-now {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--el-text-color-primary);
+  z-index: 2;
+}
+.pos-gauge-fwd-cap {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--el-text-color-placeholder);
+}
+.pos-gauge-fwd-cap b { font-family: var(--app-font-mono); }
 
 .pos-distance {
   display: flex;
