@@ -623,10 +623,10 @@
         <!-- 单项指标：分组横条（统一按热度分位：越靠右越热，竖线为 50% 中位；细条为近 1 年分位对照） -->
         <div class="pos-metrics">
           <p class="cap pos-metrics-cap">
-            <span class="pm-legend"><i class="lg-bar" />横向长条 = 近 10 年热度分位（越长越热，红=偏热 绿=偏冷）</span>
-            <span class="pm-legend"><i class="lg-tick" />琥珀竖刻度 = 近 1 年分位（与长条末端差距大 = 长期位置正被近一年修正）</span>
-            <span class="pm-legend"><i class="lg-mid" />灰色竖线 = 50% 中位（长条越过它即偏热）</span>
-            悬停指标名可查看原始值与口径。
+            <span class="pm-legend"><i class="lg-bar" />横条 <b>圆点 = 当前值</b>：把今天的读数放进近 10 年所有交易日里排队，排在第几位</span>
+            <span class="pm-legend"><i class="lg-tick" />琥珀刻度：<b>同一个当前值</b>放进近 1 年里排队，排第几位</span>
+            <span class="pm-legend"><i class="lg-mid" />灰色竖线 = 50% 中位（圆点越过它 = 当前偏热）</span>
+            <b>两项都是「当前值」的位置</b>，只是参照区间不同：两个位置差得越远，说明近一年常态和十年常态已经不一样。
           </p>
           <div v-for="grp in positionGroups" :key="grp.group" class="pos-group">
             <div class="pos-group-head">
@@ -647,10 +647,17 @@
                   <i
                     v-if="m.percentile_1y != null"
                     class="pos-bullet-1y"
-                    :title="`近 1 年分位 ${m.percentile_1y}%（与近 10 年分位对照，识别长期漂移）`"
-                    :style="{ left: (m.higher_is_hot ? m.percentile_1y : 100 - m.percentile_1y) + '%' }"
+                    :title="`同一个当前值，在近 1 年里排 ${heat1yOfMetric(m)}%（近 10 年为 ${heatOfMetric(m)}%）`"
+                    :style="{ left: (heat1yOfMetric(m) ?? 0) + '%' }"
                   />
                   <i class="pos-bullet-med" title="中位 = 50% 分位" />
+                  <i
+                    v-if="m.percentile != null"
+                    class="pos-bullet-tip"
+                    :class="posTone(heatOfMetric(m))"
+                    :style="{ left: (heatOfMetric(m) ?? 0) + '%' }"
+                    :title="`当前值：近 10 年 ${heatOfMetric(m)}% 分位`"
+                  />
                 </div>
                 <span class="pos-bullet-value">
                   {{ m.value == null ? '—' : m.value }}<em>{{ m.unit }}</em>
@@ -1218,6 +1225,10 @@ const posGuides = computed(() => {
 const heatOfMetric = (m: MarketPositionMetric) =>
   m.percentile == null ? null : (m.higher_is_hot ? m.percentile : 100 - m.percentile)
 
+/** 近 1 年分位同样折算成热度口径（0 最冷 / 100 最热），与横条同一把尺 */
+const heat1yOfMetric = (m: MarketPositionMetric) =>
+  m.percentile_1y == null ? null : (m.higher_is_hot ? m.percentile_1y : 100 - m.percentile_1y)
+
 /** 单项指标 tooltip：原始分位方向 + 图中统一折算后的热度分位 */
 function posMetricTip(m: MarketPositionMetric): string {
   const parts: string[] = [m.desc]
@@ -1225,7 +1236,15 @@ function posMetricTip(m: MarketPositionMetric): string {
     const dir = m.higher_is_hot ? '越高越热' : '越高越冷'
     parts.push(`当前值处于历史 ${m.percentile}% 分位（${dir}），横条按热度分位 ${heatOfMetric(m)}% 展示`)
   }
-  if (m.percentile_1y != null) parts.push(`近 1 年分位 ${m.percentile_1y}%（与近 10 年分位对照，识别长期漂移）`)
+  if (m.percentile_1y != null && m.percentile != null) {
+    const gap = Math.round(Math.abs((heat1yOfMetric(m) ?? 0) - (heatOfMetric(m) ?? 0)))
+    parts.push(
+      `同一个当前值放进近 1 年排队是 ${heat1yOfMetric(m)}%，与近 10 年相差 ${gap} 个百分点` +
+      (gap >= 20 ? '，说明近一年常态已明显偏离十年常态，判位置时要两者一起看' : '，两个参照区间基本一致')
+    )
+  } else if (m.percentile_1y != null) {
+    parts.push(`同一个当前值放进近 1 年排队是 ${heat1yOfMetric(m)}%`)
+  }
   if (m.samples) parts.push(`样本 ${m.samples} 个交易日，不含今日实时值`)
   const p = position.value
   if (p?.live && m.as_of && m.as_of !== p.as_of) parts.push(`数据日期 ${m.as_of}（非今日实时）`)
@@ -2213,14 +2232,29 @@ onActivated(() => {
   align-items: center;
   gap: 5px;
   margin-right: 14px;
-  white-space: nowrap;
+  white-space: normal;
 }
 .pm-legend i { display: inline-block; flex: none; }
+/* 图例长条：末端带一个圆点，与图中「当前值标记」形状一致 */
 .pm-legend .lg-bar {
+  position: relative;
   width: 22px;
   height: 6px;
   border-radius: 3px;
   background: linear-gradient(90deg, var(--app-down), var(--el-color-primary), var(--app-up));
+}
+.pm-legend .lg-bar::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: -3px;
+  width: 7px;
+  height: 7px;
+  margin-top: -3.5px;
+  border-radius: 50%;
+  background: var(--app-up);
+  border: 1.5px solid #fff;
+  box-shadow: 0 0 0 1px var(--el-border-color-lighter);
 }
 .pm-legend .lg-tick {
   width: 3px;
@@ -4301,6 +4335,22 @@ onActivated(() => {
   background: var(--el-text-color-placeholder);
   opacity: .7;
 }
+/* 当前值标记：横条末端的小圆点，明确「当前就在这」 */
+.pos-bullet-tip {
+  position: absolute;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  margin: -4.5px 0 0 -4.5px;
+  border-radius: 50%;
+  border: 2px solid var(--el-bg-color);
+  box-shadow: 0 0 0 1px var(--el-border-color-lighter);
+  z-index: 3;
+}
+.pos-bullet-tip.is-hot { background: var(--app-up); }
+.pos-bullet-tip.is-cold { background: var(--app-down); }
+.pos-bullet-tip.is-neutral { background: var(--el-color-primary); }
+.pos-bullet-tip.is-muted { background: var(--el-border-color); }
 .pos-bullet-value {
   text-align: right;
   font-family: var(--app-font-mono);
