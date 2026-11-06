@@ -14,6 +14,7 @@ import asyncio
 import logging
 import re
 from datetime import date, datetime, time, timedelta, timezone
+from urllib.parse import quote
 
 from app.services.cache_layer import cached
 from app.services.vibe_astock import _akshare
@@ -33,77 +34,121 @@ _RULES: list[dict] = [
         "key": "cn_cpi", "region": "CN", "pattern": r"CPI|居民消费价格",
         "scale": 0.2, "coef": -0.7, "horizon": "仅今日",
         "sectors": ["高股息", "债", "成长"],
-        "trans": ["通胀压力变化", "宽松预期变化", "利率敏感板块反向"],
+        "trans": [
+            "CPI 同比每偏离预期 0.2pct，等于一次普通幅度的通胀意外",
+            "10Y 国债利率同向约 2~3bp，降息预期时点前后移动",
+            "利率上行则成长估值受压、高股息占优，下行则相反",
+        ],
         "watch": "10 年期国债收益率是否同向变动 >2bp",
     },
     {
         "key": "cn_ppi", "region": "CN", "pattern": r"PPI|工业生产者出厂价格",
         "scale": 0.3, "coef": -0.6, "horizon": "仅今日",
         "sectors": ["上游资源", "中游制造"],
-        "trans": ["工业品价格变化", "中下游利润再分配", "周期板块分化"],
+        "trans": [
+            "PPI 同比每偏离预期 0.3pct，等于工业品价格一次性变化",
+            "上游资源毛利随之下修或上修，中游制造毛利反向修复",
+            "周期股与中游设备的相对强弱随之切换",
+        ],
         "watch": "周期板块是否跟随商品价格同向",
     },
     {
         "key": "cn_pmi", "region": "CN", "pattern": r"PMI|采购经理",
         "scale": 0.5, "coef": 0.9, "horizon": "今日~T+1",
         "sectors": ["顺周期", "通用设备", "出口链"],
-        "trans": ["景气度变化", "盈利预期修正", "顺周期板块反应"],
+        "trans": [
+            "PMI 每偏离预期 0.5 点，约等于景气度变化一档（荣枯线上下）",
+            "顺周期盈利预期随之修正，领先 PPI 约 1 个季度",
+            "有色、机械、建材订单预期先动，出口链随后跟随",
+        ],
         "watch": "顺周期板块能否放量跑赢大盘",
     },
     {
         "key": "cn_srf", "region": "CN", "pattern": r"社会融资|社融",
         "scale": 3000, "coef": 0.8, "horizon": "今日~T+3",
         "sectors": ["券商", "银行", "中小盘"],
-        "trans": ["宽信用程度", "实体融资需求", "流动性敏感板块"],
+        "trans": [
+            "社融每偏离预期 3000 亿 ≈ 单月多/少一个中型银行的投放量",
+            "宽信用预期变化，10Y 国债利率同向约 1~2bp",
+            "券商与中小盘对剩余流动性最敏感，最先放量",
+        ],
         "watch": "券商板块是否放量；若冲高回落视为预期已消化",
     },
     {
         "key": "cn_m2", "region": "CN", "pattern": r"M2|货币供应",
         "scale": 0.3, "coef": 0.6, "horizon": "今日~T+3",
         "sectors": ["券商", "成长"],
-        "trans": ["货币宽松程度", "剩余流动性", "估值扩张空间"],
+        "trans": [
+            "M2 同比每偏离预期 0.3pct",
+            "剩余流动性（M2 增速 - 社融增速）随之变化，决定 A 股估值扩张空间",
+            "剩余流动性扩张时券商与成长弹性最大，收缩时防御占优",
+        ],
         "watch": "两市成交额能否维持 1.1 倍 5 日均",
     },
     {
         "key": "cn_gdp", "region": "CN", "pattern": r"GDP|国内生产总值",
         "scale": 0.3, "coef": 0.8, "horizon": "今日~T+3",
         "sectors": ["顺周期", "消费"],
-        "trans": ["增长动能", "盈利预期", "顺周期与消费"],
+        "trans": [
+            "GDP 每偏离预期 0.3pct，直接改写全年增速一致预期",
+            "顺周期盈利预测与 10Y 国债利率同向调整",
+            "消费与周期风格随之切换，指数级别波动大于板块",
+        ],
         "watch": "顺周期与消费是否同步走强",
     },
     {
         "key": "lpr", "region": "CN", "pattern": r"LPR|贷款市场报价利率",
         "scale": 0.1, "coef": 0.9, "horizon": "今日~T+3",
         "sectors": ["券商", "银行", "地产链"],
-        "trans": ["融资成本", "宽信用预期", "利率敏感板块"],
+        "trans": [
+            "5Y LPR 每下调 10bp，100 万按揭月供约减 55 元，银行息差约 -2bp",
+            "地产销售与宽信用预期同步改善，10Y 国债利率下行",
+            "地产链、券商先反应，银行因息差承压滞后",
+        ],
         "watch": "银行与地产链是否同向；若仅高开则视为利好出尽",
     },
     {
         "key": "us_nfp", "region": "US", "pattern": r"非农|失业率",
         "scale": 5, "coef": -0.6, "horizon": "今日~T+1",
         "sectors": ["成长", "出口链", "外资重仓"],
-        "trans": ["美债利率预期", "外资风险偏好", "成长估值受压"],
+        "trans": [
+            "非农每偏离预期 5 万人，等于就业市场冷热差一档",
+            "降息概率与 10Y 美债利率反向变动，美元指数同向",
+            "美元走强 → 北向流出压力 → 成长估值受压、出口链汇兑承压",
+        ],
         "watch": "美元指数与美债收益率是否同向走强",
     },
     {
         "key": "us_cpi", "region": "US", "pattern": r"CPI|消费者物价",
         "scale": 0.2, "coef": -0.7, "horizon": "今日~T+1",
         "sectors": ["成长", "外资重仓"],
-        "trans": ["美联储路径", "美债利率", "成长估值"],
+        "trans": [
+            "美国 CPI 每偏离预期 0.2pct，等于一次核心通胀意外",
+            "降息预期与 10Y 美债利率反向变动，美元指数同向",
+            "纳指与 A 股成长同向承压，外资重仓股先于指数反应",
+        ],
         "watch": "纳指期货与美元指数是否同向确认",
     },
     {
         "key": "fomc", "region": "US", "pattern": r"美联储|FOMC|利率决议|议息",
         "scale": None, "coef": None, "horizon": "今日~T+1",
         "sectors": ["成长", "出口链", "外资重仓"],
-        "trans": ["政策路径不确定性", "美债利率与美元", "风险偏好"],
+        "trans": [
+            "点阵图隐含降息次数 vs 市场预期，差 1 次 ≈ 10Y 美债 10~15bp",
+            "美债利率与美元指数同向，人民币汇率与北向资金反向",
+            "北向流出 → 成长（AI/半导体/创新药）估值承压，红利与资源相对占优",
+        ],
         "watch": "开盘 30 分钟北向与成长板块是否同向；不一致则按波动处理",
     },
     {
         "key": "tariff", "region": "ANY", "pattern": r"关税|制裁|出口管制|实体清单",
         "scale": None, "coef": None, "horizon": "今日~T+1",
         "sectors": ["出口链", "半导体", "军工"],
-        "trans": ["风险偏好", "出口链盈利预期", "自主可控主题"],
+        "trans": [
+            "加征幅度与覆盖清单规模，决定出口链盈利下修幅度（每 5pct 关税约压毛利 1~2pct）",
+            "人民币汇率与风险偏好同步反应，出口占比高的公司先跌",
+            "半导体/出口链承压，自主可控与军工获得相对资金",
+        ],
         "watch": "出口链是否放量下跌；若低开高走视为已消化",
     },
 ]
@@ -111,6 +156,7 @@ _RULES: list[dict] = [
 # 明确剔除：仓单、竞拍、库存、每日高频项，以及日历里常见但与A股无关的例行条目
 _BLACKLIST = re.compile(
     r"仓单|竞拍|库存|每日|货币供应M1金额|货币供应M2金额|国债竞拍|同业拆借|拆借利率"
+    r"|资产负债表|褐皮书|贴现率"
 )
 
 _REGION_ALLOW = ("中国", "美国", "欧元区")
@@ -150,6 +196,11 @@ def _match_rule(title: str, region: str) -> dict | None:
         if re.search(rule["pattern"], title):
             return rule
     return None
+
+
+def _news_url(title: str, day: str) -> str:
+    """事件本身没有稳定的官方原文链接，给出「标题 + 日期」的新闻检索入口。"""
+    return "https://www.baidu.com/s?wd=" + quote(f"{title} {day}")
 
 
 def _strength(raw: float | None) -> str:
@@ -235,6 +286,7 @@ def _build_event(row: dict, rule: dict, day: str) -> dict:
         "sectors": rule.get("sectors", []),
         "transmission": rule.get("trans", []),
         "watch": rule.get("watch", ""),
+        "url": _news_url(title, day),
         "score": raw,
     }
 
@@ -260,8 +312,13 @@ def _fomc_events(day: str) -> list[dict]:
             "horizon": "今日~T+1",
             "action": "开盘不接力，等 10:00 后方向确认",
             "sectors": ["成长", "出口链", "外资重仓"],
-            "transmission": ["政策路径不确定性", "美债利率与美元", "风险偏好"],
+            "transmission": [
+                "点阵图隐含降息次数 vs 市场预期，差 1 次 ≈ 10Y 美债 10~15bp",
+                "美债利率与美元指数同向，人民币汇率与北向资金反向",
+                "北向流出 → 成长（AI/半导体/创新药）估值承压，红利与资源相对占优",
+            ],
             "watch": "开盘 30 分钟北向与成长板块是否同向；不一致则按波动处理",
+            "url": _news_url("美联储 FOMC 利率决议", day),
             "score": None,
         }]
     except Exception:
@@ -325,7 +382,7 @@ async def _build_events() -> dict:
 async def get_market_events() -> dict:
     """今日事件（Redis 缓存 30 分钟）。抓取失败不写缓存，避免把「源不可用」固化半小时。"""
     return await cached(
-        "vibe:market_events", _build_events,
+        "vibe:market_events:v3", _build_events,
         category="market", ttl=1800,
         valid=lambda v: bool(v.get("source_ok")),
     )

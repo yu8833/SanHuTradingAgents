@@ -280,6 +280,8 @@ export interface MarketEvent {
   sectors?: string[]
   transmission?: string[]
   watch?: string
+  /** 已公布事件的新闻检索入口（后端按标题+日期生成） */
+  url?: string
   score?: number | null
 }
 
