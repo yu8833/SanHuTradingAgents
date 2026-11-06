@@ -263,11 +263,22 @@ export interface PreOpen {
 
 export interface MarketEvent {
   id: string
+  /** 规则键（用于前几日事件去重） */
+  key?: string
+  /** 事件发布日 */
+  day?: string
+  /** 距今天数，0 表示今日 */
+  age?: number
+  /** 影响延续窗口（自然日） */
+  carry?: number
+  /** 影响仍在持续时的说明文案 */
+  persist_note?: string
   time: string
   datetime: string
   title: string
   region: 'CN' | 'US' | 'EU' | string
-  status: 'pending' | 'released' | 'expired'
+  /** ongoing = 已公布且影响窗口未结束，仍按当前影响计入判断 */
+  status: 'pending' | 'released' | 'ongoing' | 'expired'
   forecast?: number | null
   actual?: number | null
   prev?: number | null

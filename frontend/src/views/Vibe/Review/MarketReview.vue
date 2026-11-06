@@ -529,7 +529,7 @@
                     <i
                       class="pos-gauge-dot"
                       :class="[d.tone, `is-${d.level}`, `imp-${d.imp}`]"
-                      :style="{ left: d.pct + '%', '--dy': d.dy + 'px' }"
+                      :style="{ left: d.pct + '%', '--lane': d.lane }"
                     >
                       <span class="pd-mark" />
                     </i>
@@ -774,7 +774,7 @@
           :key="e.id"
           shadow="never"
           class="ev-card"
-          :class="[`impact-${e.impact}`, { 'is-expired': e.status === 'expired' }]"
+          :class="[`impact-${e.impact}`, { 'is-expired': e.status === 'expired', 'is-ongoing': e.status === 'ongoing' }]"
         >
           <div class="ev-row ev-main">
             <span class="ev-time">{{ e.time }}</span>
@@ -783,7 +783,7 @@
               {{ e.surprise_label }}
             </span>
             <span class="ev-status" :class="`status-${e.status}`">{{ eventStatusLabel(e) }}</span>
-            <span class="ev-toggle" @click="toggleEvent(e.id)">
+            <span v-if="e.status !== 'ongoing'" class="ev-toggle" @click="toggleEvent(e.id)">
               {{ expandedEvents.includes(e.id) ? '收起' : '展开' }}
             </span>
           </div>
@@ -813,7 +813,12 @@
             >相关报道与解读 ↗</a>
           </div>
 
-          <div v-if="expandedEvents.includes(e.id)" class="ev-detail">
+          <div v-if="e.status === 'ongoing' && e.persist_note" class="ev-row ev-persist">
+            <span class="ev-label">延续</span>
+            <span class="ev-persist-text">{{ e.persist_note }}</span>
+          </div>
+
+          <div v-if="expandedEvents.includes(e.id) || e.status === 'ongoing'" class="ev-detail">
             <div v-if="e.transmission && e.transmission.length" class="ev-trans">
               <span v-for="(t, i) in e.transmission" :key="i" class="ev-trans-step">
                 {{ t }}<em v-if="i < e.transmission.length - 1">→</em>
@@ -1200,9 +1205,12 @@ const DOT_IMPACT: Record<string, 1 | 2 | 3> = {
 
 const GROUP_ORDER = ['core', 'aux', 'ref'] as const
 
+/** 同一行内两点最小间距（百分点）；小于它就把后一个点上/下层小轨道 */
+const LANE_GAP = 3.4
+
 /**
  * 标尺散点：横向位置 = 热度分位，纵向 = 重要性类别（核心 / 佐证 / 参考）。
- * 同一行内距离过近的点上下微错开（±5px），避免叠成一坨。
+ * 行内再做三层蜂群避让（lane -1 / 0 / +1），保证相近分位的点也不重叠、可单独悬停。
  */
 const heatDots = computed(() => {
   const dots = (position.value?.position || [])
@@ -1223,7 +1231,7 @@ const heatDots = computed(() => {
         tone: posTone(pct),
         level,
         imp,
-        dy: 0,
+        lane: 0,
         tip:
           `${ll.tag} ${m.label}：${m.value == null ? '—' : m.value}${m.unit}${asOfDate} · 热度分位 ${pct}%\n` +
           `样本 ${m.window_years} 年 · ${ll.hint}` +
@@ -1232,12 +1240,20 @@ const heatDots = computed(() => {
     })
     .sort((a, b) => a.pct - b.pct)
 
-  // 行内避让：同一类别、同一 5% 桶内超过 1 个点时交替上下错开
-  const bucket: Record<string, number> = {}
+  // 贪心分层：每行先占中轨，挤不下再上、下错开
+  const used: Record<string, number[]> = {}
+  for (const k of GROUP_ORDER) used[k] = [NaN, NaN, NaN]
   for (const d of dots) {
-    const k = `${d.level}-${Math.round(d.pct / 5)}`
-    const n = (bucket[k] = (bucket[k] || 0) + 1)
-    if (n > 1) d.dy = n % 2 === 0 ? 5 : -5
+    const lanes = used[d.level]
+    let idx = 1
+    for (const cand of [1, 0, 2]) {
+      if (!Number.isFinite(lanes[cand]) || d.pct - lanes[cand] >= LANE_GAP) {
+        idx = cand
+        break
+      }
+    }
+    lanes[idx] = d.pct
+    d.lane = idx - 1
   }
   return dots
 })
@@ -1576,7 +1592,13 @@ const shortTitle = (t: string) => (t && t.length > 14 ? `${t.slice(0, 14)}…` :
 const dirLabel = (d?: string) => (d === 'bull' ? '偏多' : d === 'bear' ? '偏空' : '中性')
 const surpriseClass = (e: MarketEvent) => `sur-${e.direction || 'neutral'}`
 const eventStatusLabel = (e: MarketEvent) =>
-  e.status === 'pending' ? '待公布' : e.status === 'expired' ? '已过时' : '已公布'
+  e.status === 'pending'
+    ? '待公布'
+    : e.status === 'ongoing'
+      ? '已公布 · 影响持续'
+      : e.status === 'expired'
+        ? '已过时'
+        : '已公布'
 
 /** 影响一行说清三件事：方向 / 力度 / 时效；噪音事件明确标注「不改判断」 */
 const impactText = (e: MarketEvent) => {
@@ -3324,6 +3346,11 @@ onActivated(() => {
   background: rgba(43, 108, 176, .04);
 }
 .ev-card.is-expired { opacity: .72; }
+/* 已公布但影响窗口未结束：这是当日走势的主要解释，视觉上要压过待公布项 */
+.ev-card.is-ongoing {
+  border-left: 3px solid var(--el-color-primary);
+  background: color-mix(in srgb, var(--el-color-primary) 5%, var(--el-bg-color));
+}
 .ev-card :deep(.el-card__body) { padding: 10px 12px; }
 
 .ev-row {
@@ -3366,6 +3393,13 @@ onActivated(() => {
   color: var(--el-text-color-placeholder);
 }
 .ev-status.status-pending { color: var(--el-color-warning); }
+.ev-status.status-ongoing { color: var(--el-color-primary); font-weight: 600; }
+.ev-persist { align-items: flex-start; }
+.ev-persist-text {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--el-color-primary);
+}
 .ev-toggle {
   flex: none;
   font-size: 11.5px;
@@ -3884,6 +3918,7 @@ onActivated(() => {
   position: relative;
   margin-top: 22px;
   --pgr-gutter: 74px;
+  --lane-h: 7px;
   padding: 0 2px 0 var(--pgr-gutter);
 }
 .pos-gauge-bar {
@@ -3947,7 +3982,7 @@ onActivated(() => {
    类内权重用尺寸 + 不透明度表达：imp-1 最大最实，imp-3 最小最淡。
    行标签放在左侧留白里，保证散点与上方色带共用同一 0–100 坐标 */
 .pos-gauge-rows { margin-top: 2px; }
-.pos-gauge-row { position: relative; height: 22px; }
+.pos-gauge-row { position: relative; height: 28px; }
 .pgr-label {
   position: absolute;
   right: calc(100% + 8px);
@@ -3976,7 +4011,8 @@ onActivated(() => {
 .pos-gauge-row.is-ref .pgr-label b { color: var(--el-text-color-placeholder); font-weight: 500; }
 .pgr-track { position: relative; height: 100%; }
 
-/* 外圈是 15px 的透明命中区，便于 hover 小点；真正可见的是里面的 pd-mark */
+/* 外圈是 15px 的透明命中区，便于 hover 小点；真正可见的是里面的 pd-mark。
+   --lane 由 JS 按拥挤程度给出（-1 上 / 0 中 / +1 下），三点一层错开 */
 .pos-gauge-dot {
   position: absolute;
   top: 50%;
@@ -3986,11 +4022,11 @@ onActivated(() => {
   align-items: center;
   justify-content: center;
   cursor: default;
-  transform: translate(-50%, calc(-50% + var(--dy, 0px)));
+  transform: translate(-50%, calc(-50% + var(--lane, 0) * var(--lane-h, 7px)));
   transition: transform .15s ease;
   z-index: 1;
 }
-.pos-gauge-dot:hover { transform: translate(-50%, calc(-50% + var(--dy, 0px))) scale(1.25); z-index: 3; }
+.pos-gauge-dot:hover { transform: translate(-50%, calc(-50% + var(--lane, 0) * var(--lane-h, 7px))) scale(1.25); z-index: 3; }
 .pos-gauge-dot .pd-mark {
   display: block;
   border-radius: 50%;
@@ -4006,15 +4042,15 @@ onActivated(() => {
 /* ⭐ 核心合成：实心 + 外发光圈，视觉最重 */
 .pos-gauge-dot.is-core {
   z-index: 2;
-  --sz1: 16px; --sz2: 12px; --sz3: 9px;
+  --sz1: 14px; --sz2: 11px; --sz3: 9px;
 }
 .pos-gauge-dot.is-core .pd-mark {
   box-shadow: 0 0 0 1.5px var(--el-bg-color), 0 0 0 2.6px color-mix(in srgb, var(--mark) 55%, white);
 }
 /* 🔸 重要佐证：实心，无外圈 */
-.pos-gauge-dot.is-aux { --sz1: 13px; --sz2: 10px; --sz3: 8px; }
+.pos-gauge-dot.is-aux { --sz1: 12px; --sz2: 10px; --sz3: 8px; }
 /* 🔹 参考估值：空心（只有描边），样本仅 2.3 年 */
-.pos-gauge-dot.is-ref { --sz1: 12px; --sz2: 9px; --sz3: 7px; }
+.pos-gauge-dot.is-ref { --sz1: 11px; --sz2: 9px; --sz3: 7px; }
 .pos-gauge-dot.is-ref .pd-mark {
   background: transparent;
   box-shadow: inset 0 0 0 1.8px var(--mark), 0 0 0 1.5px var(--el-bg-color);
@@ -4639,10 +4675,10 @@ onActivated(() => {
   .pos-score-cap { margin-top: 0; }
   .pos-gauge-band { font-size: 9px; letter-spacing: 0; }
   /* 窄屏收窄类别标签留白，散点轨道保持足够宽度 */
-  .pos-gauge { --pgr-gutter: 60px; }
+  .pos-gauge { --pgr-gutter: 60px; --lane-h: 6px; }
   .pgr-label { right: calc(100% + 6px); gap: 2px; font-size: 9.5px; }
   .pgr-label em { font-size: 9px; padding: 1px 3px; }
-  .pos-gauge-row { height: 20px; }
+  .pos-gauge-row { height: 26px; }
   .pos-gauge-legend { gap: 3px 10px; font-size: 10px; }
   .chart-200 { height: 180px; }
   .chart-360 { height: 260px; }

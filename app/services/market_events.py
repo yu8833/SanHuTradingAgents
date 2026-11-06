@@ -108,7 +108,7 @@ _RULES: list[dict] = [
         "watch": "银行与地产链是否同向；若仅高开则视为利好出尽",
     },
     {
-        "key": "us_nfp", "region": "US", "pattern": r"非农|失业率",
+        "key": "us_nfp", "region": "US", "pattern": r"非农就业|新增非农|ADP|失业率",
         "scale": 5, "coef": -0.6, "horizon": "今日~T+1",
         "sectors": ["成长", "出口链", "外资重仓"],
         "trans": [
@@ -128,6 +128,18 @@ _RULES: list[dict] = [
             "纳指与 A 股成长同向承压，外资重仓股先于指数反应",
         ],
         "watch": "纳指期货与美元指数是否同向确认",
+    },
+    {
+        # 必须先于 fomc 匹配：标题里同样含「美联储」，但传导链与利率决议不同
+        "key": "us_fed_bs", "region": "US", "pattern": r"美联储资产负债表",
+        "scale": None, "coef": None, "horizon": "今日~T+2",
+        "sectors": ["成长", "外资重仓", "券商"],
+        "trans": [
+            "美联储资产规模每周变化，对应 QE 扩表或 QT 缩表节奏",
+            "准备金与隔夜逆回购余额随之变化，决定美元流动性松紧",
+            "缩表加速 → 美元走强、外资流出 → 成长与外资重仓承压，券商量能最敏感",
+        ],
+        "watch": "美元指数与北向资金是否同向；成长板块量能能否跟上指数",
     },
     {
         "key": "fomc", "region": "US", "pattern": r"美联储|FOMC|利率决议|议息",
@@ -156,8 +168,16 @@ _RULES: list[dict] = [
 # 明确剔除：仓单、竞拍、库存、每日高频项，以及日历里常见但与A股无关的例行条目
 _BLACKLIST = re.compile(
     r"仓单|竞拍|库存|每日|货币供应M1金额|货币供应M2金额|国债竞拍|同业拆借|拆借利率"
-    r"|资产负债表|褐皮书|贴现率"
+    r"|褐皮书|贴现率"
 )
+
+# 事件影响延续窗口（自然日）：已公布但仍在窗口内的事件保留并标记「影响持续」，
+# 因为对当前走势起作用的往往不是今天要公布的，而是昨天已经落地的那条。
+_CARRY_DAYS: dict[str, int] = {
+    "cn_cpi": 0, "cn_ppi": 1, "cn_pmi": 4, "cn_srf": 3, "cn_m2": 3,
+    "cn_gdp": 5, "lpr": 3, "us_nfp": 1, "us_cpi": 1, "us_fed_bs": 2,
+    "fomc": 3, "tariff": 5,
+}
 
 _REGION_ALLOW = ("中国", "美国", "欧元区")
 
@@ -269,6 +289,11 @@ def _build_event(row: dict, rule: dict, day: str) -> dict:
 
     return {
         "id": f"{day}-{hhmm}-{rule['key']}",
+        "key": rule["key"],
+        "day": day,
+        "age": 0,
+        "carry": 0,
+        "persist_note": "",
         "time": hhmm,
         "datetime": f"{day}T{hhmm}:00+08:00" if hhmm != "待定" else f"{day}T00:00:00+08:00",
         "title": title,
@@ -302,6 +327,11 @@ def _fomc_events(day: str) -> list[dict]:
         now = datetime.now(BEIJING).strftime("%H:%M")
         return [{
             "id": f"{day}-02:00-fomc-manual",
+            "key": "fomc",
+            "day": day,
+            "age": 0,
+            "carry": 0,
+            "persist_note": "",
             "time": "02:00",
             "datetime": f"{day}T02:00:00+08:00",
             "title": "美联储 FOMC 利率决议（手工日程）",
@@ -339,6 +369,9 @@ def _process(rows: list[dict], day: str) -> list[dict]:
         region = _s(row.get("地区"))
         if not title or not any(region.startswith(r) for r in _REGION_ALLOW):
             continue
+        # 台湾/香港数据常被日历归到「中国」，但对 A 股宏观驱动无解释力
+        if "台湾" in region or "香港" in region:
+            continue
         if _BLACKLIST.search(title):
             continue
         rule = _match_rule(title, "CN" if region.startswith("中国") else ("US" if region.startswith("美国") else "EU"))
@@ -359,22 +392,90 @@ def _process(rows: list[dict], day: str) -> list[dict]:
     return events[:8]
 
 
-async def _build_events() -> dict:
-    day = datetime.now(BEIJING).strftime("%Y-%m-%d")
-    rows: list[dict] = []
-    ok = False
-    try:
-        rows = await asyncio.wait_for(asyncio.to_thread(_fetch_calendar, day), timeout=20)
-        ok = True
-    except Exception as e:
-        logger.warning("经济日历抓取失败/超时，事件降级为空: %s", e)
+def _recent_trade_days(n: int = 3) -> list[str]:
+    """今天 + 之前 n-1 个工作日，用于取「已公布但影响窗口还没结束」的事件。"""
+    d = datetime.now(BEIJING).date()
+    out = [d.isoformat()]
+    cur = d
+    while len(out) < n:
+        cur -= timedelta(days=1)
+        if cur.weekday() < 5:
+            out.append(cur.isoformat())
+    return out
 
-    events = _process(rows, day) if rows else _fomc_events(day)
+
+def _mark_carry(ev: dict, today: str) -> None:
+    """按影响窗口决定事件保留多久：已公布且窗口未结束 → ongoing（自动展开详细说明）。"""
+    age = (date.fromisoformat(today) - date.fromisoformat(ev["day"])).days
+    carry = _CARRY_DAYS.get(ev.get("key", ""), 0)
+    ev["age"] = age
+    ev["carry"] = carry
+
+    if ev["status"] == "pending":
+        if age > 0:
+            ev["status"] = "expired"
+        return
+
+    if age > 0 and carry <= 0:
+        ev["status"] = "expired"
+        return
+
+    if carry > 0:
+        ev["status"] = "ongoing"
+        ev["persist_note"] = (
+            f"{ev['day'][5:]} 已公布，影响窗口约 {carry} 天，今日仍在窗口内"
+            if age > 0
+            else f"今日 {ev['time']} 公布，影响窗口约 {carry} 天，午后到明日仍在发酵"
+        )
+
+
+def _rank(ev: dict) -> int:
+    """排序优先级：仍在持续的方向性事件最靠前，其次今日已公布，最后待公布。"""
+    if ev["status"] in ("ongoing", "released"):
+        return 0 if ev.get("impact") == "direction" else 1
+    if ev["status"] == "pending":
+        return 2
+    return 3
+
+
+async def _build_events() -> dict:
+    today = datetime.now(BEIJING)
+    day = today.strftime("%Y-%m-%d")
+    days = _recent_trade_days(3)
+
+    async def _fetch_one(d: str) -> tuple[str, list[dict], bool]:
+        try:
+            rows = await asyncio.wait_for(asyncio.to_thread(_fetch_calendar, d), timeout=15)
+            return d, rows, True
+        except Exception as e:
+            logger.warning("经济日历抓取失败/超时 %s: %s", d, e)
+            return d, [], False
+
+    fetched = await asyncio.gather(*[_fetch_one(d) for d in days])
+    source_ok = any(ok for _, _, ok in fetched)
+
+    today_keys: set[str] = set()
+    events: list[dict] = []
+    for d, rows, ok in fetched:
+        day_events = _process(rows, d) if rows else _fomc_events(d)
+        is_today = d == day
+        for ev in day_events:
+            _mark_carry(ev, day)
+            if ev["status"] == "expired":
+                continue
+            # 今天已有同名事件时，不再叠加前几天的同规则事件
+            if not is_today and ev.get("key") in today_keys:
+                continue
+            if is_today:
+                today_keys.add(ev.get("key", ""))
+            events.append(ev)
+
+    events.sort(key=lambda e: (_rank(e), e["age"], e["time"] == "待定", e["time"]))
     return {
         "date": day,
         "updated": datetime.now(BEIJING).replace(microsecond=0).isoformat(),
-        "events": events,
-        "source_ok": ok,
+        "events": events[:10],
+        "source_ok": source_ok,
         "source": "akshare_baidu + 手工日程",
     }
 
@@ -382,7 +483,7 @@ async def _build_events() -> dict:
 async def get_market_events() -> dict:
     """今日事件（Redis 缓存 30 分钟）。抓取失败不写缓存，避免把「源不可用」固化半小时。"""
     return await cached(
-        "vibe:market_events:v3", _build_events,
+        "vibe:market_events:v5", _build_events,
         category="market", ttl=1800,
         valid=lambda v: bool(v.get("source_ok")),
     )
