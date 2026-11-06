@@ -119,7 +119,7 @@ async def get_board_quadrant() -> dict[str, Any]:
     原 ETF 行业分支（_build_industry_quadrant）已删除。
     """
     return await cached(
-        "vibe:board_quadrant:concept", _build_concept_quadrant,
+        "vibe:board_quadrant:concept:v2", _build_concept_quadrant,
         category="market",
         valid=lambda v: bool(v.get("frame")),
     )
