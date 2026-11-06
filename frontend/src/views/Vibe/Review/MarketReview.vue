@@ -505,7 +505,7 @@
             <div class="pos-gauge-scale">
               <span v-for="t in GAUGE_TICKS" :key="t" :style="{ left: t + '%' }">{{ t }}</span>
             </div>
-            <!-- 每项指标一个点：实心=参与合成，空心=样本短未参与；分三行错落避免重叠 -->
+            <!-- 每项指标一个点：实心=有 3 年以上样本，空心=样本不足 3 年；分四行错落避免重叠 -->
             <div class="pos-gauge-dots">
               <el-tooltip
                 v-for="d in heatDots"
@@ -515,15 +515,15 @@
               >
                 <i
                   class="pos-gauge-dot"
-                  :class="[d.tone, { 'is-hole': !d.inComposite }]"
+                  :class="[d.tone, { 'is-hole': d.shortSample }]"
                   :style="{ left: d.pct + '%', top: (4 + d.row * 12) + 'px' }"
                 />
               </el-tooltip>
             </div>
             <div class="pos-gauge-key">
-              <span><i class="gk-solid" />参与合成 {{ dotCounts.inComposite }} 项</span>
-              <span><i class="gk-hole" />样本短未参与 {{ dotCounts.outside }} 项</span>
-              <span class="gk-hint">每一颗点 = 一项指标的近 10 年分位</span>
+              <span><i class="gk-solid" />{{ dotCounts.full }} 项有 {{ position.window?.years || 10 }} 年样本</span>
+              <span><i class="gk-hole" />{{ dotCounts.short }} 项样本不足 3 年</span>
+              <span class="gk-hint">每一颗点 = 一项指标的分位</span>
             </div>
           </div>
 
@@ -1122,31 +1122,36 @@ const GAUGE_TICKS = [0, 20, 40, 60, 80, 100]
 const compositePct = computed(() => position.value?.composite.percentile ?? null)
 
 /**
- * 标尺上的指标散点：全部指标（含估值、底部特征）按热度分位定位。
- * 点数较多，按分位排序后分三行错落，避免相邻点位重叠；实心=参与合成，空心=样本短未参与。
+ * 标尺上的指标散点：全部指标按热度分位定位。
+ * 点数较多，按分位排序后分四行错落，避免相邻点位重叠；空心=历史样本不足 3 年，分位仅供参照。
  */
 const heatDots = computed(() =>
   (position.value?.position || [])
     .filter(m => m.percentile != null)
     .map(m => {
       const pct = heatOfMetric(m) as number
+      const shortSample = (m.window_years ?? 0) < 3
       return {
         key: m.key,
         pct,
         tone: posTone(pct),
-        inComposite: m.in_composite,
+        shortSample,
         tip:
-          `${m.label}：${m.value == null ? '—' : m.value}${m.unit} · 近 10 年分位 ${pct}%` +
-          (m.in_composite ? '' : '（样本短，不参与合成）'),
+          `${m.label}：${m.value == null ? '—' : m.value}${m.unit} · 分位 ${pct}%（样本 ${m.window_years} 年）` +
+          (shortSample
+            ? '（历史样本不足 3 年，分位仅供参照）'
+            : m.in_composite
+              ? '（计入合成分位）'
+              : '（独立佐证项，不计入合成）'),
       }
     })
     .sort((a, b) => a.pct - b.pct)
-    .map((d, i) => ({ ...d, row: i % 3 })),
+    .map((d, i) => ({ ...d, row: i % 4 })),
 )
 
 const dotCounts = computed(() => ({
-  inComposite: (position.value?.position || []).filter(m => m.in_composite && m.percentile != null).length,
-  outside: (position.value?.position || []).filter(m => !m.in_composite && m.percentile != null).length,
+  full: (position.value?.position || []).filter(m => m.percentile != null && (m.window_years ?? 0) >= 3).length,
+  short: (position.value?.position || []).filter(m => m.percentile != null && (m.window_years ?? 0) < 3).length,
 }))
 
 /** 内部高度分化时给一句话解释：为什么合成分位不高不低 */
@@ -3831,10 +3836,10 @@ onActivated(() => {
   font-size: 10.5px;
   color: var(--el-text-color-placeholder);
 }
-/* 标尺散点区：三行错落，每颗点是一项指标的分位 */
+/* 标尺散点区：四行错落，每颗点是一项指标的分位 */
 .pos-gauge-dots {
   position: relative;
-  height: 42px;
+  height: 54px;
   margin-top: 1px;
 }
 .pos-gauge-dot {
@@ -3853,7 +3858,7 @@ onActivated(() => {
 .pos-gauge-dot.is-cold { --dot: var(--app-down); }
 .pos-gauge-dot.is-neutral { --dot: var(--el-color-primary); }
 .pos-gauge-dot.is-muted { --dot: var(--el-border-color); }
-/* 未参与合成的指标用空心点，形状区分优先于颜色 */
+/* 样本不足 3 年的指标用空心点，形状区分优先于颜色 */
 .pos-gauge-dot.is-hole {
   background: transparent;
   box-shadow: inset 0 0 0 2px var(--dot), 0 0 0 1.5px var(--el-bg-color);

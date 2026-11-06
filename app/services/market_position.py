@@ -156,11 +156,24 @@ def _live_row_sync(db) -> dict[str, Any] | None:
                 0,
                 {"$ifNull": ["$amount", 0]},
             ]}}},
+            # 涨停判定：与历史日线口径一致（按板块前缀确定涨停幅度）
+            {"$addFields": {
+                "sym": {"$ifNull": ["$symbol", "$code"]},
+                "lim": {"$switch": {
+                    "branches": [
+                        {"case": {"$in": [{"$substrCP": ["$sym", 0, 2]}, ["30", "68"]]}, "then": 19.8},
+                        {"case": {"$in": [{"$substrCP": ["$sym", 0, 1]}, ["4", "8"]]}, "then": 29.5},
+                        {"case": {"$eq": [{"$substrCP": ["$sym", 0, 2]}, "92"]}, "then": 29.5},
+                    ],
+                    "default": 9.8,
+                }},
+            }},
             {"$group": {
                 "_id": None,
                 "n": {"$sum": 1},
                 "up": {"$sum": {"$cond": [{"$gt": ["$pct_chg", 0]}, 1, 0]}},
                 "down": {"$sum": {"$cond": [{"$lt": ["$pct_chg", 0]}, 1, 0]}},
+                "zt": {"$sum": {"$cond": [{"$gte": ["$pct_chg", {"$subtract": ["$lim", 0.2]}]}, 1, 0]}},
                 "amount": {"$sum": "$amt"},
                 "avg_pct": {"$avg": "$pct_chg"},
                 "amp": {"$avg": {"$cond": [
@@ -186,36 +199,36 @@ def _live_row_sync(db) -> dict[str, Any] | None:
             logger.info(f"📊 [position] 今日快照仅 {n} 只（参考 {ref_n}），视为不完整，跳过实时行")
             return None
 
-        # 估值：取最新一日的全市场均值（快照本身没有 PE/PB）
+        # 估值：取最新一日的全市场估值/换手（日线快照本身没有 PE/PB）
         vrow = next(db["stock_daily_basic"].find({}, {"trade_date": 1}).sort("trade_date", -1).limit(1), None)
         vdate = _normalize_date((vrow or {}).get("trade_date"))
-        avg_pe = avg_pb = None
+        vmeta: dict[str, Any] = {}
         if vdate:
-            vagg = next(db["stock_daily_basic"].aggregate([
-                {"$match": {"trade_date": {"$in": [vdate, vdate.replace("-", "")]}}},
-                {"$group": {"_id": None,
-                            "pe": {"$avg": {"$cond": [
-                                {"$and": [{"$gt": ["$pe", 0]}, {"$lte": ["$pe", 500]}]}, "$pe", None]}},
-                            "pb": {"$avg": {"$cond": [
-                                {"$and": [{"$gt": ["$pb", 0]}, {"$lte": ["$pb", 50]}]}, "$pb", None]}}}},
-            ], allowDiskUse=True), None)
-            if vagg:
-                avg_pe = round(_f(vagg["pe"]), 2) if vagg.get("pe") is not None else None
-                avg_pb = round(_f(vagg["pb"]), 2) if vagg.get("pb") is not None else None
+            vmeta = _aggregate_valuation(db, vdate, vdate).get(vdate, {})
 
         up = int((agg or {}).get("up") or 0)
+        zt = int((agg or {}).get("zt") or 0)
+        # 站上 250 日线占比需逐股均线，盘中无法实时重算，沿用上一交易日值（该值变化极慢）
+        prev_row = next(db[COLLECTION].find({}, {"ma250_pct": 1}).sort("date", -1).limit(1), None)
+        ma250_pct = (prev_row or {}).get("ma250_pct")
         return {
             "date": date,
             "n": n,
             "up": up,
             "down": int((agg or {}).get("down") or 0),
             "up_pct": round(up / n * 100, 2),
+            "zt": zt,
+            "zt_pct": round(zt / n * 100, 2),
             "amount": round(_f((agg or {}).get("amount")) / 1e8, 2),
             "avg_pct": round(_f((agg or {}).get("avg_pct")), 3),
             "amp_pct": round(_f((agg or {}).get("amp")), 2) if (agg or {}).get("amp") is not None else None,
             "low_pct": round(int((agg or {}).get("low_small") or 0) / n * 100, 2),
-            "avg_pe": avg_pe,
-            "avg_pb": avg_pb,
+            "avg_pe": vmeta.get("pe"),
+            "avg_pb": vmeta.get("pb"),
+            "pe_med": vmeta.get("pe_med"),
+            "net_pct": vmeta.get("net_pct"),
+            "turnover_pct": vmeta.get("turnover"),
+            "ma250_pct": ma250_pct,
             "valuation_date": vdate,
         }
     except Exception:
@@ -310,8 +323,15 @@ def _aggregate_quotes(db, start: str, end: str | None) -> list[dict]:
     return list(db["stock_daily_quotes"].aggregate(pipeline, allowDiskUse=True))
 
 
-def _aggregate_valuation(db, start: str, end: str | None) -> dict[str, tuple[float | None, float | None]]:
-    """按交易日计算全市场平均 PE / PB（仅取有效正数，剔除极端脏值）。"""
+def _aggregate_valuation(db, start: str, end: str | None) -> dict[str, dict[str, Any]]:
+    """按交易日聚合全市场估值与参与度。
+
+    返回 {日期: {pe, pb, pe_med, net_pct, turnover}}：
+    - pe / pb：均值（剔除极端脏值）
+    - pe_med：PE 中位数（MongoDB 4.4 无 $median，取当日有效 PE 列表在 Python 端求中位数）
+    - net_pct：破净率（PB < 1 个股占比，%）
+    - turnover：换手率均值（%）
+    """
     date_match: dict[str, Any] = {"$gte": start}
     if end:
         date_match["$lte"] = end
@@ -325,17 +345,86 @@ def _aggregate_valuation(db, start: str, end: str | None) -> dict[str, tuple[flo
             "pb": {"$avg": {"$cond": [
                 {"$and": [{"$gt": ["$pb", 0]}, {"$lte": ["$pb", 50]}]}, "$pb", None,
             ]}},
+            "turnover": {"$avg": {"$cond": [
+                {"$and": [{"$gt": ["$turnover_rate", 0]}, {"$lte": ["$turnover_rate", 100]}]},
+                "$turnover_rate", None,
+            ]}},
+            # 破净率：PB 有效且小于 1 的只数 / PB 有效总只数
+            "pb_n": {"$sum": {"$cond": [
+                {"$and": [{"$gt": ["$pb", 0]}, {"$lte": ["$pb", 50]}]}, 1, 0,
+            ]}},
+            "pb_net": {"$sum": {"$cond": [
+                {"$and": [{"$gt": ["$pb", 0]}, {"$lt": ["$pb", 1]}]}, 1, 0,
+            ]}},
+            # 单日 5000 只个股的 PE 列表（约 40KB）远小于文档上限，可整日推送后在 Python 端求中位数
+            "pe_vals": {"$push": {"$cond": [
+                {"$and": [{"$gt": ["$pe", 0]}, {"$lte": ["$pe", 500]}]}, "$pe", "$$REMOVE",
+            ]}},
         }},
     ]
-    out: dict[str, tuple[float | None, float | None]] = {}
+    out: dict[str, dict[str, Any]] = {}
     for r in db["stock_daily_basic"].aggregate(pipeline, allowDiskUse=True):
         d = _normalize_date(r.get("_id"))
         if not d:
             continue
-        pe = round(_f(r["pe"]), 2) if r.get("pe") is not None else None
-        pb = round(_f(r["pb"]), 2) if r.get("pb") is not None else None
-        out[d] = (pe, pb)
+        pe_vals = [_f(v) for v in (r.get("pe_vals") or [])]
+        pb_n = int(r.get("pb_n") or 0)
+        pb_net = int(r.get("pb_net") or 0)
+        out[d] = {
+            "pe": round(_f(r["pe"]), 2) if r.get("pe") is not None else None,
+            "pb": round(_f(r["pb"]), 2) if r.get("pb") is not None else None,
+            "pe_med": round(_median(pe_vals), 2) if pe_vals else None,
+            "net_pct": round(pb_net / pb_n * 100, 2) if pb_n else None,
+            "turnover": round(_f(r["turnover"]), 2) if r.get("turnover") is not None else None,
+        }
     return out
+
+
+def _ma250_breadth_map(db, start: str, end: str) -> dict[str, float]:
+    """站上 250 日线（年线）的个股占比（%），按交易日统计。
+
+    这是位置判断最有力的广度证据：回答「多数股票是否真的处在长期上升趋势里」。
+    逐股滚动均线的计算量无法用一次聚合完成，这里按 symbol 推送收盘价序列
+    （单只票一个文档），在 Python 端滚动求 MA250，游标逐条处理以控制内存。
+    日期早于 start 的只参与均线预热，不产出结果。
+    """
+    try:
+        lookback = (datetime.strptime(start, "%Y-%m-%d") - timedelta(days=420)).strftime("%Y-%m-%d")
+    except ValueError:
+        return {}
+    pipeline = [
+        {"$match": {"period": "daily", "trade_date": {"$gte": lookback},
+                    "close": {"$gt": 0}, "pct_chg": {"$ne": None}}},
+        {"$project": {"symbol": 1, "trade_date": 1, "close": 1}},
+        {"$group": {"_id": "$symbol",
+                    "pairs": {"$push": {"d": "$trade_date", "c": "$close"}}}},
+    ]
+    above: dict[str, int] = {}
+    total: dict[str, int] = {}
+    for doc in db["stock_daily_quotes"].aggregate(pipeline, allowDiskUse=True):
+        # 同一只票可能多源重复：按日期去重（保留首条有效收盘价）
+        by_date: dict[str, float] = {}
+        for p in doc.get("pairs") or []:
+            d = _normalize_date((p or {}).get("d"))
+            c = _f((p or {}).get("c"))
+            if d and c > 0 and d not in by_date:
+                by_date[d] = c
+        if len(by_date) < 250:
+            continue
+        pairs = sorted(by_date.items())
+        arr = [c for _, c in pairs]
+        win_sum = 0.0
+        for i, (d, c) in enumerate(pairs):
+            win_sum += c
+            if i >= 250:
+                win_sum -= arr[i - 250]
+            if i + 1 < 250 or d < start or d > end:
+                continue
+            ma = win_sum / 250
+            total[d] = total.get(d, 0) + 1
+            if c > ma:
+                above[d] = above.get(d, 0) + 1
+    return {d: round(above.get(d, 0) / n * 100, 2) for d, n in total.items() if n >= 100}
 
 
 def _upsert_docs(db, docs: list[dict]) -> int:
@@ -367,6 +456,9 @@ def _build_sync(full: bool = False) -> int:
         except ValueError:
             start_dt = latest_dt - timedelta(days=POSITION_YEARS * 365 + 30)
 
+    # 站上 250 日线占比：逐股滚动均线，一次算好整段映射（毫秒级查库 + 秒级计算）
+    breadth_map = _ma250_breadth_map(db, start_dt.strftime("%Y-%m-%d"), latest)
+
     total = 0
     cursor = start_dt
     now = now_tz()
@@ -396,21 +488,30 @@ def _build_sync(full: bool = False) -> int:
                 logger.info(f"📊 [position] 跳过不完整交易日 {d}：仅 {n} 只个股（参考 {ref_n}）")
                 continue
             up = int(r.get("up") or 0)
-            pe, pb = valuation.get(d, (None, None))
+            zt = int(r.get("zt") or 0)
+            v = valuation.get(d) or {}
             docs.append({
                 "date": d,
                 "n": n,
                 "up": up,
                 "down": int(r.get("down") or 0),
                 "up_pct": round(up / n * 100, 2),
-                "zt": int(r.get("zt") or 0),
+                "zt": zt,
+                # 涨停家数占比（%）：情绪极值，与波动率互补
+                "zt_pct": round(zt / n * 100, 2),
                 "amount": round(_f(r.get("amount")) / 1e8, 2),
                 "avg_pct": round(_f(r.get("avg_pct")), 3),
                 # 平均振幅（%）与低价股（<3 元）占比（%）
                 "amp_pct": round(_f(r.get("amp")), 2) if r.get("amp") is not None else None,
                 "low_pct": round(int(r.get("low_small") or 0) / n * 100, 2),
-                "avg_pe": pe,
-                "avg_pb": pb,
+                "avg_pe": v.get("pe"),
+                "avg_pb": v.get("pb"),
+                # 估值中位 / 破净率 / 换手率：估值与底部特征的佐证项
+                "pe_med": v.get("pe_med"),
+                "net_pct": v.get("net_pct"),
+                "turnover_pct": v.get("turnover"),
+                # 站上 250 日线的个股占比（%）：广度确认
+                "ma250_pct": breadth_map.get(d),
                 "updated_at": now,
             })
         batch_ns.extend(int(r.get("n") or 0) for r in quotes if int(r.get("n") or 0) > 0)
@@ -510,6 +611,15 @@ def _pct_series(series: list[float | None]) -> list[int | None]:
     return _rank_series([_f(v) if v is not None else None for v in series])
 
 
+def _zt_ratio(row: dict) -> float | None:
+    """涨停家数占比（%）：新行直接有 zt_pct，旧行用 zt / n 现算。"""
+    v = row.get("zt_pct")
+    if v is not None:
+        return _f(v)
+    zt, n = int(row.get("zt") or 0), int(row.get("n") or 0)
+    return round(zt / n * 100, 2) if n else None
+
+
 def _heat_of(pct: int | None, higher_is_hot: bool) -> int | None:
     """把「指标分位」统一成「热度分位」：越高越热。"""
     if pct is None:
@@ -569,6 +679,27 @@ def _ma_dev_series(idx: list[float], window: int = 250) -> list[float | None]:
         seg = idx[max(0, i - window + 1): i + 1]
         ma = sum(seg) / len(seg)
         out.append(round((v / ma - 1) * 100, 2) if ma > 0 else None)
+    return out
+
+
+def _momentum_series(idx: list[float], window: int = 20) -> list[float | None]:
+    """等权指数近 N 个交易日涨幅（%）：回答「最近在往上还是往下」。"""
+    out: list[float | None] = []
+    for i, v in enumerate(idx):
+        if i < window:
+            out.append(None)
+            continue
+        base = idx[i - window]
+        out.append(round((v / base - 1) * 100, 2) if base > 0 else None)
+    return out
+
+
+def _low_gain_series(idx: list[float], window: int = 250) -> list[float | None]:
+    """距近 250 个交易日最低点的涨幅（%）：与「距高点回撤」配对，构成位置区间。"""
+    out: list[float | None] = []
+    for i, v in enumerate(idx):
+        lo = min(idx[max(0, i - window + 1): i + 1])
+        out.append(round((v / lo - 1) * 100, 2) if lo > 0 else None)
     return out
 
 
@@ -900,6 +1031,21 @@ def compute_position_payload(rows: list[dict], live_row: dict[str, Any] | None =
          "上涨家数占全市场比重，越高说明上涨越普遍", True),
         ("low_price", "底部特征", "3 元以下个股占比", "%", [r.get("low_pct") for r in rows], False,
          "收盘价低于 3 元的个股占比，熊市末期往往明显抬升（分位越高越冷）", True),
+        # 以下为佐证项：只作为标尺上的独立证据点，不参与合成分位，避免改变既有口径
+        ("ma250_breadth", "广度", "站上 250 日线占比", "%", [r.get("ma250_pct") for r in rows], True,
+         "收盘价高于自身 250 日均线（年线）的个股占比，衡量多数股票是否真的处在长期上升趋势里", False),
+        ("momentum20", "趋势", "20 日动量", "%", _momentum_series(idx), True,
+         "等权指数近 20 个交易日涨幅，正值为上涨趋势；用来区分「低位止跌」与「低位续跌」", False),
+        ("low_gain", "位置", "距 250 日低点涨幅", "%", _low_gain_series(idx), True,
+         "等权指数相对近 250 日最低点已反弹多少，与「距高点回撤」配对构成完整的位置区间", False),
+        ("zt_ratio", "情绪", "涨停家数占比", "%", [_zt_ratio(r) for r in rows], True,
+         "当日涨停家数占全市场比重，衡量投机资金的极端活跃度，与波动率互补", False),
+        ("break_net", "底部特征", "破净率", "%", [r.get("net_pct") for r in rows], False,
+         "市净率低于 1 倍的个股占比，越高说明越多个股跌破净资产；熊市底部往往明显抬升（分位越高越冷）", False),
+        ("pe_median", "估值", "PE 中位数", "倍", [r.get("pe_med") for r in rows], True,
+         "全市场市盈率中位数，比均值更抗极端值；越高代表整体估值越贵；样本自 2024-07 起", False),
+        ("turnover", "参与度", "平均换手率", "%", [r.get("turnover_pct") for r in rows], True,
+         "全市场个股换手率均值，衡量资金换手活跃度，比绝对成交额更可跨期比较；样本自 2024-07 起", False),
     ]
 
     series_by_key = {spec[0]: spec[4] for spec in specs}
@@ -924,7 +1070,7 @@ def compute_position_payload(rows: list[dict], live_row: dict[str, Any] | None =
         if is_live:
             m["live"] = True
             # 估值来自 daily_basic，若其日期早于实时行，卡片需标注真实数据日期
-            if key in ("valuation_pe", "valuation_pb"):
+            if key in ("valuation_pe", "valuation_pb", "break_net", "pe_median", "turnover"):
                 vdate = _normalize_date((live_row or {}).get("valuation_date"))
                 if vdate:
                     m["as_of"] = vdate
