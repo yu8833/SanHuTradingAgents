@@ -15,25 +15,10 @@
 from __future__ import annotations
 
 
-def _latest_trade_date() -> str:
-    """实收最近交易日（YYYY-MM-DD），与个股趋势/行业宽度统一口径（同步查询日线表）。"""
-    from app.services.stock_quadrant_analysis import _dash
-    from app.core.database import get_mongo_db_sync
-
-    try:
-        db = get_mongo_db_sync()
-        cursor = db["stock_daily_quotes"].find(
-            {"period": "daily"}, {"trade_date": 1}
-        ).sort("trade_date", -1).limit(1)
-        doc = next(cursor, None)
-        if doc:
-            d = _dash(doc.get("trade_date"))
-            if len(d) == 10:
-                return d
-    except Exception as e:
-        logging.getLogger(__name__).warning(f"获取最近交易日失败（概念宽度回退当天）: {e}")
-    import datetime as _dt
-    return _dt.datetime.now().strftime("%Y-%m-%d")
+def _market_trade_date() -> str:
+    """页面当前参考交易日（交易日开盘后=当日，盘前/休息日=最近已完成交易日）。"""
+    from app.utils.trading_time import get_market_trade_date
+    return get_market_trade_date().strftime("%Y-%m-%d")
 
 
 import logging
@@ -173,8 +158,9 @@ def _build() -> dict:
 
     return {
         "total": len(concepts),
-        # as_of 统一为「实收最近交易日」（与非交易日显示口径一致），updated_at 保留抓取时刻
-        "as_of": _latest_trade_date(),
+        # 概念快照是「实时行情」，as_of 必须取市场参考交易日（交易时段=当日）；
+        # 日线表在收盘落库前仍停在昨日，不能用 _latest_trade_date 当标题日期
+        "as_of": _market_trade_date(),
         "updated_at": datetime.now(BEIJING).strftime("%Y-%m-%d %H:%M"),
         "breadth": {
             "up": up_count,
@@ -192,7 +178,7 @@ def _build() -> dict:
 async def get_concept_analysis() -> dict:
     """概念分析：实时行情 + 领涨/领跌榜 + 资金流榜（Redis 缓存，market 级 TTL）。"""
     return await cached(
-        "vibe:concept_analysis", _build,
+        "vibe:concept_analysis:v2", _build,
         category="market",
         valid=lambda v: bool(v.get("concepts")),
     )
