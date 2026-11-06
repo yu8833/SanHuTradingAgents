@@ -505,25 +505,33 @@
             <div class="pos-gauge-scale">
               <span v-for="t in GAUGE_TICKS" :key="t" :style="{ left: t + '%' }">{{ t }}</span>
             </div>
-            <!-- 每项指标一个点：实心=有 3 年以上样本，空心=样本不足 3 年；分四行错落避免重叠 -->
+            <!-- 每项指标一个点：三级重要性 → 尺寸/边框/空心区别；四行错落避免重叠 -->
             <div class="pos-gauge-dots">
               <el-tooltip
                 v-for="d in heatDots"
                 :key="d.key"
                 :content="d.tip"
                 placement="top"
+                effect="light"
               >
                 <i
                   class="pos-gauge-dot"
-                  :class="[d.tone, { 'is-hole': d.shortSample }]"
+                  :class="[d.tone, `is-${d.level}`]"
                   :style="{ left: d.pct + '%', top: (4 + d.row * 12) + 'px' }"
                 />
               </el-tooltip>
             </div>
+            <!-- 三段图例：一眼识别每档重要性的点数与含义 -->
             <div class="pos-gauge-key">
-              <span><i class="gk-solid" />{{ dotCounts.full }} 项有 {{ position.window?.years || 10 }} 年样本</span>
-              <span><i class="gk-hole" />{{ dotCounts.short }} 项样本不足 3 年</span>
-              <span class="gk-hint">每一颗点 = 一项指标的分位</span>
+              <span class="gk-seg">
+                <i class="gk-symbol gk-core" />⭐ 核心 {{ dotCounts.core }} 项 · 决定合成分位
+              </span>
+              <span class="gk-seg">
+                <i class="gk-symbol gk-aux" />🔸 佐证 {{ dotCounts.aux }} 项 · 独立验证
+              </span>
+              <span class="gk-seg">
+                <i class="gk-symbol gk-ref" />🔹 参考 {{ dotCounts.ref }} 项 · 仅 2.3 年历史
+              </span>
             </div>
           </div>
 
@@ -1122,27 +1130,62 @@ const GAUGE_TICKS = [0, 20, 40, 60, 80, 100]
 const compositePct = computed(() => position.value?.composite.percentile ?? null)
 
 /**
- * 标尺上的指标散点：全部指标按热度分位定位。
- * 点数较多，按分位排序后分四行错落，避免相邻点位重叠；空心=历史样本不足 3 年，分位仅供参照。
+ * 三级重要性（后端 specs 顺序已按此排列）：
+ *  core    核心合成：决定合成分位 100% 权重，大圆点 + 实线
+ *  aux     重要佐证：独立验证广度/动量/情绪极值，中圆点 + 实心
+ *  ref     参考估值：样本仅 2.3 年，小圆点 + 空心
+ */
+const DOT_LEVEL: Record<string, 'core' | 'aux' | 'ref'> = {
+  drawdown: 'core', ma250_dev: 'core', amplitude: 'core', volatility: 'core',
+  amount: 'core', up_pct: 'core', low_price: 'core',
+  ma250_breadth: 'aux', momentum20: 'aux', low_gain: 'aux', zt_ratio: 'aux',
+  valuation_pe: 'ref', valuation_pb: 'ref', pe_median: 'ref', break_net: 'ref', turnover: 'ref',
+}
+
+const DOT_LEVEL_LABEL: Record<string, { tag: string; cap: string; hint: string }> = {
+  core: {
+    tag: '⭐ 核心合成',
+    cap: '核心合成',
+    hint: '决定合成分位的 7 项指标，10 年以上历史',
+  },
+  aux: {
+    tag: '🔸 重要佐证',
+    cap: '重要佐证',
+    hint: '长历史独立验证项，不计入合成分位',
+  },
+  ref: {
+    tag: '🔹 参考估值',
+    cap: '参考估值',
+    hint: '仅 2.3 年历史（自 2024-07），非 10 年窗口，方向参考',
+  },
+}
+
+/**
+ * 标尺上的指标散点：按热度分位定位；三级重要性 → 不同尺寸/样式/tooltip 前缀。
+ * 核心（13px）> 佐证（11px）> 参考（9px 空心）；按分位排序后四行错落避免重叠。
  */
 const heatDots = computed(() =>
   (position.value?.position || [])
     .filter(m => m.percentile != null)
     .map(m => {
       const pct = heatOfMetric(m) as number
-      const shortSample = (m.window_years ?? 0) < 3
+      const level = DOT_LEVEL[m.key] ?? 'ref'
+      const ll = DOT_LEVEL_LABEL[level]
+      const asOfDate = m.as_of && m.as_of !== position.value?.as_of ? `（截至 ${m.as_of.slice(5)}）` : ''
+      const isAmountProjected = m.key === 'amount' && m.projected_value != null
+      const projectedCap = isAmountProjected
+        ? `盘中进度 ${Math.round((m.progress ?? 1) * 100)}% 折算全天`
+        : ''
       return {
         key: m.key,
         pct,
         tone: posTone(pct),
+        level,
         shortSample,
         tip:
-          `${m.label}：${m.value == null ? '—' : m.value}${m.unit} · 分位 ${pct}%（样本 ${m.window_years} 年）` +
-          (shortSample
-            ? '（历史样本不足 3 年，分位仅供参照）'
-            : m.in_composite
-              ? '（计入合成分位）'
-              : '（独立佐证项，不计入合成）'),
+          `${ll.tag} ${m.label}：${m.value == null ? '—' : m.value}${m.unit}${asOfDate} · 热度分位 ${pct}%\n` +
+          `样本 ${m.window_years} 年 · ${ll.hint}` +
+          (projectedCap ? `\n${projectedCap}` : ''),
       }
     })
     .sort((a, b) => a.pct - b.pct)
@@ -1150,8 +1193,9 @@ const heatDots = computed(() =>
 )
 
 const dotCounts = computed(() => ({
-  full: (position.value?.position || []).filter(m => m.percentile != null && (m.window_years ?? 0) >= 3).length,
-  short: (position.value?.position || []).filter(m => m.percentile != null && (m.window_years ?? 0) < 3).length,
+  core: heatDots.value.filter(d => d.level === 'core').length,
+  aux: heatDots.value.filter(d => d.level === 'aux').length,
+  ref: heatDots.value.filter(d => d.level === 'ref').length,
 }))
 
 /** 内部高度分化时给一句话解释：为什么合成分位不高不低 */
@@ -3836,30 +3880,49 @@ onActivated(() => {
   font-size: 10.5px;
   color: var(--el-text-color-placeholder);
 }
-/* 标尺散点区：四行错落，每颗点是一项指标的分位 */
+/* 标尺散点区：四行错落，每颗点是一项指标的分位。
+   三级重要性驱动尺寸：核心 13px（决定合成分位）> 佐证 11px > 参考 9px 空心 */
 .pos-gauge-dots {
   position: relative;
-  height: 54px;
+  height: 60px;
   margin-top: 1px;
 }
 .pos-gauge-dot {
   position: absolute;
-  width: 9px;
-  height: 9px;
-  margin-left: -4.5px;
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
   border-radius: 50%;
   background: var(--dot);
   box-shadow: 0 0 0 1.5px var(--el-bg-color);
   cursor: default;
-  transition: transform .12s ease;
+  transition: transform .15s ease, box-shadow .15s ease;
+  z-index: 1;
 }
-.pos-gauge-dot:hover { transform: scale(1.5); }
+.pos-gauge-dot:hover { transform: scale(1.8); z-index: 3; box-shadow: 0 0 0 2px var(--el-bg-color), 0 2px 8px rgba(0,0,0,.2); }
 .pos-gauge-dot.is-hot { --dot: var(--app-up); }
 .pos-gauge-dot.is-cold { --dot: var(--app-down); }
 .pos-gauge-dot.is-neutral { --dot: var(--el-color-primary); }
 .pos-gauge-dot.is-muted { --dot: var(--el-border-color); }
-/* 样本不足 3 年的指标用空心点，形状区分优先于颜色 */
-.pos-gauge-dot.is-hole {
+/* ⭐ 核心合成：最大尺寸 + 外圈实线 + hover 优先 */
+.pos-gauge-dot.is-core {
+  width: 13px;
+  height: 13px;
+  margin-left: -6.5px;
+  box-shadow: 0 0 0 1.5px var(--el-bg-color), 0 0 0 2.5px color-mix(in srgb, var(--dot) 70%, white);
+  z-index: 2;
+}
+/* 🔸 重要佐证：中号 + 实心 */
+.pos-gauge-dot.is-aux {
+  width: 11px;
+  height: 11px;
+  margin-left: -5.5px;
+}
+/* 🔹 参考估值：小号 + 空心（只有颜色描边） */
+.pos-gauge-dot.is-ref {
+  width: 9px;
+  height: 9px;
+  margin-left: -4.5px;
   background: transparent;
   box-shadow: inset 0 0 0 2px var(--dot), 0 0 0 1.5px var(--el-bg-color);
 }
@@ -3867,20 +3930,26 @@ onActivated(() => {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 16px;
-  margin-top: 2px;
-  font-size: 11px;
-  color: var(--el-text-color-placeholder);
+  gap: 6px 18px;
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: var(--el-text-color-secondary);
 }
-.pos-gauge-key span { display: inline-flex; align-items: center; gap: 4px; }
-.pos-gauge-key i {
-  width: 8px;
-  height: 8px;
+.pos-gauge-key .gk-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--el-fill-color-light) 80%, transparent);
+}
+.pos-gauge-key .gk-symbol {
+  display: inline-block;
   border-radius: 50%;
 }
-.pos-gauge-key .gk-solid { background: var(--el-text-color-secondary); }
-.pos-gauge-key .gk-hole { box-shadow: inset 0 0 0 2px var(--el-text-color-placeholder); }
-.pos-gauge-key .gk-hint { margin-left: auto; }
+.pos-gauge-key .gk-core { width: 10px; height: 10px; background: var(--el-text-color-primary); box-shadow: 0 0 0 1.5px var(--el-bg-color), 0 0 0 2.5px color-mix(in srgb, var(--el-text-color-primary) 70%, white); }
+.pos-gauge-key .gk-aux { width: 8px; height: 8px; background: var(--el-text-color-secondary); }
+.pos-gauge-key .gk-ref { width: 7px; height: 7px; background: transparent; box-shadow: inset 0 0 0 1.8px var(--el-text-color-placeholder); }
 
 /* 分位 → 未来收益：与色带共用同一把 0–100 横轴，当前分位竖线贯穿 */
 .pos-gauge-fwd {
