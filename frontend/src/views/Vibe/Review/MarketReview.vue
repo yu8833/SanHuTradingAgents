@@ -1181,7 +1181,6 @@ const heatDots = computed(() =>
         pct,
         tone: posTone(pct),
         level,
-        shortSample,
         tip:
           `${ll.tag} ${m.label}：${m.value == null ? '—' : m.value}${m.unit}${asOfDate} · 热度分位 ${pct}%\n` +
           `样本 ${m.window_years} 年 · ${ll.hint}` +
