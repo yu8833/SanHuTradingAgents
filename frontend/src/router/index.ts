@@ -634,10 +634,30 @@ router.afterEach((_to, _from) => {
 })
 
 // 路由错误处理
-router.onError((error) => {
+// 懒加载 chunk 失败是最常见的「页面空白」来源：前端重新部署后文件名 hash 变化，
+// 手机浏览器若仍持有旧 index.html（或弱网下载中断），请求到的旧 chunk 会 404，
+// 动态 import 直接 reject，router-view 就停在空白。这里自动整页刷新一次自愈。
+const CHUNK_RELOAD_KEY = 'chunk-reload-at'
+const CHUNK_ERR_RE =
+  /Failed to fetch dynamically imported module|dynamically imported module|Loading chunk .* failed|Importing a module script failed|ChunkLoadError/i
+
+router.onError((error: unknown) => {
   console.error('路由错误:', error)
   NProgress.done()
-  ElMessage.error('页面加载失败，请重试')
+
+  const msg = String((error as Error)?.message ?? error)
+  if (CHUNK_ERR_RE.test(msg)) {
+    const last = Number(sessionStorage.getItem(CHUNK_RELOAD_KEY) || 0)
+    // 60 秒内只自动刷新一次，避免「资源确实缺失」时陷入刷新死循环
+    if (Date.now() - last > 60_000) {
+      sessionStorage.setItem(CHUNK_RELOAD_KEY, String(Date.now()))
+      ElMessage.warning('页面资源已更新，正在自动刷新…')
+      window.location.reload()
+      return
+    }
+  }
+
+  ElMessage.error('页面加载失败，请刷新重试')
 })
 
 export default router
