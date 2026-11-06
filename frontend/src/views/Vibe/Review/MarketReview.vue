@@ -623,7 +623,10 @@
         <!-- 单项指标：分组横条（统一按热度分位：越靠右越热，竖线为 50% 中位；细条为近 1 年分位对照） -->
         <div class="pos-metrics">
           <p class="cap pos-metrics-cap">
-            粗条 = 近 10 年热度分位（0 最冷 / 100 最热）；细条 = 近 1 年分位对照，用来识别长期漂移；悬停指标名查看口径。
+            <span class="pm-legend"><i class="lg-bar" />横向长条 = 近 10 年热度分位（越长越热，红=偏热 绿=偏冷）</span>
+            <span class="pm-legend"><i class="lg-tick" />琥珀竖刻度 = 近 1 年分位（与长条末端差距大 = 长期位置正被近一年修正）</span>
+            <span class="pm-legend"><i class="lg-mid" />灰色竖线 = 50% 中位（长条越过它即偏热）</span>
+            悬停指标名可查看原始值与口径。
           </p>
           <div v-for="grp in positionGroups" :key="grp.group" class="pos-group">
             <div class="pos-group-head">
@@ -2202,7 +2205,35 @@ onActivated(() => {
   border-radius: 8px;
 }
 .pos-data-note { margin: 8px 2px 0; }
-.pos-metrics-cap { margin: 0 2px 6px; }
+.pos-metrics-cap { margin: 0 2px 6px; line-height: 1.9; }
+
+/* 指标条图例：把横条 / 竖刻度 / 中位线三者的形状与含义写清楚，避免「粗细条」误解 */
+.pm-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 14px;
+  white-space: nowrap;
+}
+.pm-legend i { display: inline-block; flex: none; }
+.pm-legend .lg-bar {
+  width: 22px;
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--app-down), var(--el-color-primary), var(--app-up));
+}
+.pm-legend .lg-tick {
+  width: 3px;
+  height: 12px;
+  border-radius: 2px;
+  background: #e6a23c;
+}
+.pm-legend .lg-mid {
+  width: 1px;
+  height: 12px;
+  background: var(--el-text-color-placeholder);
+  opacity: .7;
+}
 
 /* 数据时点标签：只标注「非今日实时」的部分（历史基线/历史收盘） */
 .fresh-tag {
@@ -4294,16 +4325,17 @@ onActivated(() => {
 .pos-bullet-pct.is-hot { color: var(--app-up); }
 .pos-bullet-pct.is-cold { color: var(--app-down); }
 .pos-bullet-pct.is-neutral { color: var(--el-text-color-regular); }
-/* 近 1 年分位对照细刻度：竖立在 10 年分位条上的小刻度线 */
+/* 近 1 年分位刻度：竖立在 10 年分位横条上的琥珀色短线（与灰色 50% 中位线区分） */
 .pos-bullet-1y {
   position: absolute;
-  top: -3px;
-  bottom: -3px;
-  width: 2px;
-  margin-left: -1px;
-  border-radius: 1px;
-  background: var(--el-text-color-secondary);
-  opacity: .85;
+  top: -4px;
+  bottom: -4px;
+  width: 3px;
+  margin-left: -1.5px;
+  border-radius: 2px;
+  background: #e6a23c;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .85);
+  z-index: 2;
 }
 .pos-bullet-tag {
   display: inline-block;
