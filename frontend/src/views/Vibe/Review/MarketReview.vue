@@ -622,12 +622,19 @@
 
         <!-- 单项指标：分组横条（统一按热度分位：越靠右越热，竖线为 50% 中位；细条为近 1 年分位对照） -->
         <div class="pos-metrics">
-          <p class="cap pos-metrics-cap">
-            <span class="pm-legend"><i class="lg-bar" />横条 <b>圆点 = 当前值</b>：把今天的读数放进近 10 年所有交易日里排队，排在第几位</span>
-            <span class="pm-legend"><i class="lg-tick" />琥珀刻度：<b>同一个当前值</b>放进近 1 年里排队，排第几位</span>
-            <span class="pm-legend"><i class="lg-mid" />灰色竖线 = 50% 中位（圆点越过它 = 当前偏热）</span>
-            <b>两项都是「当前值」的位置</b>，只是参照区间不同：两个位置差得越远，说明近一年常态和十年常态已经不一样。
-          </p>
+          <div class="pos-metrics-cap">
+            <p class="pm-lead">
+              怎么读：把每项的<b>今天的读数</b>放进历史里排队，排第几位就是它当前的位置（0 = 最冷，100 = 最热）。
+            </p>
+            <p class="pm-legends">
+              <span class="pm-legend"><i class="lg-bar" />横条 + 圆点 = 近 10 年排第几</span>
+              <span class="pm-legend"><i class="lg-tick" />琥珀刻度 = 同一个值在近 1 年排第几</span>
+              <span class="pm-legend"><i class="lg-mid" />灰色竖线 = 50% 中位（圆点越过 = 当前偏热）</span>
+            </p>
+            <p class="pm-note">
+              最右侧数字就是近 10 年分位；两处位置差得越远，说明近一年常态和十年常态已经不一样。
+            </p>
+          </div>
           <div v-for="grp in positionGroups" :key="grp.group" class="pos-group">
             <div class="pos-group-head">
               {{ grp.group }}<span class="pos-group-hint">{{ grp.hint }}</span>
@@ -635,7 +642,15 @@
             <div class="pos-bullets">
               <div v-for="m in grp.items" :key="m.key" class="pos-bullet">
                 <el-tooltip :content="posMetricTip(m)" placement="top" :show-after="200">
-                  <span class="pos-bullet-label">{{ m.label }}<el-icon><QuestionFilled /></el-icon></span>
+                  <span class="pos-bullet-label">
+                    <span class="pos-bullet-name">{{ m.label }}</span>
+                    <em
+                      v-if="!m.in_composite"
+                      class="pos-bullet-short"
+                      title="该指标历史样本不足 3 年，暂不参与合成分位计算"
+                    >样本短</em>
+                    <el-icon><QuestionFilled /></el-icon>
+                  </span>
                 </el-tooltip>
                 <div class="pos-bullet-track">
                   <i
@@ -661,7 +676,6 @@
                 </div>
                 <span class="pos-bullet-value">
                   {{ m.value == null ? '—' : m.value }}<em>{{ m.unit }}</em>
-                  <em v-if="!m.in_composite" class="pos-bullet-tag">样本短·未纳入合成</em>
                 </span>
                 <span class="pos-bullet-pct" :class="posTone(heatOfMetric(m))">
                   {{ m.percentile == null ? '—' : (heatOfMetric(m) ?? 0) + '%' }}
@@ -1246,6 +1260,7 @@ function posMetricTip(m: MarketPositionMetric): string {
     parts.push(`同一个当前值放进近 1 年排队是 ${heat1yOfMetric(m)}%`)
   }
   if (m.samples) parts.push(`样本 ${m.samples} 个交易日，不含今日实时值`)
+  if (!m.in_composite) parts.push('历史样本不足 3 年，暂不参与合成分位计算，仅供单项参考')
   const p = position.value
   if (p?.live && m.as_of && m.as_of !== p.as_of) parts.push(`数据日期 ${m.as_of}（非今日实时）`)
   return parts.join('。')
@@ -2224,7 +2239,29 @@ onActivated(() => {
   border-radius: 8px;
 }
 .pos-data-note { margin: 8px 2px 0; }
-.pos-metrics-cap { margin: 0 2px 6px; line-height: 1.9; }
+.pos-metrics-cap {
+  margin: 0 2px 8px;
+  padding: 9px 11px;
+  border-radius: 6px;
+  background: var(--el-fill-color-blank);
+  border: 1px solid var(--el-border-color-lighter);
+  font-size: 11.5px;
+  line-height: 1.75;
+  color: var(--el-text-color-secondary);
+}
+.pos-metrics-cap p { margin: 0; }
+.pm-lead { color: var(--el-text-color-regular); }
+.pm-lead b { color: var(--el-text-color-primary); }
+.pm-legends {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  margin-top: 4px !important;
+}
+.pm-note {
+  margin-top: 4px !important;
+  color: var(--el-text-color-placeholder);
+}
 
 /* 指标条图例：把横条 / 竖刻度 / 中位线三者的形状与含义写清楚，避免「粗细条」误解 */
 .pm-legend {
@@ -4287,7 +4324,7 @@ onActivated(() => {
 }
 .pos-bullet {
   display: grid;
-  grid-template-columns: 104px minmax(0, 1fr) 66px 42px;
+  grid-template-columns: 132px minmax(0, 1fr) 74px 46px;
   align-items: center;
   gap: 8px;
   padding: 5px 6px;
@@ -4299,12 +4336,29 @@ onActivated(() => {
 .pos-bullet-label {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
+  min-width: 0;
   color: var(--el-text-color-secondary);
-  white-space: nowrap;
+  cursor: help;
+}
+.pos-bullet-name {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  cursor: help;
+  white-space: nowrap;
+}
+/* 样本不足标记：贴在指标名后的小标签，不挤占数值与分位列 */
+.pos-bullet-short {
+  flex: none;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-style: normal;
+  font-size: 10px;
+  line-height: 15px;
+  color: var(--el-text-color-placeholder);
+  background: var(--el-fill-color);
+  border: 1px solid var(--el-border-color-lighter);
+  white-space: nowrap;
 }
 .pos-bullet-label .el-icon {
   flex: none;
@@ -4387,20 +4441,6 @@ onActivated(() => {
   box-shadow: 0 0 0 1px rgba(255, 255, 255, .85);
   z-index: 2;
 }
-.pos-bullet-tag {
-  display: inline-block;
-  margin-left: 6px;
-  padding: 0 5px;
-  border-radius: 4px;
-  font-style: normal;
-  font-size: 10px;
-  font-weight: 400;
-  line-height: 16px;
-  color: var(--el-text-color-placeholder);
-  background: var(--el-fill-color);
-  white-space: nowrap;
-}
-
 /* ── 同分位时点行业榜联动卡 ── */
 .chart-360 { width: 100%; height: 360px; }
 .pos-link {
@@ -4640,7 +4680,7 @@ onActivated(() => {
   .pos-ind-cols { grid-template-columns: 1fr; }
 
   /* 指标横条 / 未来收益条形 */
-  .pos-bullet { grid-template-columns: 92px minmax(0, 1fr) 58px 38px; gap: 6px; }
+  .pos-bullet { grid-template-columns: 132px minmax(0, 1fr) 66px 44px; gap: 6px; }
   .pos-fwd-row { grid-template-columns: 84px minmax(0, 1fr) 62px; gap: 4px 8px; font-size: 11.5px; }
   .pos-fwd-meta { grid-column: 1 / -1; text-align: left; }
 
@@ -4652,7 +4692,9 @@ onActivated(() => {
   .ev-toggle { order: 4; }
 }
 @media (max-width: 480px) {
-  .pos-bullet { grid-template-columns: 84px minmax(0, 1fr) 52px 34px; }
+  .pos-bullet { grid-template-columns: 92px minmax(0, 1fr) 58px 40px; }
+  /* 极窄屏优先保证指标名与数值可读，样本短标记交给 tooltip */
+  .pos-bullet-short { display: none; }
   .pos-distance-chip { font-size: 11px; }
   .pos-gauge-band { font-size: 8.5px; }
   .pos-comp-chip { font-size: 11px; }
