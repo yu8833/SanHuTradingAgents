@@ -537,17 +537,6 @@
                 </div>
               </div>
             </div>
-            <!-- 图解图例：图形自解释，不用再翻文字说明 -->
-            <div class="pos-gauge-legend">
-              <span class="gl-size">
-                <i class="gl-dot gl-big" /><i class="gl-dot gl-small" />
-                点越大 = 该类内越重要
-              </span>
-              <span><i class="gl-ring" />空心 = 估值参考（仅 2.3 年样本）</span>
-              <span class="gl-tone"><i class="gl-dot is-hot" />偏热</span>
-              <span class="gl-tone"><i class="gl-dot is-neutral" />中性</span>
-              <span class="gl-tone"><i class="gl-dot is-cold" />偏冷</span>
-            </div>
           </div>
 
           <div class="pos-hero-foot">
@@ -4063,26 +4052,6 @@ onActivated(() => {
 /* hover 提到最上层，方便在密集区看清单个点 */
 .pos-gauge-dot:hover { z-index: 4; }
 
-/* 图解图例 */
-.pos-gauge-legend {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 14px;
-  margin-top: 6px;
-  font-size: 10.5px;
-  color: var(--el-text-color-placeholder);
-}
-.pos-gauge-legend span { display: inline-flex; align-items: center; gap: 4px; }
-.pos-gauge-legend i { display: inline-block; border-radius: 50%; }
-.gl-dot { width: 9px; height: 9px; background: var(--el-text-color-secondary); }
-.gl-big { width: 12px; height: 12px; opacity: 1; }
-.gl-small { width: 7px; height: 7px; opacity: .7; }
-.gl-ring { width: 10px; height: 10px; box-shadow: inset 0 0 0 1.8px var(--el-text-color-placeholder); }
-.gl-tone.is-hot { background: var(--app-up); }
-.gl-tone.is-neutral { background: var(--el-color-primary); }
-.gl-tone.is-cold { background: var(--app-down); }
-
 /* 分位 → 未来收益：与色带共用同一把 0–100 横轴，当前分位竖线贯穿 */
 .pos-gauge-fwd {
   position: relative;
@@ -4679,7 +4648,6 @@ onActivated(() => {
   .pgr-label { right: calc(100% + 6px); gap: 2px; font-size: 9.5px; }
   .pgr-label em { font-size: 9px; padding: 1px 3px; }
   .pos-gauge-row { height: 26px; }
-  .pos-gauge-legend { gap: 3px 10px; font-size: 10px; }
   .chart-200 { height: 180px; }
   .chart-360 { height: 260px; }
 
