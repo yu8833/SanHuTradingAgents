@@ -227,9 +227,10 @@ const widthAvg = computed(() => {
 })
 /** 页头标题日期：最新交易日（轻量接口预取，首屏即正确，不闪非交易日当天） */
 const titleDate = ref('')
-/** KPI 标题日期：优先取行业多周期的 as_of（数据交易日），缺失回退最新交易日 */
-const trendAsOf = computed(() => periodFlows.value?.as_of || '')
-const trendDate = computed(() => trendAsOf.value ? trendAsOf.value.slice(0, 10) : titleDate.value)
+/** 行业宽度是「即时快照」，日期必须取总览的 trade_date（交易时段=当日），
+    不能用行业多周期资金流的 as_of —— 那是日线聚合，收盘同步前仍停在昨日 */
+const ovTradeDate = ref('')
+const trendDate = computed(() => ovTradeDate.value || titleDate.value)
 
 // ── 大盘热力图：行业板块 treemap（面积=资金量，颜色=涨跌幅 红涨绿跌）──
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v))
@@ -859,7 +860,9 @@ const loadAll = async (refresh = false) => {
     ])
     const [ovRes, periodRes] = results
     if (ovRes.status === 'fulfilled') {
-      sectorMap.value = (ovRes.value as any).data?.sectors || []
+      const ov = (ovRes.value as any).data || {}
+      sectorMap.value = ov.sectors || []
+      ovTradeDate.value = String(ov.trade_date || '').slice(0, 10)
     }
     if (periodRes.status === 'fulfilled') {
       periodFlows.value = (periodRes.value as any).data || null
