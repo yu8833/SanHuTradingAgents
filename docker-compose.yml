@@ -218,9 +218,11 @@ services:
 
   # MongoDB 数据库服务
   mongodb:
-    image: mongo:4.4
+    image: mongo:7.0
     container_name: tradingagents-mongodb
     restart: unless-stopped
+    # 优雅停机：给 WiredTiger 充足时间 fsync + close，防坏页（4.4 默认 10s 太短）
+    stop_grace_period: 60s
     ports:
       - "27017:27017"
     environment:
@@ -234,11 +236,12 @@ services:
     command: ["mongod", "--wiredTigerCacheSizeGB", "1"]
     volumes:
       - mongodb_data:/data/db
+      # init 脚本仅在新卷首次启动时执行；日常重启不会再跑
       - ./scripts/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
     networks:
       - tradingagents-network
     healthcheck:
-      test: echo 'db.runCommand("ping").ok' | mongo localhost:27017/test --quiet
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
       interval: 30s
       timeout: 10s
       retries: 3
