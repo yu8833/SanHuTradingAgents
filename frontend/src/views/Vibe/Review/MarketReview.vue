@@ -1122,8 +1122,10 @@ const posDataNote = computed(() => {
   if (p.live) {
     const amt = p.position.find(m => m.key === 'amount')
     if (p.amount_projected != null && amt?.value != null) {
-      const prog = p.progress ? Math.round(p.progress * 100) : null
-      notes.push(`成交额实际 ${amt.value} 亿${prog ? `（交易进度 ${prog}%）` : ''}，折算全天约 ${p.amount_projected} 亿后计算分位`)
+      const mins = p.progress ? Math.round(p.progress * 240) : null
+      notes.push(`成交额实际 ${amt.value} 亿${mins ? `（已交易 ${mins} 分钟）` : ''}，按日内成交曲线折算全天约 ${p.amount_projected} 亿后计算分位`)
+    } else if (amt?.value != null && (p.progress ?? 1) < 0.25) {
+      notes.push(`成交额实际 ${amt.value} 亿：开盘不足 60 分钟，开盘放量占全天比例波动大，分位暂不折算`)
     }
     const vals = p.position.filter(
       m => (m.key === 'valuation_pe' || m.key === 'valuation_pb') && m.as_of && m.as_of !== p.as_of,
@@ -1212,7 +1214,7 @@ const heatDots = computed(() => {
       const asOfDate = m.as_of && m.as_of !== position.value?.as_of ? `（截至 ${m.as_of.slice(5)}）` : ''
       const isAmountProjected = m.key === 'amount' && m.projected_value != null
       const projectedCap = isAmountProjected
-        ? `盘中进度 ${Math.round((m.progress ?? 1) * 100)}% 折算全天`
+        ? `已交易 ${Math.round((m.progress ?? 1) * 240)} 分钟 · 按日内成交曲线折算全天约 ${m.projected_value} 亿`
         : ''
       return {
         key: m.key,

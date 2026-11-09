@@ -573,6 +573,28 @@ def _session_progress(now: datetime | None = None) -> float:
     return min(120, m - (9 * 60 + 30)) / 240
 
 
+# 日内成交量累计曲线：横轴为已交易分钟（0~240），纵轴为该时点累计成交额占全天的比例。
+# A 股量能呈 U 型（开盘集合竞价与尾盘放量集中），用「交易进度」线性折算会在开盘前半小时
+# 把成交额放大数倍（例如 09:34 进度 4/240=1.7%，实测会被外推成 9 万亿）。
+_INTRADAY_AMOUNT_CURVE = [
+    (0, 0.0), (1, 0.040), (2, 0.055), (5, 0.090), (10, 0.125), (15, 0.155),
+    (30, 0.225), (45, 0.285), (60, 0.340), (90, 0.430), (120, 0.520),
+    (150, 0.620), (180, 0.710), (210, 0.790), (225, 0.860), (240, 1.0),
+]
+
+
+def _intraday_amount_share(progress: float) -> float:
+    """给定交易进度（0~1），返回该时点应有的「全天累计成交额占比」。"""
+    mins = max(0.0, min(240.0, progress * 240.0))
+    pts = _INTRADAY_AMOUNT_CURVE
+    for i in range(1, len(pts)):
+        x0, y0 = pts[i - 1]
+        x1, y1 = pts[i]
+        if mins <= x1:
+            return y1 if x1 == x0 else y0 + (y1 - y0) * (mins - x0) / (x1 - x0)
+    return 1.0
+
+
 # 需要按交易进度折算的累计型指标（其余为瞬时值，不用折算）
 _CUMULATIVE_KEYS = {"amount", "avg_turnover"}
 
@@ -592,10 +614,11 @@ def _temperature(history: list[dict], live: dict, progress: float = 1.0) -> list
         cur_f = _f(cur)
         # 涨跌停家数展示用封板池口径，但历史基线是阈值口径，分位改用同口径值计算
         rank_val = _f(live.get(f"{key}_th")) if live.get(f"{key}_th") is not None else cur_f
-        # 累计型指标（成交额/换手）盘中只是半天数据，先按交易进度折算再比全天历史
+        # 累计型指标（成交额/换手）盘中只是半天数据，先按日内成交曲线折算再比全天历史
         scaled = key in _CUMULATIVE_KEYS and 0.0 < progress < 0.995 and cur_f > 0
         if scaled:
-            rank_val = cur_f / progress
+            share = _intraday_amount_share(progress)
+            rank_val = cur_f / share if share > 0 else cur_f
         rank = _rank(vals, rank_val)
         med = _median(vals)
         item = {
@@ -611,7 +634,7 @@ def _temperature(history: list[dict], live: dict, progress: float = 1.0) -> list
         }
         if scaled:
             item["projected"] = round(rank_val, 2)
-            item["desc"] = desc + f"（盘中按交易进度 {round(progress * 100)}% 折算后比较分位）"
+            item["desc"] = desc + f"（盘中已交易 {round(progress * 240)} 分钟，按日内成交曲线折算后比较分位）"
         out.append(item)
     return out
 

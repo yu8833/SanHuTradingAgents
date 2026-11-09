@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from app.services.cache_layer import cached
-from app.services.market_metrics import _session_progress
+from app.services.market_metrics import _session_progress, _intraday_amount_share
 from app.utils.timezone import now_tz
 
 logger = logging.getLogger("webapi")
@@ -640,6 +640,9 @@ def _index_series(rows: list[dict]) -> list[float]:
 
 # 量比基准要求的最少历史天数（约 1 年）：不足则量比为 None，曲线该段不参与合成
 RATIO_MIN_BASE_DAYS = 200
+# 开盘不足 60 分钟（25% 进度）时不给成交额分位：开盘放量占全天比例在 7%~15% 之间波动，
+# 任何折算都会放大成极端分位（实测 09:34 线性折算得出 9 万亿 → 100 分位）
+AMOUNT_PROJECT_MIN_PROGRESS = 0.25
 
 
 def _ratio_series(values: list[float | None], window: int = 250) -> list[float | None]:
@@ -1054,13 +1057,26 @@ def compute_position_payload(rows: list[dict], live_row: dict[str, Any] | None =
     rank_series_by_key = {k: list(v) for k, v in series_by_key.items()}
     rank_series_by_key["amount"] = _ratio_series(series_by_key["amount"])
     amount_projected = None
-    if is_live and 0.0 < progress < 0.995:
+    amount_too_early = is_live and 0.0 < progress < AMOUNT_PROJECT_MIN_PROGRESS
+    if is_live and 0.0 < progress:
         actual = _f(series_by_key["amount"][-1])
-        if actual > 0:
-            amount_projected = round(actual / progress, 2)
-            base = [x for x in series_by_key["amount"][-1 - 250: -1] if x is not None and x > 0]
-            if len(base) >= RATIO_MIN_BASE_DAYS:
-                rank_series_by_key["amount"][-1] = round(amount_projected / (sum(base) / len(base)), 4)
+        base = [x for x in series_by_key["amount"][-1 - 250: -1] if x is not None and x > 0]
+        base_ok = len(base) >= RATIO_MIN_BASE_DAYS
+        if amount_too_early:
+            # 开盘不到 60 分钟时，开盘放量占全天的比例本身波动极大（7%~15%），
+            # 任何折算都会给出极端分位（曾出现 09:34 折算出 9 万亿 → 100 分位）。
+            # 此时不给分位数字，内部按量比 1.0（中性）参与合成，避免污染其他判断。
+            if base_ok:
+                rank_series_by_key["amount"][-1] = 1.0
+        else:
+            # 60 分钟之后按日内成交曲线折算，而不是按时间进度线性外推
+            share = _intraday_amount_share(progress)
+            if actual > 0 and share > 0:
+                amount_projected = round(actual / share, 2)
+                if base_ok:
+                    rank_series_by_key["amount"][-1] = round(
+                        amount_projected / (sum(base) / len(base)), 4
+                    )
 
     metrics: list[dict[str, Any]] = []
     for key, group, label, unit, series, hot, desc, in_composite in specs:
@@ -1078,7 +1094,11 @@ def compute_position_payload(rows: list[dict], live_row: dict[str, Any] | None =
             if key == "amount" and amount_projected is not None:
                 m["projected_value"] = amount_projected
                 m["progress"] = round(progress, 4)
-                m["desc"] = f"{desc}（盘中按交易进度 {round(progress * 100)}% 折算全天后算量比）"
+                m["desc"] = f"{desc}（盘中已交易 {round(progress * 240)} 分钟，按日内成交曲线折算全天后算量比）"
+            elif key == "amount" and amount_too_early:
+                # 开盘不足 60 分钟：值照常展示，但不给分位数字（合成里按中性计入）
+                m["percentile"] = None
+                m["desc"] = f"{desc}（开盘不足 60 分钟，开盘放量占比波动大，分位暂不折算）"
         metrics.append(m)
 
     # 合成分位：长历史指标统一折算成热度分位后取均值；估值样本不足 3 年时不参与合成
@@ -1226,7 +1246,7 @@ async def get_market_position() -> dict[str, Any]:
     from app.utils.trading_time import is_trading_time
 
     ttl = 300 if is_trading_time() else 900
-    return await cached("vibe:market:position", _build, ttl=ttl)
+    return await cached("vibe:market:position:v3", _build, ttl=ttl)
 
 
 # ---------------------------------------------------------------------------
