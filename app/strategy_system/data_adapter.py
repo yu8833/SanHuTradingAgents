@@ -69,9 +69,8 @@ def load_daily_panel(
     Args:
         adjust: 复权方式，'none'=不复权 / 'hfq'=用 pct_chg 链重建后复权价格。
             hfq 消除除权除息造成的价格断层（避免误触发 MA/突破类信号）：
-            pct_chg 缺失（停牌/首日）处按当日零涨跌处理（即回退 raw）；
-            混源（非 Tushare 口径）的 symbol 回退不复权，均写入 notes 标注。
-        notes: 可选，用于接收复权处理过程中的标注信息（如回退不复权的 symbol）。
+            pct_chg 缺失（停牌/首日）处按当日零涨跌处理（即回退 raw）。
+        notes: 可选，用于接收复权/清洗过程中的标注信息。
     """
     collection = db["stock_daily_quotes"]
     start_s = _parse_date(start_dt)
@@ -108,7 +107,7 @@ def load_daily_panel(
     # 按 (symbol, date) 去重，保留优先级最高的数据源
     # 为降低大回测(数十万行)时的内存峰值：rows 只存一份最终行，best 只存 key->(rows下标, src_rank)，
     # 高优先级数据后到时覆盖 rows 中该行，避免行数据被重复持有两份。
-    # symbol_sources 记录每只 symbol 出现过的数据源集合，用于 hfq 复权的混源回退判断。
+    # symbol_sources 记录每只 symbol 出现过的数据源集合（用于口径标注）。
     best: dict[tuple, tuple[int, int]] = {}
     rows: list[dict] = []
     symbol_sources: dict[str, set[str]] = {}
@@ -170,8 +169,47 @@ def load_daily_panel(
         df["pct_chg"] = df["pct_chg"].fillna(computed)
 
     # === 复权治理（B3）：hfq 链重建 ===
+    # 先复权再清洗：除权除息造成的 raw close 断层属于「应被复权修正」的正常事件，
+    # 若先按 raw 跳变剔除会把除权日整行删掉，破坏链式连续性。
     if adjust == "hfq":
         df = _apply_hfq_adjust(df, symbol_sources, notes=notes)
+
+    # 价格异常清洗：剔除非新股单日 |涨跌|>21% 或相邻收盘跳变>50% 的脏行，
+    # 避免数据源错误/异常行情被当作真实收益（如单笔 +205% 的离群交易）。
+    df = _sanitize_price_rows(df, notes=notes)
+    return df
+
+
+def _sanitize_price_rows(
+    df: pd.DataFrame,
+    notes: list[str] | None = None,
+    max_abs_pct: float = 0.21,
+    max_jump: float = 0.5,
+) -> pd.DataFrame:
+    """剔除价格异常行（非新股）。
+
+    - 单日 |涨跌幅| > 21%（A 股主板/创业板/科创板涨跌停上限为 20%）；
+    - 相邻交易日收盘价跳变 > 50%（未复权除权断层或数据错误）。
+
+    「新股」定义为每只股票面板内的前 NEW_ROWS 个交易日（上市初期无涨跌停约束且
+    常有大幅波动），不参与清洗，避免误删真实的首日行情。
+    """
+    if df.empty:
+        return df
+    new_rows = 10
+    seq = df.groupby("symbol", sort=False).cumcount()
+    is_new = seq < new_rows
+    pct_bad = pd.to_numeric(df["pct_chg"], errors="coerce").abs() > max_abs_pct
+    prev_close = df.groupby("symbol", sort=False)["close"].shift(1)
+    ratio = (df["close"] / prev_close.where(prev_close > 0)).astype("float64")
+    jump_bad = (ratio > (1 + max_jump)) | (ratio < (1 - max_jump))
+    drop = (~is_new) & (pct_bad | jump_bad)
+    n_drop = int(drop.sum())
+    if n_drop:
+        logger.warning(f"⚠️ 价格异常清洗：剔除 {n_drop} 行（|涨跌|>21% 或收盘跳变>50%）")
+        if notes is not None:
+            notes.append(f"价格异常清洗剔除 {n_drop} 行（非新股单日|涨跌|>21% 或跳变>50%）")
+        df = df.loc[~drop].reset_index(drop=True)
     return df
 
 
@@ -187,32 +225,15 @@ def _apply_hfq_adjust(
 
     边界：
     - pct_chg 缺失（停牌/首日）按当日零涨跌处理（即回退 raw，价格平走）；
-    - 混源（symbol_sources 中该 symbol 出现多个数据源，pct_chg 口径可能不一致）
-      时整只回退不复权，并在 notes 标注。
+    - 各数据源均存不复权的原始 OHLC，pct_chg 已统一为小数口径，因此混源
+      不会造成价格等级漂移；链式复权对所有 symbol 一视同仁，消除除权断层。
     """
     if df.empty:
         return df
 
-    mixed_syms = sorted(
-        sym for sym, sources in symbol_sources.items() if len(sources) > 1
-    )
-    if mixed_syms:
-        logger.warning(
-            f"⚠️ hfq 复权：{len(mixed_syms)} 只股票混源（pct_chg 口径可能不一致），回退不复权: "
-            f"{mixed_syms[:10]}{'…' if len(mixed_syms) > 10 else ''}"
-        )
-        if notes is not None:
-            notes.append(
-                f"hfq 混源回退不复权 {len(mixed_syms)} 只: {mixed_syms[:10]}"
-                f"{'…' if len(mixed_syms) > 10 else ''}"
-            )
-
     parts: list[pd.DataFrame] = []
     adjusted_count = 0
     for symbol, g in df.groupby("symbol", sort=False):
-        if symbol in mixed_syms:
-            parts.append(g)
-            continue
         g = g.copy()
         close_f = g["close"].ffill()
         # 缺失涨跌幅按 0 处理（价格平走 = 回退 raw）；首行 pct_chg 通常为 NaN
@@ -232,7 +253,7 @@ def _apply_hfq_adjust(
         parts.append(g)
         adjusted_count += 1
 
-    logger.info(f"✅ hfq 复权完成：{adjusted_count} 只已复权，{len(mixed_syms)} 只回退不复权")
+    logger.info(f"✅ hfq 复权完成：{adjusted_count} 只")
     return pd.concat(parts, ignore_index=True) if parts else df
 
 

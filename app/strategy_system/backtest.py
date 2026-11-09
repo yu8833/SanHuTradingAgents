@@ -121,7 +121,8 @@ def _strategy_required_columns(strategy_id: str) -> set[str]:
 def _load_panel(db, config, end_extra_days: int = 0,
                 progress_cb: Callable[[float, str], None] | None = None,
                 keep_columns: set[str] | None = None,
-                enrich_fundamentals: bool = True) -> pd.DataFrame:
+                enrich_fundamentals: bool = True,
+                apply_universe: bool = True) -> pd.DataFrame:
     """加载回测区间 + warmup 历史，并计算指标/信号。
 
     keep_columns（可选）：只计算并保留策略所需的指标/信号列，压缩全市场长区间
@@ -156,6 +157,22 @@ def _load_panel(db, config, end_extra_days: int = 0,
     )
     if df.empty:
         return df
+    # 股票池清洗（与筛选共用同一套规则）：剔除 ST/退市/次新/低流动性。
+    # 必须在指标计算前完成，避免脏标的进入信号/评分/撮合。
+    if apply_universe:
+        try:
+            meta = screener.load_universe_meta(db)
+            mask = screener.apply_universe_filter(df, meta)
+            n_before = len(df)
+            df = df[mask].reset_index(drop=True)
+            if df.empty:
+                return df
+            if len(df) < n_before:
+                scope_notes.append(
+                    f"股票池清洗剔除 {n_before - len(df)} 行（ST/退市/次新/近5日均额<5000万）"
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"⚠️ 股票池清洗失败，跳过: {exc}")
     _report(0.02, "正在计算技术指标…")
     # 指标计算阶段耗时最长（全市场可占大头），映射到 [0.02, 0.045] 并报分批进度，
     # 避免长时计算期间进度条长时间停留在 2% 造成"卡死"假象。
@@ -572,6 +589,11 @@ def run_strategy_backtest(db, config: StrategyBtConfig, panel: pd.DataFrame | No
 
     elapsed = round((time.perf_counter() - t0) * 1000, 1)
     _scope = _scope_tags(panel)
+    # 可疑交易：单笔 |收益| > 50% 通常由未复权断层/脏数据造成，单独列出供复核，
+    # 不参与主统计（主统计已由 data_adapter 的价格异常清洗先行过滤）。
+    suspect_trades = [
+        t for t in sim["trades"] if abs(float(t.get("pnl_pct") or 0.0)) > 0.50
+    ]
     return {
         "run_id": run_id,
         "success": True,
@@ -595,6 +617,7 @@ def run_strategy_backtest(db, config: StrategyBtConfig, panel: pd.DataFrame | No
         "drawdown_curve": sim["drawdown_curve"],
         "benchmark_curve": sim["benchmark_curve"],
         "trades": sim["trades"],
+        "suspect_trades": suspect_trades,
         "per_symbol_stats": sim["per_symbol_stats"],
         "strategy_info": {
             "id": strategy["id"] if strategy else config.strategy_id,
@@ -608,28 +631,42 @@ def run_strategy_backtest(db, config: StrategyBtConfig, panel: pd.DataFrame | No
 
 
 def _score_series(df: pd.DataFrame, scoring: dict) -> pd.Series:
+    """回测评分：按「当日横截面」归一化后加权求和（0-100）。
+
+    关键：归一化的 min/max 必须只在同一交易日内取，不能使用整个回测面板的全局
+    min/max——后者会把未来才出现的高/低值带入当期评分，属于前视偏差（look-ahead）。
+    与筛选页 _score_rank 的当日截面口径保持一致。
+
+    权重为负表示「越低越好」（如动量跌幅因子），按 1-norm 反向计分。
+    """
     scores = pd.Series(0.0, index=df.index)
     if not scoring:
         return scores
     executable = [(c, float(w)) for c, w in scoring.items() if w and c in df.columns]
     if not executable:
         return scores
-    total = sum(w for _, w in executable)
+    total = sum(abs(w) for _, w in executable)
     if total <= 0:
         return scores
+    if "date" not in df.columns:
+        return scores
+    date_col = df["date"]
     for col, w in executable:
         val = pd.to_numeric(df[col], errors="coerce")
-        valid = val.notna()
-        if valid.any():
-            col_min, col_max = val[valid].min(), val[valid].max()
-            rng = col_max - col_min
-            norm = pd.Series(0.5, index=df.index)
-            if rng > 0:
-                norm = (val - col_min) / rng
-            norm = norm.where(valid, 0.0)
-        else:
-            norm = pd.Series(0.0, index=df.index)
-        scores += norm * (w / total)
+        # 当日横截面 min/max（transform 保留行索引，避免跨期泄漏）
+        grp = val.groupby(date_col)
+        col_min = grp.transform("min")
+        col_max = grp.transform("max")
+        rng = col_max - col_min
+        norm = pd.Series(0.5, index=df.index)
+        positive = rng > 0
+        if positive.any():
+            norm = norm.where(~positive, (val - col_min) / rng.where(positive))
+        # 缺失值先置 NaN：负权重反转时不得因缺失而误得满分
+        norm = norm.where(val.notna())
+        if w < 0:
+            norm = 1.0 - norm
+        scores += norm.fillna(0.0) * (abs(w) / total)
     return scores * 100
 
 
@@ -771,14 +808,17 @@ def _simulate_portfolio(panel, entry, exit_mask, scores, config, start_s, end_s,
             if exit_reason is None:
                 continue
 
-            # 成交价：止损/止盈是盘中触发（用当日 low/high 判定），应在触发价位成交，
-            # 而非当日开盘价——否则等于"已知当日最低/最高价后，用更早的开盘价成交"，
-            # 同样是未来函数且对止损/止盈都系统性有利。
-            # exit_signal / max_hold 则按配置口径：open_t+1 → 当日开盘（信号来自前一日）。
+            # 成交价：止损/止盈是盘中触发（用当日 low/high 判定），但必须考虑跳空：
+            # 若当日开盘已跌破止损价，真实成交价是开盘价（更差）；若开盘已高于止盈价，
+            # 真实成交价是开盘价（更好）。直接用触发价成交会系统性高估止损、低估止盈。
+            open_px = row.get("open")
+            open_valid = open_px is not None and pd.notna(open_px) and float(open_px) > 0
             if exit_reason == "stop_loss":
-                px = stop_price * (1 - slippage)
+                fill = min(float(open_px), stop_price) if open_valid else stop_price
+                px = fill * (1 - slippage)
             elif exit_reason == "take_profit":
-                px = tp_price * (1 - slippage)
+                fill = max(float(open_px), tp_price) if open_valid else tp_price
+                px = fill * (1 - slippage)
             else:
                 px = _price_for(row, "sell", config.exit_fill)
             if px is None or px <= 0:

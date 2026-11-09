@@ -295,13 +295,14 @@ def compute_market_context(db) -> dict:
         broad_swing = 0.0
     volatility = "high" if (avg_abs20 >= 2.5 or broad_swing >= 0.18) else "low"
 
-    # 趋势判定
+    # 趋势判定：这是「近 5 日宽度」的短期读数，不是完整大盘状态。
+    # 标签统一加「短期」前缀，避免与画像名称（牛市普涨/熊市阴跌…）混淆。
     if up_ratio >= 0.55 and avg_chg5 > 0:
-        trend, label = "bull", "偏强"
+        trend, label = "bull", "短期偏强"
     elif up_ratio <= 0.45 and avg_chg5 < 0:
-        trend, label = "bear", "偏弱"
+        trend, label = "bear", "短期偏弱"
     else:
-        trend, label = "sideways", "中性"
+        trend, label = "sideways", "短期中性"
 
     latest_row = rows[-1]
     pct_chg = float(round(latest_row["avg_pct"], 2))
@@ -314,14 +315,14 @@ def compute_market_context(db) -> dict:
 
     # 统一操作建议文案（与前端「策略行情条」保持一致，作为唯一文案源下发）
     if trend == "bull":
-        advice = "偏强但波动大 → 优先选择突破/趋势类，注意控制仓位" if volatility == "high" else \
-            "偏强 → 优先选择趋势、突破、放量类策略"
+        advice = "短期偏强但波动大 → 优先选择突破/趋势类，注意控制仓位" if volatility == "high" else \
+            "短期偏强 → 优先选择趋势、突破、放量类策略"
     elif trend == "bear":
-        advice = "偏弱且高波动 → 谨慎操作，可关注超跌反弹小仓试错" if volatility == "high" else \
-            "偏弱 → 降低仓位，关注低估值避险与超跌反弹"
+        advice = "短期偏弱且高波动 → 谨慎操作，可关注超跌反弹小仓试错" if volatility == "high" else \
+            "短期偏弱 → 降低仓位，关注低估值避险与超跌反弹"
     else:  # sideways
-        advice = "震荡高波动 → 区间操作为主，注意假突破风险" if volatility == "high" else \
-            "震荡 → 关注回踩支撑、反转类策略"
+        advice = "短期中性 + 高波动 → 区间操作为主，注意假突破风险" if volatility == "high" else \
+            "短期中性 → 关注回踩支撑、反转类策略"
 
     data = {
         "as_of": latest,
@@ -345,7 +346,11 @@ def compute_market_context(db) -> dict:
 
 
 def _score_rank(df: pd.DataFrame, scoring: dict, universe: pd.Series) -> np.ndarray:
-    """按评分权重对候选做排序打分（0-100），返回 score 数组。"""
+    """按评分权重对候选做排序打分（0-100），返回 score 数组。
+
+    归一化使用「目标日横截面」的 min/max（与回测 _score_series 口径一致）。
+    权重为负表示越低越好（如跌幅因子），按 1-norm 反向计分。
+    """
     idx = df.index
     n = len(df)
     score = np.zeros(n, dtype=float)
@@ -362,12 +367,12 @@ def _score_rank(df: pd.DataFrame, scoring: dict, universe: pd.Series) -> np.ndar
     if not executable:
         return score
 
-    total_weight = sum(w for _, w, _ in executable)
+    total_weight = sum(abs(w) for _, w, _ in executable)
     if total_weight <= 0:
         return score
 
     for _, weight, val in executable:
-        w = weight / total_weight
+        w = abs(weight) / total_weight
         valid = val.notna()
         if valid.any():
             col_min = val[valid].min()
@@ -379,6 +384,9 @@ def _score_rank(df: pd.DataFrame, scoring: dict, universe: pd.Series) -> np.ndar
             norm = norm.where(valid, np.nan)
         else:
             norm = pd.Series(np.nan, index=idx)
+        # 缺失值先置 NaN：负权重反转时不得因缺失而误得满分
+        if weight < 0:
+            norm = 1.0 - norm
         # 仅对候选内计算
         norm = norm.where(universe, np.nan)
         score += norm.fillna(0.0).to_numpy() * w
@@ -406,6 +414,162 @@ def _stock_name_map(db) -> dict:
         if sym and nm:
             names[sym] = nm
     return names
+
+
+# ── 股票池清洗（筛选与回测共用）──────────────────────────────
+# 规则：剔除 ST/*ST/退市/非在市、上市不足 60 交易日、近 5 日均成交额不足 5000 万。
+# 目的：避免超跌反弹等策略命中无流动性的 ST/次新股，导致回测与实盘严重偏离。
+UNIVERSE_MIN_LIST_DAYS = 60
+UNIVERSE_MIN_AVG_AMOUNT = 5e7  # 5000 万元（stock_daily_quotes.amount 口径为元）
+
+_UNIVERSE_META_TTL = 21600  # 6 小时（与全站缓存约定一致）
+_universe_meta_cache: dict = {"time": 0.0, "data": {}}
+
+
+def load_universe_meta(db) -> dict[str, dict]:
+    """加载股票基础信息：名称 / 上市日 / 上市状态（6 小时进程内缓存）。
+
+    stock_basic_info 同一 code 可能有多条（多数据源），优先挑选字段最完整的一条。
+    """
+    now = time.monotonic()
+    cached = _universe_meta_cache.get("data") or {}
+    if cached and (now - _universe_meta_cache.get("time", 0.0)) < _UNIVERSE_META_TTL:
+        return cached
+
+    meta: dict[str, dict] = {}
+    try:
+        cursor = db["stock_basic_info"].find(
+            {},
+            {"_id": 0, "code": 1, "symbol": 1, "name": 1,
+             "list_date": 1, "status": 1, "is_active": 1},
+        )
+        for doc in cursor:
+            code = str(doc.get("code") or doc.get("symbol") or "").strip()
+            if not code:
+                continue
+            score = (
+                bool(doc.get("name")), bool(doc.get("list_date")),
+                bool(doc.get("status")), doc.get("is_active") is not None,
+            )
+            prev = meta.get(code)
+            if prev is None or sum(score) > sum(prev.get("_score", ())):
+                meta[code] = {
+                    "name": doc.get("name") or "",
+                    "list_date": doc.get("list_date") or "",
+                    "status": doc.get("status"),
+                    "is_active": doc.get("is_active"),
+                    "_score": score,
+                }
+    except Exception:
+        return cached
+
+    for v in meta.values():
+        v.pop("_score", None)
+    _universe_meta_cache["time"] = now
+    _universe_meta_cache["data"] = meta
+    return meta
+
+
+def _is_bad_name(name: str) -> bool:
+    """ST / *ST / 退市 / 退字标记的股票。"""
+    n = str(name or "").upper()
+    return ("ST" in n) or ("退" in n)
+
+
+def excluded_universe_symbols(meta: dict[str, dict]) -> set[str]:
+    """基于名称与上市状态，返回需要剔除的股票代码集合。"""
+    out: set[str] = set()
+    for code, m in meta.items():
+        if m.get("is_active") is False:
+            out.add(code)
+            continue
+        status = m.get("status")
+        if status is not None and str(status).upper() not in ("L", ""):
+            out.add(code)
+            continue
+        if _is_bad_name(m.get("name")):
+            out.add(code)
+    return out
+
+
+def apply_universe_filter(
+    panel: pd.DataFrame,
+    meta: dict[str, dict],
+    min_list_days: int = UNIVERSE_MIN_LIST_DAYS,
+    min_avg_amount: float = UNIVERSE_MIN_AVG_AMOUNT,
+) -> pd.Series:
+    """对面板逐行标记「是否属于可交易股票池」，返回与 panel 等长的布尔 Series。
+
+    - 剔除 ST/*ST/退市/非在市（名称 + list_status 双口径）；
+    - 上市不足 60 交易日：优先用 list_date（+90 自然日近似 60 交易日），
+      缺失时回退到面板内累计交易日数；
+    - 近 5 日均成交额 < 5000 万元（amount 缺失的行不据此剔除，避免误伤）。
+    """
+    if panel is None or panel.empty:
+        return pd.Series(dtype=bool)
+
+    symbols = panel["symbol"].astype(str)
+    bad = excluded_universe_symbols(meta)
+    mask = ~symbols.isin(bad)
+
+    # 上市天数（面板需按 symbol/date 升序）
+    dates = pd.to_datetime(panel["date"], errors="coerce")
+    list_date_map = {c: m.get("list_date") for c, m in meta.items()
+                     if m.get("list_date")}
+    ld = symbols.map(list_date_map)
+    ld_dates = pd.to_datetime(ld, errors="coerce")
+    has_ld = ld_dates.notna()
+    age_ok = pd.Series(True, index=panel.index)
+    if has_ld.any():
+        age_ok = age_ok & (~has_ld | (dates >= ld_dates + pd.Timedelta(days=90)))
+    # 无 list_date：用面板累计交易日数兜底（前 60 行视为次新）
+    if (~has_ld).any():
+        cum = panel.groupby("symbol", sort=False).cumcount()
+        age_ok = age_ok & (has_ld | (cum >= min_list_days))
+    mask = mask & age_ok.fillna(True)
+
+    # 近 5 日均成交额
+    amount = pd.to_numeric(panel["amount"], errors="coerce")
+    if amount.notna().any():
+        avg5 = (
+            panel.assign(_amt=amount)
+            .groupby("symbol", sort=False)["_amt"]
+            .rolling(5, min_periods=3).mean()
+            .reset_index(level=0, drop=True)
+            .reindex(panel.index)
+        )
+        mask = mask & (avg5.isna() | (avg5 >= min_avg_amount))
+
+    return mask.fillna(False)
+
+
+def allowed_symbols_on_date(
+    panel: pd.DataFrame,
+    meta: dict[str, dict],
+    as_of_date: str,
+) -> set[str]:
+    """返回目标交易日满足股票池清洗规则的代码集合（供筛选/监控使用）。"""
+    if panel is None or panel.empty:
+        return set()
+    mask = apply_universe_filter(panel, meta)
+    day = panel["date"] == as_of_date
+    return set(panel.loc[mask & day, "symbol"].astype(str))
+
+
+def _apply_universe_to_target(
+    db, panel: pd.DataFrame, target: pd.DataFrame, as_of_date: str
+) -> pd.DataFrame:
+    """把股票池清洗应用到目标日候选表（候选表在面板中已有历史）。"""
+    if target is None or target.empty or panel is None or panel.empty:
+        return target
+    try:
+        meta = load_universe_meta(db)
+        allowed = allowed_symbols_on_date(panel, meta, as_of_date)
+    except Exception:
+        return target
+    if not allowed:
+        return target
+    return target[target["symbol"].astype(str).isin(allowed)].copy()
 
 
 def _to_float(v):
@@ -693,6 +857,12 @@ def _build_intraday_target(db, pool: list[str] | None):
         return None, as_of_date, False
     enhanced = pd.concat([df, today_rows], ignore_index=True, sort=False)
     enhanced = compute_all(enhanced)
+    # 股票池清洗：用含今日行的完整历史计算（次新/流动性口径与回测一致）
+    try:
+        mask = apply_universe_filter(enhanced, load_universe_meta(db))
+        enhanced = enhanced[mask]
+    except Exception:
+        pass
     target = enhanced[enhanced["date"] == today].copy()
     if target.empty:
         return None, as_of_date, False
@@ -737,6 +907,13 @@ def run_strategy(
 
     if target.empty:
         return _empty_result(as_of_date, strategy_id, "目标交易日无数据")
+
+    # 股票池清洗（与回测共用）：剔除 ST/退市/次新/低流动性，避免命中不可交易标的。
+    # 盘中实时路径在 _build_intraday_target 内部完成清洗，此处仅处理 EOD 路径。
+    if not is_intraday:
+        target = _apply_universe_to_target(db, df, target, as_of_date)
+        if target.empty:
+            return _empty_result(as_of_date, strategy_id, "无满足股票池条件的标的")
 
     # 过滤（对目标日行向量执行策略 filter）
     mask = run_strategy_filter(strategy_id, target, params or {})
@@ -1064,6 +1241,11 @@ def run_strategy_signals(
     if target.empty:
         return {"entry": [], "exit": []}
 
+    # 股票池清洗（与回测共用）：ST/退市/次新/低流动性不产生买卖信号
+    target = _apply_universe_to_target(db, df, target, as_of_date)
+    if target.empty:
+        return {"entry": [], "exit": [], "as_of": as_of_date}
+
     # 买入：策略筛选过滤命中
     mask = run_strategy_filter(strategy_id, target, {}).fillna(False)
     entry_codes = [str(s) for s in target.loc[mask, "symbol"]]
@@ -1093,6 +1275,7 @@ def run_strategy_signals(
         "entry": entry_codes,
         "exit": exit_codes,
         "entry_scores": entry_scores,
+        "as_of": as_of_date,
         "entry_reasons": _describe_hits(strategy, target, entry_codes, "entry"),
         "exit_reasons": _describe_hits(strategy, target, exit_codes, "exit"),
         # 🔥 新增：信号完整上下文（用于历史追溯）
@@ -1254,6 +1437,7 @@ def run_strategy_signals_intraday(
         "entry": entry_codes,
         "exit": exit_codes,
         "entry_scores": entry_scores,
+        "as_of": as_of_date,
         "entry_reasons": _describe_hits(strategy, target, entry_codes, "entry"),
         "exit_reasons": _describe_hits(strategy, target, exit_codes, "exit"),
         # 🔥 新增：信号完整上下文（用于历史追溯）

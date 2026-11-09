@@ -4,12 +4,13 @@
 
 from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from bson import ObjectId
 
 from app.core.database import get_mongo_db
 from app.services.quotes_service import get_quotes_service
-from app.utils.timezone import now_tz, to_display_iso
+from app.utils.timezone import get_tz, now_tz, to_config_tz, to_display_iso
 
 
 class FavoritesService:
@@ -47,7 +48,6 @@ class FavoritesService:
 
         raw_market = favorite.get("market", "A股")
         code = str(favorite.get("stock_code", "")).strip().upper()
-
         # 规范化 market：如果是板块值或非标准值，按股票代码推断市场类型
         board_keywords = ("主板", "创业板", "科创板", "中小板", "北交所")
         exchange_keywords = ("上海", "深圳", "上交所", "深交所", "沪市", "深市")
@@ -68,12 +68,27 @@ class FavoritesService:
             "added_at": added_at,
             "tags": favorite.get("tags", []),
             "notes": favorite.get("notes", ""),
+            "source_strategy": favorite.get("source_strategy"),
+            "strategy_entry_score": favorite.get("strategy_entry_score"),
             "alert_price_high": favorite.get("alert_price_high"),
             "alert_price_low": favorite.get("alert_price_low"),
+            # 收益基准字段（信号日次一交易日开盘价口径，与回测 open_t+1 对齐）
+            "signal_date": favorite.get("signal_date"),
+            "entry_date": favorite.get("entry_date"),
+            "entry_price": favorite.get("entry_price"),
+            "entry_mode": favorite.get("entry_mode"),
+            "base_source": favorite.get("base_source"),
+            # 离场结算字段（策略池离场时写入，保留历史供统计）
+            "exit_advised": bool(favorite.get("exit_advised")),
+            "exit_date": favorite.get("exit_date"),
+            "exit_price": favorite.get("exit_price"),
+            "realized_return_pct": favorite.get("realized_return_pct"),
             # 行情占位，稍后填充
             "current_price": None,
             "change_percent": None,
             "volume": None,
+            "return_pct": None,
+            "entry_status": None,
         }
 
     async def get_user_favorites(self, user_id: str) -> list[dict[str, Any]]:
@@ -165,37 +180,139 @@ class FavoritesService:
                 # 查询失败时保持占位 None，避免影响基础功能
                 pass
 
-        # 计算「加入自选后的收益率」：基准价 = 加入当日（及之前最近一个交易日）的日线收盘价
+        # 计算「加入自选后的收益率」：基准价 = 信号日（次一交易日）开盘价
+        # 与回测 open_t+1 口径完全对齐，杜绝用加入当日收盘价作为成本的前视偏差。
         for it in items:
-            it["return_pct"] = await self._return_since_added(db, it)
+            it["return_pct"] = await self._return_since_added(db, user_id, it)
 
         return items
 
-    async def _return_since_added(self, db, it: dict[str, Any]) -> float | None:
+    @staticmethod
+    def _local_date(value) -> str | None:
+        """把 added_at（datetime 或 ISO 字符串）转成配置时区的日期 YYYY-MM-DD。"""
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return to_config_tz(value).strftime("%Y-%m-%d")
+        s = str(value).strip()
+        if not s:
+            return None
+        try:
+            parsed = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        except ValueError:
+            return s[:10]
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=ZoneInfo("UTC"))
+        return parsed.astimezone(get_tz()).strftime("%Y-%m-%d")
+
+    async def _resolve_entry_basis(
+        self, db, code: str, signal_date: str
+    ) -> tuple[str | None, float | None]:
+        """解析信号日之后第一个交易日的开盘价作为收益基准（open_t+1）。
+
+        未开盘/无数据时返回 (None, None)，前端展示为「待成交」。
+        """
+        if not signal_date:
+            return None, None
+        try:
+            doc = await db["stock_daily_quotes"].find_one(
+                {
+                    "symbol": str(code).zfill(6),
+                    "trade_date": {"$gt": str(signal_date)[:10]},
+                    "open": {"$gt": 0},
+                },
+                {"_id": 0, "trade_date": 1, "open": 1},
+                sort=[("trade_date", 1)],
+            )
+        except Exception:
+            return None, None
+        if not doc:
+            return None, None
+        entry_date = str(doc.get("trade_date"))[:10]
+        try:
+            entry_price = float(doc.get("open"))
+        except (TypeError, ValueError):
+            return None, None
+        if entry_price <= 0:
+            return None, None
+        return entry_date, entry_price
+
+    async def _update_entry_fields(
+        self, db, user_id: str, code: str, fields: dict[str, Any]
+    ) -> None:
+        """把收益基准/离场结算字段写回自选条目（兼容两种存储集合）。"""
+        if not fields:
+            return
+        is_oid = self._is_valid_object_id(user_id)
+        prefix = "favorite_stocks.$." if is_oid else "favorites.$."
+        set_fields = {prefix + k: v for k, v in fields.items()}
+        try:
+            if is_oid:
+                await db.users.update_one(
+                    {"_id": ObjectId(user_id), "favorite_stocks.stock_code": code},
+                    {"$set": set_fields},
+                )
+            else:
+                await db.user_favorites.update_one(
+                    {"user_id": user_id, "favorites.stock_code": code},
+                    {"$set": {**set_fields, "updated_at": now_tz()}},
+                )
+        except Exception:
+            # 回写失败不影响本次展示（字段已在本进程内生效）
+            pass
+
+    async def _return_since_added(
+        self, db, user_id: str, it: dict[str, Any]
+    ) -> float | None:
         """计算自选股加入后的累计收益率（百分数口径，如 8.34 = +8.34%）。
 
-        仅 A 股参与计算；基准价取加入日期所在（或之前最近）交易日的日线收盘价。
-        缺少行情/基准/非叶数时返回 None，前端展示为 '-'.
+        基准价 = 信号日（次一交易日）开盘价。信号日优先取显式 signal_date，
+        存量数据回退到 added_at 的本地日期。基准日尚未到来时标记「待成交」并
+        返回 None（不计入统计），避免用当日收盘价制造前视收益。
         """
         if it.get("market") != "A股":
             return None
+
+        code = str(it.get("stock_code", "")).zfill(6)
+        signal_date = it.get("signal_date") or self._local_date(it.get("added_at"))
+
+        entry_price = it.get("entry_price")
+        entry_date = it.get("entry_date")
+        if entry_price is None:
+            entry_date, entry_price = await self._resolve_entry_basis(db, code, signal_date)
+            if entry_price is not None:
+                it["entry_price"] = entry_price
+                it["entry_date"] = entry_date
+                it["entry_mode"] = "next_open"
+                it["base_source"] = "daily_open"
+                it["signal_date"] = signal_date
+                await self._update_entry_fields(db, user_id, it.get("stock_code"), {
+                    "signal_date": signal_date,
+                    "entry_date": entry_date,
+                    "entry_price": entry_price,
+                    "entry_mode": "next_open",
+                    "base_source": "daily_open",
+                })
+
+        if entry_price is None:
+            it["entry_status"] = "pending"
+            return None
+        it["entry_status"] = "settled"
+        it["signal_date"] = signal_date
+        if entry_date:
+            it["entry_date"] = entry_date
+
         cur = it.get("current_price")
-        added_at = it.get("added_at")
-        if cur is None or not added_at:
+        if cur is None:
             return None
-        date_str = str(added_at)[:10]
         try:
-            doc = await db["stock_daily_quotes"].find_one(
-                {"symbol": str(it.get("stock_code", "")).zfill(6), "trade_date": {"$lte": date_str}},
-                {"close": 1, "_id": 0},
-                sort=[("trade_date", -1)],
-            )
-        except Exception:
+            cur = float(cur)
+            entry_price = float(entry_price)
+        except (TypeError, ValueError):
             return None
-        base = (doc or {}).get("close")
-        if not base or base <= 0:
+        if entry_price <= 0:
             return None
-        return round((cur / base - 1) * 100, 2)
+        return round((cur / entry_price - 1) * 100, 2)
 
     async def get_user_symbols(self, user_id: str) -> list[str]:
         """轻量获取用户自选股代码列表（不富集行情、不查基础信息）。
@@ -253,6 +370,11 @@ class FavoritesService:
                     "tags": tags,
                     "strategy_entry_score": fav.get("strategy_entry_score"),
                     "added_at": fav.get("added_at"),
+                    # 收益基准字段（离场结算需要）
+                    "signal_date": fav.get("signal_date"),
+                    "entry_date": fav.get("entry_date"),
+                    "entry_price": fav.get("entry_price"),
+                    "entry_mode": fav.get("entry_mode"),
                 })
         return out
 
@@ -268,6 +390,7 @@ class FavoritesService:
         alert_price_low: float | None = None,
         source_strategy: str | None = None,
         strategy_entry_score: float | None = None,
+        signal_date: str | None = None,
     ) -> bool:
         """添加股票到自选股（兼容字符串ID与ObjectId）"""
         import logging
@@ -284,6 +407,10 @@ class FavoritesService:
                 "stock_name": stock_name,
                 "market": market,
                 "added_at": now_tz(),
+                # 收益基准口径：信号日（次一交易日开盘价），未开盘前为待成交
+                "signal_date": str(signal_date)[:10] if signal_date else now_tz().strftime("%Y-%m-%d"),
+                "entry_mode": "pending",
+                "base_source": "daily_open",
                 "tags": tags or [],
                 "notes": notes,
                 "alert_price_high": alert_price_high,
@@ -410,6 +537,123 @@ class FavoritesService:
                 if str(fav.get("stock_code") or fav.get("symbol") or "").strip() in _codes
             )
         return max(0, before - after)
+
+    async def record_strategy_exits(
+        self, user_id: str, strategy_id: str, entries: list[dict[str, Any]],
+        exit_date: str,
+    ) -> int:
+        """记录策略池离场并结算已实现收益（写入 strategy_exit_history）。
+
+        结算口径：入场价 = 信号日次一交易日开盘价（与 _return_since_added 一致），
+        离场价 = 离场信号日收盘价。写入后由调用方把条目移出活动自选池，
+        历史记录保留供池统计（胜率/期望/持有天数），不随条目删除而消失。
+        """
+        if not entries or not user_id or not strategy_id:
+            return 0
+        db = await self._get_db()
+        today = str(exit_date or now_tz().strftime("%Y-%m-%d"))[:10]
+        written = 0
+        for e in entries:
+            code = str(e.get("stock_code") or "").strip()
+            if not code:
+                continue
+            signal_date = e.get("signal_date") or self._local_date(e.get("added_at"))
+            entry_price = e.get("entry_price")
+            entry_date = e.get("entry_date")
+            if entry_price is None:
+                entry_date, entry_price = await self._resolve_entry_basis(db, code, signal_date)
+
+            exit_price = None
+            try:
+                doc = await db["stock_daily_quotes"].find_one(
+                    {"symbol": code.zfill(6), "trade_date": today},
+                    {"_id": 0, "close": 1},
+                )
+                if not doc:
+                    doc = await db["stock_daily_quotes"].find_one(
+                        {"symbol": code.zfill(6), "trade_date": {"$lte": today}, "close": {"$gt": 0}},
+                        {"_id": 0, "close": 1},
+                        sort=[("trade_date", -1)],
+                    )
+                if doc:
+                    exit_price = float(doc.get("close"))
+            except Exception:
+                exit_price = None
+
+            realized = None
+            holding_days = None
+            try:
+                if entry_price and exit_price and float(entry_price) > 0:
+                    realized = round((float(exit_price) / float(entry_price) - 1) * 100, 2)
+                if entry_date:
+                    holding_days = (datetime.fromisoformat(today) - datetime.fromisoformat(
+                        str(entry_date)[:10])).days
+            except Exception:
+                pass
+
+            await db["strategy_exit_history"].update_one(
+                {
+                    "user_id": user_id,
+                    "strategy_id": strategy_id,
+                    "stock_code": code,
+                    "exit_date": today,
+                },
+                {"$set": {
+                    "entry_date": entry_date,
+                    "entry_price": entry_price,
+                    "exit_price": exit_price,
+                    "realized_return_pct": realized,
+                    "holding_days": holding_days,
+                    "recorded_at": now_tz(),
+                }},
+                upsert=True,
+            )
+            written += 1
+        return written
+
+    async def get_pool_stats(self, user_id: str, strategy_id: str,
+                             active: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        """策略池统计：活动持仓的浮动收益 + 已离场的已实现收益汇总。
+
+        已实现部分来自 strategy_exit_history（离场时结算，不受条目删除影响）；
+        浮动部分基于活动条目的实时价格（active 由调用方传入已含 current_price）。
+        """
+        db = await self._get_db()
+        n_active = len(active or [])
+        floating = [float(a["return_pct"]) for a in (active or [])
+                    if a.get("return_pct") is not None]
+
+        hist = {"n": 0, "win_rate": None, "avg_return_pct": None, "avg_holding_days": None}
+        try:
+            cursor = db["strategy_exit_history"].find(
+                {"user_id": user_id, "strategy_id": strategy_id},
+                {"_id": 0, "realized_return_pct": 1, "holding_days": 1},
+            )
+            rows = [d async for d in cursor]
+            rets = [float(r["realized_return_pct"]) for r in rows
+                    if r.get("realized_return_pct") is not None]
+            holds = [float(r["holding_days"]) for r in rows
+                     if r.get("holding_days") is not None]
+            if rets:
+                hist = {
+                    "n": len(rets),
+                    "win_rate": round(sum(1 for r in rets if r > 0) / len(rets) * 100, 2),
+                    "avg_return_pct": round(sum(rets) / len(rets), 2),
+                    "avg_holding_days": round(sum(holds) / len(holds), 1) if holds else None,
+                }
+        except Exception:
+            pass
+
+        return {
+            "active_count": n_active,
+            "pending_count": sum(1 for a in (active or []) if a.get("entry_status") == "pending"),
+            "active_avg_return_pct": round(sum(floating) / len(floating), 2) if floating else None,
+            "active_win_rate": (
+                round(sum(1 for r in floating if r > 0) / len(floating) * 100, 2)
+                if floating else None
+            ),
+            "realized": hist,
+        }
 
     async def update_favorite(
         self,

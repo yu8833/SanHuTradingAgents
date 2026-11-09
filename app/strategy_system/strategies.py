@@ -60,9 +60,38 @@ def _n_day_low_reversal(df: pd.DataFrame, params: dict) -> pd.Series:
 
 
 def _oversold_bounce(df: pd.DataFrame, params: dict) -> pd.Series:
-    m = _lt(df, "rsi_14", float(params.get("rsi_max", 30)))
+    """超跌反弹（硬化版）：RSI 超卖 + MA5 上穿，并叠加趋势/量能/反转确认。
+
+    原版仅 RSI<30 + MA5 突破，等于「下跌中继也买」，回测中靠个别离群值贡献收益。
+    新增三道过滤，降低接飞刀与低位假反弹：
+    1. 趋势未破坏：MA20 的 5 日斜率 >= -15%，且收盘价 >= MA60 × 0.70；
+    2. 量能配合：当日成交量 >= 1.2 × 前 5 日均量（vol_ratio_5d）；
+    3. 反转确认：RSI 较前一日回升（不在下跌加速段买入）。
+
+    阈值经全市场实测校准：若按「MA20 斜率 >= -1% 且 close >= MA60×0.85」执行，
+    在 2025-06~2026-11 全市场仅剩个位数信号（超跌股天然远离 MA60 且 MA20 陡降），
+    策略会被直接打死。故放宽到实测仍保留约 200 个信号的区间，同时保留防接飞刀意图。
+    注：不再要求 MA5 当日上翘——MA5 交叉当日 MA5 通常仍在下降，该条件与入场信号
+    互斥，会额外剔除 ~95% 候选。
+
+    ma20_slope_5d / rsi_14_prev 由指标层按 symbol 预计算，保证「目标日单行/每股」
+    的筛选模式下也有值（策略内 shift 会得到 NaN）。
+    """
+    rsi_max = float(params.get("rsi_max", 30))
+    m = _lt(df, "rsi_14", rsi_max)
     m &= _signal(df, "signal_ma5_breakout")
-    return m
+
+    # 1) 趋势未破坏：MA20 非断崖式下跌，且不深度跌破 MA60
+    m &= _ge(df, "ma20_slope_5d", float(params.get("min_ma20_slope", -0.15)))
+    m &= (df["close"] >= df["ma60"] * float(params.get("min_ma60_ratio", 0.70))).fillna(False)
+
+    # 2) 量能配合
+    if params.get("use_volume_filter", True):
+        m &= _ge(df, "vol_ratio_5d", float(params.get("vol_ratio_min", 1.2)))
+
+    # 3) 反转确认：RSI 较前一日回升
+    m &= (df["rsi_14"] > df["rsi_14_prev"]).fillna(False)
+    return m.fillna(False)
 
 
 def _trend_breakout(df: pd.DataFrame, params: dict) -> pd.Series:
@@ -372,19 +401,24 @@ BUILTIN_STRATEGIES: list[dict] = [
         _n_day_low_reversal,
         ["signal_n_day_low"], [],
         ["创 60 日新低后收阳企稳，RSI 低位"], ["跌破前低转弱离场"],
-        market_regimes=["震荡蓄势", "震荡分化"],
+        market_regimes=["熊市反弹", "震荡蓄势", "震荡分化"],
     ),
     _def(
-        "oversold_bounce", "超跌反弹", "RSI超卖后MA5金叉反弹",
+        "oversold_bounce", "超跌反弹", "RSI超卖后MA5金叉反弹（趋势/量能/反转确认）",
         ["超跌", "反弹"],
         [
             {"id": "rsi_max", "label": "RSI14上限", "type": "float", "default": 30, "min": 10, "max": 50, "step": 1},
+            {"id": "min_ma20_slope", "label": "MA20五日斜率下限", "type": "float", "default": -0.15, "min": -0.3, "max": 0.05, "step": 0.01},
+            {"id": "min_ma60_ratio", "label": "收盘/MA60最低比例", "type": "float", "default": 0.70, "min": 0.5, "max": 1.0, "step": 0.01},
+            {"id": "use_volume_filter", "label": "启用量能过滤", "type": "bool", "default": True},
+            {"id": "vol_ratio_min", "label": "最低量比(量/前5日均量)", "type": "float", "default": 1.2, "min": 0.5, "max": 5.0, "step": 0.1},
         ],
-        {"rsi_14": 0.5, "momentum_5d": 0.3, "change_pct": 0.2},
+        # 四因子：趋势 0.3 / 量能 0.3 / 反转强度 0.2 / 跌幅 0.2（负权重 = 跌得越多分越高）
+        {"momentum_20d": 0.3, "vol_ratio_5d": 0.3, "rsi_14": 0.2, "momentum_5d": -0.2},
         _oversold_bounce,
         ["signal_ma5_breakout"], ["signal_ma5_breakdown"],
         ["RSI 超卖后 MA5 向上突破反弹"], ["MA5 下穿（反弹乏力）离场"],
-        market_regimes=["熊市恐慌", "高波动市"],
+        market_regimes=["熊市反弹", "熊市恐慌", "高波动市"],
     ),
     _def(
         "trend_breakout", "趋势突破", "创60日新高且站上多均线，多头趋势",
@@ -516,7 +550,7 @@ BUILTIN_STRATEGIES: list[dict] = [
         _bottom_volume,
         [], [],
         ["20日跌幅>15%，当日量比≥3、收阳带长下影（底部承接）"], ["反转证伪：跌破放量日低点 / 3日内不回补，止损离场"],
-        market_regimes=["熊市恐慌", "震荡蓄势"],
+        market_regimes=["熊市反弹", "熊市恐慌", "震荡蓄势"],
     ),
     _def(
         "one_yang_three_yin", "一阳夹三阴", "1大阳+3小K整理（不破大阳开盘）+第5日放量突破，多方蓄势形态",
@@ -560,7 +594,7 @@ try:
         buy_desc=["20日跌幅>15%，当日量比≥3、收阳带长下影（底部承接）"],
         sell_desc=["反转证伪：跌破放量日低点 / 3日内不回补，止损离场"],
         frontend=FrontendSpec(icon="🛑", color="#E6A23C", order=15),
-        market_regimes=["熊市恐慌", "震荡蓄势"],
+        market_regimes=["熊市反弹", "熊市恐慌", "震荡蓄势"],
     )
     def bottom_volume_deco(df, params):
         return _bottom_volume(df, params)
@@ -604,7 +638,7 @@ try:
         buy_desc=["恐慌超跌后情绪极端反转，逆向入场"],
         sell_desc=["情绪修复兑现或跌破确认错位离场"],
         frontend=FrontendSpec(icon="🔻", color="#F56C6C", order=17),
-        market_regimes=["熊市恐慌", "高波动市"],
+        market_regimes=["熊市反弹", "熊市恐慌", "高波动市"],
         source="retail",
     )
     def extreme_reversal_deco(df, params):

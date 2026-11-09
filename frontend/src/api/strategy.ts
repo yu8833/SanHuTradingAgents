@@ -287,6 +287,53 @@ export const FACTOR_OPTIONS = [
   { value: 'close', label: '收盘价' },
 ]
 
+// ===== 大盘状态统一事实源（画像轮盘 / 适配矩阵 / 策略池共用） =====
+export interface MarketStateDims {
+  trend?: string
+  vol?: string
+  breadth?: string
+  sentiment?: string
+}
+
+export interface MarketStateMetrics {
+  index_price?: number | null
+  index_ma250?: number | null
+  index_deviation_pct?: number | null
+  volatility_percentile?: number | null
+  mid_trend?: string
+  short_trend?: string
+  short_detail?: string
+  up_ratio?: number | null
+  /** 当日上涨家数占比（市场宽度快照） */
+  breadth_ratio?: number | null
+  up_count?: number | null
+  down_count?: number | null
+  avg_abs?: number | null
+  breadth_swing?: number | null
+  last_day_avg_pct?: number | null
+  margin_balance_change_pct?: number | null
+  turnover_ratio?: number | null
+  turnover_ma20?: number | null
+  volatility?: string
+  breadth?: string
+  sentiment?: string | null
+}
+
+export interface MarketState {
+  as_of?: string | null
+  generated_at?: string
+  /** 画像：牛市普涨 / 牛市强趋势 / 震荡蓄势 / 震荡分化 / 熊市阴跌 / 熊市恐慌 / 熊市反弹 / 高波动市 */
+  portrait: string
+  dims: MarketStateDims
+  advice: string
+  reasons: string[]
+  metrics: MarketStateMetrics
+  data_quality: 'ok' | 'degraded'
+  missing: string[]
+  short_context?: Record<string, any>
+  cache?: boolean
+}
+
 export const strategyApi = {
   list: () => ApiClient.get<StrategyMeta[]>('/api/strategy/list'),
   tradeDates: (limit?: number) => ApiClient.get<{ dates: string[] }>('/api/strategy/trade-dates', { limit: limit ?? 30 }),
@@ -352,6 +399,9 @@ export const strategyApi = {
     ApiClient.post<{ saved: boolean }>('/api/strategy/backtest/results', result),
   deleteBacktestResult: (recordId: string) =>
     ApiClient.delete<{ deleted: number }>(`/api/strategy/backtest/results/${encodeURIComponent(recordId)}`),
+
+  // ===== 大盘状态统一事实源（画像轮盘 / 适配矩阵 / 策略池共用） =====
+  marketState: () => ApiClient.get<MarketState>('/api/strategy/market-state'),
 
   // ===== 大盘行情上下文（策略行情适配提醒） =====
   marketContext: () => ApiClient.get<{

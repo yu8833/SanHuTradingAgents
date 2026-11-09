@@ -324,6 +324,15 @@ def _concat_indicators(df: pd.DataFrame) -> pd.DataFrame:
         rs = avg_gain / avg_loss.replace(0, np.nan)
         out[f"rsi_{n}"] = 100 - 100 / (1 + rs)
 
+    # ── 派生趋势/反转列 ────────────────────────────────────────
+    # 筛选模式传入的是「目标日单行/每股」表，策略内直接 shift 会因每股仅一行
+    # 而得到 NaN，导致过滤条件永远不成立。故在指标层按 symbol 预计算，
+    # 保证筛选与回测使用同一口径。
+    out["ma20_slope_5d"] = (
+        out["ma20"] / out["ma20"].groupby(symbols, sort=False).shift(5) - 1
+    )
+    out["rsi_14_prev"] = out["rsi_14"].groupby(symbols, sort=False).shift(1)
+
     # OBV: 上涨日累加成交量，下跌日累减，平盘不变
     direction = close.groupby(symbols, sort=False).diff()
     direction = np.sign(direction)

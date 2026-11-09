@@ -160,15 +160,22 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="return_pct" label="加入后收益率" min-width="120" sortable align="right">
+        <el-table-column prop="return_pct" label="加入后收益率(T+1开盘)" min-width="150" sortable align="right">
           <template #default="{ row }">
-            <span
-              v-if="row.return_pct !== null && row.return_pct !== undefined && Number.isFinite(row.return_pct)"
-              :class="getChangeClass(row.return_pct)"
+            <el-tooltip
+              v-if="row.entry_price !== null && row.entry_price !== undefined"
+              :content="`基准：${row.entry_date || '-'} 开盘价 ${row.entry_price}`"
+              placement="top"
             >
-              {{ fmtPct(row.return_pct) }}
-            </span>
-            <span v-else>-</span>
+              <span
+                v-if="row.return_pct !== null && row.return_pct !== undefined && Number.isFinite(row.return_pct)"
+                :class="getChangeClass(row.return_pct)"
+              >
+                {{ fmtPct(row.return_pct) }}
+              </span>
+              <span v-else>-</span>
+            </el-tooltip>
+            <el-tag v-else size="small" type="info">待成交</el-tag>
           </template>
         </el-table-column>
 

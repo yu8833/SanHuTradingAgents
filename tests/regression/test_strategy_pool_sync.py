@@ -56,8 +56,12 @@ def _patch_common(monkeypatch, service, owned, exits, held, as_of):
     async def fake_positions(user_id):
         return list(held)
 
+    async def fake_record(user_id, strategy_id, entries, exit_date):
+        return len(entries or [])
+
     monkeypatch.setattr(favorites_service, "get_strategy_favorites", fake_get_owned)
     monkeypatch.setattr(favorites_service, "remove_favorites_batch", fake_remove)
+    monkeypatch.setattr(favorites_service, "record_strategy_exits", fake_record)
     monkeypatch.setattr(service, "_resolve_position_symbols", fake_positions)
     monkeypatch.setattr(ms, "get_mongo_db_sync", lambda: object())
     monkeypatch.setattr(screener_mod, "_resolve_as_of", lambda db, default: as_of)
@@ -161,7 +165,7 @@ def test_entry_hits_all_added_without_cap(monkeypatch):
     async def fake_item(sym):
         return {"name": sym, "close": 10.0}
 
-    async def fake_tag(user_id, sym, item, r, score=None):
+    async def fake_tag(user_id, sym, item, r, score=None, signal_date=None):
         added.append(sym)
         return True
 

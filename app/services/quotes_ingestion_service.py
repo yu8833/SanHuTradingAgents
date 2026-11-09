@@ -1222,11 +1222,16 @@ class QuotesIngestionService:
 
         # 覆盖率守卫：日线只回填了少量个股时（如同步进行中/数据源缺页），
         # 不能拿它校准全市场快照，否则被覆盖的个股会永久停在残缺值。
-        # 以当日快照总数为基准，低于 60% 视为日线未完成，等下一轮重试。
+        # 口径：日线覆盖率（当日日线条数）低于当日快照总数的 60% → 视为日线未完成。
+        # 注意不能用 len(quotes_map) 比较——quotes_map 只包含「收盘前滞留」的个股，
+        # 收盘后大部分快照已刷新时它会远小于全市场，导致少数滞留个股永远校准不到。
         mq_total = await db[self.collection_name].count_documents({"trade_date": td_compact})
-        if mq_total and len(quotes_map) < mq_total * 0.6:
+        daily_n = await db["stock_daily_quotes"].count_documents(
+            {"period": "daily", "trade_date": {"$in": [str(latest_td), td_compact]}}
+        )
+        if mq_total and daily_n < mq_total * 0.6:
             logger.info(
-                f"⏳ 日终校准：{td_compact} 日线仅 {len(quotes_map)}/{mq_total} 只"
+                f"⏳ 日终校准：{td_compact} 日线仅 {daily_n}/{mq_total} 只"
                 f"（<60%），视为日线未同步完成，跳过本轮"
             )
             return 0

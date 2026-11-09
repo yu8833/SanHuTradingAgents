@@ -820,11 +820,15 @@ class MonitorService:
 
     async def _ensure_watchlist_tagged(self, user_id: str | None, sym: str,
                                        item: dict, rule: dict,
-                                       entry_score: float | None = None) -> bool:
+                                       entry_score: float | None = None,
+                                       signal_date: str | None = None) -> bool:
         """确保股票在自选中并带策略标签（用于策略买入命中同步自选池）。
 
         同时写入 source_strategy，标记该条目由策略自动纳入，供离场时自动移出。
         返回是否真正新增（已在自选则为 False）。
+
+        入池由「常用策略」的监控开关决定：本方法只在 `scan_strategy_instructions`
+        处理 `enabled=True` 的策略规则时被调用，开关关闭即不扫描、不入池。
         """
         if not user_id:
             return False
@@ -839,6 +843,7 @@ class MonitorService:
                 tags=[tag],
                 source_strategy=rule.get("strategy_id"),
                 strategy_entry_score=entry_score,
+                signal_date=signal_date,
             )
             return True
         except Exception as e:
@@ -950,12 +955,13 @@ class MonitorService:
                     logger.error(f"❌ 策略 {strategy_id} 买入监控扫描失败: {e}", exc_info=True)
                     sig_res = {"entry": [], "exit": []}
                 entry_scores = sig_res.get("entry_scores") or {}
+                signal_as_of = sig_res.get("as_of")
                 # 严格按策略口径：命中多少只就纳入多少只（不设上限、不做评分截断）
                 for sym in sig_res.get("entry", []):
                     item = await self._strategy_item(sym)
-                    # 买入命中：同步到自选池并带策略标签
+                    # 买入命中：同步到自选池并带策略标签（记录信号日，基准为次一交易日开盘价）
                     await self._ensure_watchlist_tagged(
-                        user_id, sym, item, r, entry_scores.get(sym))
+                        user_id, sym, item, r, entry_scores.get(sym), signal_as_of)
                     sig_type = "entry"
                     if self._strategy_order_exists(existing_orders, r["id"], sym, sig_type):
                         continue
@@ -1093,6 +1099,15 @@ class MonitorService:
             return {}
         remove = sorted((set(sig.get("exit") or []) & set(codes)) - held)
         if remove:
+            # 先结算已实现收益并写入离场历史，再从活动池移出：
+            # 保证条目消失后仍能统计胜率/期望/持有天数，而不是"凭空消失"。
+            try:
+                exit_entries = [o for o in owned if o["stock_code"] in set(remove)]
+                settled = await favorites_service.record_strategy_exits(
+                    user_id, strategy_id, exit_entries, as_of)
+                logger.info(f"📉 策略池 {strategy_id}: 结算离场 {settled} 只（离场日 {as_of}）")
+            except Exception as e:
+                logger.error(f"❌ 策略池离场结算失败 {strategy_id}: {e}", exc_info=True)
             removed_count = await favorites_service.remove_favorites_batch(user_id, remove)
             logger.info(
                 f"🧹 策略池 {strategy_id}: 离场移出 {removed_count} 只，"

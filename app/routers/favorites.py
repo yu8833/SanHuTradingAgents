@@ -273,6 +273,33 @@ async def get_user_tags(
         ) from e
 
 
+@router.get("/pool-stats", response_model=dict)
+async def get_strategy_pool_stats(
+    strategy_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """策略池统计：活动浮动 vs 已离场已实现（收益基准统一为 T+1 开盘）。
+
+    已实现部分来自离场历史（不因条目被移出自选而丢失），用于判断策略是否
+    真实有效（n / 胜率 / 单笔期望 / 平均持有天数）。
+    """
+    try:
+        favorites = await favorites_service.get_user_favorites(current_user["id"])
+        active = [
+            f for f in favorites
+            if f.get("source_strategy") == strategy_id
+            or (strategy_id in (f.get("tags") or []))
+        ]
+        stats = await favorites_service.get_pool_stats(
+            current_user["id"], strategy_id, active)
+        return ok(stats)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取策略池统计失败: {str(e)}",
+        ) from e
+
+
 class SyncFavoritesRequest(BaseModel):
     """同步自选股实时行情请求"""
     data_source: str = "tushare"  # tushare/akshare

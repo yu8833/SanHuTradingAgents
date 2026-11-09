@@ -51,6 +51,7 @@
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { TrendCharts, Connection } from '@element-plus/icons-vue'
 import { strategyApi } from '@/api/strategy'
+import { portraitOf } from '@/utils/marketFit'
 
 defineOptions({ name: 'StrategyExplainPanel' })
 
@@ -64,6 +65,8 @@ export interface LiveMetrics {
 // autoSync=true 时（盘中预警开启）跟随最新检测结果，检测刷新即覆盖矩阵维度（按实际行情）。
 const props = defineProps<{
   initialDims?: Record<string, string>
+  /** 后端统一大盘状态给出的权威画像（含「熊市反弹」）；用户手动改维度前优先展示 */
+  initialPortrait?: string
   autoSync?: boolean
   liveMetrics?: LiveMetrics | null
 }>()
@@ -75,10 +78,12 @@ const matrixDims = [
   { key: 'trend', label: '趋势', options: ['牛市', '震荡', '熊市'] },
   { key: 'vol', label: '波动率', options: ['高波动', '正常', '低波动'] },
   { key: 'breadth', label: '市场宽度', options: ['普涨', '中性', '分化'] },
-  { key: 'sentiment', label: '情绪', options: ['狂热', '中性', '恐慌'] },
+  { key: 'sentiment', label: '情绪', options: ['狂热', '中性', '恐慌', '未知'] },
 ]
 const regimeDims = reactive({ trend: '震荡', vol: '正常', breadth: '中性', sentiment: '中性' })
 let initialized = false
+// 用户是否手动调过矩阵维度：手动后不再用后端权威画像覆盖，改为按四维推导
+const userTouched = ref(false)
 
 const applyInitialDims = (d: Record<string, string>, force = false) => {
   if (!d || (initialized && !force)) return
@@ -100,31 +105,34 @@ watch(
   },
   { deep: true }
 )
-// 盘中预警开启 → 立即以最新检测结果强制同步一次
+// 盘中预警开启 → 立即以最新检测结果强制同步一次（用户手动调整的优先级同时复位）
 watch(
   () => props.autoSync,
   (on) => {
-    if (on) applyInitialDims(props.initialDims as any, true)
+    if (on) {
+      userTouched.value = false
+      applyInitialDims(props.initialDims as any, true)
+    }
   }
 )
 
 const onPickDim = (key: string, opt: string) => {
+  userTouched.value = true
   ;(regimeDims as any)[key] = opt
 }
 
-const matchedPortrait = computed(() => {
-  const d = regimeDims
-  if (d.vol === '高波动') return '高波动市'
-  if (d.trend === '牛市') return d.breadth === '普涨' ? '牛市普涨' : '牛市强趋势'
-  if (d.trend === '熊市') return (d.vol === '高波动' || d.sentiment === '恐慌') ? '熊市恐慌' : '熊市阴跌'
-  return d.breadth === '分化' ? '震荡分化' : '震荡蓄势'
-})
+// 后端统一状态给出的画像优先（含「熊市反弹」，四维推导不出来）；
+// 用户一旦手动调整维度，就按四维重新推导，避免面板与操作不一致。
+const matchedPortrait = computed(() =>
+  !userTouched.value && props.initialPortrait ? props.initialPortrait : portraitOf(regimeDims)
+)
 const portraitDesc = computed(() => {
   const p = matchedPortrait.value
   const m: Record<string, string> = {
     牛市强趋势: '趋势延续，强者恒强',
     牛市普涨: '全面上涨，弹性优先',
     熊市恐慌: '超跌反弹机会，快进快出',
+    熊市反弹: '中期仍空、短期转强，小仓做超跌反弹',
     熊市阴跌: '谨慎防御，低估值优先',
     震荡蓄势: '低吸跟随，波段操作',
     震荡分化: '结构性行情，精选个股',
@@ -139,8 +147,16 @@ const recommendedStrategies = computed(() => {
   )
 })
 
-// 画像变化 → 通知父组件（策略池联动过滤）
-watch(matchedPortrait, p => emit('portrait-change', p), { immediate: true })
+// 画像变化 → 通知父组件（策略池联动过滤）。
+// 尚未拿到后端权威画像且用户未手动调整时不广播，避免用四维兜底值覆盖页面真实画像。
+watch(
+  matchedPortrait,
+  (p) => {
+    if (!userTouched.value && !props.initialPortrait) return
+    emit('portrait-change', p)
+  },
+  { immediate: true }
+)
 
 const loadStrategyCatalog = async () => {
   try {

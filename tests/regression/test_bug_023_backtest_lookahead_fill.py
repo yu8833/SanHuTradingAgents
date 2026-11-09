@@ -108,13 +108,15 @@ def test_sell_executes_at_next_open_not_signal_day_open():
         f"卖出价应为 01-07 开盘价扣滑点，实际 {t['exit_price']}"
 
 
-def test_stop_loss_fills_at_stop_price_not_day_open():
-    """止损盘中触发（当日 low 击穿），应在止损价成交，而非当日开盘价。"""
+def test_stop_loss_fills_at_open_when_gap_down():
+    """止损盘中触发：若当日开盘已跳空跌破止损线，应按开盘价（更差）成交，而非止损价。
+
+    止损价成交只适用于「盘中跌破」；跳空低开时真实成交价是开盘价（存在负滑点）。
+    若仍按止损价成交，会系统性高估止损单的成交价（乐观偏差）。
+    """
     stop_pct = 0.1
     # 买入信号 01-05 → 在 01-06 开盘成交（open_t+1），成交价 = 01-06 开盘 10.2 加滑点。
-    # 01-06 盘中下探 8.8，但当日买入尚未建仓（买入在卖出判定之后），故不触发；
-    # 01-07 盘中 low 8.7 击穿止损线（基于实际成交价计算），应在止损价成交。
-    # 若按当日开盘价 9.0 卖出，会躲过 8.7 的跌幅，系统性高估收益（未来函数）。
+    # 01-07 开盘 9.0 已跳空跌破止损线（≈9.18），故应在 9.0 开盘价成交。
     panel = _panel([
         {"symbol": "000001", "date": "2026-01-05", "open": 10.0, "high": 10.5, "low": 9.8, "close": 10.0,
          "volume": 1000, "amount": 10000, "pct_chg": 0.0, "name": "测试股"},
@@ -132,8 +134,50 @@ def test_stop_loss_fills_at_stop_price_not_day_open():
     # 买入价：01-06 开盘 10.2 加滑点（信号 01-05 → 次日开盘成交）
     actual_entry = 10.2 * (1 + 0.0005)
     assert t["entry_price"] == pytest.approx(actual_entry, rel=1e-4)
-    # 止损成交价 = 基于实际成交价的止损线 扣滑点，而非当日开盘价
+    # 跳空低开：成交价 = 当日开盘 9.0 扣滑点（而非止损价 ≈9.18）
+    expected = 9.0 * (1 - 0.0005)
+    assert t["exit_price"] == pytest.approx(expected, rel=1e-4), \
+        f"跳空跌破止损线应按开盘价成交（{expected:.4f}），实际 {t['exit_price']}"
+
+
+def test_stop_loss_fills_at_stop_price_when_intraday_break():
+    """止损盘中触发（开盘仍在止损线上方、盘中被击穿），按止损价成交。"""
+    stop_pct = 0.1
+    panel = _panel([
+        {"symbol": "000001", "date": "2026-01-05", "open": 10.0, "high": 10.5, "low": 9.8, "close": 10.0,
+         "volume": 1000, "amount": 10000, "pct_chg": 0.0, "name": "测试股"},
+        {"symbol": "000001", "date": "2026-01-06", "open": 10.2, "high": 10.3, "low": 8.8, "close": 9.2,
+         "volume": 1000, "amount": 9500, "pct_chg": -0.08, "name": "测试股"},
+        {"symbol": "000001", "date": "2026-01-07", "open": 9.5, "high": 9.6, "low": 8.7, "close": 8.8,
+         "volume": 1000, "amount": 9000, "pct_chg": -0.043, "name": "测试股"},
+    ])
+    sim = _run(panel, entry_dates=["2026-01-05"], stop_loss_pct=stop_pct)
+    assert sim is not None
+    stops = [t for t in sim["trades"] if t["exit_reason"] == "stop_loss"]
+    assert len(stops) == 1
+    t = stops[0]
+    actual_entry = 10.2 * (1 + 0.0005)
     stop_line = actual_entry * (1 - stop_pct)
     expected = stop_line * (1 - 0.0005)
-    assert t["exit_price"] == pytest.approx(expected, rel=1e-4), \
-        f"止损应在止损价成交（{expected:.4f}），实际 {t['exit_price']}（未来函数：用当日开盘价高估）"
+    assert t["exit_price"] == pytest.approx(expected, rel=1e-4)
+
+
+def test_take_profit_fills_at_open_when_gap_up():
+    """止盈盘中触发：若开盘已跳空高于止盈线，应按开盘价（更好）成交。"""
+    tp_pct = 0.05
+    panel = _panel([
+        {"symbol": "000001", "date": "2026-01-05", "open": 10.0, "high": 10.5, "low": 9.8, "close": 10.0,
+         "volume": 1000, "amount": 10000, "pct_chg": 0.0, "name": "测试股"},
+        {"symbol": "000001", "date": "2026-01-06", "open": 10.0, "high": 10.4, "low": 9.9, "close": 10.2,
+         "volume": 1000, "amount": 11000, "pct_chg": 0.02, "name": "测试股"},
+        {"symbol": "000001", "date": "2026-01-07", "open": 12.0, "high": 12.2, "low": 11.8, "close": 12.0,
+         "volume": 1000, "amount": 12000, "pct_chg": 0.176, "name": "测试股"},
+    ])
+    sim = _run(panel, entry_dates=["2026-01-05"], take_profit_pct=tp_pct)
+    assert sim is not None
+    tps = [t for t in sim["trades"] if t["exit_reason"] == "take_profit"]
+    assert len(tps) == 1
+    t = tps[0]
+    # 01-06 开盘买入（10.0 加滑点），01-07 开盘 12.0 跳空高于止盈线 → 按开盘价成交
+    expected = 12.0 * (1 - 0.0005)
+    assert t["exit_price"] == pytest.approx(expected, rel=1e-4)

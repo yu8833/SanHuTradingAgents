@@ -130,8 +130,12 @@ def test_hfq_missing_pct_chg_flat():
     assert df.loc[3, "close"] == pytest.approx(13.2, rel=1e-4)
 
 
-def test_hfq_mixed_source_fallback_none():
-    """同一 symbol 出现多个数据源（pct_chg 口径可能不一致）→ 整只回退不复权。"""
+def test_hfq_across_mixed_sources():
+    """同一 symbol 跨多个数据源时仍统一做 hfq 链式复权（不再混源回退不复权）。
+
+    各源均存不复权 OHLC，pct_chg 已统一为小数口径，因此混源不会造成价格等级漂移；
+    若混源回退不复权，除权断层会被当作真实收益，污染回测。
+    """
     docs = [
         _quote_doc("000001", "2026-01-05", 10.0, None, source="tushare"),
         _quote_doc("000001", "2026-01-06", 11.0, 10.0, source="akshare"),
@@ -142,10 +146,9 @@ def test_hfq_mixed_source_fallback_none():
         db, ["000001"], "2026-01-05", "2026-01-06", adjust="hfq", notes=notes
     ).sort_values("date").reset_index(drop=True)
 
-    # 回退不复权：close 保持 raw
-    assert df.loc[1, "close"] == pytest.approx(11.0, rel=1e-6)
-    assert notes
-    assert any("混源" in n for n in notes)
+    # 链式复权：10.0 × (1 + 10%) = 11.0（与单源一致，不做回退）
+    assert df.loc[1, "close"] == pytest.approx(11.0, rel=1e-4)
+    assert not any("混源" in n for n in notes)
 
 
 def test_adjust_none_keeps_raw():
@@ -185,7 +188,8 @@ def test_load_panel_scope_adjust_hfq(monkeypatch):
         "start": "2026-01-05", "end": "2026-01-06",
         "symbols": ["000001"],
     }
-    panel = _load_panel(db, config, enrich_fundamentals=False, keep_columns=set())
+    panel = _load_panel(db, config, enrich_fundamentals=False, keep_columns=set(),
+                        apply_universe=False)
 
     assert not panel.empty
     # hfq 链生效：01-06 close = 10 * 1.10 = 11.0

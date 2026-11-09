@@ -12,11 +12,12 @@ from typing import Any
 
 from bson import ObjectId
 from fastapi import APIRouter
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.core.database import get_mongo_db_sync
 from app.core.response import fail, ok
 from app.strategy_system import backtest as bt
+from app.strategy_system import market_state as market_state_service
 from app.strategy_system import screener
 from app.strategy_system.backtest_queue import enqueue as bt_enqueue
 from app.strategy_system.backtest_results_store import (
@@ -83,14 +84,31 @@ class StrategyRunAllRequest(BaseModel):
     user_id: str | None = None
 
 
-class BacktestRequest(BaseModel):
+class _OpenFillOnly(BaseModel):
+    """成交口径基类：仅允许 open_t+1（T 日收盘信号 → T+1 开盘执行）。
+
+    close_t 允许信号日收盘成交，会绕过 _shift_signal_to_execute，等于用当日收盘价
+    在当日成交，属于未来函数（系统已禁用）。
+    """
+
+    entry_fill: str = "open_t+1"
+    exit_fill: str = "open_t+1"
+
+    @field_validator("entry_fill", "exit_fill")
+    @classmethod
+    def _only_open_t1(cls, v: str) -> str:
+        val = str(v or "").strip().lower()
+        if val and val != "open_t+1":
+            raise ValueError("仅支持 open_t+1 成交口径（close_t 存在未来函数，已禁用）")
+        return "open_t+1"
+
+
+class BacktestRequest(_OpenFillOnly):
     strategy_id: str
     start: str
     end: str
     symbols: list[str] | None = None
     params: dict | None = None
-    entry_fill: str = "open_t+1"
-    exit_fill: str = "open_t+1"
     fees_pct: float = 0.0002
     slippage_bps: float = 5.0
     max_positions: int = 10
@@ -112,15 +130,13 @@ class FactorBacktestRequest(BaseModel):
     rebalance: str = "monthly"
 
 
-class OptimizeRequest(BaseModel):
+class OptimizeRequest(_OpenFillOnly):
     strategy_id: str
     start: str
     end: str
     symbols: list[str] | None = None
     objective: str = "total_return"
     param_grid: dict[str, list[Any]] | None = None
-    entry_fill: str = "open_t+1"
-    exit_fill: str = "open_t+1"
     fees_pct: float = 0.0002
     slippage_bps: float = 5.0
     max_positions: int = 10
@@ -132,7 +148,7 @@ class OptimizeRequest(BaseModel):
     holding_days: int = 5
 
 
-class WalkForwardRequest(BaseModel):
+class WalkForwardRequest(_OpenFillOnly):
     strategy_id: str
     start: str
     end: str
@@ -140,8 +156,6 @@ class WalkForwardRequest(BaseModel):
     train_days: int = 120
     test_days: int = 30
     param_grid: dict[str, list[Any]] | None = None
-    entry_fill: str = "open_t+1"
-    exit_fill: str = "open_t+1"
     fees_pct: float = 0.0002
     slippage_bps: float = 5.0
     max_positions: int = 10
@@ -245,6 +259,25 @@ async def market_context():
     except Exception as e:
         logger.exception("获取大盘行情上下文失败")
         return fail(f"获取大盘行情上下文失败: {e}")
+
+
+@router.get("/api/strategy/market-state")
+async def market_state():
+    """大盘状态统一事实源（中期年线 × 短期宽度 × 波动 × 情绪）。
+
+    合并此前两套互相冲突的口径（retail 的沪深300 vs MA250 / 策略筛选的近5日宽度），
+    输出画像 portrait（含「熊市反弹」）、四维中文标签 dims、判定依据 reasons、
+    原始指标 metrics 与数据质量 data_quality。
+
+    页面画像轮盘、大盘×策略矩阵、策略池适配均以此为准，不再各自判断。
+    """
+    try:
+        db = get_mongo_db_sync()
+        data = await market_state_service.build_market_state(db)
+        return ok(data)
+    except Exception as e:
+        logger.exception("获取大盘状态失败")
+        return fail(f"获取大盘状态失败: {e}")
 
 
 @router.get("/api/strategy/trade-dates")
