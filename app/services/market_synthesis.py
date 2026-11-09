@@ -126,8 +126,10 @@ def _prompt_dashboard(d: dict) -> str:
         lines.append(f"- 涨跌停: 涨停 {lim.get('limit_up')} / 跌停 {lim.get('limit_down')}，"
                      f"最高连板 {lim.get('max_boards')} 板")
     reg = d.get("regime")
-    if reg and reg.get("trend_label"):
-        lines.append(f"- 环境: {reg.get('trend_label')} · {reg.get('volatility_label')}"
+    if reg and (reg.get("portrait") or reg.get("trend_label")):
+        # 优先用大盘画像名称（牛市普涨/熊市反弹…），与策略页轮盘同口径
+        head = reg.get("portrait") or f"{reg.get('trend_label')} · {reg.get('volatility_label')}"
+        lines.append(f"- 环境: {head}"
                      f"{('；' + str(reg.get('advice')) + '') if reg.get('advice') else ''}")
     gain = d.get("top_gainers") or []
     if gain:

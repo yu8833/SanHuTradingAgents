@@ -83,17 +83,34 @@ def _calc_volatility_percentile(closes: list, window: int = VOLATILITY_WINDOW) -
     return round(max(0.0, min(1.0, percentile)), 4)
 
 
-def _fetch_margin_balance_change() -> float:
+def _fetch_margin_balance_change() -> float | None:
     """
     获取全市场融资余额近5日变化百分比
 
     数据源：akshare stock_margin_sse（上交所）+ stock_margin_szse（深交所）
     注意：两个接口参数不同，sse 支持 start_date/end_date，szse 不支持（返回全部历史）
+
+    失败 / 数据不足返回 None（不再用 0.0 冒充「无变化」，避免情绪维度被静默判为中性）。
     """
     ak = _safe_akshare()
     if ak is None:
-        return 0.0
+        return None
 
+    # 主数据源：沪深合计的历史序列。stock_margin_szse 已退化为只回 1 行（不再可靠），
+    # account_info 单接口直接给全市场融资余额（单位亿元，算变化率无需换算），更稳。
+    try:
+        df_all = ak.stock_margin_account_info()
+        if df_all is not None and len(df_all) > MARGIN_CHANGE_DAYS + 1:
+            df_all = df_all.copy()
+            df_all["日期"] = df_all["日期"].astype(str)
+            df_all = df_all.sort_values("日期")
+            vals = [float(v) for v in df_all["融资余额"].tail(MARGIN_CHANGE_DAYS + 1).tolist()]
+            if len(vals) >= MARGIN_CHANGE_DAYS + 1 and vals[0] != 0:
+                return round(float((vals[-1] - vals[0]) / vals[0]), 4)
+    except Exception as e:
+        logger.warning(f"获取全市场融资余额(account_info)失败: {e}")
+
+    # 回退：两所合并（保留原逻辑，防止主路径接口再变动）
     try:
         sse_map = {}  # {date_str: balance}
         szse_map = {}
@@ -129,26 +146,26 @@ def _fetch_margin_balance_change() -> float:
         # 按日期对齐合并（修复：原代码按数组下标对齐导致不同日期被相加）
         all_dates = sorted(set(sse_map.keys()) & set(szse_map.keys()))
         if len(all_dates) < MARGIN_CHANGE_DAYS + 1:
-            return 0.0
+            return None
 
         # 取最近 MARGIN_CHANGE_DAYS+1 个共同交易日
         recent_dates = all_dates[-(MARGIN_CHANGE_DAYS + 1):]
         total_recent = [sse_map[d] + szse_map[d] for d in recent_dates]
 
         if len(total_recent) < MARGIN_CHANGE_DAYS + 1:
-            return 0.0
+            return None
 
         current = total_recent[-1]
         before = total_recent[0]
         if before == 0:
-            return 0.0
+            return None
 
         change_pct = (current - before) / before
         return round(float(change_pct), 4)
 
     except Exception as e:
         logger.warning(f"获取融资余额变化失败: {e}")
-        return 0.0
+        return None
 
 
 def _fetch_market_turnover() -> tuple:
@@ -157,16 +174,20 @@ def _fetch_market_turnover() -> tuple:
 
     数据源：akshare stock_zh_a_spot_em（全市场快照，含换手率列）
     返回：(当前换手率, 20日均值)
+
+    20 日均值需要历史序列才能算，当前未接入 → 返回 (当前值, None)；
+    失败返回 (None, None)。不再用「当前值当均值」制造恒为 0 的偏离度
+    （那会让「狂热」永远无法触发，却看起来像正常判断）。
     """
     ak = _safe_akshare()
     if ak is None:
-        return 1.0, 1.0
+        return None, None
 
     try:
         # 当前全市场换手率
         df = ak.stock_zh_a_spot_em()
         if df is None or len(df) == 0:
-            return 1.0, 1.0
+            return None, None
 
         # 换手率列名可能是"换手率"
         turnover_col = None
@@ -176,46 +197,40 @@ def _fetch_market_turnover() -> tuple:
                 break
 
         if turnover_col is None:
-            return 1.0, 1.0
+            return None, None
 
         # 过滤掉停牌（换手率为0或NaN）的股票
         turnovers = df[turnover_col].astype(float)
         turnovers = turnovers[(turnovers > 0) & turnovers.notna()]
         if len(turnovers) == 0:
-            return 1.0, 1.0
+            return None, None
 
         current_turnover = float(turnovers.mean())
-
-        # 20日均值：由于 stock_zh_a_spot_em 只返回当日快照，
-        # 这里用当前值作为近似（历史均值需要逐日拉取，成本太高）
-        # 实际生产中可由定时任务累积历史值到缓存
-        turnover_ma20 = current_turnover
-
-        return round(current_turnover, 4), round(turnover_ma20, 4)
+        return round(current_turnover, 4), None
 
     except Exception as e:
         logger.warning(f"获取全市场换手率失败: {e}")
-        return 1.0, 1.0
+        return None, None
 
 
-def _fetch_breadth_ratio() -> float:
-    """获取市场宽度（上涨家数占比）"""
+def _fetch_breadth_ratio() -> float | None:
+    """获取市场宽度（上涨家数占比）；失败返回 None（不冒充 0.5 中性）。"""
     try:
         from app.services.market_overview import _sentiment
         sentiment = _sentiment()
         if not sentiment:
-            return 0.5
+            return None
 
         up = sentiment.get("up", 0)
         down = sentiment.get("down", 0)
         flat = sentiment.get("flat", 0)
         total = up + down + flat
         if total == 0:
-            return 0.5
+            return None
         return round(up / total, 4)
     except Exception as e:
         logger.warning(f"获取市场宽度失败: {e}")
-        return 0.5
+        return None
 
 
 def _fetch_index_price() -> float:
@@ -235,14 +250,19 @@ def _fetch_index_price() -> float:
 
 def _build_daily_state() -> dict:
     """
-    日级别分量：指数 MA250 + 波动率分位 + 融资余额变化。
+    日级别分量：指数 MA250 + 波动率分位 + 融资余额变化 + 全市场换手率。
 
     盘中基本不变（收盘后才更新），单独 6h 缓存，避免 60s 的实时刷新每次都重拉
     指数日线与两所融资余额历史（省流且稳定）。
+
+    换手率快照（stock_zh_a_spot_em 全市场分页，实测约 2 分钟）也放在日级：
+    它是日频指标，且其 20 日均值尚未接入历史序列、不参与情绪判定，
+    放进 60s 的实时分量会阻塞页面刷新。
     """
     # 指数MA250 + 波动率分位（共用一次日线拉取）
     index_ma250 = 3800.0
     volatility_percentile = 0.5
+    index_ok = False
 
     df = _fetch_index_daily(HS300_INDEX_CODE)
     if df is not None and len(df) > 0:
@@ -252,38 +272,60 @@ def _build_daily_state() -> dict:
         elif len(closes) >= 20:
             index_ma250 = float(np.mean(closes))
         volatility_percentile = _calc_volatility_percentile(closes)
+        index_ok = True
 
-    # 融资余额变化（T+1 日频数据）
+    # 融资余额变化（T+1 日频数据）；失败为 None，由上层标注降级
     margin_change = _fetch_margin_balance_change()
+
+    # 全市场换手率（日频快照；20 日均值暂未接入）
+    turnover_ratio, turnover_ma20 = _fetch_market_turnover()
 
     return {
         "index_ma250": round(index_ma250, 2),
         "volatility_percentile": volatility_percentile,
         "margin_balance_change_pct": margin_change,
+        "turnover_ratio": turnover_ratio,
+        "turnover_ma20": turnover_ma20,
+        "_ok": {
+            "index": index_ok,
+            "margin": margin_change is not None,
+            "turnover": turnover_ratio is not None,
+        },
     }
 
 
 def _build_live_state() -> dict:
     """
-    实时分量：指数点位 + 市场宽度 + 全市场换手率。
+    实时分量：指数点位 + 市场宽度。
 
     盘中随行情变化，随 market 分类 TTL（交易时段 60s）刷新。
     """
     # 1. 指数当前价
     index_price = _fetch_index_price()
 
-    # 3. 市场宽度
-    breadth_ratio = _fetch_breadth_ratio()
-
-    # 5. 换手率
-    turnover_ratio, turnover_ma20 = _fetch_market_turnover()
+    # 2. 市场宽度（失败时回落 0.5 供旧检测器使用，但用 _ok 标记缺失）
+    breadth_raw = _fetch_breadth_ratio()
 
     return {
         "index_price": round(index_price, 2) if index_price > 0 else 3800.0,
-        "breadth_ratio": breadth_ratio,
-        "turnover_ratio": turnover_ratio,
-        "turnover_ma20": turnover_ma20,
+        "breadth_ratio": breadth_raw if breadth_raw is not None else 0.5,
+        "_ok": {
+            "index_price": index_price > 0,
+            "breadth": breadth_raw is not None,
+        },
     }
+
+
+# 检测器 detect() 的入参白名单：采集结果里还会带 _ok 采集状态，不能直接 ** 展开
+REGIME_INPUT_KEYS = (
+    "index_price",
+    "index_ma250",
+    "volatility_percentile",
+    "breadth_ratio",
+    "margin_balance_change_pct",
+    "turnover_ratio",
+    "turnover_ma20",
+)
 
 
 def _build_regime_data() -> dict:
@@ -291,31 +333,60 @@ def _build_regime_data() -> dict:
     return {**_build_daily_state(), **_build_live_state()}
 
 
-async def collect_market_regime_data() -> dict:
+async def collect_market_regime_data_with_sources() -> dict:
     """
-    异步入口：采集市场环境检测数据（分级缓存）。
+    异步入口（带采集状态）：返回 7 个检测入参 + sources 数据源可用性。
 
-    - 日级别分量（MA250/波动率分位/融资余额）：6h 缓存，盘中不必重算；
-    - 实时分量（指数点位/宽度/换手率）：交易时段 60s、非交易 30min（category=market）。
+    - 日级别分量（MA250/波动率分位/融资余额/换手率）：6h 缓存 + SWR，盘中不必重算；
+    - 实时分量（指数点位/宽度）：交易时段 60s、非交易 30min（category=market）。
+
+    sources 用于上层标注 data_quality=degraded，避免 akshare 失败被静默当成正常值。
     """
     daily = await cached(
-        "retail:regime_daily",
+        "retail:regime_daily_v2",
         _build_daily_state,
         category="default",
         ttl=21600,
         valid=lambda v: bool(v and v.get("index_ma250", 0) > 0),
+        # 日级分量含全市场换手率快照（约 2 分钟），过期时先返回旧值再后台重建，
+        # 避免「常用策略」页 60s 轮询被一次 2 分钟的重建阻塞。
+        swr=True,
+        stale_ttl=7 * 86400,
     )
     live = await cached(
-        "retail:regime_live",
+        "retail:regime_live_v2",
         _build_live_state,
         category="market",
         valid=lambda v: bool(v and v.get("index_price", 0) > 0),
     )
-    return {**daily, **live}
+    merged = {**daily, **live}
+    ok = {**(daily.get("_ok") or {}), **(live.get("_ok") or {})}
+    return {
+        **{k: merged.get(k) for k in REGIME_INPUT_KEYS},
+        "sources": {
+            "index": bool(ok.get("index")),
+            "index_price": bool(ok.get("index_price")),
+            "breadth": bool(ok.get("breadth")),
+            "margin": bool(ok.get("margin")),
+            "turnover": bool(ok.get("turnover")),
+        },
+    }
+
+
+async def collect_market_regime_data() -> dict:
+    """
+    异步入口：采集市场环境检测数据（分级缓存）。
+
+    只返回检测器需要的 7 个入参，保证 `detect(**data)` 可安全调用；
+    需要采集状态时用 collect_market_regime_data_with_sources。
+    """
+    data = await collect_market_regime_data_with_sources()
+    return {k: data.get(k) for k in REGIME_INPUT_KEYS}
 
 
 def collect_market_regime_data_sync() -> dict:
     """
     同步入口：直接采集（无缓存），供定时任务等同步上下文使用
     """
-    return _build_regime_data()
+    data = _build_regime_data()
+    return {k: data.get(k) for k in REGIME_INPUT_KEYS}

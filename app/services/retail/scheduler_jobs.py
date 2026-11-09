@@ -232,12 +232,15 @@ async def detect_market_regime_daily():
                 user_ids = await _get_all_user_ids_with_open_positions()
                 notif_service = get_notifications_service()
 
-                trend_labels = {"bull": "牛市", "bear": "熊市", "range": "震荡市"}
+                # 标题用「大盘画像」名称（与策略页轮盘 / 大屏看板同口径），不再写「牛市/熊市/震荡市」
                 trend = regime_dict.get("trend", "range")
+                portrait = regime_dict.get("portrait") or {
+                    "bull": "牛市强趋势", "bear": "熊市阴跌", "range": "震荡分化",
+                }.get(trend, "震荡分化")
                 active_strategies = regime_dict.get("active_strategies", [])
                 strategy_text = "、".join(active_strategies) if active_strategies else "暂无推荐"
 
-                title = f"市场环境变化：转入{trend_labels.get(trend, trend)}"
+                title = f"市场环境变化：转入{portrait}"
                 content = f"{current_summary}\n当前推荐策略：{strategy_text}"
 
                 notified = 0

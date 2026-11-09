@@ -275,23 +275,35 @@ def _industry_rank(sectors: list[dict], as_of: str = "", top_n: int = 20) -> dic
 
 
 def _market_regime() -> dict | None:
-    """统一市场状态（趋势+波动+建议），与「策略行情条」共用 compute_market_context 口径。
+    """统一市场状态（大盘画像 + 趋势 + 波动 + 建议）。
 
-    复用 compute_market_context 的进程级缓存，保证策略页与大屏看板显示一致的中性/高波动与建议。
+    画像 portrait 取自唯一事实源 market_state（与「常用策略」页轮盘同名），
+    趋势/波动/建议沿用 compute_market_context 的口径；两步都带进程/Redis 缓存，
+    取不到画像时只降级为缺省字段，不影响看板其余部分。
     """
     try:
+        from app.core.database import get_mongo_db_sync
+        from app.strategy_system.market_state import build_market_state
         from app.strategy_system.screener import compute_market_context
-        r = compute_market_context(get_mongo_db_sync())
-        regime = r or {}
-        if regime.get("trend") not in ("bull", "bear", "sideways"):
+
+        db = get_mongo_db_sync()
+        r = compute_market_context(db) or {}
+        portrait = None
+        try:
+            portrait = asyncio.run(build_market_state(db)).get("portrait")
+        except Exception as e:
+            logger.warning(f"大盘画像构建失败（看板降级为不含画像）: {e}")
+
+        if r.get("trend") not in ("bull", "bear", "sideways") and not portrait:
             return None
         return {
-            "trend": regime.get("trend"),
-            "trend_label": regime.get("trend_label", "中性"),
-            "volatility": regime.get("volatility"),
-            "volatility_label": regime.get("volatility_label", "波动待研判"),
-            "advice": regime.get("advice", ""),
-            "as_of": regime.get("as_of"),
+            "portrait": portrait,
+            "trend": r.get("trend"),
+            "trend_label": r.get("trend_label", "中性"),
+            "volatility": r.get("volatility"),
+            "volatility_label": r.get("volatility_label", "波动待研判"),
+            "advice": r.get("advice", ""),
+            "as_of": r.get("as_of"),
         }
     except Exception:
         logger.exception("构造大盘统一市场状态失败")
