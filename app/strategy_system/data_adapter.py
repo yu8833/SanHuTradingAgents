@@ -29,24 +29,49 @@ def _parse_date(d) -> str:
 
 
 def get_stock_list(db, market: str | None = None, limit: int = 100000) -> list[dict]:
-    """从 stock_basic_info 获取股票列表（含 symbol 与 name）。"""
+    """从 stock_basic_info 获取股票列表（含 symbol / name / industry / ths_industry）。
+
+    行业口径统一：
+    - 同一只股票在 stock_basic_info 中可能有多源记录（akshare industry 为空、
+      baostock 国标行业、tushare 191 细分），按数据源优先级
+      tushare > baostock > akshare 取一条，避免行业取值随机。
+    - industry 保留源原始行业名（兼容旧业务）；ths_industry 为归一到同花顺 90 行业的标准值，
+      新业务/驾驶舱统一使用 ths_industry。
+    """
+    from app.core.industry import resolve_stock_ths_industry
+
     collection = db["stock_basic_info"]
     query: dict = {}
     if market:
         query["market"] = market
+
     cursor = collection.find(
         query,
-        {"_id": 0, "symbol": 1, "code": 1, "name": 1, "industry": 1},
+        {"_id": 0, "symbol": 1, "code": 1, "name": 1, "industry": 1, "source": 1},
     ).limit(limit)
-    out: list[dict] = []
+
+    # 数据源优先级（数字越小越优先），与 stock_daily_quotes 去重优先级一致
+    SOURCE_PRIO = {"tushare": 0, "baostock": 1, "akshare": 2}
+    picked: dict[str, dict] = {}
+    picked_prio: dict[str, int] = {}
     for doc in cursor:
-        symbol = doc.get("symbol") or doc.get("code")
+        symbol = str(doc.get("symbol") or doc.get("code") or "")
         if not symbol:
             continue
+        src = doc.get("source") or ""
+        prio = SOURCE_PRIO.get(src, 9)
+        # 同 symbol 取优先级最高的；同级取先出现的
+        if symbol not in picked or prio < picked_prio[symbol]:
+            picked[symbol] = doc
+            picked_prio[symbol] = prio
+
+    out: list[dict] = []
+    for symbol, doc in picked.items():
         out.append({
-            "symbol": str(symbol),
+            "symbol": symbol,
             "name": doc.get("name") or "",
             "industry": doc.get("industry") or "",
+            "ths_industry": resolve_stock_ths_industry(doc),
         })
     return out
 

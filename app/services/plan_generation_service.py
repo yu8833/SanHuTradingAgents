@@ -116,25 +116,41 @@ async def _build_environment_step() -> dict:
 # 输出「当日行业池」[{industry, forecast_score, confidence, factors}]，
 # Stage3 个股段按该池**硬绑定**，实现「预测哪些行业会涨 → 只在该行业内挑股」。
 # ══════════════════════════════════════════════════════════════
+# 行业β分组（同花顺 90 行业口径）
 _HIGH_BETA_INDUSTRIES = {
-    "军工", "有色金属", "半导体", "计算机", "传媒", "人工智能", "证券",
-    "新能源", "汽车", "电子", "通信", "房地产",
+    "军工装备", "军工电子", "半导体", "IT服务", "软件开发", "互联网电商",
+    "文化传媒", "影视院线", "游戏", "证券", "电池", "光伏设备", "风电设备",
+    "其他电源设备", "汽车整车", "汽车零部件", "消费电子", "光学光电子",
+    "通信设备", "通信服务", "房地产", "小金属", "能源金属", "金属新材料",
 }
 _LOW_BETA_INDUSTRIES = {
-    "银行", "保险", "食品", "白酒", "乳制品", "电力", "公共交通",
-    "公用事业", "农业", "石油", "煤炭",
+    "银行", "保险", "食品加工制造", "白酒", "饮料制造", "电力",
+    "公路铁路运输", "种植业与林业", "养殖业", "石油加工贸易",
+    "油气开采及服务", "煤炭开采加工", "燃气",
 }
 # 行业→资讯关键词（弱信号：标题命中即加权；与 ETF 主题名自动并集）
+# key 为同花顺 90 行业名
 _EXTRA_NEWS_KEYWORDS = {
     "半导体": ("芯片", "晶圆", "集成电路", "存储"),
-    "人工智能": ("AI", "大模型", "算力", "机器人"),
-    "新能源": ("光伏", "风电", "锂电", "充电桩", "储能"),
-    "医药": ("创新药", "医保", "药品"),
+    "IT服务": ("AI", "大模型", "算力", "机器人", "人工智能"),
+    "软件开发": ("AI", "大模型", "算力", "机器人", "人工智能"),
+    "电池": ("光伏", "风电", "锂电", "充电桩", "储能", "新能源"),
+    "光伏设备": ("光伏", "锂电", "储能", "新能源"),
+    "风电设备": ("风电", "新能源"),
+    "中药": ("创新药", "医保", "药品", "医药"),
+    "化学制药": ("创新药", "医保", "药品", "医药"),
+    "生物制品": ("创新药", "医保", "药品", "医药"),
+    "医疗器械": ("创新药", "医保", "药品", "医药"),
     "白酒": ("酿酒", "酒企", "白酒"),
-    "汽车": ("新能源车", "整车", "车企"),
-    "通信": ("5G", "光模块", "6G"),
-    "有色金属": ("铜", "铝", "稀土", "黄金"),
-    "煤炭": ("煤价", "煤炭"),
+    "汽车整车": ("新能源车", "整车", "车企"),
+    "汽车零部件": ("新能源车", "整车", "车企"),
+    "通信设备": ("5G", "光模块", "6G", "通信"),
+    "通信服务": ("5G", "光模块", "6G", "通信"),
+    "小金属": ("铜", "铝", "稀土", "黄金", "有色金属"),
+    "工业金属": ("铜", "铝", "有色金属"),
+    "贵金属": ("黄金", "有色金属"),
+    "能源金属": ("稀土", "锂电", "有色金属"),
+    "煤炭开采加工": ("煤价", "煤炭"),
 }
 # 因子权重（0-100 分制，相对 50 基准加权偏离）
 _W_MOM = 0.35
@@ -142,13 +158,30 @@ _W_FUND = 0.30
 _W_NEWS = 0.15
 
 
-def _industry_news_hits(news_list: list[dict], industry: str) -> int:
-    """资讯标题命中次数：行业名 + 关联 ETF 主题名 + 别名关键词。"""
+def _ths_to_etf_themes() -> dict[str, list[str]]:
+    """同花顺 90 行业 → 关联 ETF 主题名列表（从 ETF_TO_LOCAL_INDUSTRIES 反向推导）。
+
+    模块级缓存：首次调用构建一次，后续复用。
+    """
+    cache = getattr(_ths_to_etf_themes, "_cache", None)
+    if cache is not None:
+        return cache
     from app.services.candidate_pool.candidate_pool_service import ETF_TO_LOCAL_INDUSTRIES
-    kws = {industry}
+    from app.core.industry import normalize_to_ths
+    mapping: dict[str, set[str]] = {}
     for theme, locals_ in ETF_TO_LOCAL_INDUSTRIES.items():
-        if industry in locals_:
-            kws.add(theme)
+        for local in locals_:
+            ths = normalize_to_ths(local)
+            mapping.setdefault(ths, set()).add(theme)
+    cache = {k: sorted(v) for k, v in mapping.items()}
+    _ths_to_etf_themes._cache = cache
+    return cache
+
+
+def _industry_news_hits(news_list: list[dict], industry: str) -> int:
+    """资讯标题命中次数：同花顺行业名 + 关联 ETF 主题名 + 别名关键词。"""
+    kws = {industry}
+    kws.update(_ths_to_etf_themes().get(industry, []))
     kws.update(_EXTRA_NEWS_KEYWORDS.get(industry, ()))
     hits = 0
     for n in news_list or []:
@@ -159,12 +192,9 @@ def _industry_news_hits(news_list: list[dict], industry: str) -> int:
 
 
 def _industry_fund_score(industry: str, radar_by_theme: dict[str, float]) -> float | None:
-    """该细类行业关联 ETF 主题的资金流分均值；无映射返回 None（数据缺失）。"""
-    from app.services.candidate_pool.candidate_pool_service import ETF_TO_LOCAL_INDUSTRIES
-    scores = []
-    for theme, locals_ in ETF_TO_LOCAL_INDUSTRIES.items():
-        if industry in locals_ and theme in radar_by_theme:
-            scores.append(radar_by_theme[theme])
+    """该同花顺行业关联 ETF 主题的资金流分均值；无映射返回 None（数据缺失）。"""
+    themes = _ths_to_etf_themes().get(industry, [])
+    scores = [radar_by_theme[t] for t in themes if t in radar_by_theme]
     if not scores:
         return None
     return round(sum(scores) / len(scores), 2)
@@ -198,21 +228,28 @@ def _industry_confidence(basis: dict, mom: float | None, fund: float | None, new
 
 
 async def _build_industry_step(direction: str | None, basis: dict | None) -> dict:
-    """行业段：盘前行业方向预测 → 当日行业池（供 Stage3 个股段硬绑定）。"""
+    """行业段：盘前行业方向预测 → 当日行业池（供 Stage3 个股段硬绑定）。
+
+    行业口径统一为同花顺 90 行业：候选池强势行业（本地细类）归一到同花顺，
+    ETF 主题也通过本地细类映射到同花顺行业，保证行业池与个股 industry 可硬绑定。
+    """
     from app.services.candidate_pool import candidate_pool_service
     from app.services.candidate_pool.candidate_pool_service import ETF_TO_LOCAL_INDUSTRIES
     from app.services.macro import macro_service
+    from app.core.industry import normalize_to_ths
 
     # ① 行业动量：候选池强势行业（含 sector_score；结果级缓存，热路径秒回）
-    mom_map: dict[str, float] = {}
+    # 多本地细类可能归一到同一同花顺行业，动量分取均值
+    mom_acc: dict[str, list[float]] = {}
     try:
         inds = await candidate_pool_service.get_candidate_industries(top_n=DEFAULT_TOP_N * 2)
         for i in (inds.get("industries") or []):
-            nm = (i.get("industry") or "").strip()
-            if nm:
-                mom_map[nm] = float(i.get("sector_score") or 50.0)
+            nm = normalize_to_ths((i.get("industry") or "").strip())
+            if nm and nm != "其他":
+                mom_acc.setdefault(nm, []).append(float(i.get("sector_score") or 50.0))
     except Exception as e:
         logger.warning(f"行业预测-动量读取失败: {e}")
+    mom_map: dict[str, float] = {k: round(sum(v) / len(v), 2) for k, v in mom_acc.items()}
 
     # ② 资金流：ETF 雷达快照（纯读 MongoDB，无网络副作用）
     radar_by_theme: dict[str, float] = {}
@@ -234,12 +271,13 @@ async def _build_industry_step(direction: str | None, basis: dict | None) -> dic
     except Exception as e:
         logger.warning(f"行业预测-资讯读取失败: {e}")
 
-    # 候选行业 = 强势行业（细类）∪ 资金流领跑 ETF 主题映射的细类（补资金强但动量未上榜的行业）
+    # 候选行业 = 强势行业（同花顺）∪ 资金流领跑 ETF 主题映射的同花顺行业
     candidates: dict[str, dict] = {nm: {"momentum_score": mom_map[nm]} for nm in mom_map}
     for theme in sorted(radar_by_theme, key=radar_by_theme.get, reverse=True)[:5]:
         for local in ETF_TO_LOCAL_INDUSTRIES.get(theme, []):
-            if local not in candidates:
-                candidates[local] = {"momentum_score": None}
+            ths = normalize_to_ths(local)
+            if ths and ths != "其他" and ths not in candidates:
+                candidates[ths] = {"momentum_score": None}
 
     if not candidates:
         step = _audit("行业", scanned=0, rule="行业预测数据不可用", kept=0, dropped=0,
@@ -445,14 +483,12 @@ async def _build_stock_step(user_id: str, direction: str | None, basis: dict | N
     verified_items = await _collect_verified_items()
     strategy = await _active_strategy(direction)
 
-    # code → 本地细类行业 映射（纯读 stock_basic_info）。
+    # code → 同花顺 90 行业 映射（纯读 stock_basic_info）。
     # stock_basic_info 同一 code 有多数据源记录：akshare 行业常为空、baostock 是证监会
-    # 标准分类、tushare 是本地细类（与预测行业池同命名，如"普钢"/"通信设备"）。
-    # 已验证信号（signal_tracking）的 industry 是证监会标准分类（来自扫描时聚合），
-    # 与预测行业池命名空间不一致，直接硬绑定会全部误杀（实测近一周 kept=0）。
-    # 因此按统一 source_rank 优先解析本地细类（tushare > baostock > akshare > sina），
-    # 统一映射到预测行业池命名。
-    code_industry: dict[str, str] = {}
+    # 标准分类、tushare 是本地细类。按统一 source_rank 优先取一条（tushare > baostock > akshare），
+    # 再用 normalize_to_ths 归一到同花顺 90 行业，与行业池口径一致，保证硬绑定可命中。
+    from app.core.industry import normalize_to_ths
+    code_industry: dict[str, dict] = {}
     try:
         from app.core.database import get_mongo_db_sync
         codes = {str(it.get("code")) for it in (*pool_items, *verified_items) if it.get("code")}
@@ -465,7 +501,7 @@ async def _build_stock_step(user_id: str, direction: str | None, basis: dict | N
                 continue
             cur = code_industry.get(c)
             if cur is None or source_rank(src) < source_rank(cur.get("src", "")):
-                code_industry[c] = {"ind": ind, "src": src}
+                code_industry[c] = {"ind": normalize_to_ths(ind), "src": src}
     except Exception as e:
         logger.warning(f"个股行业映射读取失败（跳过）: {e}")
 
@@ -483,10 +519,10 @@ async def _build_stock_step(user_id: str, direction: str | None, basis: dict | N
     for it in merged.values():
         code = it.get("code")
         sig_type = it.get("signal_type") or it.get("primary_signal_type") or ""
-        # 行业以本地细类为准（stock_basic_info tushare/baostock 覆盖，纠正 signal_tracking 的证监会分类名）
+        # 行业统一为同花顺 90 行业：stock_basic_info 归一值优先，兜底用候选自带 industry 归一
         industry = str((code_industry.get(str(code)) or {}).get("ind") or "") if code else ""
         if not industry:
-            industry = str(it.get("industry") or "").strip()
+            industry = normalize_to_ths(str(it.get("industry") or "").strip())
         it["industry"] = industry
         # 去重：已在当日计划中的标的（人工确认/手动添加）不再重复推荐
         if code and str(code).strip() in planned_codes:

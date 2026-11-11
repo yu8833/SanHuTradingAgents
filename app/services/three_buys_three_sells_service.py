@@ -2174,6 +2174,8 @@ class ThreeBuysThreeSellsService:
             "name": name,
             "close": round(float(ind["closes"][last_idx]), 2),
             "pct_chg": round(float(ind["pct_chgs"][last_idx]), 2),
+            "ma5": round(float(ind["ma5"][last_idx]), 2),
+            "ma20": round(float(ind["ma20"][last_idx]), 2),
             "trigger_date": ind["dates"][last_idx],
             "market_trend": market_trend,
             "stock_trend": stock_trend,

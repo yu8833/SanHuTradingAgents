@@ -202,6 +202,16 @@ async def init_database():
         redis_client = db_manager.redis_client
         redis_pool = db_manager.redis_pool
 
+        # 同步到 app.core.redis_client 的全局：该模块的 get_redis_service()/get_redis()
+        # 读的是自己模块内的全局变量，与本模块相互独立；不同步会让 backend 进程里
+        # get_redis_service() 永远抛「Redis客户端未初始化」（驾驶舱积累区扫描即因此失败）。
+        try:
+            from . import redis_client as _rc
+            _rc.redis_pool = db_manager.redis_pool
+            _rc.redis_client = db_manager.redis_client
+        except Exception as _e:  # 不应阻塞启动，但要留痕
+            logger.warning(f"⚠️ 同步 Redis 全局到 app.core.redis_client 失败: {_e}")
+
         logger.info("🎉 所有数据库连接初始化完成")
 
         # 🔥 初始化数据库视图和索引

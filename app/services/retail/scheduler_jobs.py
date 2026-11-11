@@ -322,6 +322,88 @@ async def run_unified_intraday_scan():
         logger.error(f"❌ 个股预警检查失败: {e}", exc_info=True)
     # 2. 持仓退出信号扫描
     await check_all_users_exit_signals()
+    # 3. 驾驶舱突破检测（观察池右侧确认信号）
+    try:
+        from app.services.cockpit.breakout_detector import check_breakout_signals
+        await check_breakout_signals()
+    except Exception as e:
+        logger.error(f"❌ 驾驶舱突破检测失败: {e}", exc_info=True)
+    # 4. 驾驶舱纪律持仓盘中预警（假突破/跌破MA5）
+    try:
+        from app.services.cockpit.breakout_detector import check_position_exit_warnings
+        await check_position_exit_warnings()
+    except Exception as e:
+        logger.error(f"❌ 驾驶舱持仓预警失败: {e}", exc_info=True)
+
+
+async def run_cockpit_accumulation_scan():
+    """驾驶舱积累区盘后扫描（每日 18:30，日线入库后）。
+
+    Redis 分布式锁防重入；仅交易日执行。
+    """
+    if not _is_trading_day():
+        logger.info("非交易日，跳过驾驶舱积累区扫描")
+        return
+
+    from app.core.redis_client import get_redis_service
+    from app.core.collections import Collections
+    from app.core.database import get_mongo_db_sync
+    from app.services.cockpit.accumulation_scanner import run_daily_accumulation_scan
+
+    redis_service = get_redis_service()
+    lock_key = "lock:cockpit:accumulation_scan"
+    lock_value = None
+    if redis_service:
+        try:
+            lock_value = await redis_service.acquire_lock(lock_key, timeout=3600)
+            if not lock_value:
+                logger.warning("驾驶舱积累区扫描：另一实例正在执行，本次跳过")
+                return
+        except Exception as e:
+            logger.warning(f"驾驶舱积累区扫描获取锁失败（退化单飞执行）: {e}")
+
+    try:
+        db = get_mongo_db()
+        sync_db = get_mongo_db_sync()
+        latest = sync_db[Collections.stock_daily_quotes].find_one(sort=[("trade_date", -1)])
+        trade_date = (latest or {}).get("trade_date")
+        if not trade_date:
+            logger.warning("驾驶舱积累区扫描：日线数据为空，跳过")
+            return
+        # 日线 19:30（AKShare）/20:30（BaoStock）才同步当日，若还没到今日则跳过，
+        # 避免用前一交易日的旧数据重复覆盖观察池（22:50 有一次补扫机会）
+        today = now_tz().strftime("%Y%m%d")
+        if str(trade_date).replace("-", "")[:8] != today:
+            logger.warning(
+                f"驾驶舱积累区扫描：日线最新 {trade_date} 尚未同步到今日 {today}，本次跳过"
+            )
+            return
+        logger.info(f"🛫 驾驶舱积累区扫描开始: {trade_date}")
+        summary = await run_daily_accumulation_scan(db, trade_date)
+        logger.info(f"🛬 驾驶舱积累区扫描完成: {summary}")
+    except Exception as e:
+        logger.error(f"❌ 驾驶舱积累区扫描失败: {e}", exc_info=True)
+    finally:
+        if redis_service and lock_value:
+            try:
+                await redis_service.release_lock(lock_key, lock_value)
+            except Exception:
+                pass
+
+
+def register_cockpit_jobs(scheduler, settings):
+    """注册交易驾驶舱定时任务：积累区盘后扫描（工作日 20:50 与 21:50 补扫）。"""
+    from app.utils.scheduler_utils import cron_trigger
+
+    tz = get_tz()
+    scheduler.add_job(
+        run_cockpit_accumulation_scan,
+        cron_trigger("50 20,21 * * 1-5", timezone=tz),
+        id="cockpit_accumulation_scan",
+        name="驾驶舱积累区盘后扫描（每日20:50，21:50 补扫）",
+        replace_existing=True,
+    )
+    logger.info("🛫 交易驾驶舱定时任务已注册: 积累区盘后扫描(每日20:50/21:50)")
 
 
 async def _check_stock_alerts_wrapper():

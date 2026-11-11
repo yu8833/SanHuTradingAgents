@@ -117,6 +117,13 @@ async def _ensure_redis_available() -> bool:
             await db_mod.db_manager.init_redis()
             db_mod.redis_client = db_mod.db_manager.redis_client
             db_mod.redis_pool = db_mod.db_manager.redis_pool
+            # 同步到 app.core.redis_client 的全局，避免两套全局出现新旧连接分叉
+            try:
+                from app.core import redis_client as rc_mod
+                rc_mod.redis_client = db_mod.db_manager.redis_client
+                rc_mod.redis_pool = db_mod.db_manager.redis_pool
+            except Exception:
+                pass
             ok = True
     except Exception as e:
         logger.warning(f"Redis重新初始化失败: {e}")

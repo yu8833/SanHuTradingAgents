@@ -29,6 +29,17 @@ class _DummyCache:
     def get_cache_backend_info(self, *args, **kwargs):
         return {}
 
+    # foreign_stock_service 走的是 stock_data 缓存接口；占位实现必须补齐这几个方法，
+    # 否则港股/美股行情、信息、K线与新闻在第一次读缓存时就会 AttributeError。
+    def find_cached_stock_data(self, *args, **kwargs):
+        return None
+
+    def load_stock_data(self, *args, **kwargs):
+        return None
+
+    def save_stock_data(self, *args, **kwargs):
+        return None
+
 
 _cache_instance = None
 

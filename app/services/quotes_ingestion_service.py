@@ -1190,7 +1190,7 @@ class QuotesIngestionService:
 
         if not stale_codes:
             logger.info(f"✅ 日终校准：{td_compact} 无收盘前滞留快照（已一致）")
-            return 0
+            return await self._repair_stale_trade_date(db, latest_td, td_compact)
 
         # 批量取对应日线收盘数据，构造与 backfill 相同的 quotes_map 走统一入库
         daily_cursor = db["stock_daily_quotes"].find(
@@ -1217,8 +1217,11 @@ class QuotesIngestionService:
             }
 
         if not quotes_map:
-            logger.info(f"⏳ 日终校准：{td_compact} 日线数据尚未同步完成，跳过本轮")
-            return 0
+            logger.info(
+                f"⏳ 日终校准：{td_compact} 日线数据尚未同步完成，跳过本轮"
+                f"（收盘前滞留 {len(stale_codes)} 只）"
+            )
+            return await self._repair_stale_trade_date(db, latest_td, td_compact)
 
         # 覆盖率守卫：日线只回填了少量个股时（如同步进行中/数据源缺页），
         # 不能拿它校准全市场快照，否则被覆盖的个股会永久停在残缺值。
@@ -1237,8 +1240,61 @@ class QuotesIngestionService:
             return 0
 
         await self._bulk_upsert(quotes_map, td_compact, "daily_close_calibrate")
-        logger.info(f"✅ 日终校准完成：{len(quotes_map)} 只股票已从收盘前快照校准为日线收盘值")
-        return len(quotes_map)
+
+        repaired = await self._repair_stale_trade_date(db, latest_td, td_compact)
+        logger.info(
+            f"✅ 日终校准完成：{len(quotes_map)} 只股票已从收盘前快照校准为日线收盘值"
+            + (f"，另补齐 {repaired} 只 trade_date 陈旧的个股" if repaired else "")
+        )
+        return len(quotes_map) + repaired
+
+    async def _repair_stale_trade_date(self, db, latest_td, td_compact: str) -> int:
+        """补齐 trade_date 陈旧的快照行（market_quotes 以 code 唯一）。
+
+        个别个股（如 689009）若当日未被任何实时源刷新，trade_date 会永久停在旧日期，
+        上面按 trade_date 的过滤永远看不到它。只要该代码在最新交易日有日线，就按日线
+        补齐整行（_bulk_upsert 会顺带把 trade_date 刷新为最新交易日）。
+        """
+        repaired = 0
+        try:
+            stale_rows = await db[self.collection_name].find(
+                # 只补「比日线最新交易日更旧」的行：绝不把当日快照降级回上一交易日
+                {"trade_date": {"$ne": td_compact, "$lt": td_compact}},
+                {"_id": 0, "code": 1},
+            ).to_list(length=None)
+            stale_codes = [str(r.get("code") or "").zfill(6) for r in stale_rows if r.get("code")]
+            if not stale_codes:
+                return 0
+            extra: dict[str, dict] = {}
+            extra_cursor = db["stock_daily_quotes"].find(
+                {
+                    "trade_date": str(latest_td),
+                    "$or": [{"symbol": {"$in": stale_codes}}, {"code": {"$in": stale_codes}}],
+                },
+                {
+                    "_id": 0, "code": 1, "symbol": 1, "close": 1, "pct_chg": 1,
+                    "amount": 1, "volume": 1, "vol": 1, "open": 1, "high": 1,
+                    "low": 1, "pre_close": 1,
+                },
+            )
+            async for sq in extra_cursor:
+                code6 = str(sq.get("symbol") or sq.get("code") or "").zfill(6)
+                extra[code6] = {
+                    "close": sq.get("close"),
+                    "pct_chg": sq.get("pct_chg"),
+                    "amount": sq.get("amount"),
+                    "volume": sq.get("volume") or sq.get("vol"),
+                    "open": sq.get("open"),
+                    "high": sq.get("high"),
+                    "low": sq.get("low"),
+                    "pre_close": sq.get("pre_close"),
+                }
+            if extra:
+                await self._bulk_upsert(extra, td_compact, "daily_close_calibrate")
+                repaired = len(extra)
+        except Exception as e:
+            logger.warning(f"日终校准：陈旧 trade_date 补漏失败（忽略）: {e}")
+        return repaired
 
     async def backfill_last_close_snapshot(self) -> None:
         """一次性补齐上一笔收盘快照（用于冷启动或数据陈旧）。允许在休市期调用。"""

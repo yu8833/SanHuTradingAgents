@@ -838,6 +838,14 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"🚨 散户策略定时任务注册失败，退出信号扫描/预警检查等功能将不可用: {e}", exc_info=True)
 
+        # ==================== 交易驾驶舱定时任务（积累区盘后扫描） ====================
+        try:
+            from app.services.retail.scheduler_jobs import register_cockpit_jobs
+            register_cockpit_jobs(scheduler, settings)
+            logger.info("✅ 交易驾驶舱定时任务注册完成")
+        except Exception as e:
+            logger.error(f"🚨 交易驾驶舱定时任务注册失败，积累区盘后扫描将不可用: {e}", exc_info=True)
+
         # ==================== 宏观快扫（盘前）：交易日 8:15 生成并落库 ====================
         # 设计文档《第六章·交易工具与日常流程》§5.5：调度 交易日 8:15 自动生成落库。
         # 职责解耦（从根上保证「宏观就绪」）：
@@ -1086,6 +1094,54 @@ async def lifespan(app: FastAPI):
             logger.info("✅ 常用策略收盘定格预计算已注册: 工作日 15:05")
         except Exception as e:
             logger.error(f"🚨 常用策略收盘定格预计算注册失败: {e}", exc_info=True)
+
+        # ==================== 当日日线同步（盘中临时 + 收盘正式） ====================
+        # 背景：stock_daily_quotes 原先只有 23:00 的逐股增量同步，且 18:30 前
+        # _latest_settled_trade_day() 会把「应有数据日」回退到上一交易日，导致当日
+        # K 线在收盘后数小时才可见——盘中/收盘后的买卖分析全部基于 T-1，
+        # market_quotes 日终校准也因「当日日线覆盖率不足」被跳过。
+        # 方案：盘中用实时快照合成临时日线；收盘后一次 pro.daily(trade_date) 拉全市场
+        # 官方日线（复用 data_integrity_service 的幂等入库），成功后自动触发日终校准。
+        if settings.DAILY_BAR_SYNC_ENABLED:
+            from functools import partial
+
+            from app.services.daily_bar_sync_service import run_daily_bar_sync
+
+            async def _run_daily_bar(purpose: str):
+                try:
+                    result = await run_daily_bar_sync()
+                    logger.info(f"📊 [APScheduler] 当日日线同步({purpose})完成: {result}")
+                    return result
+                except Exception as e:
+                    logger.error(f"❌ [APScheduler] 当日日线同步({purpose})失败: {e}", exc_info=True)
+                    raise
+
+            scheduler.add_job(
+                partial(_run_daily_bar, "intraday"),
+                cron_trigger(settings.DAILY_BAR_INTRADAY_CRON, timezone=get_tz()),
+                id="daily_bar_intraday_compose",
+                name="当日日线-盘中快照合成",
+                replace_existing=True,
+            )
+            scheduler.add_job(
+                partial(_run_daily_bar, "official"),
+                cron_trigger(settings.DAILY_BAR_OFFICIAL_CRON, timezone=get_tz()),
+                id="daily_bar_official_sync",
+                name="当日日线-收盘官方同步",
+                replace_existing=True,
+            )
+            # 16:10 / 17:10 补两次：Tushare 日线发布晚于 16:00 时仍有兜底
+            scheduler.add_job(
+                partial(_run_daily_bar, "official_late"),
+                cron_trigger("10 16,17 * * 1-5", timezone=get_tz()),
+                id="daily_bar_official_sync_late",
+                name="当日日线-收盘官方同步(补)",
+                replace_existing=True,
+            )
+            logger.info(
+                f"✅ 当日日线同步已注册: 盘中 {settings.DAILY_BAR_INTRADAY_CRON} / "
+                f"收盘 {settings.DAILY_BAR_OFFICIAL_CRON} + 16:10,17:10"
+            )
 
         # ==================== market_quotes 日终校准（收盘后自动执行） ====================
         # 背景（bug-013 数据治理）：盘中最末轮实时采集通常停在 14:59 左右，收盘后若日线
@@ -1691,6 +1747,16 @@ app.include_router(war_room_router.router, tags=["war-room"])
 from app.routers import strategy as strategy_router
 
 app.include_router(strategy_router.router, tags=["strategy"])
+
+# 交易驾驶舱（左侧观察 · 右侧确认 · 纪律离场）
+from app.routers import cockpit as cockpit_router
+
+app.include_router(cockpit_router.router, tags=["cockpit"])
+
+# 今日待办（买 / 盯 / 卖 一个页面）
+from app.routers import today as today_router
+
+app.include_router(today_router.router, tags=["today"])
 
 
 @app.get("/")

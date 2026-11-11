@@ -19,6 +19,7 @@ import threading
 import time
 
 from app.core.database import get_mongo_db
+from app.services.retail.exit_rule_engine import PositionExitContext, evaluate_unified_exit
 from app.utils.timezone import now_tz
 
 logger = logging.getLogger(__name__)
@@ -40,7 +41,9 @@ async def _eval_sell_signal(code: str) -> dict | None:
 
     失败/无信号返回 None（不缓存失败标记以外的中间态）；结果按「代码+日期」缓存。
     """
-    code = str(code).strip().zfill(6) if str(code).strip().isdigit() else str(code).strip()
+    raw = str(code).strip()
+    # A股 6 位、港股 5 位：统一 zfill(6) 会把 00700 变成 000700（另一只股票）
+    code = (raw.zfill(6) if len(raw) >= 6 else raw.zfill(5)) if raw.isdigit() else raw
     if not code:
         return None
     today = now_tz().strftime("%Y-%m-%d")
@@ -62,6 +65,8 @@ async def _eval_sell_signal(code: str) -> dict | None:
                 "name": r.get("name") or code,
                 "close": r.get("close"),
                 "pct_chg": r.get("pct_chg"),
+                "ma5": r.get("ma5"),
+                "ma20": r.get("ma20"),
                 "signal_type": None,
                 "signal_label": "",
                 "sell_pct": 0.0,
@@ -87,6 +92,11 @@ async def _eval_sell_signal(code: str) -> dict | None:
     return result
 
 
+async def evaluate_sell_signal(code: str) -> dict | None:
+    """公开入口：三买三卖卖点评估（供驾驶舱 05 与持仓追踪共用同一份信号）。"""
+    return await _eval_sell_signal(code)
+
+
 async def _load_open_positions(user_id: str) -> list[dict]:
     """读取用户全部未平仓持仓（字段精简，供卖出评估使用）。"""
     try:
@@ -108,21 +118,39 @@ async def _load_open_positions(user_id: str) -> list[dict]:
             continue
         code = str(d.get("code") or "").strip()
         out.append({
-            "code": code.zfill(6) if code.isdigit() else code,
+            "code": (code.zfill(6) if len(code) >= 6 else code.zfill(5)) if code.isdigit() else code,
             "name": d.get("stock_name") or code,
             "quantity": qty,
             "avg_cost": round(cost, 3),
             "stop_loss_price": d.get("stop_loss_price"),
             "take_profit_price": d.get("take_profit_price"),
+            "trigger_price": d.get("trigger_price"),
+            "buy_date": d.get("buy_date"),
             "user_id": d.get("user_id"),
         })
     return out
 
 
+def _is_intraday_now() -> bool:
+    """当前是否处于连续竞价时段（用于 MA5 盘中预警 / 收盘确认区分）。"""
+    now = now_tz()
+    try:
+        from app.utils.trading_time import is_trading_day
+
+        if not is_trading_day(now.strftime("%Y%m%d")):
+            return False
+    except Exception:
+        return False
+    minutes = now.hour * 60 + now.minute
+    return (9 * 60 + 30) <= minutes <= (15 * 60)
+
+
 def _advice_for(position: dict, price: float | None, sig: dict | None) -> dict:
     """把 实时价 + 卖点信号 + 止损止盈 合成一条持仓卖出建议。
 
-    判定优先级：触发止损 > S3清仓 > 安全网 > S2主减仓 > 触及止盈 > S1减仓 > 持有。
+    判定统一走 exit_rule_engine.evaluate_unified_exit（与驾驶舱 05 同一口径）：
+    兜底止损 8% > 假突破 > 三买三卖卖点（S3/SafetyNet/S2/S1/TrailingStop）
+    > 跌破 MA5 > 止盈 15% > MA20 均线止盈 > 时间止损。
     """
     code = position["code"]
     name = position.get("name") or code
@@ -148,54 +176,78 @@ def _advice_for(position: dict, price: float | None, sig: dict | None) -> dict:
                 "sell_pct": 0.0, "trigger_price": None,
                 "reason": "实时价暂不可用，由信号快照兜底（可点「对照实时价评估」刷新）"}
 
-    def _hit() -> dict:
-        return {**base, "advice": "触发止损", "advice_label": "无条件离场",
-                "sell_pct": 1.0, "trigger_price": float(stop),
-                "reasons": [{"kind": "warn", "text": f"现价 {price} 已跌破止损位 {stop}，无条件止损离场"}],
-                "reason": f"现价 {price} 已跌破止损位 {stop}，无条件止损离场"}
+    signal_type = (sig or {}).get("signal_type")
+    decision = evaluate_unified_exit(
+        PositionExitContext(
+            symbol=code,
+            buy_price=float(cost or 0),
+            current_price=price,
+            buy_date=position.get("buy_date"),
+            trigger_price=position.get("trigger_price"),
+            stop_loss_price=float(stop) if stop else None,
+            take_profit_price=float(take) if take else None,
+            ma5=(sig or {}).get("ma5"),
+            ma20=(sig or {}).get("ma20"),
+            is_intraday=_is_intraday_now(),
+            signal=(
+                {
+                    "signal_type": signal_type,
+                    "sell_pct": (sig or {}).get("sell_pct"),
+                    "reasons": (sig or {}).get("reasons"),
+                }
+                if signal_type
+                else None
+            ),
+        )
+    )
 
-    if stop and float(stop) > 0 and price <= float(stop):
-        return _hit()
-    if sig:
-        st = sig.get("signal_type")
-        tp = sig.get("trigger_price") or price
-        reasons = "；".join(sig.get("reasons") or []) or "触发卖出信号"
-        reason_items = [{"kind": "warn", "text": r} for r in (sig.get("reasons") or [])] or [
-            {"kind": "warn", "text": reasons}]
-        if st == "S3":
-            return {**base, "advice": "S3 清仓卖出", "advice_label": "清仓",
-                    "sell_pct": float(sig.get("sell_pct") or 1.0), "trigger_price": tp,
-                    "reasons": reason_items,
-                    "reason": reasons or "中期/大级别趋势破坏，无条件清仓"}
-        if st == "SafetyNet":
-            return {**base, "advice": "SafetyNet 安全网", "advice_label": "强制减至50%",
-                    "sell_pct": float(sig.get("sell_pct") or 0.5), "trigger_price": tp,
-                    "reasons": reason_items,
-                    "reason": reasons or "单日跌幅超 ATR×3，强制减仓一半"}
-        if st == "S2":
-            return {**base, "advice": "S2 主减仓", "advice_label": "主减仓",
-                    "sell_pct": float(sig.get("sell_pct") or 0.67), "trigger_price": tp,
-                    "reasons": reason_items,
-                    "reason": reasons or "连续跌破 MA5/MA8/MA13，主减仓（减至1/3）"}
-        if st == "TrailingStop":
-            return {**base, "advice": "TrailingStop 移动止损", "advice_label": "离场",
-                    "sell_pct": float(sig.get("sell_pct") or 1.0), "trigger_price": tp,
-                    "reasons": reason_items,
-                    "reason": reasons or "触发移动止损，保护利润离场"}
-        if st == "S1":
-            return {**base, "advice": "S1 减仓预警", "advice_label": "减仓1/3",
-                    "sell_pct": float(sig.get("sell_pct") or 0.33), "trigger_price": tp,
-                    "reasons": reason_items,
-                    "reason": reasons or "BIAS 超阈值或慢组压缩，减仓1/3锁盈"}
-    if take and float(take) > 0 and price >= float(take):
-        return {**base, "advice": "触及止盈", "advice_label": "分批止盈",
-                "sell_pct": 0.5, "trigger_price": float(take),
-                "reasons": [{"kind": "good", "text": f"现价 {price} 已达止盈位 {take}，分批止盈一半"}],
-                "reason": f"现价 {price} 已达止盈位 {take}，分批止盈一半"}
-    return {**base, "advice": "持有", "advice_label": "继续持有",
-            "sell_pct": 0.0, "trigger_price": None,
-            "reasons": [{"kind": "flat", "text": "未触发卖出信号、未触及止损/止盈，继续持有观察"}],
-            "reason": "未触发卖出信号、未触及止损/止盈，继续持有观察"}
+    reason_items = [
+        {"kind": "warn" if r.get("kind") == "exit" else r.get("kind", "flat"), "text": r.get("text", "")}
+        for r in decision.reasons
+    ]
+    reason_text = "；".join(r["text"] for r in reason_items) or "继续持有观察"
+
+    if not decision.should_exit:
+        # 仅有预警（时间止损 / 盘中跌破 MA5）：保持「持有」，但把预警展示出来
+        return {**base, "advice": "持有", "advice_label": "继续持有",
+                "sell_pct": 0.0, "trigger_price": decision.trailing_line,
+                "reasons": reason_items or [{"kind": "flat", "text": "未触发卖出信号，继续持有观察"}],
+                "reason": reason_text}
+
+    reason = decision.reason
+    ratio = float(decision.suggested_sell_ratio or 0.0)
+    if reason.value == "stop_loss":
+        advice, label, trigger = "触发止损", "无条件离场", decision.stop_loss_line
+    elif reason.value == "false_breakout":
+        advice, label, trigger = "假突破离场", "离场", position.get("trigger_price")
+    elif reason.value == "signal":
+        st = decision.signal_type or signal_type
+        advice = {
+            "S3": "S3 清仓卖出",
+            "SafetyNet": "SafetyNet 安全网",
+            "S2": "S2 主减仓",
+            "S1": "S1 减仓预警",
+            "TrailingStop": "TrailingStop 移动止损",
+        }.get(st, "触发卖出信号")
+        label = {
+            "S3": "清仓",
+            "SafetyNet": "强制减至50%",
+            "S2": "主减仓",
+            "S1": "减仓1/3",
+            "TrailingStop": "离场",
+        }.get(st, "离场")
+        trigger = (sig or {}).get("trigger_price") or price
+    elif reason.value == "ma_break":
+        advice, label, trigger = "跌破 MA5", "离场", decision.trailing_line
+    elif reason.value == "take_profit":
+        advice, label = "触及止盈", "分批止盈" if ratio < 1 else "止盈离场"
+        trigger = take or decision.trailing_line or price
+    else:
+        advice, label, trigger = "触发卖出信号", "离场", price
+
+    return {**base, "advice": advice, "advice_label": label,
+            "sell_pct": ratio, "trigger_price": trigger,
+            "reasons": reason_items, "reason": reason_text}
 
 
 def _sell_condition_text(advice: dict) -> str:

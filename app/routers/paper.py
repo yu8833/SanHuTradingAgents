@@ -1,4 +1,6 @@
 import logging
+from datetime import datetime
+from datetime import time as dtime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -145,14 +147,16 @@ async def _get_available_quantity(user_id: str, code: str, market: str) -> int:
         # 获取市场规则
         rules = await _get_market_rules(market)
         if rules and rules.get("t_plus", 0) > 0:
-            # 查询今天的买入数量
-            today = now_tz().date().isoformat()
+            # 查询今天的买入数量。
+            # 注意：paper_trades.timestamp 是 BSON Date，必须用 datetime 比较；
+            # 用日期字符串会因为 MongoDB 类型分桶而匹配 0 条，导致 T+1 校验失效。
+            today_start = datetime.combine(now_tz().date(), dtime.min, tzinfo=now_tz().tzinfo)
             pipeline = [
                 {"$match": {
                     "user_id": user_id,
                     "code": code,
                     "side": "buy",
-                    "timestamp": {"$gte": today}
+                    "timestamp": {"$gte": today_start}
                 }},
                 {"$group": {"_id": None, "total": {"$sum": "$quantity"}}}
             ]

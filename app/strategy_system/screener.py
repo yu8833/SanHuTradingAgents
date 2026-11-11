@@ -625,6 +625,8 @@ def _load_fundamentals(db, symbols) -> pd.DataFrame:
             score += 1
         return score
 
+    from app.core.industry import normalize_to_ths
+
     best: dict[str, dict] = {}
     for doc in cursor:
         code = str(doc.get("code") or doc.get("symbol") or "").strip()
@@ -641,7 +643,8 @@ def _load_fundamentals(db, symbols) -> pd.DataFrame:
             best[code] = {
                 "_score": score,
                 "symbol": code,
-                "industry": industry,
+                # 行业统一归一为同花顺 90 行业，与驾驶舱主线/观察池口径一致
+                "industry": normalize_to_ths(industry),
                 "total_mv": mv,
                 "pe_ttm": pe,
                 "pb": pb,

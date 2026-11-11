@@ -98,14 +98,10 @@ def _history_status(db) -> tuple[bool, int]:
     return n >= MIN_HISTORY_ROWS, n
 
 
-def _backfill_sync(days: int = HISTORY_DAYS) -> int:
-    """从日线回填历史温度行（一次性，约 10-15s），按 (日期, 股票) 去重取最高优先级源。"""
-    db = _sync_db()
-    # 250 个交易日约对应 380 个自然日，留足冗余后一次性回填
-    start = (now_tz() - timedelta(days=int(days * 1.6) + 20)).strftime("%Y-%m-%d")
-
-    pipeline = [
-        {"$match": {"period": "daily", "trade_date": {"$gte": start}}},
+def _daily_metrics_pipeline(match: dict[str, Any]) -> list[dict[str, Any]]:
+    """日线 → 每日温度聚合管道（历史回填与单日重算共用，保证口径完全一致）。"""
+    return [
+        {"$match": match},
         {"$addFields": {"prio": {"$switch": {
             "branches": [
                 {"case": {"$eq": ["$data_source", "tushare"]}, "then": 0},
@@ -163,6 +159,14 @@ def _backfill_sync(days: int = HISTORY_DAYS) -> int:
         }},
         {"$sort": {"_id": 1}},
     ]
+
+
+def _backfill_sync(days: int = HISTORY_DAYS) -> int:
+    """从日线回填历史温度行（一次性，约 10-15s），按 (日期, 股票) 去重取最高优先级源。"""
+    db = _sync_db()
+    # 250 个交易日约对应 380 个自然日，留足冗余后一次性回填
+    start = (now_tz() - timedelta(days=int(days * 1.6) + 20)).strftime("%Y-%m-%d")
+    pipeline = _daily_metrics_pipeline({"period": "daily", "trade_date": {"$gte": start}})
     rows = list(db["stock_daily_quotes"].aggregate(pipeline, allowDiskUse=True))
 
     turn_map: dict[str, float] = {}
@@ -343,11 +347,16 @@ def _live_point(db, pools: dict[str, Any] | None = None) -> dict[str, Any]:
     }
 
 
-def _ma20_above_ratio(db, data_date: str, quotes: list[dict]) -> float | None:
-    """当前价站上 20 日均线的个股占比（口径：20 日均值含当日价）。"""
+def _ma20_above_ratio(db, data_date: str, quotes: list[dict], exclude_date: str | None = None) -> float | None:
+    """当前价站上 20 日均线的个股占比（口径：20 日均值含当日价）。
+
+    exclude_date: 传入时表示「当日已入日线」，均线只取该日之前的 19 个交易日，
+    避免把当日收盘价重复计入两次（历史单日重算场景）。
+    """
     try:
+        cond = {"$lt": exclude_date} if exclude_date else {"$lte": data_date}
         dates = [d for d in db["stock_daily_quotes"].distinct(
-            "trade_date", {"period": "daily", "trade_date": {"$lte": data_date}}
+            "trade_date", {"period": "daily", "trade_date": cond}
         )]
         dates = sorted(_normalize_date(d) for d in dates if d)
         # 当日实时价不在日线集合里，故只需前 19 个已完成交易日的收盘价
@@ -789,13 +798,122 @@ async def get_market_metrics() -> dict[str, Any]:
     return data
 
 
+def _calibration_status_sync(db, date_str: str) -> tuple[bool, str]:
+    """判断某交易日的 market_quotes 是否已被日终校准（收盘价口径）。
+
+    固化温度行只能基于收盘口径：若 market_quotes 仍停留在盘中快照（如 14:33 采集失败
+    后的旧值），固化出来的成交额/涨跌家数会永久失真，且 finalized=True 后不再更新。
+    """
+    td = _normalize_date(date_str)
+    td_compact = td.replace("-", "")
+    n_daily = db["stock_daily_quotes"].count_documents({"period": "daily", "trade_date": td})
+    if n_daily < 4000:
+        return False, f"daily_rows={n_daily}"
+    total = db["market_quotes"].count_documents({"trade_date": td_compact})
+    if total <= 0:
+        return False, "no_market_quotes"
+    close_time = datetime.strptime(td, "%Y-%m-%d").replace(hour=15, minute=0, tzinfo=now_tz().tzinfo)
+    calibrated = db["market_quotes"].count_documents(
+        {"trade_date": td_compact, "updated_at": {"$gte": close_time}}
+    )
+    if calibrated < total * 0.6:
+        return False, f"calibrated={calibrated}/{total}"
+    return True, "ok"
+
+
+def _daily_point_sync(db, date_str: str) -> dict[str, Any]:
+    """按历史基线同口径，从日线重算某个交易日的温度点（不读 market_quotes）。"""
+    td = _normalize_date(date_str)
+    rows = list(db["stock_daily_quotes"].aggregate(
+        _daily_metrics_pipeline({"period": "daily", "trade_date": td}), allowDiskUse=True
+    ))
+    row = rows[0] if rows else None
+    if not row:
+        return {}
+    n = int(row.get("n") or 0)
+    if n <= 0:
+        return {}
+    up = int(row.get("up") or 0)
+    down = int(row.get("down") or 0)
+
+    avg_turnover = None
+    turn = list(db["stock_daily_basic"].aggregate([
+        {"$match": {"trade_date": td}},
+        {"$group": {"_id": None, "avg": {"$avg": "$turnover_rate"}}},
+    ]))
+    if turn and turn[0].get("avg") is not None:
+        avg_turnover = round(_f(turn[0]["avg"]), 2)
+
+    quotes = list(db["stock_daily_quotes"].find(
+        {"period": "daily", "trade_date": td}, {"_id": 0, "symbol": 1, "close": 1}
+    ))
+
+    point = {
+        "date": td,
+        "n": n,
+        "up": up,
+        "down": down,
+        "flat": max(0, n - up - down),
+        "up_pct": round(up / n * 100, 2),
+        "zt": int(row.get("zt") or 0),
+        "dt": int(row.get("dt") or 0),
+        "amount": round(_f(row.get("amt")) / 1e8, 2),
+        "avg_turnover": avg_turnover,
+        "adl_delta": up - down,
+        "finalized": True,
+        "source": "daily_quotes",
+        "updated_at": now_tz(),
+    }
+    ma20_above = _ma20_above_ratio(db, td, quotes, exclude_date=td)
+    if ma20_above is not None:
+        point["ma20_above"] = ma20_above
+    return point
+
+
+async def recompute_market_metrics(date_str: str) -> dict[str, Any]:
+    """用日线重算指定交易日的温度行并覆盖（幂等）。
+
+    用于修复「固化时 market_quotes 尚未校准」造成的历史失真，
+    以及在官方日线补齐后主动纠正当日指标。
+    """
+    db = _sync_db()
+    point = await asyncio.to_thread(_daily_point_sync, db, date_str)
+    if not point:
+        return {"ok": False, "reason": "no_daily_rows", "date": date_str}
+    from pymongo import UpdateOne
+
+    await asyncio.to_thread(
+        lambda: db[COLLECTION].bulk_write([UpdateOne({"date": point["date"]}, {"$set": point}, upsert=True)],
+                                         ordered=False)
+    )
+    logger.info(
+        f"📊 [metrics] 已按日线重算温度: {point['date']} "
+        f"涨{point['up']}/跌{point['down']} 涨停{point['zt']} 成交额{point['amount']}亿"
+    )
+    return {"ok": True, "date": point["date"], "point": point}
+
+
 async def finalize_market_metrics() -> dict[str, Any]:
-    """收盘后固化当日温度行（供分位数与曲线使用），由定时任务/预热调用。"""
+    """收盘后固化当日温度行（供分位数与曲线使用），由定时任务/预热调用。
+
+    前置校验：当日 market_quotes 必须已完成日终校准。未校准时直接跳过（返回
+    not_calibrated），由后续轮次或官方日线补齐后的重算补上，避免把盘中快照
+    锁成 finalized 的历史基线。
+    """
     db = _sync_db()
     live_data = await asyncio.to_thread(_live_point, db)
     point = (live_data or {}).get("point") or {}
     if not point.get("date"):
         return {"ok": False, "reason": "no_quote"}
+
+    calendar_ok, calendar_detail = await asyncio.to_thread(
+        _calibration_status_sync, db, point["date"]
+    )
+    if not calendar_ok:
+        logger.warning(
+            f"📊 [metrics] 暂不固化 {point['date']}：market_quotes 未完成日终校准（{calendar_detail}）"
+        )
+        return {"ok": False, "reason": "not_calibrated", "date": point["date"], "detail": calendar_detail}
 
     doc = dict(point)
     # 历史基线一律用阈值口径，固化时写入同口径值，保证后续分位可比

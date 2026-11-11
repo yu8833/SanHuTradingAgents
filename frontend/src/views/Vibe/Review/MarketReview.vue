@@ -921,7 +921,6 @@ import {
   Refresh,
   Loading,
   Histogram,
-  QuestionFilled,
   TrendCharts,
   Document,
   InfoFilled,
@@ -1094,15 +1093,6 @@ const industryTip = (r: PositionIndustryRow) =>
 /** 分位配色：高位偏热、低位偏冷（仅用于分位条，不用于涨跌） */
 const posTone = (pct?: number | null) =>
   pct == null ? 'is-muted' : pct >= 75 ? 'is-hot' : pct <= 25 ? 'is-cold' : 'is-neutral'
-
-/** 位置指标分组顺序 + 每组一句话解释 */
-const POSITION_GROUP_HINTS: Record<string, string> = {
-  估值: '贵不贵',
-  位置: '指数自身的高低',
-  情绪: '日内博弈与稳定性',
-  参与度: '资金与广度',
-  底部特征: '熊市末期特征',
-}
 
 /** 逃顶 / 判断底部：后端整理的判据 + 历史证据 */
 const posGuides = computed(() => {
@@ -1421,7 +1411,7 @@ const compositeChartOption = computed<EChartsOption | null>(() => {
           symbolSize: 42,
           itemStyle: { color: '#2b6cb0' },
           label: { color: '#fff', fontSize: 10, fontWeight: 700, formatter: '今' },
-          data: cur == null ? [] : [{ coord: [lastIdx, cur] }],
+          data: cur == null ? [] : [{ name: '今', coord: [lastIdx, cur] }],
         },
       },
       {

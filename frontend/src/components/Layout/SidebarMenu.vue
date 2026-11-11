@@ -50,7 +50,7 @@
         <el-icon><CreditCard /></el-icon>
         <span>交易</span>
       </template>
-      <el-menu-item index="/paper">模拟交易</el-menu-item>
+      <el-menu-item index="/paper">今日待办</el-menu-item>
       <el-menu-item index="/portfolio">持仓追踪</el-menu-item>
       <el-menu-item index="/stock-alerts">监控中心</el-menu-item>
       <el-menu-item index="/paper/review">交易复盘</el-menu-item>

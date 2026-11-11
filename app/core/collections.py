@@ -75,6 +75,10 @@ class Collections:
     scheduler_executions = "scheduler_executions"
     strategy_backtest_results = "strategy_backtest_results"
 
+    # 交易驾驶舱（积累区观察池 / 纪律持仓）
+    cockpit_watch_pool = "cockpit_watch_pool"
+    cockpit_positions = "cockpit_positions"
+
 
 def col(name: str):
     """按集合名取异步 MongoDB 集合。"""

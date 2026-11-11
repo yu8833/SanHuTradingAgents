@@ -1,208 +1,299 @@
 <template>
-  <div class="paper-trading app-page">
-    <!-- 顶部横幅（全局统一） -->
+  <div class="today-page app-page">
+    <!-- 页头 -->
     <div class="page-hero">
       <div class="page-hero-main">
         <div class="page-hero-icon">
-          <el-icon :size="26"><CreditCard /></el-icon>
+          <el-icon :size="26"><List /></el-icon>
         </div>
         <div class="page-hero-text">
-          <h2 class="page-hero-title">模拟交易</h2>
-          <p class="page-hero-sub">策略信号 · 虚拟资金 · 模拟下单</p>
+          <h2 class="page-hero-title">今日待办</h2>
+          <p class="page-hero-sub">买 · 盯 · 卖 —— 每条都直接给结论，理由可展开查看</p>
         </div>
       </div>
       <div class="page-hero-meta">
-        <el-button :icon="Refresh" text size="small" :loading="synLoading" @click="loadAll">刷新信号</el-button>
+        <span class="page-hero-tag">{{ tradeDateLabel }}</span>
+        <span class="page-hero-tag">{{ sessionLabel }}</span>
+        <el-button :icon="Refresh" text size="small" :loading="loading" @click="load">刷新</el-button>
         <el-button type="primary" :icon="Plus" @click="openOrderDialog">下市场单</el-button>
-        <el-dropdown trigger="click" @command="onHeroCommand">
-          <el-button text size="small">更多<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item command="reset">重置账户</el-dropdown-item>
-              <el-dropdown-item command="portfolio">查看持仓</el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
       </div>
     </div>
 
-    <!-- ═══════════ ① 今日买卖信号 ═══════════ -->
-    <section class="signal-shell">
-      <div class="signal-hd">
-        <div class="signal-hd-left">
-          <div class="signal-title-row">
-            <h3 class="signal-title">今日买卖信号</h3>
-            <span class="signal-asof">更新于 {{ synAsOf }}</span>
-          </div>
-          <!-- 监控状态条 -->
-          <div class="moni-bar">
-            <span class="moni-strategy" :class="monitorStatus.strategyNames.length ? 'has' : ''">
-              <span class="moni-label">常用策略</span>
-              <template v-if="monitorStatus.strategyNames.length">
-                <span v-for="n in monitorStatus.strategyNames" :key="n" class="moni-tag">{{ n }}</span>
-              </template>
-              <span v-else class="moni-empty">未启用</span>
-            </span>
-            <span class="moni-desc">监控中的策略信号将直接汇入买卖清单</span>
+    <!-- 环境结论：熊市阴跌 · 高潮期 · 0~2 成（观察仓） -->
+    <section v-if="data" class="env-banner" :class="`is-${data.environment.gate}`">
+      <div class="env-top">
+        <span class="env-verdict">{{ data.environment.verdict }}</span>
+        <div class="env-verdicts">
+          <div v-for="(layer, i) in envLayers" :key="layer.key" class="ev">
+            <span v-if="i" class="ev-sep">·</span>
+            <b class="ev-value" :class="`tone-${layer.data.tone}`">{{ layer.data.value }}</b>
+            <span class="ev-label">{{ layer.label }}</span>
           </div>
         </div>
-        <div class="signal-hd-right">
-          <el-button size="small" type="primary" @click="goMonitorCenter">
-            管理监控 <el-icon class="el-icon--right"><ArrowRight /></el-icon>
-          </el-button>
-        </div>
+        <el-button text class="env-toggle" @click="toggle('env')">
+          {{ expanded.env ? '收起说明' : '为什么？该怎么做？' }}
+        </el-button>
       </div>
+      <p class="env-hint">{{ data.environment.position.desc }}</p>
+      <el-alert
+        v-if="data.environment.degraded"
+        :title="data.environment.degrade_note"
+        type="warning"
+        :closable="false"
+        show-icon
+        class="env-degrade"
+      />
 
-      <!-- 加载中 -->
-      <div v-if="synLoading" class="signal-loading">
-        <el-skeleton :rows="4" animated />
-        <div class="sync-tip">正在加载买卖信号…</div>
+      <div v-if="expanded.env" class="env-detail">
+        <div class="env-layers">
+          <div v-for="layer in envLayers" :key="layer.key" class="env-layer">
+            <div class="el-hd">
+              <span class="el-label">{{ layer.label }}</span>
+              <b class="el-value" :class="`tone-${layer.data.tone}`">{{ layer.data.value }}</b>
+            </div>
+            <p class="el-desc">{{ layer.data.desc }}</p>
+            <ul class="el-points">
+              <li v-for="(p, i) in layer.data.points" :key="i">{{ p }}</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="env-action-title">这个环境下，买卖这么做</div>
+        <div class="env-actions">
+          <div v-for="a in data.environment.actions" :key="a.side" class="env-action" :class="`side-${a.side}`">
+            <span class="ea-badge">{{ a.side }}</span>
+            <div class="ea-body">
+              <b>{{ a.title }}</b>
+              <p>{{ a.text }}</p>
+            </div>
+          </div>
+        </div>
+        <p class="env-foot">{{ data.environment.footnote }}</p>
       </div>
-
-      <template v-else-if="syn">
-        <div class="list-wrap">
-          <!-- 建议买入：富信息信号卡片 -->
-          <div class="ls-col ls-buy">
-            <div class="col-hd">
-              <span class="col-title">
-                <span class="dot dot-buy"></span>建议买入
-              </span>
-              <el-tag v-if="buys.length" size="small" type="danger" effect="plain">{{ buys.length }}</el-tag>
-              <span v-else class="col-empty-note">暂无信号</span>
-            </div>
-            <div v-if="buys.length" class="buy-list">
-              <div v-for="b in buys" :key="b.code + (b.plan_id || '')" class="buy-card">
-                <div class="bc-hd">
-                  <div class="bc-stk">
-                    <router-link class="bc-name" :to="`/stocks/${b.code}`">{{ b.name || b.code }}</router-link>
-                    <span class="bc-code">{{ b.code }}</span>
-                  </div>
-                  <div class="bc-tags">
-                    <el-tooltip :content="buySource(b).full || buySource(b).text" placement="top" :disabled="!buySource(b).full">
-                      <span class="src-tag" :class="'src-' + buySource(b).type">{{ buySource(b).text }}</span>
-                    </el-tooltip>
-                    <span v-if="b.signal_label" class="sig-badge">{{ b.signal_label }}</span>
-                  </div>
-                </div>
-                <div class="bc-price">
-                  <div class="bc-cell">
-                    <span class="bc-label">触发价</span>
-                    <span class="bc-val">{{ b.trigger_price ?? '—' }}</span>
-                  </div>
-                  <span class="bc-arrow">→</span>
-                  <div class="bc-cell">
-                    <span class="bc-label">现价</span>
-                    <span class="bc-val">{{ b.last_price ?? '—' }}</span>
-                  </div>
-                  <div class="bc-cell bc-dist">
-                    <span class="bc-label">距触发</span>
-                    <span class="bc-val" :class="pctClass(b.distance_pct)">{{ fmtPct(b.distance_pct) }}</span>
-                  </div>
-                  <span class="bc-state" v-if="b.triggered">已触价</span>
-                  <span v-else-if="b.confirmed === false" class="bc-state warn">待确认</span>
-                  <span v-else-if="b.distance_pct != null && b.distance_pct <= 2" class="bc-state warn">接近触发</span>
-                </div>
-                <div class="bc-foot">
-                  <span class="bc-advice" :title="b.buy_reason">{{ b.advice || '—' }}</span>
-                  <el-button size="small" class="act act-buy" @click="buyFromSignal(b)">买入</el-button>
-                </div>
-              </div>
-            </div>
-            <el-empty v-else description="暂无建议买入" :image-size="56" />
-            <p class="col-note" v-if="!buys.length">当日计划/候选池无买入触达信号，可前往监控中心查看策略监控结果。</p>
-          </div>
-
-          <!-- 持仓卖出（绿系） -->
-          <div class="ls-col ls-sell">
-            <div class="col-hd">
-              <span class="col-title">
-                <span class="dot dot-sell"></span>持仓卖出
-              </span>
-              <el-tag v-if="sells.length" size="small" type="success" effect="plain">{{ realSells.length }}</el-tag>
-              <span v-else class="col-empty-note">暂无信号</span>
-            </div>
-            <el-table v-if="realSells.length" :data="realSells" size="small" class="ms-table">
-              <el-table-column label="股票" min-width="120">
-                <template #default="{ row }">
-                  <div class="stk">
-                    <router-link class="stk-name" :to="`/stocks/${row.code}`">{{ row.name || row.code }}</router-link>
-                    <span class="stk-code">{{ row.code }}</span>
-                  </div>
-                </template>
-              </el-table-column>
-              <el-table-column label="来源" width="100">
-                <template #default="{ row }">
-                  <span class="src-tag" :class="'src-' + sellSource(row).type">{{ sellSource(row).text }}</span>
-                </template>
-              </el-table-column>
-              <el-table-column label="盈亏" width="82" align="right">
-                <template #default="{ row }">
-                  <span class="pct" :class="pctClass(row.profit_loss_rate)">{{ fmtPct(row.profit_loss_rate) }}</span>
-                </template>
-              </el-table-column>
-              <el-table-column label="止损" width="80" align="right">
-                <template #default="{ row }"><span class="money">{{ row.stop_loss_price ?? '—' }}</span></template>
-              </el-table-column>
-              <el-table-column label="建议" min-width="136">
-                <template #default="{ row }">
-                  <div class="advice">
-                    <b v-if="row.advice_label" class="advice-label">{{ row.advice_label }}</b>
-                    {{ row.advice_text || row.advice || '—' }}
-                  </div>
-                </template>
-              </el-table-column>
-              <el-table-column label="" width="76" align="right">
-                <template #default="{ row }">
-                  <el-button size="small" class="act act-sell" @click="sellFromSignal(row)">卖出</el-button>
-                </template>
-              </el-table-column>
-            </el-table>
-
-            <!-- 继续持有：仅持仓评估，不参与卖出操作 -->
-            <el-collapse v-if="holdSells.length" class="hold-collapse">
-              <el-collapse-item :title="`继续持有（${holdSells.length}）· 仅评估，不参与卖出`" name="hold">
-                <el-table :data="holdSells" size="small" class="ms-table">
-                  <el-table-column label="股票" min-width="120">
-                    <template #default="{ row }">
-                      <div class="stk">
-                        <span class="stk-name">{{ row.name || row.code }}</span>
-                        <span class="stk-code">{{ row.code }}</span>
-                      </div>
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="盈亏" width="82" align="right">
-                    <template #default="{ row }">
-                      <span class="pct" :class="pctClass(row.profit_loss_rate)">{{ fmtPct(row.profit_loss_rate) }}</span>
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="建议" min-width="136">
-                    <template #default="{ row }">
-                      <div class="advice">{{ row.advice_text || row.advice || '继续持有' }}</div>
-                    </template>
-                  </el-table-column>
-                </el-table>
-              </el-collapse-item>
-            </el-collapse>
-
-            <el-empty v-if="!sells.length" description="暂无卖出建议" :image-size="56" />
-            <p class="col-note" v-if="!sells.length">持仓暂无卖点触达，止损/止盈建议将在此汇总。</p>
-          </div>
-        </div>
-        <div class="signal-foot">
-          <span class="foot-item">
-            <span class="foot-dot foot-dot-buy"></span>建议买入：当日计划 / 候选池 / 常用策略触发
-          </span>
-          <span class="foot-item">
-            <span class="foot-dot foot-dot-sell"></span>持仓卖出：盈亏评估 / 止损止盈
-          </span>
-          <span class="foot-item">账户概览与持仓请前往「持仓追踪」</span>
-        </div>
-      </template>
     </section>
 
-    <!-- ═══════════ 下市场单 ═══════════ -->
+    <!-- 一句话结论 -->
+    <div v-if="data" class="today-brief">
+      <span class="tb-item tb-buy">买 <b>{{ data.buy.count }}</b> 只已触发</span>
+      <span class="tb-item tb-watch">盯 <b>{{ data.watch.count }}</b> 只</span>
+      <span class="tb-item tb-sell">卖 <b>{{ data.sell.exit_count }}</b> 只需离场</span>
+      <span class="tb-note">可用现金 ¥{{ fmtMoney(data.account.cash_cny) }}</span>
+    </div>
+
+    <el-skeleton v-if="loading && !data" :rows="8" animated class="today-skeleton" />
+
+    <template v-else-if="data">
+      <!-- ═══════════ 买 ═══════════ -->
+      <section class="todo-block blk-buy">
+        <div class="blk-hd">
+          <span class="blk-badge">买</span>
+          <h3 class="blk-title">
+            <template v-if="data.buy.count">{{ data.buy.count }} 只已触发 → 代码 / 价格 / 仓位 / 止损（照做即可）</template>
+            <template v-else>今日无 B2 触发 → 不买，等信号</template>
+          </h3>
+          <span class="blk-hint">右侧确认：放量 + 中阳 + 站上 MA55/MA60</span>
+        </div>
+
+        <div v-if="data.buy.items.length" class="card-list">
+          <article v-for="b in data.buy.items" :key="b.code" class="todo-card">
+            <div class="card-hd">
+              <div class="card-stk">
+                <router-link class="stk-name" :to="`/stocks/${b.code}`">{{ b.name }}</router-link>
+                <span class="stk-code">{{ b.code }}</span>
+                <span v-if="b.industry" class="stk-industry">{{ b.industry }}</span>
+              </div>
+              <div class="card-tags">
+                <span class="tag tag-signal">{{ b.signal_label }}</span>
+                <span v-if="b.blocked" class="tag tag-exit">环境红灯 · 暂停</span>
+                <span v-if="b.held" class="tag tag-held">已持有</span>
+                <span v-if="b.trigger_date" class="tag">{{ b.trigger_date }} 触发</span>
+              </div>
+            </div>
+
+            <div class="metric-row">
+              <div class="metric">
+                <span class="m-label">现价</span>
+                <span class="m-val">{{ b.current_price }}</span>
+              </div>
+              <div class="metric">
+                <span class="m-label">触发价</span>
+                <span class="m-val">{{ b.trigger_price ?? '—' }}</span>
+              </div>
+              <div class="metric">
+                <span class="m-label">建议仓位</span>
+                <span class="m-val">{{ (b.position_pct * 100).toFixed(1) }}%</span>
+                <span class="m-sub">{{ b.suggest_qty }} 股 · ¥{{ fmtMoney(b.suggest_amount) }}</span>
+              </div>
+              <div class="metric">
+                <span class="m-label">止损</span>
+                <span class="m-val down">{{ b.stop_loss_price }}</span>
+              </div>
+            </div>
+
+            <div class="card-ft">
+              <span class="card-summary">{{ b.summary }}</span>
+              <div class="card-acts">
+                <el-button text size="small" @click="toggle('buy:' + b.code)">
+                  {{ expanded['buy:' + b.code] ? '收起理由' : '为什么？' }}
+                </el-button>
+                <el-button class="act act-buy" size="small" :disabled="b.blocked" @click="quickOrder(b.code, 'buy', b.suggest_qty || 100, b.name, { stop_loss_price: b.stop_loss_price, take_profit_price: b.take_profit_price })">
+                  {{ b.blocked ? '闸门红灯 · 暂停' : '照做买入' }}
+                </el-button>
+              </div>
+            </div>
+
+            <ul v-if="expanded['buy:' + b.code]" class="reason-list">
+              <li v-for="(r, i) in b.reasons" :key="i" :class="`k-${r.kind}`">{{ r.text }}</li>
+            </ul>
+          </article>
+        </div>
+        <el-empty v-else description="暂无已触发的 B2 买点，今天不买" :image-size="56" />
+      </section>
+
+      <!-- ═══════════ 盯 ═══════════ -->
+      <section class="todo-block blk-watch">
+        <div class="blk-hd">
+          <span class="blk-badge">盯</span>
+          <h3 class="blk-title">
+            <template v-if="data.watch.count">
+              {{ data.watch.count }} 只待触发{{ data.watch.near_count ? `（${data.watch.near_count} 只已进入 2% 临近区）` : '' }} → 明天重点看这几只
+            </template>
+            <template v-else>观察池暂无待触发标的</template>
+          </h3>
+          <span class="blk-hint">B1 左侧信号 ∩ 积累区四条件，只观察，不提前埋伏</span>
+        </div>
+
+        <div v-if="data.watch.items.length" class="watch-list">
+          <div v-for="w in data.watch.items" :key="w.code" class="watch-row" :class="{ near: w.distance_to_trigger >= -0.02 }">
+            <div class="wr-main">
+              <div class="card-stk">
+                <router-link class="stk-name" :to="`/stocks/${w.code}`">{{ w.name }}</router-link>
+                <span class="stk-code">{{ w.code }}</span>
+                <span v-if="w.industry" class="stk-industry">{{ w.industry }}</span>
+              </div>
+              <div class="wr-price">
+                <span class="m-val">{{ w.current_price }}</span>
+                <span class="wr-arrow">→</span>
+                <span class="wr-trigger">{{ w.trigger_price }}</span>
+                <span class="wr-dist" :class="{ near: w.distance_to_trigger >= -0.02 }">
+                  距触发 {{ (w.to_trigger_pct * 100).toFixed(2) }}%
+                </span>
+              </div>
+            </div>
+            <div class="wr-ft">
+              <span class="card-summary">{{ w.summary }}</span>
+              <el-button text size="small" @click="toggle('watch:' + w.code)">
+                {{ expanded['watch:' + w.code] ? '收起理由' : '为什么是它？' }}
+              </el-button>
+            </div>
+            <ul v-if="expanded['watch:' + w.code]" class="reason-list">
+              <li v-for="(r, i) in w.reasons" :key="i" :class="`k-${r.kind}`">{{ r.text }}</li>
+            </ul>
+          </div>
+        </div>
+        <el-empty v-else description="观察池暂无待触发标的" :image-size="56" />
+      </section>
+
+      <!-- ═══════════ 卖 ═══════════ -->
+      <section class="todo-block blk-sell">
+        <div class="blk-hd">
+          <span class="blk-badge">卖</span>
+          <h3 class="blk-title">
+            <template v-if="data.sell.exit_count">{{ data.sell.exit_count }} 只需离场 → 代码 / 原因 / 参考价</template>
+            <template v-else>持仓无离场信号 → 继续持有</template>
+          </h3>
+          <span class="blk-hint">
+            统一离场：止损 8% / 假突破 / S1-S3 卖点 / 跌破 MA5 / 止盈 / 30 日时间止损
+          </span>
+        </div>
+
+        <div v-if="data.sell.items.length" class="card-list">
+          <article v-for="s in data.sell.items" :key="s.code" class="todo-card" :class="{ warn: s.state === 'warn' }">
+            <div class="card-hd">
+              <div class="card-stk">
+                <router-link class="stk-name" :to="`/stocks/${s.code}`">{{ s.name }}</router-link>
+                <span class="stk-code">{{ s.code }}</span>
+                <span class="tag" :class="s.source === 'cockpit' ? 'tag-cockpit' : 'tag-paper'">
+                  {{ s.source === 'cockpit' ? '纪律持仓' : '模拟持仓' }}
+                </span>
+              </div>
+              <div class="card-tags">
+                <span class="tag" :class="s.state === 'exit' ? 'tag-exit' : 'tag-warn'">
+                  {{ s.state === 'exit' ? '需离场' : '预警' }}
+                </span>
+                <span v-if="s.pnl_pct != null" class="tag" :class="s.pnl_pct >= 0 ? 'tag-up' : 'tag-down'">
+                  {{ s.pnl_pct >= 0 ? '+' : '' }}{{ s.pnl_pct.toFixed(2) }}%
+                </span>
+              </div>
+            </div>
+
+            <div class="metric-row">
+              <div class="metric">
+                <span class="m-label">动作</span>
+                <span class="m-val">{{ s.advice_label || s.advice }}</span>
+              </div>
+              <div class="metric">
+                <span class="m-label">参考价</span>
+                <span class="m-val">{{ s.reference_price ?? '—' }}</span>
+              </div>
+              <div class="metric">
+                <span class="m-label">现价</span>
+                <span class="m-val">{{ s.current_price ?? '—' }}</span>
+              </div>
+              <div class="metric" v-if="s.state === 'exit'">
+                <span class="m-label">卖出比例</span>
+                <span class="m-val">{{ Math.round((s.sell_pct || 0) * 100) }}%</span>
+              </div>
+            </div>
+
+            <div class="card-ft">
+              <span class="card-summary">
+                {{ s.summary || (s.state === 'exit' ? '按纪律离场' : '今日仅预警，暂不卖出') }}
+              </span>
+              <div class="card-acts">
+                <el-button text size="small" @click="toggle('sell:' + s.code)">
+                  {{ expanded['sell:' + s.code] ? '收起原因' : '看原因' }}
+                </el-button>
+                <el-button
+                  v-if="s.source === 'paper' && s.state === 'exit'"
+                  class="act act-sell"
+                  size="small"
+                  @click="quickOrder(s.code, 'sell', Math.round((s.quantity || 0) * (s.sell_pct || 1)) || s.quantity || 1, s.name)"
+                >
+                  按建议卖出
+                </el-button>
+                <el-button
+                  v-else-if="s.state === 'exit'"
+                  class="act act-sell"
+                  size="small"
+                  @click="closeCockpit(s)"
+                >
+                  了结离场
+                </el-button>
+              </div>
+            </div>
+
+            <ul v-if="expanded['sell:' + s.code]" class="reason-list">
+              <li v-for="(r, i) in s.reasons" :key="i" :class="`k-${r.kind}`">{{ r.text }}</li>
+            </ul>
+          </article>
+        </div>
+        <el-empty v-else description="持仓暂无离场信号，继续按纪律持有" :image-size="56" />
+
+        <p v-if="data.sell.hold_count" class="blk-foot">
+          其余 {{ data.sell.hold_count }} 只持仓未触发任何离场条件，继续持有；盘中每 15 分钟统一扫描一次。
+        </p>
+      </section>
+
+      <p class="page-foot">
+        <el-icon><InfoFilled /></el-icon>
+        买 / 盯 来自 B1 ∩ 积累区观察池与 B2 突破扫描；卖 来自统一离场引擎（与持仓追踪同一份结论）。
+        盘中每 2 分钟自动刷新，页面切走暂停。
+      </p>
+    </template>
+
+    <!-- 下市场单 -->
     <el-dialog v-model="orderDialog" title="下市场单" width="480px">
-      <!-- 分析上下文提示 -->
       <div v-if="(order as any).analysis_id" class="analysis-context">
         <el-alert :closable="false" type="info" show-icon>
           <template #title>
@@ -283,7 +374,7 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="orderDialog=false">取消</el-button>
+        <el-button @click="orderDialog = false">取消</el-button>
         <el-button type="primary" :disabled="submitDisabled" :loading="submitting" @click="submitOrder">提交</el-button>
       </template>
     </el-dialog>
@@ -291,194 +382,159 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
-import { CreditCard, Refresh, Plus, ArrowRight, ArrowDown } from '@element-plus/icons-vue'
+import { List, Refresh, Plus, InfoFilled } from '@element-plus/icons-vue'
+import { todayApi, type TodayActions, type TodaySellItem } from '@/api/today'
 import { paperApi, type OrderPreview } from '@/api/paper'
+import { cockpitApi } from '@/api/cockpit'
 import { analysisApi } from '@/api/analysis'
-import { vibeApi, type MarketSynthesis } from '@/api/vibe'
-import { monitorApi, type StrategyMonitorStatus } from '@/api/monitor'
-import { fmtPct } from '@/utils/format'
 
-// 路由与初始化
 const route = useRoute()
 const router = useRouter()
 
+// ── 今日待办数据 ──
+const data = ref<TodayActions | null>(null)
+const loading = ref(false)
+const expanded = ref<Record<string, boolean>>({})
+
+function toggle(key: string) {
+  expanded.value = { ...expanded.value, [key]: !expanded.value[key] }
+}
+
+const tradeDateLabel = computed(() => {
+  if (!data.value?.trade_date) return '—'
+  const w = ['日', '一', '二', '三', '四', '五', '六'][new Date(data.value.trade_date).getDay()]
+  return `${data.value.trade_date}（周${w}）`
+})
+
+const sessionLabel = computed(() => {
+  const s = data.value?.session
+  if (!s) return '—'
+  if (s.is_intraday) return '盘中 · 实时价'
+  return s.quote_as_of ? `收盘快照 ${s.quote_as_of}` : '非交易时段'
+})
+
+const envLayers = computed(() => {
+  const e = data.value?.environment
+  if (!e) return []
+  return [
+    { key: 'portrait', label: '市场画像', data: e.portrait },
+    { key: 'phase', label: '情绪阶段', data: e.phase },
+    { key: 'position', label: '仓位纪律', data: e.position }
+  ]
+})
+
+async function load() {
+  loading.value = true
+  try {
+    data.value = await todayApi.getActions()
+  } catch (e: any) {
+    if (e?.code === 401) return
+    ElMessage.error(e?.message || '今日待办加载失败')
+  } finally {
+    loading.value = false
+  }
+}
+
+// 盘中每 2 分钟刷新（页面隐藏时暂停）
+const POLL_MS = 120000
+let timer: ReturnType<typeof setInterval> | null = null
+function startPolling() {
+  if (timer) return
+  timer = setInterval(() => {
+    if (document.visibilityState === 'visible') load()
+  }, POLL_MS)
+}
+function stopPolling() {
+  if (timer) {
+    clearInterval(timer)
+    timer = null
+  }
+}
+function onVisibility() {
+  if (document.visibilityState === 'visible') load()
+}
+
+// ── 下单 ──
 const orderDialog = ref(false)
 const order = ref({ side: 'buy', code: '', qty: 100 })
+const orderMeta = ref<{ stop_loss_price?: number; take_profit_price?: number; stock_name?: string }>({})
 const detectedMarket = ref<string>('')
 const orderName = ref('')
 
-// 代码变化（联想选中/清空/程序赋值）→ 刷新市场标签；清空时同步清空名称回显
 watch(() => order.value.code, (v) => {
   detectMarket()
   if (!v) orderName.value = ''
 })
 
-// 股票联想选中 → 回填名称回显 + 市场识别
 function onOrderStockPicked(stock: any) {
   if (stock?.name) orderName.value = stock.name
   detectMarket()
 }
 
-// ── 今日买卖信号（来自综合研判：计划/候选 + 持仓卖点评估） ──
-const syn = ref<MarketSynthesis | null>(null)
-const synLoading = ref(false)
-
-// 常用策略监控状态（type=strategy 规则由 /api/monitor/strategies/status 独立提供，
-// /api/monitor/rules 刻意跳过 strategy 类型，不能用于推断策略启用状态）
-const strategyStatus = ref<StrategyMonitorStatus[]>([])
-const monitorStatus = computed(() => {
-  const enabled = (strategyStatus.value || []).filter(s => s.enabled)
-  const strategyNames = enabled.map(s => s.name || s.strategy_id).filter(Boolean)
-  return { strategyNames }
-})
-
-// 信号清单直接采用综合研判结果（三买三卖体系已废弃，不再按监控开关隐藏信号）
-const buys = computed(() => syn.value?.buys || [])
-const sells = computed(() => syn.value?.sells || [])
-
-/** 是否真正卖出内容（sell_pct>0 为实质卖出建议；=0 的「继续持有」仅做持仓评估展示，非卖出） */
-function isHoldSell(row: any): boolean {
-  return !(Number(row?.sell_pct || 0) > 0)
-}
-
-/** 持仓卖出排序：真实卖出信号在前，非卖出的「继续持有」置灰并排在最低部 */
-const realSells = computed(() => (sells.value || []).filter(s => !isHoldSell(s)))
-const holdSells = computed(() => (sells.value || []).filter(isHoldSell))
-
-/** 买入信号来源徽标（来源类型，信号名由顶部 sig-badge 单独展示，避免重复） */
-function buySource(b: any): { type: string; text: string; full: string } {
-  if (b?.source?.type === 'strategy') {
-    return { type: 'strategy', text: '常用策略', full: b.source.label || '' }
-  }
-  const st = b?.source?.type
-  if (st === 'plan') return { type: 'signal', text: '当日计划', full: b?.source?.label || '' }
-  if (st === 'candidate') return { type: 'signal', text: '候选池', full: b?.source?.label || '' }
-  if (st === 'signal_verified') {
-    // 已验证信号均属三买三卖体系（B1/B2/B3），徽章统一为"三买三卖"
-    return { type: 'signal', text: '三买三卖', full: b?.source?.label || '' }
-  }
-  return { type: 'signal', text: b?.signal_label || st || '计划', full: b?.source?.label || '' }
-}
-
-/** 卖出信号来源徽标（S卖点属三买三卖体系，其余为持仓评估/仓位管理） */
-function sellSource(s: any): { type: string; text: string } {
-  const text = `${s?.advice || ''} ${s?.advice_label || ''}`
-  if (/S\d|SafetyNet|TrailingStop|移动止损/.test(text)) {
-    return { type: 'signal', text: '三买三卖·卖点' }
-  }
-  if (s?.source?.type === 'position_eval') {
-    return { type: 'position', text: '持仓评估' }
-  }
-  return { type: 'position', text: '仓位管理' }
-}
-
-// 信号单快速下单
-function buyFromSignal(row: any) {
-  if (!row?.code) return
+function quickOrder(
+  code: string,
+  side: 'buy' | 'sell',
+  qty: number,
+  name?: string,
+  meta?: { stop_loss_price?: number; take_profit_price?: number }
+) {
   ;(order.value as any).analysis_id = null
-  order.value.side = 'buy'
-  order.value.code = row.code
-  order.value.qty = 100
-  orderName.value = row.name || ''
+  order.value.side = side
+  order.value.code = code
+  order.value.qty = Math.max(1, Math.round(qty || 1))
+  orderName.value = name || ''
+  orderMeta.value = side === 'buy' ? { ...meta, stock_name: name } : {}
   detectMarket()
   orderDialog.value = true
 }
 
-function sellFromSignal(row: any) {
-  if (!row?.code) return
-  ;(order.value as any).analysis_id = null
-  order.value.side = 'sell'
-  order.value.code = row.code
-  order.value.qty = Math.max(1, Number(row.quantity || 0))
-  orderName.value = row.name || ''
-  detectMarket()
+function openOrderDialog() {
+  order.value.code = ''
+  orderName.value = ''
+  orderMeta.value = {}
+  preview.value = null
   orderDialog.value = true
 }
 
-const synAsOf = computed(() => {
-  const s = syn.value?.as_of
-  if (!s) return '—'
+/** 纪律持仓了结（驾驶舱账本，不经过模拟交易下单） */
+async function closeCockpit(item: TodaySellItem) {
+  if (!item.position_id) return
+  const price = item.current_price ?? item.reference_price
+  if (!price) {
+    ElMessage.warning('暂无现价，无法了结')
+    return
+  }
   try {
-    const d = new Date(s)
-    if (isNaN(d.getTime())) return s
-    const p = (n: number) => String(n).padStart(2, '0')
-    return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+    await ElMessageBox.confirm(
+      `按参考价 ${price} 了结 ${item.name || item.code}？原因：${item.reasons?.[0]?.text || '纪律离场'}`,
+      '了结持仓',
+      { type: 'warning' }
+    )
+    await cockpitApi.closePosition(item.position_id, Number(price))
+    ElMessage.success(`已了结 ${item.name || item.code}`)
+    load()
   } catch {
-    return s
-  }
-})
-
-const pctClass = (v: number | null | undefined) => {
-  if (v == null) return 'flat'
-  if (v > 0) return 'up'
-  if (v < 0) return 'down'
-  return 'flat'
-}
-
-async function loadStrategyStatus() {
-  try {
-    const res: any = await monitorApi.strategyMonitorStatus()
-    const items: StrategyMonitorStatus[] =
-      (res as any)?.data?.items ?? (res as any)?.items ?? []
-    strategyStatus.value = items || []
-  } catch (e) {
-    console.warn('[PaperTrading] 常用策略监控状态加载失败（不影响信号展示）', e)
-    strategyStatus.value = []
+    // 取消
   }
 }
 
-async function loadSynthesis() {
-  synLoading.value = true
-  try {
-    const res: any = await vibeApi.getSynthesis()
-    if (res?.code === 401) {
-      // 登录过期：不打断交易操作，静默跳过
-      return
-    }
-    syn.value = res || null
-  } catch (e) {
-    console.warn('[PaperTrading] 买卖清单加载失败', e)
-  } finally {
-    synLoading.value = false
-  }
-}
-
-/** 刷新信号 = 重新加载监控状态 + 综合研判（一次，避免频繁触发 AI 重算） */
-function loadAll() {
-  loadStrategyStatus()
-  loadSynthesis()
-}
-
-// 跳转监控中心（history 路由，勿用 href="#/..."）
-function goMonitorCenter() {
-  router.push('/stock-alerts')
-}
-
-// 分析上下文
-const analysisContext = ref<any | null>(null)
-const analysisLoading = ref(false)
-
-// 检测市场类型
 function detectMarket() {
   const code = order.value.code.trim().toUpperCase()
   if (!code) {
     detectedMarket.value = ''
     return
   }
-  // 美股：纯字母
   if (/^[A-Z]+$/.test(code)) {
     detectedMarket.value = 'US'
     return
   }
-  // 港股：4-5位数字或.HK后缀
   if (/^\d{4,5}$/.test(code) || code.endsWith('.HK')) {
     detectedMarket.value = 'HK'
     return
   }
-  // A股：6位数字
   if (/^\d{6}$/.test(code)) {
     detectedMarket.value = 'CN'
     return
@@ -486,14 +542,6 @@ function detectMarket() {
   detectedMarket.value = 'CN'
 }
 
-function openOrderDialog() {
-  order.value.code = ''
-  orderName.value = ''
-  preview.value = null
-  orderDialog.value = true
-}
-
-// ── 下单预览（价格/金额/费用/最大可买，提交前拦截错误） ──
 const preview = ref<OrderPreview | null>(null)
 const previewLoading = ref(false)
 const submitting = ref(false)
@@ -545,22 +593,11 @@ async function submitOrder() {
     submitting.value = true
     const payload: any = { side: order.value.side as 'buy' | 'sell', code: order.value.code, quantity: Number(order.value.qty) }
     if ((order.value as any).analysis_id) payload.analysis_id = (order.value as any).analysis_id
+    if (order.value.side === 'buy') Object.assign(payload, orderMeta.value)
     const res: any = await paperApi.placeOrder(payload)
     if (res.success) {
       const placed = res?.data?.order
-      let cashText = ''
-      try {
-        const acc: any = await paperApi.getAccount()
-        const currency = placed?.currency || preview.value?.currency || 'CNY'
-        const cash = acc?.data?.account?.cash
-        const remain = cash && typeof cash === 'object' ? cash[currency] : undefined
-        if (remain != null) cashText = `，剩余可用 ${currency} ${fmtMoney(Number(remain))}`
-      } catch {
-        // 回执缺少余额不影响成交结果
-      }
-      const receipt = placed
-        ? `已成交 ${placed.quantity} 股 @ ${placed.price}${cashText}`
-        : `下单成功${cashText}`
+      const receipt = placed ? `已成交 ${placed.quantity} 股 @ ${placed.price}` : '下单成功'
       ElNotification({
         title: '成交回执',
         message: `${receipt}（点击查看持仓）`,
@@ -569,7 +606,7 @@ async function submitOrder() {
         onClick: () => router.push('/portfolio')
       })
       orderDialog.value = false
-      loadAll()
+      load()
     } else {
       ElMessage.error(res.message || '下单失败')
     }
@@ -580,29 +617,10 @@ async function submitOrder() {
   }
 }
 
-function onHeroCommand(cmd: string) {
-  if (cmd === 'reset') confirmReset()
-  else if (cmd === 'portfolio') router.push('/portfolio')
-}
+// 分析上下文
+const analysisContext = ref<any | null>(null)
+const analysisLoading = ref(false)
 
-async function confirmReset() {
-  try {
-    await ElMessageBox.confirm('将清空所有持仓与交易记录，并把账户恢复为初始现金，确认重置？', '重置账户', { type: 'warning' })
-    const res = await paperApi.resetAccount()
-    if (res.success) {
-      ElMessage.success('账户已重置')
-      loadAll()
-    }
-  } catch (e) {
-    // 取消或失败
-  }
-}
-
-onUnmounted(() => {
-  if (previewTimer) clearTimeout(previewTimer)
-})
-
-// 查看报告详情
 function viewReport(analysisId: string) {
   if (!analysisId) return
   router.push({ name: 'ReportDetail', params: { id: analysisId } })
@@ -614,8 +632,8 @@ async function fetchAnalysisContext(analysisId: string) {
     analysisContext.value = null
     const res = await analysisApi.getResult(analysisId)
     analysisContext.value = res as any
-  } catch (e) {
-    // 忽略错误，仅用于展示
+  } catch {
+    // 仅用于展示
   } finally {
     analysisLoading.value = false
   }
@@ -644,163 +662,293 @@ onMounted(() => {
     fetchAnalysisContext(qAnalysisId)
     hasPrefill = true
   }
-  if (hasPrefill) {
-    orderDialog.value = true
-  }
-  // 监控状态 + 买卖信号（一次，避免频繁触发综合研判 AI 重算）
-  loadAll()
+  if (hasPrefill) orderDialog.value = true
+
+  load()
+  startPolling()
+  document.addEventListener('visibilitychange', onVisibility)
+})
+
+onUnmounted(() => {
+  if (previewTimer) clearTimeout(previewTimer)
+  stopPolling()
+  document.removeEventListener('visibilitychange', onVisibility)
 })
 </script>
 
 <style scoped>
-.paper-trading {
-  padding: 24px;
+.today-page { padding: 0 0 24px; }
+
+/* 环境结论横幅 */
+.env-banner {
+  margin-top: 14px;
+  padding: 14px 18px;
+  border-radius: var(--app-radius-lg);
+  border: 1px solid var(--el-border-color-lighter);
+  border-left: 4px solid var(--el-border-color);
+  background: var(--el-fill-color-lighter);
+}
+.env-banner.is-red {
+  border-left-color: var(--app-down);
+  background: linear-gradient(90deg, #fef2f2 0%, #fff 62%);
+}
+.env-banner.is-yellow {
+  border-left-color: var(--el-color-warning);
+  background: linear-gradient(90deg, #fffbeb 0%, #fff 62%);
+}
+.env-banner.is-green {
+  border-left-color: var(--app-up);
+  background: linear-gradient(90deg, #f0fdf4 0%, #fff 62%);
+}
+.env-top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.env-verdict {
+  font-size: 13px;
+  font-weight: 800;
+  color: #fff;
+  padding: 4px 12px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.is-red .env-verdict { background: var(--app-down); }
+.is-yellow .env-verdict { background: var(--el-color-warning); }
+.is-green .env-verdict { background: var(--app-up); }
+
+.env-verdicts {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.ev {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.ev-sep {
+  color: var(--el-text-color-placeholder);
+  font-size: 16px;
+  margin: 0 2px;
+}
+.ev-value {
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: .3px;
+  font-family: var(--app-font-mono);
+}
+.ev-label {
+  font-size: 11px;
+  color: var(--el-text-color-placeholder);
+}
+.tone-down { color: var(--app-down); }
+.tone-up { color: var(--app-up); }
+.tone-warn { color: var(--el-color-warning); }
+.tone-flat { color: var(--el-text-color-primary); }
+.env-toggle { margin-left: auto; }
+
+.env-hint {
+  margin-top: 8px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--el-text-color-regular);
+}
+.env-degrade { margin-top: 8px; }
+
+.env-detail {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--el-border-color);
+}
+.env-layers {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.env-layer {
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .75);
+  border: 1px solid var(--el-border-color-lighter);
+  padding: 10px 12px;
+}
+.el-hd {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.el-label {
+  font-size: 11px;
+  color: var(--el-text-color-placeholder);
+}
+.el-value {
+  font-size: 14px;
+  font-weight: 800;
+}
+.el-desc {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--el-text-color-regular);
+}
+.el-points {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.el-points li {
+  position: relative;
+  padding-left: 11px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--el-text-color-secondary);
+}
+.el-points li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--el-border-color);
 }
 
-/* ═══════════ ① 今日买卖信号 ═══════════ */
-.signal-shell {
-  margin-top: 20px;
+.env-action-title {
+  margin: 14px 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+}
+.env-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.env-action {
+  display: flex;
+  gap: 9px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--el-border-color-lighter);
+  background: var(--el-fill-color-blank);
+}
+.ea-badge {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 800;
+  color: #fff;
+}
+.side-买 .ea-badge { background: var(--app-up); }
+.side-盯 .ea-badge { background: var(--el-color-warning); }
+.side-卖 .ea-badge { background: var(--app-down); }
+.ea-body b { font-size: 12px; }
+.ea-body p {
+  margin-top: 3px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--el-text-color-secondary);
+}
+.env-foot {
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--el-text-color-placeholder);
+}
+
+/* 一句话结论 */
+.today-brief {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 12px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--el-border-color-lighter);
+  background: var(--el-fill-color-lighter);
+}
+.tb-item {
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+}
+.tb-item b {
+  font-family: var(--app-font-mono);
+  font-size: 17px;
+  font-weight: 800;
+  margin: 0 2px;
+}
+.tb-buy b { color: var(--app-up); }
+.tb-watch b { color: var(--el-color-warning); }
+.tb-sell b { color: var(--app-down); }
+.tb-note {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  border-left: 1px solid var(--el-border-color);
+  padding-left: 14px;
+}
+
+.today-skeleton { margin-top: 18px; }
+
+/* 区块 */
+.todo-block {
+  margin-top: 18px;
   border: 1px solid var(--el-border-color-lighter);
   border-radius: var(--app-radius-lg);
   background: var(--el-fill-color-blank);
-  padding: 18px 20px 14px;
-  animation: rise-in .35s ease both;
+  padding: 16px 18px 14px;
 }
-.signal-hd {
+.blk-buy { box-shadow: inset 3px 0 0 var(--app-up); }
+.blk-watch { box-shadow: inset 3px 0 0 var(--el-color-warning); }
+.blk-sell { box-shadow: inset 3px 0 0 var(--app-down); }
+
+.blk-hd {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
+  align-items: center;
+  gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 12px;
 }
-.signal-hd-left {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-}
-.signal-title-row {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-}
-.signal-title {
-  font-size: 16px;
+.blk-badge {
+  font-size: 13px;
   font-weight: 800;
-  color: var(--el-text-color-primary);
-  letter-spacing: .4px;
+  color: #fff;
+  border-radius: 6px;
+  padding: 2px 10px;
 }
-.signal-asof {
+.blk-buy .blk-badge { background: var(--app-up); }
+.blk-watch .blk-badge { background: var(--el-color-warning); }
+.blk-sell .blk-badge { background: var(--app-down); }
+.blk-title { font-size: 15px; font-weight: 700; color: var(--el-text-color-primary); }
+.blk-hint {
   font-size: 12px;
-  color: var(--el-text-color-secondary);
-  font-family: var(--app-font-mono);
-}
-.signal-hd-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-/* 监控状态条 */
-.moni-bar {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.moni-strategy {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--el-border-color-lighter);
-  background: var(--el-fill-color-lighter);
-}
-.moni-strategy.has {
-  border-color: rgba(64, 158, 255, .35);
-  background: rgba(64, 158, 255, .06);
-}
-.moni-label {
-  font-size: 11px;
-  color: var(--el-text-color-secondary);
-  white-space: nowrap;
-}
-.moni-tag {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--el-color-primary);
-  background: rgba(64, 158, 255, .1);
-  padding: 1px 8px;
-  border-radius: 999px;
-  white-space: nowrap;
-}
-.moni-empty {
-  font-size: 11px;
   color: var(--el-text-color-placeholder);
+  margin-left: auto;
 }
-.moni-desc {
-  font-size: 11.5px;
+.blk-foot {
+  margin: 12px 2px 2px;
+  font-size: 12px;
   color: var(--el-text-color-placeholder);
 }
 
-/* 信号双栏 */
-.list-wrap {
+/* 卡片 */
+.card-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(560px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  gap: 12px;
 }
-.ls-col {
-  min-width: 0;
-  padding: 14px 14px 10px;
-  border-radius: var(--app-radius);
-  background: var(--el-fill-color-lighter);
-}
-.ls-buy {
-  box-shadow: inset 3px 0 0 var(--app-up);
-}
-.ls-sell {
-  box-shadow: inset 3px 0 0 var(--app-down);
-}
-.col-hd {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 10px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
-}
-.col-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
-}
-.col-empty-note {
-  font-size: 12px;
-  color: var(--el-text-color-placeholder);
-}
-.col-note {
-  margin: 10px 2px 4px;
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--el-text-color-placeholder);
-}
-.dot { width: 9px; height: 9px; border-radius: 50%; }
-.dot-buy { background: var(--app-up); }
-.dot-sell { background: var(--app-down); }
-
-/* ── 建议买入 · 富信息卡片 ── */
-.buy-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.buy-card {
+.todo-card {
   border: 1px solid var(--el-border-color-lighter);
   border-radius: var(--app-radius);
   background: var(--el-fill-color-blank);
@@ -810,95 +958,92 @@ onMounted(() => {
   gap: 10px;
   transition: box-shadow .2s ease, transform .2s ease;
 }
-.buy-card:hover {
+.todo-card:hover {
   box-shadow: 0 6px 18px rgba(0, 0, 0, .06);
   transform: translateY(-1px);
 }
-.bc-hd {
+.todo-card.warn { background: #fffdf5; }
+
+.card-hd {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
 }
-.bc-stk {
+.card-stk {
   display: flex;
   align-items: baseline;
   gap: 8px;
   min-width: 0;
 }
-.bc-name {
+.stk-name {
   font-size: 14px;
   font-weight: 700;
   color: var(--el-text-color-primary);
   text-decoration: none;
   white-space: nowrap;
 }
-.bc-name:hover { color: var(--el-color-primary); }
-.bc-code {
+.stk-name:hover { color: var(--el-color-primary); }
+.stk-code {
   font-size: 11px;
   color: var(--el-text-color-placeholder);
   font-family: var(--app-font-mono);
 }
-.bc-tags {
+.stk-industry {
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+.card-tags {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
-.sig-badge {
+.tag {
   font-size: 11px;
-  font-weight: 700;
-  color: var(--app-up);
-  background: rgba(245, 108, 108, .1);
-  border: 1px solid rgba(245, 108, 108, .3);
-  border-radius: 6px;
+  border-radius: 5px;
   padding: 1px 7px;
-}
-.bc-price {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: nowrap;
+  border: 1px solid var(--el-border-color-lighter);
+  color: var(--el-text-color-secondary);
   white-space: nowrap;
 }
-.bc-cell {
+.tag-signal { color: var(--app-up); border-color: rgba(245, 108, 108, .35); background: rgba(245, 108, 108, .06); }
+.tag-held { color: var(--el-color-primary); border-color: rgba(64, 158, 255, .35); background: rgba(64, 158, 255, .06); }
+.tag-paper { color: var(--el-color-primary); border-color: rgba(64, 158, 255, .3); }
+.tag-cockpit { color: #7c3aed; border-color: rgba(124, 58, 237, .3); background: rgba(124, 58, 237, .05); }
+.tag-exit { color: var(--app-down); border-color: rgba(103, 194, 58, .4); background: rgba(103, 194, 58, .07); font-weight: 700; }
+.tag-warn { color: var(--el-color-warning); border-color: rgba(230, 162, 60, .4); background: rgba(230, 162, 60, .07); font-weight: 700; }
+.tag-up { color: var(--app-up); }
+.tag-down { color: var(--app-down); }
+
+/* 指标行 */
+.metric-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 22px;
+  flex-wrap: wrap;
+}
+.metric {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
-.bc-label {
-  font-size: 10.5px;
-  color: var(--el-text-color-placeholder);
-}
-.bc-val {
+.m-label { font-size: 10.5px; color: var(--el-text-color-placeholder); }
+.m-val {
   font-family: var(--app-font-mono);
   font-size: 15px;
   font-weight: 700;
   color: var(--el-text-color-primary);
 }
-.bc-val.up { color: var(--app-up); }
-.bc-val.down { color: var(--app-down); }
-.bc-val.flat { color: var(--el-text-color-regular); }
-.bc-dist { margin-left: auto; }
-.bc-arrow {
-  color: var(--el-text-color-placeholder);
-  font-size: 12px;
-}
-.bc-state {
-  margin-left: auto;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--app-up);
-  background: rgba(245, 108, 108, .1);
-  border-radius: 999px;
-  padding: 2px 8px;
-  flex-shrink: 0;
-}
-.bc-state.warn {
-  color: var(--el-color-warning);
-  background: rgba(230, 162, 60, .1);
-}
-.bc-foot {
+.m-val.down { color: var(--app-down); }
+.m-sub { font-size: 10.5px; color: var(--el-text-color-placeholder); }
+
+/* 卡片底部 */
+.card-ft {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -906,7 +1051,7 @@ onMounted(() => {
   padding-top: 10px;
   border-top: 1px dashed var(--el-border-color-lighter);
 }
-.bc-advice {
+.card-summary {
   font-size: 12px;
   line-height: 1.5;
   color: var(--el-text-color-regular);
@@ -915,86 +1060,13 @@ onMounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
-/* ── 持仓卖出表 ── */
-.ms-table {
-  background: transparent;
-}
-.ms-table :deep(.el-table__row) { cursor: default; }
-.ms-table :deep(th.el-table__cell) {
-  color: var(--el-text-color-secondary);
-  font-weight: 600;
-  background: var(--el-fill-color-lighter);
-}
-.stk {
+.card-acts {
   display: flex;
-  flex-direction: column;
-  line-height: 1.3;
-}
-.stk-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
-  text-decoration: none;
-}
-.stk-name:hover { color: var(--el-color-primary); }
-.stk-code {
-  font-size: 11px;
-  color: var(--el-text-color-placeholder);
-}
-.money {
-  font-family: var(--app-font-mono);
-  font-size: 12px;
-  color: var(--el-text-color-regular);
-}
-.pct {
-  font-family: var(--app-font-mono);
-  font-size: 12px;
-  font-weight: 600;
-}
-.pct.up { color: var(--app-up); }
-.pct.down { color: var(--app-down); }
-.pct.flat { color: var(--el-text-color-regular); }
-.advice {
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--el-text-color-regular);
-}
-.advice-label {
-  color: var(--el-text-color-primary);
-  margin-right: 4px;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
-/* 来源徽标 */
-.src-tag {
-  display: inline-block;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  vertical-align: middle;
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 6px;
-  border: 1px solid var(--el-border-color-lighter);
-  color: var(--el-text-color-secondary);
-  background: var(--el-fill-color-lighter);
-}
-.src-signal {
-  color: var(--app-up);
-  border-color: rgba(245, 108, 108, .35);
-  background: rgba(245, 108, 108, .06);
-}
-.src-strategy {
-  color: var(--el-color-primary);
-  border-color: rgba(64, 158, 255, .35);
-  background: rgba(64, 158, 255, .06);
-}
-.src-position {
-  color: #909399;
-}
-
-/* 快捷下单按钮（买入红 / 卖出绿，A股惯例） */
 .act {
   height: 26px;
   padding: 0 12px;
@@ -1003,61 +1075,112 @@ onMounted(() => {
   border: none;
   color: #fff;
   border-radius: 6px;
-  transition: transform .15s ease, box-shadow .15s ease;
-  flex-shrink: 0;
 }
-.act:hover { transform: translateY(-1px); }
 .act-buy { background: var(--app-up); }
-.act-buy:hover { box-shadow: 0 3px 8px rgba(245, 108, 108, .35); }
 .act-sell { background: var(--app-down); }
-.act-sell:hover { box-shadow: 0 3px 8px rgba(103, 194, 58, .35); }
 
-/* 来源脚注 */
-.signal-foot {
+/* 理由列表 */
+.reason-list {
+  margin: 0;
+  padding: 10px 12px;
+  list-style: none;
+  border-radius: 8px;
+  background: var(--el-fill-color-lighter);
   display: flex;
-  align-items: center;
-  gap: 18px;
-  flex-wrap: wrap;
-  margin-top: 14px;
-  padding-top: 10px;
-  border-top: 1px dashed var(--el-border-color-lighter);
-  font-size: 11.5px;
-  color: var(--el-text-color-placeholder);
-}
-.foot-item {
-  display: inline-flex;
-  align-items: center;
+  flex-direction: column;
   gap: 6px;
 }
-.foot-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-}
-.foot-dot-buy { background: var(--app-up); }
-.foot-dot-sell { background: var(--app-down); }
-
-.sync-tip {
-  margin-top: 12px;
+.reason-list li {
+  position: relative;
+  padding-left: 12px;
   font-size: 12px;
+  line-height: 1.65;
+  color: var(--el-text-color-regular);
+}
+.reason-list li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 7px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--el-border-color);
+}
+.reason-list li.k-signal::before { background: var(--app-up); }
+.reason-list li.k-trend::before { background: #7c3aed; }
+.reason-list li.k-mainline::before { background: var(--el-color-warning); }
+.reason-list li.k-liquidity::before { background: #0ea5e9; }
+.reason-list li.k-env::before { background: #14b8a6; }
+.reason-list li.k-risk::before { background: var(--app-down); }
+.reason-list li.k-exit::before { background: var(--app-down); }
+.reason-list li.k-warn::before { background: var(--el-color-warning); }
+
+/* 盯盘列表 */
+.watch-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.watch-row {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--app-radius);
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--el-fill-color-blank);
+}
+.watch-row.near {
+  border-color: rgba(230, 162, 60, .45);
+  background: #fffdf5;
+}
+.wr-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.wr-price {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-family: var(--app-font-mono);
+}
+.wr-arrow { color: var(--el-text-color-placeholder); font-size: 12px; }
+.wr-trigger {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+}
+.wr-dist {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--el-text-color-secondary);
+}
+.wr-dist.near { color: var(--el-color-warning); }
+.wr-ft {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+/* 底部说明 */
+.page-foot {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 16px;
+  font-size: 12px;
+  line-height: 1.7;
   color: var(--el-text-color-placeholder);
 }
 
-@keyframes rise-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.t0-hint {
-  margin-top: 8px;
-  font-size: 12px;
-  color: #909399;
-}
-.qty-hint {
-  margin-left: 10px;
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-}
+/* 下单弹窗沿用 */
+.t0-hint { margin-top: 8px; font-size: 12px; color: #909399; }
+.qty-hint { margin-left: 10px; font-size: 12px; color: var(--el-text-color-secondary); }
 .order-preview {
   width: 100%;
   min-height: 32px;
@@ -1078,38 +1201,15 @@ onMounted(() => {
   font-weight: 700;
   color: var(--el-text-color-primary);
 }
-.op-alert {
-  margin-top: 6px;
-}
-.op-empty {
-  font-size: 12px;
-  color: var(--el-text-color-placeholder);
-}
-.hold-collapse {
-  margin-top: 8px;
-  border-top: 1px dashed var(--el-border-color-lighter);
-  border-bottom: none;
-}
-.hold-collapse :deep(.el-collapse-item__header) {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-  background: transparent;
-}
-.hold-collapse :deep(.el-collapse-item__wrap) {
-  background: transparent;
-}
-.analysis-context {
-  margin-bottom: 12px;
-}
+.op-alert { margin-top: 6px; }
+.op-empty { font-size: 12px; color: var(--el-text-color-placeholder); }
+.analysis-context { margin-bottom: 12px; }
 
-/* ═══════════ 响应式 ═══════════ */
-@media (max-width: 1200px) {
-  .list-wrap { grid-template-columns: 1fr; }
-}
 @media (max-width: 768px) {
-  .paper-trading { padding: 12px; }
-  .signal-shell { padding: 14px; }
-  .bc-price { flex-wrap: wrap; }
-  .bc-dist { margin-left: 0; }
+  .card-list { grid-template-columns: 1fr; }
+  .blk-hint { margin-left: 0; }
+  .env-layers,
+  .env-actions { grid-template-columns: 1fr; }
+  .env-toggle { margin-left: 0; }
 }
 </style>

@@ -491,7 +491,7 @@ const routes: RouteRecordRaw[] = [
     name: 'PaperTrading',
     component: () => import('@/layouts/BasicLayout.vue'),
     meta: {
-      title: '交易',
+      title: '今日待办',
       icon: 'CreditCard',
       requiresAuth: true,
       transition: 'slide-up'
@@ -502,7 +502,7 @@ const routes: RouteRecordRaw[] = [
         name: 'PaperTradingHome',
         component: () => import('@/views/PaperTrading/index.vue'),
         meta: {
-          title: '交易',
+          title: '今日待办',
           requiresAuth: true
         }
       },
@@ -535,6 +535,8 @@ const routes: RouteRecordRaw[] = [
       }
     ]
   },
+  // 旧入口兼容：交易驾驶舱已并入「今日待办」页面
+  { path: '/vibe/cockpit', redirect: '/paper' },
   {
     path: '/:pathMatch(.*)*',
     name: 'NotFound',

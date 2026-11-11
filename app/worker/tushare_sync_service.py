@@ -918,9 +918,11 @@ class TushareSyncService:
     def _latest_settled_trade_day(self) -> str:
         """返回最近一个"理应已有K线数据"的交易日（YYYY-MM-DD）。
 
-        用于真增量跳过：晚间 cron（TUSHARE_HISTORICAL_SYNC_CRON=18:30）才会拉取当日K线；
-        在 18:30 之前的启动补跑/白天同步里，当日K线尚未落地，理应只有上一交易日的完整数据，
-        因此回退到上一交易日，避免为尚未发布的当日K线空跑全市场。
+        用于真增量跳过：晚间 cron 才会拉取当日K线；
+        在 15:05 之前的启动补跑/白天同步里，当日K线尚未收盘定稿，理应只有上一交易日的完整数据，
+        因此回退到上一交易日，避免为尚未收盘的当日K线空跑全市场。
+        （15:05 之后当日日线已具备拉取条件，不再回退；当日日线主要由
+        daily_bar_sync_service 用单日全市场接口提前落库。）
 
         格式统一为 YYYY-MM-DD，可直接与 _get_last_sync_date 返回的字符串做字典序比较。
         """
@@ -929,8 +931,8 @@ class TushareSyncService:
 
             now = now_tz()
             target = get_latest_trade_day(now)
-            # 交易日当日 18:30 前，当日K线未落地，回退到上一交易日（统一 prev_trading_day）
-            if is_trading_day(now) and (now.hour, now.minute) < (18, 30):
+            # 交易日当日 15:05 前，当日K线尚未收盘定稿，回退到上一交易日（统一 prev_trading_day）
+            if is_trading_day(now) and (now.hour, now.minute) < (15, 5):
                 target = prev_trading_day(target)
             return target.strftime('%Y-%m-%d')
         except Exception as e:

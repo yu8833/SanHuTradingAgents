@@ -420,7 +420,20 @@ export const screeningApi = {
 export interface CompletenessDayPoint {
   date: string
   count: number
+  /** 当日应有只数（全市场口径） */
+  expected?: number
+  /** 覆盖率（%） */
+  coverage_pct?: number
   complete: boolean
+}
+
+export interface CompletenessMissingDay {
+  date: string
+  count: number
+  /** 当日应有只数（全市场口径） */
+  expected?: number
+  /** 覆盖率（%） */
+  coverage_pct?: number
 }
 
 export interface DatasetCompleteness {
@@ -432,7 +445,7 @@ export interface DatasetCompleteness {
   complete_days: number
   completeness_pct: number
   min_count: number
-  missing_days: { date: string; count: number }[]
+  missing_days: CompletenessMissingDay[]
   series: CompletenessDayPoint[]
 }
 

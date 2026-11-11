@@ -242,7 +242,6 @@ const freshnessItems = computed(() => freshness.value.items || [])
 const freshCount = computed(() => freshnessItems.value.filter((i) => i.is_fresh).length)
 const completenessDatasets = computed(() => completeness.value.datasets || [])
 const overallIsComplete = computed(() => completeness.value.overall_is_complete ?? true)
-const overallHealthy = computed(() => overallIsFresh.value && overallIsComplete.value)
 
 const syncType = computed(() => {
   const map: Record<string, 'info' | 'warning' | 'success' | 'danger'> = {

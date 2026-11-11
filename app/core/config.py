@@ -234,6 +234,18 @@ class Settings(BaseSettings):
     # 默认关闭：非交易时段直接跳过，避免每轮定时触发反复调用外部数据源接口空转。
     QUOTES_BACKFILL_ON_OFFHOURS: bool = Field(default=False)
 
+    # 当日日线同步：盘中用实时快照合成临时日线，收盘后用 Tushare 单日全市场接口
+    # 拉取官方日线（一次调用），避免当日分析只能看到 T-1 的 K 线。
+    DAILY_BAR_SYNC_ENABLED: bool = Field(default=True, description="启用当日日线同步")
+    DAILY_BAR_INTRADAY_CRON: str = Field(
+        default="*/15 9-14 * * 1-5",
+        description="盘中临时日线合成 CRON（用 market_quotes 快照，不消耗外部 API）"
+    )
+    DAILY_BAR_OFFICIAL_CRON: str = Field(
+        default="5,20,35,50 15 * * 1-5",
+        description="收盘后官方日线同步 CRON（单次全市场调用，未发布则下轮重试）"
+    )
+
     # 实时行情接口轮换配置
     QUOTES_ROTATION_ENABLED: bool = Field(
         default=True,

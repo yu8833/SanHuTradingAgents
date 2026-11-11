@@ -13,26 +13,55 @@
       </div>
     </div>
 
-    <!-- 今日待办：先告诉用户"今天有什么要处理"，再展示各模块 -->
-    <div class="todo-bar" v-loading="todoLoading">
+    <!-- 今日待办：交易页「买 / 盯 / 卖」的提炼，点击进入今日待办处理 -->
+    <div class="todo-bar" v-loading="todayLoading">
       <div class="todo-head">
         <span class="todo-title">今日待办</span>
-        <span class="todo-sub" v-if="todoTotal === 0">今天没有需要处理的事项</span>
+        <span class="todo-sub" v-if="todayData">
+          {{ todayData.trade_date }} · {{ todayData.session.is_intraday ? '盘中实时价' : '收盘快照' }}
+        </span>
+        <span class="todo-sub" v-else>加载中…</span>
       </div>
-      <div class="todo-items">
-        <button class="todo-item" :class="{ active: todos.pendingOrders > 0 }" @click="router.push('/stock-alerts')">
-          <span class="todo-label">待确认指令</span>
-          <b class="todo-num">{{ todos.pendingOrders }}</b>
+
+      <template v-if="todayData">
+        <button
+          class="todo-env"
+          :class="`gate-${todayData.environment.gate}`"
+          :title="todayData.environment.position.desc"
+          @click="router.push('/paper')"
+        >
+          <span class="te-verdict">{{ todayData.environment.verdict }}</span>
+          <span class="te-pos">{{ todayData.environment.headline }}</span>
         </button>
-        <button class="todo-item" :class="{ danger: todos.criticalAlerts > 0 }" @click="router.push('/stock-alerts')">
-          <span class="todo-label">重要告警</span>
-          <b class="todo-num">{{ todos.criticalAlerts }}</b>
-        </button>
-        <button class="todo-item" :class="{ warn: todos.staleData > 0 }" @click="openSyncConfirm">
-          <span class="todo-label">数据待更新</span>
-          <b class="todo-num">{{ todos.staleData }} 项</b>
-        </button>
-      </div>
+
+        <div class="todo-cols">
+          <button
+            v-for="c in todayCols"
+            :key="c.key"
+            class="todo-col"
+            :class="`col-${c.key}`"
+            @click="router.push('/paper')"
+          >
+            <div class="tc-hd">
+              <span class="tc-badge">{{ c.badge }}</span>
+              <b class="tc-num">{{ c.count }}</b>
+              <span class="tc-text">{{ c.text }}</span>
+            </div>
+            <ul class="tc-list">
+              <li v-for="it in c.items" :key="it.code">
+                <span class="tc-name">{{ it.name }}</span>
+                <span class="tc-code">{{ it.code }}</span>
+                <span class="tc-meta">{{ it.meta }}</span>
+              </li>
+              <li v-if="!c.items.length" class="tc-empty">{{ c.empty }}</li>
+            </ul>
+          </button>
+        </div>
+
+        <el-button text size="small" class="todo-more" @click="router.push('/paper')">
+          查看全部<el-icon><ArrowRight /></el-icon>
+        </el-button>
+      </template>
     </div>
 
     <!-- 监控中心（简要触发记录，查看详情跳转监控中心） -->
@@ -264,11 +293,9 @@ import MonitorSummary from '@/components/Dashboard/MonitorSummary.vue'
 import { favoritesApi } from '@/api/favorites'
 import { paperApi, type PaperAccountSummary } from '@/api/paper'
 import * as schedulerApi from '@/api/scheduler'
-import { monitorApi } from '@/api/monitor'
-import { screeningApi } from '@/api/screening'
+import { todayApi, type TodayActions } from '@/api/today'
 import { subscribeQuotesUpdate } from '@/utils/quotesSSE'
 import { fmtPct, fmtMoney } from '@/utils/format'
-import { toTimestamp } from '@/utils/datetime'
 import { use as echartsUse } from 'echarts/core'
 import { BarChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent } from 'echarts/components'
@@ -338,50 +365,85 @@ const quotesStale = ref(false)
 // 模拟交易账户数据
 const paperAccount = ref<PaperAccountSummary | null>(null)
 
-// ---------- 今日待办（数据异常 / 待确认指令 / 重要告警） ----------
-const todoLoading = ref(false)
-const todos = reactive({ pendingOrders: 0, criticalAlerts: 0, staleData: 0 })
-const todoTotal = computed(() => todos.pendingOrders + todos.criticalAlerts + todos.staleData)
+// ---------- 今日待办（交易页「买 / 盯 / 卖」结论的提炼，点击去交易页处理） ----------
+const TODAY_TOP_N = 3
+const todayLoading = ref(false)
+const todayData = ref<TodayActions | null>(null)
 
-const loadTodos = async () => {
-  todoLoading.value = true
-  const [ordersRes, alertsRes, freshnessRes] = await Promise.allSettled([
-    monitorApi.listTbsOrders({ status: 'pending', limit: 100 }),
-    monitorApi.listAlerts({ days: 1, limit: 100 }),
-    screeningApi.checkDataFreshness(),
-  ])
-  if (ordersRes.status === 'fulfilled') {
-    const orders = (ordersRes.value as any)?.data?.orders || []
-    todos.pendingOrders = orders.filter((o: any) => o.status === 'pending').length
+const loadTodayTodo = async () => {
+  todayLoading.value = true
+  try {
+    todayData.value = await todayApi.getActions()
+  } catch (error) {
+    console.error('加载今日待办失败:', error)
+    todayData.value = null
+  } finally {
+    todayLoading.value = false
   }
-  if (alertsRes.status === 'fulfilled') {
-    const alerts = (alertsRes.value as any)?.data?.alerts || []
-    const dayStart = new Date().setHours(0, 0, 0, 0)
-    todos.criticalAlerts = alerts.filter(
-      (a: any) => a.severity === 'critical' && Number(a.ts || 0) >= dayStart
-    ).length
-  }
-  if (freshnessRes.status === 'fulfilled') {
-    const data = (freshnessRes.value as any)?.data?.data || (freshnessRes.value as any)?.data || {}
-    Object.assign(freshness, data)
-    const items = data.items || []
-    todos.staleData = items.filter((i: any) => i.is_fresh === false).length
-  }
-  todoLoading.value = false
 }
 
-// ---------- 数据新鲜度（供待办提示判断） ----------
-const freshness = reactive({
-  overall_is_fresh: false,
-  overall_stale_days: 0,
-  expected_date: '' as string,
-  message: '' as string,
-  items: [] as any[],
-  latest_data_date: '' as string,
-  is_fresh: false,
-  stale_days: 0,
-  total_stocks: 0,
-  expected_total: 0,
+interface TodayColItem { code: string; name: string; meta: string }
+interface TodayCol { key: string; badge: string; count: number; text: string; items: TodayColItem[]; empty: string }
+
+const todayCols = computed<TodayCol[]>(() => {
+  const d = todayData.value
+  if (!d) return []
+  const pct = (v: number) => `${(v * 100).toFixed(2)}%`
+
+  const buyItems: TodayColItem[] = d.buy.items.slice(0, TODAY_TOP_N).map((b) => ({
+    code: b.code,
+    name: b.name,
+    meta: b.blocked
+      ? `现价 ${b.current_price} · 环境红灯暂停`
+      : `现价 ${b.current_price} · 止损 ${b.stop_loss_price}`,
+  }))
+
+  const nearCount = d.watch.near_count
+  const watchItems: TodayColItem[] = d.watch.items.slice(0, TODAY_TOP_N).map((w) => ({
+    code: w.code,
+    name: w.name,
+    meta: `现价 ${w.current_price} · 距触发 ${pct(w.to_trigger_pct)}`,
+  }))
+
+  const sellItems: TodayColItem[] = d.sell.items
+    .filter((s) => s.state !== 'normal')
+    .slice(0, TODAY_TOP_N)
+    .map((s) => ({
+      code: s.code,
+      name: s.name,
+      meta: s.reference_price != null
+        ? `${s.advice_label} · 参考价 ${s.reference_price}`
+        : s.advice_label,
+    }))
+
+  return [
+    {
+      key: 'buy',
+      badge: '买',
+      count: d.buy.count,
+      text: d.buy.count ? '只已触发' : '今日无触发',
+      items: buyItems,
+      empty: '今日无 B2 触发，不买',
+    },
+    {
+      key: 'watch',
+      badge: '盯',
+      count: d.watch.count,
+      text: nearCount ? `只待触发 · ${nearCount} 只临近` : '只待触发',
+      items: watchItems,
+      empty: '观察池暂无待触发标的',
+    },
+    {
+      key: 'sell',
+      badge: '卖',
+      count: d.sell.exit_count,
+      text: d.sell.exit_count
+        ? (d.sell.warn_count ? `只需离场 · ${d.sell.warn_count} 只预警` : '只需离场')
+        : '无需离场',
+      items: sellItems,
+      empty: '持仓无离场信号，继续持有',
+    },
+  ]
 })
 
 // ---------- 数据缺口修复（审计 → 只补缺口） ----------
@@ -613,7 +675,7 @@ let favSseUnsubscribe: (() => void) | null = null
 
 // 生命周期
 onMounted(async () => {
-  await Promise.all([loadFavoriteStocks(), loadPaperAccount(), loadTodos()])
+  await Promise.all([loadFavoriteStocks(), loadPaperAccount(), loadTodayTodo()])
   // 收到行情更新信号立即刷新自选股（延迟约 0-2 秒）。
   // P3-6：信号若带值则原地 patch 对应股票，避免全量重拉与陈旧读取；未带值才兜底全量刷新。
   favSseUnsubscribe = subscribeQuotesUpdate((signal) => {
@@ -646,7 +708,7 @@ onActivated(() => {
   if (dashInited) {
     loadFavoriteStocks()
     loadPaperAccount()
-    loadTodos()
+    loadTodayTodo()
   }
   dashInited = true
 })
@@ -656,23 +718,26 @@ onActivated(() => {
 .dashboard {
   // 页面容器交给全局 .app-page；顶部横幅由全局 .page-hero 提供
 
-  // 今日待办
+  // 今日待办：交易页买 / 盯 / 卖的提炼
   .todo-bar {
-    display: flex;
-    align-items: center;
-    gap: 20px;
-    flex-wrap: wrap;
-    margin-bottom: 16px;
-    padding: 12px 18px;
+    display: grid;
+    grid-template-columns: 210px 1fr auto;
+    grid-template-areas:
+      'head head head'
+      'env cols more';
+    align-items: stretch;
+    gap: 10px 16px;
+    margin-bottom: 24px;
+    padding: 14px 18px;
     border-radius: 14px;
     background: var(--el-bg-color);
     border: 1px solid var(--el-border-color-light);
   }
   .todo-head {
+    grid-area: head;
     display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 140px;
+    align-items: baseline;
+    gap: 10px;
   }
   .todo-title {
     font-size: 14px;
@@ -682,35 +747,152 @@ onActivated(() => {
     font-size: 12px;
     color: var(--el-text-color-secondary);
   }
-  .todo-items {
+
+  // 环境结论（点击进入今日待办）
+  .todo-env {
+    grid-area: env;
     display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-  }
-  .todo-item {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    padding: 7px 14px;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+    padding: 10px 12px;
     border-radius: 10px;
     border: 1px solid var(--el-border-color-lighter);
     background: var(--el-fill-color-lighter);
+    font-family: inherit;
+    text-align: left;
     cursor: pointer;
     transition: border-color .2s, background .2s;
     &:hover { border-color: var(--el-color-primary-light-5); }
-    &.active { border-color: var(--el-color-primary-light-3); background: var(--el-color-primary-light-9); }
-    &.danger { border-color: var(--el-color-danger-light-5); background: var(--el-color-danger-light-9); }
-    &.warn { border-color: var(--el-color-warning-light-5); background: var(--el-color-warning-light-9); }
+    .te-verdict {
+      font-size: 14px;
+      font-weight: 700;
+      line-height: 1.3;
+    }
+    .te-pos {
+      font-size: 12px;
+      color: var(--el-text-color-regular);
+      line-height: 1.4;
+    }
+    &.gate-red {
+      border-color: var(--el-color-danger-light-5);
+      background: var(--el-color-danger-light-9);
+      .te-verdict { color: var(--el-color-danger); }
+    }
+    &.gate-yellow {
+      border-color: var(--el-color-warning-light-5);
+      background: var(--el-color-warning-light-9);
+      .te-verdict { color: var(--el-color-warning-dark-2); }
+    }
+    &.gate-green {
+      border-color: var(--el-color-success-light-5);
+      background: var(--el-color-success-light-9);
+      .te-verdict { color: var(--el-color-success); }
+    }
   }
-  .todo-label {
-    font-size: 12.5px;
-    color: var(--el-text-color-secondary);
+
+  // 买 / 盯 / 卖 三列
+  .todo-cols {
+    grid-area: cols;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
   }
-  .todo-num {
-    font-size: 16px;
+  .todo-col {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--el-border-color-lighter);
+    background: var(--el-bg-color);
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color .2s, background .2s;
+    &:hover { background: var(--el-fill-color-lighter); }
+    &.col-buy { border-left: 3px solid var(--el-color-danger); }
+    &.col-watch { border-left: 3px solid var(--el-color-warning); }
+    &.col-sell { border-left: 3px solid var(--el-color-success); }
+  }
+  .tc-hd {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+  }
+  .tc-badge {
+    display: inline-block;
+    padding: 0 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 18px;
+    color: #fff;
+    background: var(--el-text-color-secondary);
+  }
+  .col-buy .tc-badge { background: var(--el-color-danger); }
+  .col-watch .tc-badge { background: var(--el-color-warning); }
+  .col-sell .tc-badge { background: var(--el-color-success); }
+  .tc-num {
+    font-size: 18px;
     font-weight: 700;
     font-family: var(--app-font-mono, monospace);
     color: var(--el-text-color-primary);
+  }
+  .tc-text {
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+  }
+  .tc-list {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    li {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      font-size: 12px;
+      line-height: 1.5;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .tc-name {
+      max-width: 6em;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: var(--el-text-color-primary);
+      font-weight: 600;
+    }
+    .tc-code {
+      font-family: var(--app-font-mono, monospace);
+      color: var(--el-text-color-secondary);
+    }
+    .tc-meta {
+      color: var(--el-text-color-secondary);
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .tc-empty { color: var(--el-text-color-placeholder); }
+  }
+  .todo-more {
+    grid-area: more;
+    align-self: center;
+  }
+
+  @media (max-width: 1100px) {
+    .todo-bar {
+      grid-template-columns: 1fr;
+      grid-template-areas:
+        'head'
+        'env'
+        'cols'
+        'more';
+    }
+    .todo-cols { grid-template-columns: 1fr; }
   }
 
   // 顶部卡片统一样式
