@@ -161,6 +161,16 @@ async def test_bug_013_market_quotes_consistency_with_daily_quotes():
                 "跳过 market_quotes 与日线的单位一致性校验"
             )
 
+        # 最新日线交易日就是「今天」且当前仍在盘中时：market_quotes 是实时快照、
+        # 日线是同日更早时刻的盘中累计值，两者口径不同，单位一致性校验不成立
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        now_cn = datetime.now(ZoneInfo("Asia/Shanghai"))
+        if (str(latest_td).replace("-", "") == now_cn.strftime("%Y%m%d")
+                and now_cn.hour * 60 + now_cn.minute < 15 * 60 + 30):
+            pytest.skip(f"最新日线 {latest_td} 为当日盘中数据，跳过单位一致性校验")
+
         # 数据治理（bug-013 日终校准）：非交易时段先清掉收盘前滞留快照
         # （updated_at 早于当日 15:00 的盘中最后快照），避免抽样误报。
         # 交易时段内 calibrate 自动跳过（实时快照与日线口径不一致属正常）。
@@ -332,6 +342,14 @@ async def test_bug_013_calibrate_repairs_stale_snapshot():
                 "日终校准校验不适用"
             )
 
+        # 最新日线交易日就是「今天」且当前仍在盘中时：market_quotes 是实时快照、
+        # 日线是同日盘中累计值，此时模拟「收盘后」会把全市场快照判定为滞留并写回
+        # 盘中值，用例不成立
+        now_cn = datetime.now(ZoneInfo("Asia/Shanghai"))
+        if (str(latest_td).replace("-", "") == now_cn.strftime("%Y%m%d")
+                and now_cn.hour * 60 + now_cn.minute < 15 * 60 + 30):
+            pytest.skip(f"最新日线 {latest_td} 为当日盘中数据，模拟收盘后场景不成立")
+
         # 人为制造滞留快照：amount/volume 缩水 ~1.7%，updated_at 设为北京 14:59（UTC 06:59）
         # 并同步把 trade_date 对齐到日线最新交易日（非交易日时 market_quotes.trade_date
         # 可能为当日日期而与日线最新交易日不一致，导致校准查询匹配不到滞留记录）
@@ -431,6 +449,12 @@ async def test_bug_013_calibrate_idempotent():
                 f"最新交易日 {latest_td} 日线仅 {daily_n}/{mq_total} 只（盘中未同步完成），"
                 "日终校准幂等校验不适用"
             )
+
+        # 同 test_bug_013_calibrate_repairs_stale_snapshot：当日盘中日线不能用于模拟收盘后场景
+        now_cn = datetime.now(ZoneInfo("Asia/Shanghai"))
+        if (str(latest_td).replace("-", "") == now_cn.strftime("%Y%m%d")
+                and now_cn.hour * 60 + now_cn.minute < 15 * 60 + 30):
+            pytest.skip(f"最新日线 {latest_td} 为当日盘中数据，模拟收盘后场景不成立")
 
         # 构造「已校准」状态：amount=日线值、updated_at=收盘后（北京 16:00 = UTC 08:00）
         td_date = latest_td.replace("-", "")
