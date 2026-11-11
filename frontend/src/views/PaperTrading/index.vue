@@ -72,187 +72,188 @@
       </div>
     </section>
 
-    <!-- 一句话结论 -->
-    <div v-if="data" class="today-brief">
-      <span class="tb-item tb-buy">买 <b>{{ data.buy.count }}</b> 只已触发</span>
-      <span class="tb-item tb-watch">盯 <b>{{ data.watch.count }}</b> 只</span>
-      <span class="tb-item tb-sell">卖 <b>{{ data.sell.exit_count }}</b> 只需离场</span>
-      <span class="tb-note">可用现金 ¥{{ fmtMoney(data.account.cash_cny) }}</span>
+    <!-- 今天做什么：三块一眼看清 -->
+    <div v-if="data" class="tp-summary">
+      <a class="tp-sum" href="#blk-buy">
+        <span class="tp-sum-label">买</span>
+        <b class="tp-sum-num">{{ data.buy.count }}</b>
+        <span class="tp-sum-text">{{ data.buy.count ? '只已触发，照做' : '全市场无 B2，等信号' }}</span>
+      </a>
+      <a class="tp-sum" href="#blk-watch">
+        <span class="tp-sum-label">盯</span>
+        <b class="tp-sum-num">{{ data.watch.count }}</b>
+        <span class="tp-sum-text">{{ data.watch.count ? '只待触发' : '观察池为空' }}</span>
+      </a>
+      <a class="tp-sum" href="#blk-sell">
+        <span class="tp-sum-label">卖</span>
+        <b class="tp-sum-num">{{ data.sell.exit_count }}</b>
+        <span class="tp-sum-text">{{ data.sell.exit_count ? '只需离场' : '无离场信号' }}</span>
+      </a>
+      <span class="tp-sum-cash">可用现金<b>¥{{ fmtMoney(data.account.cash_cny) }}</b></span>
     </div>
 
     <el-skeleton v-if="loading && !data" :rows="8" animated class="today-skeleton" />
 
     <template v-else-if="data">
       <!-- ═══════════ 买 ═══════════ -->
-      <section class="todo-block blk-buy">
+      <section id="blk-buy" class="todo-block blk-buy">
         <div class="blk-hd">
           <span class="blk-badge">买</span>
           <h3 class="blk-title">
-            <template v-if="data.buy.count">{{ data.buy.count }} 只已触发 → 代码 / 价格 / 仓位 / 止损（照做即可）</template>
+            <template v-if="data.buy.count">{{ data.buy.count }} 只 B2 已触发</template>
             <template v-else>今日无 B2 触发 → 不买，等信号</template>
           </h3>
-          <span class="blk-hint">右侧确认：放量 + 中阳 + 站上 MA55/MA60</span>
+          <span class="blk-hint">全市场扫描 · 按评分 / BIAS60 排序 · 仓位与止损可直接照做</span>
         </div>
 
-        <div v-if="data.buy.items.length" class="card-list">
-          <article v-for="b in data.buy.items" :key="b.code" class="todo-card">
-            <div class="card-hd">
-              <div class="card-stk">
+        <div v-if="data.buy.items.length" class="tp-table">
+          <div class="tp-tr tp-th">
+            <span>标的</span>
+            <span>现价 / 触发价</span>
+            <span>建议仓位</span>
+            <span>止损 / 止盈</span>
+            <span class="tp-right">动作</span>
+          </div>
+          <template v-for="b in visibleBuyItems" :key="b.code">
+            <div class="tp-tr">
+              <span class="tp-stk">
                 <router-link class="stk-name" :to="`/stocks/${b.code}`">{{ b.name }}</router-link>
-                <span class="stk-code">{{ b.code }}</span>
-                <span v-if="b.industry" class="stk-industry">{{ b.industry }}</span>
-              </div>
-              <div class="card-tags">
-                <span class="tag tag-signal">{{ b.signal_label }}</span>
-                <span v-if="b.blocked" class="tag tag-exit">环境红灯 · 暂停</span>
-                <span v-if="b.held" class="tag tag-held">已持有</span>
-                <span v-if="b.trigger_date" class="tag">{{ b.trigger_date }} 触发</span>
-              </div>
-            </div>
-
-            <div class="metric-row">
-              <div class="metric">
-                <span class="m-label">现价</span>
-                <span class="m-val">{{ b.current_price }}</span>
-              </div>
-              <div class="metric">
-                <span class="m-label">触发价</span>
-                <span class="m-val">{{ b.trigger_price ?? '—' }}</span>
-              </div>
-              <div class="metric">
-                <span class="m-label">建议仓位</span>
-                <span class="m-val">{{ (b.position_pct * 100).toFixed(1) }}%</span>
-                <span class="m-sub">{{ b.suggest_qty }} 股 · ¥{{ fmtMoney(b.suggest_amount) }}</span>
-              </div>
-              <div class="metric">
-                <span class="m-label">止损</span>
-                <span class="m-val down">{{ b.stop_loss_price }}</span>
-              </div>
-            </div>
-
-            <div class="card-ft">
-              <span class="card-summary">{{ b.summary }}</span>
-              <div class="card-acts">
+                <i class="stk-code">{{ b.code }}</i>
+                <em v-if="b.score" class="tp-chip">评分 {{ b.score }}</em>
+                <em v-if="b.held" class="tp-chip is-held">已持有</em>
+                <em v-if="b.blocked" class="tp-chip is-warn">环境红灯</em>
+              </span>
+              <span class="tp-cell">
+                <b>{{ b.current_price }}</b><i>/ {{ b.trigger_price ?? '—' }}</i>
+              </span>
+              <span class="tp-cell">
+                <b>{{ (b.position_pct * 100).toFixed(1) }}%</b><i>{{ b.suggest_qty }} 股</i>
+              </span>
+              <span class="tp-cell">
+                <b class="is-down">{{ b.stop_loss_price }}</b><i>/ {{ b.take_profit_price }}</i>
+              </span>
+              <span class="tp-acts">
                 <el-button text size="small" @click="toggle('buy:' + b.code)">
-                  {{ expanded['buy:' + b.code] ? '收起理由' : '为什么？' }}
+                  {{ expanded['buy:' + b.code] ? '收起' : '理由' }}
                 </el-button>
-                <el-button class="act act-buy" size="small" :disabled="b.blocked" @click="quickOrder(b.code, 'buy', b.suggest_qty || 100, b.name, { stop_loss_price: b.stop_loss_price, take_profit_price: b.take_profit_price })">
-                  {{ b.blocked ? '闸门红灯 · 暂停' : '照做买入' }}
+                <el-button
+                  class="act act-buy"
+                  size="small"
+                  :disabled="b.blocked"
+                  @click="quickOrder(b.code, 'buy', b.suggest_qty || 100, b.name, { stop_loss_price: b.stop_loss_price, take_profit_price: b.take_profit_price })"
+                >
+                  {{ b.blocked ? '暂停' : '买入' }}
                 </el-button>
-              </div>
+              </span>
             </div>
-
-            <ul v-if="expanded['buy:' + b.code]" class="reason-list">
+            <ul v-if="expanded['buy:' + b.code]" class="reason-list tp-reasons">
               <li v-for="(r, i) in b.reasons" :key="i" :class="`k-${r.kind}`">{{ r.text }}</li>
             </ul>
-          </article>
+          </template>
         </div>
-        <el-empty v-else description="暂无已触发的 B2 买点，今天不买" :image-size="56" />
+        <p v-else class="tp-note">全市场今日无 B2 触发 → 今天不买，等信号。</p>
+
+        <div v-if="data.buy.items.length > BUY_PREVIEW" class="tp-more">
+          <el-button text size="small" @click="showAllBuy = !showAllBuy">
+            {{ showAllBuy ? '收起列表' : `展开全部 ${data.buy.items.length} 只` }}
+          </el-button>
+        </div>
       </section>
 
       <!-- ═══════════ 盯 ═══════════ -->
-      <section class="todo-block blk-watch">
+      <section id="blk-watch" class="todo-block blk-watch">
         <div class="blk-hd">
           <span class="blk-badge">盯</span>
           <h3 class="blk-title">
             <template v-if="data.watch.count">
-              {{ data.watch.count }} 只待触发{{ data.watch.near_count ? `（${data.watch.near_count} 只已进入 2% 临近区）` : '' }} → 明天重点看这几只
+              {{ data.watch.count }} 只待触发{{ data.watch.near_count ? `（${data.watch.near_count} 只已进入 2% 临近区）` : '' }}
             </template>
             <template v-else>观察池暂无待触发标的</template>
           </h3>
-          <span class="blk-hint">B1 左侧信号 ∩ 积累区四条件，只观察，不提前埋伏</span>
+          <span class="blk-hint">观察池 = 积累区 ∩ B1 深度超跌，只埋伏不追</span>
         </div>
 
-        <div v-if="data.watch.items.length" class="watch-list">
-          <div v-for="w in data.watch.items" :key="w.code" class="watch-row" :class="{ near: w.distance_to_trigger >= -0.02 }">
-            <div class="wr-main">
-              <div class="card-stk">
+        <div v-if="data.watch.items.length" class="tp-table">
+          <div class="tp-tr tp-th is-watch">
+            <span>标的</span>
+            <span>现价 → 触发价</span>
+            <span>距触发</span>
+            <span class="tp-right">动作</span>
+          </div>
+          <template v-for="w in data.watch.items" :key="w.code">
+            <div class="tp-tr is-watch">
+              <span class="tp-stk">
                 <router-link class="stk-name" :to="`/stocks/${w.code}`">{{ w.name }}</router-link>
-                <span class="stk-code">{{ w.code }}</span>
-                <span v-if="w.industry" class="stk-industry">{{ w.industry }}</span>
-              </div>
-              <div class="wr-price">
-                <span class="m-val">{{ w.current_price }}</span>
-                <span class="wr-arrow">→</span>
-                <span class="wr-trigger">{{ w.trigger_price }}</span>
-                <span class="wr-dist" :class="{ near: w.distance_to_trigger >= -0.02 }">
-                  距触发 {{ (w.to_trigger_pct * 100).toFixed(2) }}%
-                </span>
-              </div>
+                <i class="stk-code">{{ w.code }}</i>
+                <em v-if="w.industry" class="tp-chip">{{ w.industry }}</em>
+                <em v-if="w.distance_to_trigger >= -0.02" class="tp-chip is-warn">临近</em>
+              </span>
+              <span class="tp-cell">
+                <b>{{ w.current_price }}</b><i>→ {{ w.trigger_price }}</i>
+              </span>
+              <span class="tp-cell">
+                <b :class="{ 'is-warn-text': w.distance_to_trigger >= -0.02 }">
+                  {{ (w.to_trigger_pct * 100).toFixed(2) }}%
+                </b>
+              </span>
+              <span class="tp-acts">
+                <el-button text size="small" @click="toggle('watch:' + w.code)">
+                  {{ expanded['watch:' + w.code] ? '收起' : '理由' }}
+                </el-button>
+              </span>
             </div>
-            <div class="wr-ft">
-              <span class="card-summary">{{ w.summary }}</span>
-              <el-button text size="small" @click="toggle('watch:' + w.code)">
-                {{ expanded['watch:' + w.code] ? '收起理由' : '为什么是它？' }}
-              </el-button>
-            </div>
-            <ul v-if="expanded['watch:' + w.code]" class="reason-list">
+            <ul v-if="expanded['watch:' + w.code]" class="reason-list tp-reasons">
               <li v-for="(r, i) in w.reasons" :key="i" :class="`k-${r.kind}`">{{ r.text }}</li>
             </ul>
-          </div>
+          </template>
         </div>
-        <el-empty v-else description="观察池暂无待触发标的" :image-size="56" />
+        <p v-else class="tp-note">
+          观察池为空：今日没有同时满足「积累区 + B1 深度超跌（BIAS60 -30%~-20%）」的标的。
+          <span class="tp-note-dim">注意口径不同 —— 买 来自全市场 B2 扫描，盯 只看观察池，所以会出现「买有、盯无」。</span>
+        </p>
       </section>
 
       <!-- ═══════════ 卖 ═══════════ -->
-      <section class="todo-block blk-sell">
+      <section id="blk-sell" class="todo-block blk-sell">
         <div class="blk-hd">
           <span class="blk-badge">卖</span>
           <h3 class="blk-title">
-            <template v-if="data.sell.exit_count">{{ data.sell.exit_count }} 只需离场 → 代码 / 原因 / 参考价</template>
+            <template v-if="data.sell.exit_count">{{ data.sell.exit_count }} 只需离场</template>
             <template v-else>持仓无离场信号 → 继续持有</template>
           </h3>
-          <span class="blk-hint">
-            统一离场：止损 8% / 假突破 / S1-S3 卖点 / 跌破 MA5 / 止盈 / 30 日时间止损
-          </span>
+          <span class="blk-hint">止损 8% / 假突破 / S1-S3 卖点 / 跌破 MA5 / 止盈 / 30 日时间止损</span>
         </div>
 
-        <div v-if="data.sell.items.length" class="card-list">
-          <article v-for="s in data.sell.items" :key="s.code" class="todo-card" :class="{ warn: s.state === 'warn' }">
-            <div class="card-hd">
-              <div class="card-stk">
+        <div v-if="data.sell.items.length" class="tp-table">
+          <div class="tp-tr tp-th is-sell">
+            <span>标的</span>
+            <span>状态</span>
+            <span>动作</span>
+            <span>现价 / 参考价</span>
+            <span class="tp-right">操作</span>
+          </div>
+          <template v-for="s in data.sell.items" :key="s.code">
+            <div class="tp-tr is-sell">
+              <span class="tp-stk">
                 <router-link class="stk-name" :to="`/stocks/${s.code}`">{{ s.name }}</router-link>
-                <span class="stk-code">{{ s.code }}</span>
-                <span class="tag" :class="s.source === 'cockpit' ? 'tag-cockpit' : 'tag-paper'">
-                  {{ s.source === 'cockpit' ? '纪律持仓' : '模拟持仓' }}
-                </span>
-              </div>
-              <div class="card-tags">
-                <span class="tag" :class="s.state === 'exit' ? 'tag-exit' : 'tag-warn'">
-                  {{ s.state === 'exit' ? '需离场' : '预警' }}
-                </span>
-                <span v-if="s.pnl_pct != null" class="tag" :class="s.pnl_pct >= 0 ? 'tag-up' : 'tag-down'">
-                  {{ s.pnl_pct >= 0 ? '+' : '' }}{{ s.pnl_pct.toFixed(2) }}%
-                </span>
-              </div>
-            </div>
-
-            <div class="metric-row">
-              <div class="metric">
-                <span class="m-label">动作</span>
-                <span class="m-val">{{ s.advice_label || s.advice }}</span>
-              </div>
-              <div class="metric">
-                <span class="m-label">参考价</span>
-                <span class="m-val">{{ s.reference_price ?? '—' }}</span>
-              </div>
-              <div class="metric">
-                <span class="m-label">现价</span>
-                <span class="m-val">{{ s.current_price ?? '—' }}</span>
-              </div>
-              <div class="metric" v-if="s.state === 'exit'">
-                <span class="m-label">卖出比例</span>
-                <span class="m-val">{{ Math.round((s.sell_pct || 0) * 100) }}%</span>
-              </div>
-            </div>
-
-            <div class="card-ft">
-              <span class="card-summary">
-                {{ s.summary || (s.state === 'exit' ? '按纪律离场' : '今日仅预警，暂不卖出') }}
+                <i class="stk-code">{{ s.code }}</i>
+                <em class="tp-chip">{{ s.source === 'cockpit' ? '纪律持仓' : '模拟持仓' }}</em>
               </span>
-              <div class="card-acts">
+              <span class="tp-cell">
+                <em class="tag" :class="s.state === 'exit' ? 'tag-exit' : 'tag-warn'">
+                  {{ s.state === 'exit' ? '需离场' : '预警' }}
+                </em>
+              </span>
+              <span class="tp-cell">
+                <b>{{ s.advice_label || s.advice }}</b>
+                <i v-if="s.state === 'exit'">卖 {{ Math.round((s.sell_pct || 0) * 100) }}%</i>
+              </span>
+              <span class="tp-cell">
+                <b>{{ s.current_price ?? '—' }}</b><i>/ {{ s.reference_price ?? '—' }}</i>
+              </span>
+              <span class="tp-acts">
                 <el-button text size="small" @click="toggle('sell:' + s.code)">
-                  {{ expanded['sell:' + s.code] ? '收起原因' : '看原因' }}
+                  {{ expanded['sell:' + s.code] ? '收起' : '原因' }}
                 </el-button>
                 <el-button
                   v-if="s.source === 'paper' && s.state === 'exit'"
@@ -260,25 +261,19 @@
                   size="small"
                   @click="quickOrder(s.code, 'sell', Math.round((s.quantity || 0) * (s.sell_pct || 1)) || s.quantity || 1, s.name)"
                 >
-                  按建议卖出
+                  卖出
                 </el-button>
-                <el-button
-                  v-else-if="s.state === 'exit'"
-                  class="act act-sell"
-                  size="small"
-                  @click="closeCockpit(s)"
-                >
-                  了结离场
+                <el-button v-else-if="s.state === 'exit'" class="act act-sell" size="small" @click="closeCockpit(s)">
+                  离场
                 </el-button>
-              </div>
+              </span>
             </div>
-
-            <ul v-if="expanded['sell:' + s.code]" class="reason-list">
+            <ul v-if="expanded['sell:' + s.code]" class="reason-list tp-reasons">
               <li v-for="(r, i) in s.reasons" :key="i" :class="`k-${r.kind}`">{{ r.text }}</li>
             </ul>
-          </article>
+          </template>
         </div>
-        <el-empty v-else description="持仓暂无离场信号，继续按纪律持有" :image-size="56" />
+        <p v-else class="tp-note">持仓暂无离场信号，继续按纪律持有。</p>
 
         <p v-if="data.sell.hold_count" class="blk-foot">
           其余 {{ data.sell.hold_count }} 只持仓未触发任何离场条件，继续持有；盘中每 15 分钟统一扫描一次。
@@ -287,7 +282,7 @@
 
       <p class="page-foot">
         <el-icon><InfoFilled /></el-icon>
-        买 / 盯 来自 B1 ∩ 积累区观察池与 B2 突破扫描；卖 来自统一离场引擎（与持仓追踪同一份结论）。
+        买 = 全市场 B2 突破扫描（按评分 / BIAS60 排序）；盯 = 观察池（积累区 ∩ B1）；卖 = 统一离场引擎（与持仓追踪同一份结论）。
         盘中每 2 分钟自动刷新，页面切走暂停。
       </p>
     </template>
@@ -402,6 +397,14 @@ const expanded = ref<Record<string, boolean>>({})
 function toggle(key: string) {
   expanded.value = { ...expanded.value, [key]: !expanded.value[key] }
 }
+
+// 买列表默认只露前几条，避免一屏 10 张卡片
+const BUY_PREVIEW = 4
+const showAllBuy = ref(false)
+const visibleBuyItems = computed(() => {
+  const items = data.value?.buy.items ?? []
+  return showAllBuy.value ? items : items.slice(0, BUY_PREVIEW)
+})
 
 const tradeDateLabel = computed(() => {
   if (!data.value?.trade_date) return '—'
@@ -1205,11 +1208,148 @@ onUnmounted(() => {
 .op-empty { font-size: 12px; color: var(--el-text-color-placeholder); }
 .analysis-context { margin-bottom: 12px; }
 
+/* ═══════════ 精简版式：三块计数 + 紧凑表格 ═══════════ */
+.tp-summary {
+  display: flex;
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+.tp-sum {
+  flex: 1 1 190px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 11px 14px;
+  border-radius: var(--app-radius);
+  border: 1px solid var(--el-border-color-lighter);
+  background: var(--el-fill-color-blank);
+  text-decoration: none;
+  transition: box-shadow .18s ease, transform .18s ease;
+}
+.tp-sum:hover { box-shadow: 0 4px 14px rgba(0, 0, 0, .07); transform: translateY(-1px); }
+.tp-sum-label {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 800;
+  color: #fff;
+  border-radius: 5px;
+  padding: 1px 8px;
+}
+.tp-sum:nth-of-type(1) .tp-sum-label { background: var(--app-up); }
+.tp-sum:nth-of-type(2) .tp-sum-label { background: var(--el-color-warning); }
+.tp-sum:nth-of-type(3) .tp-sum-label { background: var(--app-down); }
+.tp-sum-num {
+  font-family: var(--app-font-mono);
+  font-size: 23px;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--el-text-color-primary);
+}
+.tp-sum-text { font-size: 12px; color: var(--el-text-color-secondary); }
+.tp-sum-cash {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.tp-sum-cash b {
+  font-family: var(--app-font-mono);
+  font-size: 15px;
+  color: var(--el-text-color-primary);
+}
+
+.tp-table { display: flex; flex-direction: column; }
+.tp-tr {
+  display: grid;
+  grid-template-columns: minmax(190px, 1.5fr) minmax(125px, 1fr) minmax(110px, .9fr) minmax(125px, .9fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-top: 1px solid var(--el-border-color-lighter);
+}
+.tp-tr.is-watch { grid-template-columns: minmax(190px, 1.5fr) minmax(150px, 1.1fr) minmax(100px, .7fr) auto; }
+.tp-tr.is-sell { grid-template-columns: minmax(190px, 1.4fr) minmax(80px, .6fr) minmax(130px, 1fr) minmax(140px, 1fr) auto; }
+.tp-tr:first-child { border-top: none; }
+.tp-th {
+  padding: 5px 12px 7px;
+  font-size: 11px;
+  color: var(--el-text-color-placeholder);
+  background: var(--el-fill-color-lighter);
+  border-radius: 6px;
+  border-top: none;
+}
+.tp-tr:not(.tp-th):hover { background: var(--el-fill-color-lighter); }
+.tp-right { text-align: right; }
+.tp-stk {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+.tp-cell {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  font-family: var(--app-font-mono);
+  font-size: 13px;
+  min-width: 0;
+}
+.tp-cell b { font-weight: 700; color: var(--el-text-color-primary); }
+.tp-cell i {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--el-text-color-placeholder);
+  white-space: nowrap;
+}
+.tp-cell b.is-down { color: var(--app-down); }
+.tp-cell b.is-warn-text { color: var(--el-color-warning); }
+.tp-acts {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.tp-chip {
+  font-style: normal;
+  font-size: 10.5px;
+  line-height: 17px;
+  padding: 0 6px;
+  border-radius: 4px;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color);
+  white-space: nowrap;
+}
+.tp-chip.is-held { color: var(--el-color-primary); background: rgba(64, 158, 255, .08); }
+.tp-chip.is-warn { color: var(--el-color-warning); background: rgba(230, 162, 60, .1); }
+.tp-reasons { grid-column: 1 / -1; margin: 2px 0 4px; }
+.tp-note {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--el-fill-color-lighter);
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--el-text-color-regular);
+}
+.tp-note-dim { color: var(--el-text-color-placeholder); }
+.tp-more { margin-top: 8px; text-align: center; }
+
 @media (max-width: 768px) {
   .card-list { grid-template-columns: 1fr; }
   .blk-hint { margin-left: 0; }
   .env-layers,
   .env-actions { grid-template-columns: 1fr; }
   .env-toggle { margin-left: 0; }
+  .tp-summary { flex-direction: column; }
+  .tp-th { display: none; }
+  .tp-tr,
+  .tp-tr.is-watch,
+  .tp-tr.is-sell { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 6px; }
+  .tp-acts { grid-column: 1 / -1; justify-content: flex-start; }
 }
 </style>

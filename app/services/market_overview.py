@@ -351,9 +351,13 @@ def _emotion_history(days: int = 10) -> dict:
 
 
 async def get_emotion_history(days: int = 10) -> dict:
-    """近 N 交易日情绪序列（独立长缓存 1 小时，供情绪页曲线/周期判断）。"""
+    """近 N 交易日情绪序列（独立长缓存 1 小时，供情绪页曲线/周期判断）。
+
+    缓存 key 必须带 days：闸门判定只取 2 天（gate_service），若与情绪页 10 天
+    共用同一个 key，先跑到的短周期会把长周期结果覆盖成 2 个交易日。
+    """
     return await cached(
-        "vibe:emotion_history", lambda: _emotion_history(days),
+        f"vibe:emotion_history:{days}", lambda: _emotion_history(days),
         category="market", ttl=3600,
         valid=lambda v: bool(v.get("series")),
     )

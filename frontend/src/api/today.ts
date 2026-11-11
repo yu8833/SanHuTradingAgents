@@ -21,6 +21,8 @@ export interface TodayBuyItem {
   industry: string
   signal_label: string
   trigger_date: string | null
+  score?: number
+  bias60?: number | null
   current_price: number
   trigger_price: number | null
   stop_loss_price: number
