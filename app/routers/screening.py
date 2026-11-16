@@ -1179,8 +1179,9 @@ async def check_data_freshness(user: dict = Depends(get_current_user)):
 async def check_data_completeness(user: dict = Depends(get_current_user)):
     """近段数据完整性检查（按「去重股票数」的逐日覆盖度）。
 
-    口径变更：某交易日「有数据的去重股票数」占当日在市股票（已上市、未退市）的比例
-    ≥ 95% 视为完整。不再使用行数，避免同股多源备份（akshare/tushare 并存）被误判。
+    口径与「修复数据缺口」审计完全同源：某交易日只要存在可补缺口
+    （标的缺失或低质量）即视为不完整，与 audit_coverage 的 has_gaps 一致；
+    覆盖率不足但缺口已登记为数据源确实无数据时，不再报不完整。
     结果按 DATA_COMPLETENESS_CACHE_TTL 秒缓存，避免前端轮询时重复聚合。
     """
     try:
@@ -1193,8 +1194,8 @@ async def check_data_completeness(user: dict = Depends(get_current_user)):
         window_n = _settings.DATA_COMPLETENESS_WINDOW_TRADING_DAYS
         ratio = _settings.DATA_COMPLETENESS_MIN_RATIO
         ttl = _settings.DATA_COMPLETENESS_CACHE_TTL
-        # v3：完整性口径改为「覆盖率≥95% 即完整」（低质量不再让整日判为不完整）
-        cache_key = f"screening:data-completeness:v3:n{window_n}:unique"
+        # v4：完整性口径与缺口审计统一为「无 needs_repair 缺口即完整」
+        cache_key = f"screening:data-completeness:v4:n{window_n}:unique"
 
         redis = None
         try:
@@ -1234,7 +1235,8 @@ async def check_data_completeness(user: dict = Depends(get_current_user)):
                     "count": int(r.get("actual") or 0),
                     "expected": int(r.get("expected") or 0),
                     "coverage_pct": r.get("coverage_pct", 0),
-                    "complete": r.get("status") == "ok",
+                    # 与缺口审计同源：needs_repair=False 即该日完整
+                    "complete": not r.get("needs_repair", False),
                 }
                 for r in rows
             ]

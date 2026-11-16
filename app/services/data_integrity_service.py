@@ -534,6 +534,9 @@ class DataIntegrityService:
                     "missing_count": len(missing),
                     "low_quality_count": len(low_quality),
                     "status": status,
+                    # 统一口径：只有「可补的缺口」才算不完整。覆盖率不足但缺口已登记为
+                    # 数据源确实无数据（unavailable）时，不再反复报缺口。
+                    "needs_repair": bool(missing or low_quality),
                     "missing_codes": sorted(missing)[:50],
                     "low_quality_codes": sorted(low_quality)[:50],
                     # 完整集合仅供内部修复使用，对外 API 会剔除
@@ -577,6 +580,8 @@ class DataIntegrityService:
                     "coverage_pct": round(coverage * 100, 2),
                     "missing_count": len(missing),
                     "status": status,
+                    # 与行情一致：以「可补缺口」判定完整性，而不是单看覆盖率
+                    "needs_repair": bool(missing),
                     "missing_codes": sorted(missing)[:50],
                     "_missing_all": sorted(missing),
                 }
@@ -653,18 +658,21 @@ class DataIntegrityService:
                 d.pop("_missing_all", None)
                 d.pop("_low_quality_all", None)
 
-        gap_dates = [d for d in quotes_details if d["status"] == "gap"]
-        # 散点缺口：覆盖率达标（>=95%）但仍有个别股票缺失/低质量的日期，也要补
+        # 统一口径：所有「完整性」结论都只看 needs_repair（是否存在可补缺口），
+        # 避免卡片按覆盖率、审计按缺口数导致同一份数据得出相反结论。
+        gap_dates = [d for d in quotes_details if d["status"] == "gap" and d["needs_repair"]]
         scattered_dates = [
             d for d in quotes_details
-            if d["status"] != "gap" and (d["missing_count"] > 0 or d["low_quality_count"] > 0)
+            if d["status"] != "gap" and d["needs_repair"]
         ]
-        basic_gaps = [d for d in basic_details if d["missing_count"] > 0]
-        moneyflow_gaps = [d for d in moneyflow_details if d["missing_count"] > 0]
+        basic_gaps = [d for d in basic_details if d["needs_repair"]]
+        moneyflow_gaps = [d for d in moneyflow_details if d["needs_repair"]]
 
         total_missing = sum(d["missing_count"] for d in gap_dates + scattered_dates)
         total_low_quality = sum(d["low_quality_count"] for d in gap_dates + scattered_dates)
-        has_gaps = bool(gap_dates or scattered_dates or basic_gaps or moneyflow_gaps)
+        has_gaps = any(
+            d["needs_repair"] for d in quotes_details + basic_details + moneyflow_details
+        )
 
         # 粗估耗时：整日缺口按每日 20s，散点按每只 1.5s，估值/资金每日 10s
         estimated = (
@@ -754,6 +762,23 @@ class DataIntegrityService:
         return result
 
     # ==================== 缺口修复（按缺口驱动补数） ====================
+
+    async def _invalidate_completeness_cache(self) -> None:
+        """清掉数据健康卡片的完整性缓存。
+
+        卡片接口（/screening/data-completeness）有 10 分钟缓存，而「修复数据缺口」的
+        审计结果不走缓存。若修复完成后不主动失效，卡片会在最长 TTL 内继续显示修复前的
+        旧覆盖度（如 18/20），与弹窗里的「数据完整，无需修复」看起来冲突。
+        """
+        try:
+            from app.core.redis_client import get_redis
+
+            redis = get_redis()
+            keys = await redis.keys("screening:data-completeness:*")
+            if keys:
+                await redis.delete(*keys)
+        except Exception as e:
+            logger.warning(f"清理完整性缓存失败（忽略）: {e}")
 
     async def start_repair(self, window_trading_days: int = DEFAULT_AUDIT_WINDOW) -> dict[str, Any]:
         """启动一次缺口修复（后台执行），立即返回 run_id 供前端轮询。
@@ -958,6 +983,7 @@ class DataIntegrityService:
             )
         finally:
             self._repair_inflight = False
+            await self._invalidate_completeness_cache()
             if redis_ok and redis_service and lock_value:
                 try:
                     await redis_service.release_lock("lock:data_integrity:repair", lock_value)
