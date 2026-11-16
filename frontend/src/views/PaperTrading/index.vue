@@ -14,6 +14,7 @@
       <div class="page-hero-meta">
         <span class="page-hero-tag">{{ tradeDateLabel }}</span>
         <span class="page-hero-tag">{{ sessionLabel }}</span>
+        <span v-if="data" class="page-hero-tag">生成 {{ formatAsOf(data.as_of) }}</span>
         <el-button :icon="Refresh" text size="small" :loading="loading" @click="load">刷新</el-button>
         <el-button type="primary" :icon="Plus" @click="openOrderDialog">下市场单</el-button>
       </div>
@@ -76,8 +77,10 @@
     <div v-if="data" class="tp-summary">
       <a class="tp-sum" href="#blk-buy">
         <span class="tp-sum-label">买</span>
-        <b class="tp-sum-num">{{ data.buy.count }}</b>
-        <span class="tp-sum-text">{{ data.buy.count ? '只已触发，照做' : '全市场无 B2，等信号' }}</span>
+        <b class="tp-sum-num">{{ data.buy.actionable_count }}</b>
+        <span class="tp-sum-text">
+          {{ data.buy.count ? `只可执行 / 共 ${data.buy.count} 只已触发` : '全市场无 B2，等信号' }}
+        </span>
       </a>
       <a class="tp-sum" href="#blk-watch">
         <span class="tp-sum-label">盯</span>
@@ -87,9 +90,13 @@
       <a class="tp-sum" href="#blk-sell">
         <span class="tp-sum-label">卖</span>
         <b class="tp-sum-num">{{ data.sell.exit_count }}</b>
-        <span class="tp-sum-text">{{ data.sell.exit_count ? '只需离场' : '无离场信号' }}</span>
+        <span class="tp-sum-text">
+          {{ data.sell.exit_count || data.sell.warn_count
+            ? `只需离场${data.sell.warn_count ? ` · ${data.sell.warn_count} 只预警` : ''}`
+            : '无离场信号' }}
+        </span>
       </a>
-      <span class="tp-sum-cash">可用现金<b>¥{{ fmtMoney(data.account.cash_cny) }}</b></span>
+      <span class="tp-sum-cash">可用现金<b>¥{{ fmtMoney(data.account.cash_cny) }}</b><i>总资产 ¥{{ fmtMoney(data.account.equity) }}</i></span>
     </div>
 
     <el-skeleton v-if="loading && !data" :rows="8" animated class="today-skeleton" />
@@ -100,10 +107,36 @@
         <div class="blk-hd">
           <span class="blk-badge">买</span>
           <h3 class="blk-title">
-            <template v-if="data.buy.count">{{ data.buy.count }} 只 B2 已触发</template>
+            <template v-if="data.buy.count">
+              {{ data.buy.count }} 只 B2 已触发 · {{ data.buy.actionable_count }} 只可执行
+            </template>
             <template v-else>今日无 B2 触发 → 不买，等信号</template>
           </h3>
-          <span class="blk-hint">全市场扫描 · 按评分 / BIAS60 排序 · 仓位与止损可直接照做</span>
+          <span class="blk-hint">全市场扫描 · 今日方向过滤 · 仓位/止损由规则计算</span>
+        </div>
+
+        <!-- L1 方向：今日结论的主攻 / 回避 -->
+        <div class="dir-bar" :class="{ 'is-off': !data.direction.usable }">
+          <span class="dir-tag">今日方向</span>
+          <template v-if="data.direction.usable">
+            <span class="dir-line">
+              主攻
+              <em v-for="ind in data.direction.attack_industries" :key="ind" class="dir-chip is-attack">{{ ind }}</em>
+              <i v-if="!data.direction.attack_industries.length">未列主攻</i>
+            </span>
+            <span v-if="data.direction.avoid_industries.length" class="dir-line">
+              回避
+              <em v-for="ind in data.direction.avoid_industries" :key="ind" class="dir-chip is-avoid">{{ ind }}</em>
+            </span>
+            <span v-if="data.buy.filtered.avoid || data.buy.filtered.not_attack" class="dir-filtered">
+              候选已剔除 {{ data.buy.filtered.avoid + data.buy.filtered.not_attack }} 只
+              （回避 {{ data.buy.filtered.avoid }} / 非主攻 {{ data.buy.filtered.not_attack }}）
+            </span>
+            <span v-if="data.direction.as_of" class="dir-filtered">结论日 {{ data.direction.as_of }}</span>
+          </template>
+          <span v-else class="dir-line is-warn">
+            未生效：{{ data.direction.note || '今日结论缺少主攻/回避行业' }}
+          </span>
         </div>
 
         <div v-if="data.buy.items.length" class="tp-table">
@@ -121,16 +154,22 @@
                 <i class="stk-code">{{ b.code }}</i>
                 <em v-if="b.score" class="tp-chip">评分 {{ b.score }}</em>
                 <em v-if="b.held" class="tp-chip is-held">已持有</em>
-                <em v-if="b.blocked" class="tp-chip is-warn">环境红灯</em>
+                <em v-if="b.blocked" class="tp-chip is-warn">暂停</em>
+                <em v-if="b.price_source === 'signal'" class="tp-chip is-warn">信号日价</em>
               </span>
               <span class="tp-cell">
-                <b>{{ b.current_price }}</b><i>/ {{ b.trigger_price ?? '—' }}</i>
+                <b>{{ b.current_price ?? '—' }}</b><i>/ {{ b.trigger_price ?? '—' }}</i>
               </span>
               <span class="tp-cell">
-                <b>{{ (b.position_pct * 100).toFixed(1) }}%</b><i>{{ b.suggest_qty }} 股</i>
+                <template v-if="b.blocked">
+                  <b class="is-down">暂停</b><i class="blk-reason" :title="b.block_reason">{{ b.block_reason }}</i>
+                </template>
+                <template v-else>
+                  <b>{{ (b.position_pct * 100).toFixed(1) }}%</b><i>{{ b.suggest_qty }} 股</i>
+                </template>
               </span>
               <span class="tp-cell">
-                <b class="is-down">{{ b.stop_loss_price }}</b><i>/ {{ b.take_profit_price }}</i>
+                <b class="is-down">{{ b.stop_loss_price ?? '—' }}</b><i>/ {{ b.take_profit_price ?? '—' }}</i>
               </span>
               <span class="tp-acts">
                 <el-button text size="small" @click="toggle('buy:' + b.code)">
@@ -139,8 +178,11 @@
                 <el-button
                   class="act act-buy"
                   size="small"
-                  :disabled="b.blocked"
-                  @click="quickOrder(b.code, 'buy', b.suggest_qty || 100, b.name, { stop_loss_price: b.stop_loss_price, take_profit_price: b.take_profit_price })"
+                  :disabled="b.blocked || !b.suggest_qty || b.suggest_qty < 100"
+                  @click="quickOrder(b.code, 'buy', b.suggest_qty, b.name, {
+                    stop_loss_price: b.stop_loss_price ?? undefined,
+                    take_profit_price: b.take_profit_price ?? undefined,
+                  })"
                 >
                   {{ b.blocked ? '暂停' : '买入' }}
                 </el-button>
@@ -151,7 +193,12 @@
             </ul>
           </template>
         </div>
-        <p v-else class="tp-note">全市场今日无 B2 触发 → 今天不买，等信号。</p>
+        <p v-else class="tp-note">
+          <template v-if="data.buy.filtered.avoid || data.buy.filtered.not_attack">
+            B2 与观察池经今日方向过滤后无剩余标的（回避 {{ data.buy.filtered.avoid }} / 非主攻 {{ data.buy.filtered.not_attack }}）→ 今天不买。
+          </template>
+          <template v-else>全市场今日无 B2 触发 → 今天不买，等信号。</template>
+        </p>
 
         <div v-if="data.buy.items.length > BUY_PREVIEW" class="tp-more">
           <el-button text size="small" @click="showAllBuy = !showAllBuy">
@@ -170,7 +217,7 @@
             </template>
             <template v-else>观察池暂无待触发标的</template>
           </h3>
-          <span class="blk-hint">观察池 = 积累区 ∩ B1 深度超跌，只埋伏不追</span>
+          <span class="blk-hint">观察池 = 积累区 ∩ B1 深度超跌 · 已按今日方向过滤 · 只埋伏不追</span>
         </div>
 
         <div v-if="data.watch.items.length" class="tp-table">
@@ -186,7 +233,8 @@
                 <router-link class="stk-name" :to="`/stocks/${w.code}`">{{ w.name }}</router-link>
                 <i class="stk-code">{{ w.code }}</i>
                 <em v-if="w.industry" class="tp-chip">{{ w.industry }}</em>
-                <em v-if="w.distance_to_trigger >= -0.02" class="tp-chip is-warn">临近</em>
+                <em v-if="w.stale" class="tp-chip is-warn">触发已过期</em>
+                <em v-else-if="w.distance_to_trigger >= -0.02" class="tp-chip is-warn">临近</em>
               </span>
               <span class="tp-cell">
                 <b>{{ w.current_price }}</b><i>→ {{ w.trigger_price }}</i>
@@ -218,7 +266,10 @@
         <div class="blk-hd">
           <span class="blk-badge">卖</span>
           <h3 class="blk-title">
-            <template v-if="data.sell.exit_count">{{ data.sell.exit_count }} 只需离场</template>
+            <template v-if="data.sell.exit_count">
+              {{ data.sell.exit_count }} 只需离场{{ data.sell.warn_count ? ` · ${data.sell.warn_count} 只预警` : '' }}
+            </template>
+            <template v-else-if="data.sell.warn_count">{{ data.sell.warn_count }} 只预警，暂无强制离场</template>
             <template v-else>持仓无离场信号 → 继续持有</template>
           </h3>
           <span class="blk-hint">止损 8% / 假突破 / S1-S3 卖点 / 跌破 MA5 / 止盈 / 30 日时间止损</span>
@@ -259,7 +310,8 @@
                   v-if="s.source === 'paper' && s.state === 'exit'"
                   class="act act-sell"
                   size="small"
-                  @click="quickOrder(s.code, 'sell', Math.round((s.quantity || 0) * (s.sell_pct || 1)) || s.quantity || 1, s.name)"
+                  :disabled="!s.quantity"
+                  @click="quickOrder(s.code, 'sell', Math.max(1, Math.round((s.quantity || 0) * (s.sell_pct || 1))), s.name)"
                 >
                   卖出
                 </el-button>
@@ -276,14 +328,18 @@
         <p v-else class="tp-note">持仓暂无离场信号，继续按纪律持有。</p>
 
         <p v-if="data.sell.hold_count" class="blk-foot">
-          其余 {{ data.sell.hold_count }} 只持仓未触发任何离场条件，继续持有；盘中每 15 分钟统一扫描一次。
+          其余 {{ data.sell.hold_count }} 只持仓未触发任何离场条件，继续持有；离场结论与持仓追踪同一份数据，随页面刷新更新。
         </p>
       </section>
 
       <p class="page-foot">
         <el-icon><InfoFilled /></el-icon>
-        买 = 全市场 B2 突破扫描（按评分 / BIAS60 排序）；盯 = 观察池（积累区 ∩ B1）；卖 = 统一离场引擎（与持仓追踪同一份结论）。
+        买 = 全市场 B2 触发的标的再经「今日结论」主攻/回避方向过滤，仓位与止损由规则计算；盯 = 观察池（积累区 ∩ B1）；卖 = 统一离场引擎。
         盘中每 2 分钟自动刷新，页面切走暂停。
+        <span class="tp-note-dim">
+          生成于 {{ formatAsOf(data.as_of) }} · 规则 {{ data.meta.rule_version }} · 快照 {{ data.meta.snapshot_hash }}
+          <template v-if="data.meta.data_quality.length"> · 数据提示：{{ data.meta.data_quality.join('；') }}</template>
+        </span>
       </p>
     </template>
 
@@ -559,6 +615,13 @@ const submitDisabled = computed(() => {
 const fmtMoney = (v: number | null | undefined) => {
   if (v == null) return '—'
   return v.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+const formatAsOf = (v: string | null | undefined) => {
+  if (!v) return '—'
+  const d = new Date(v)
+  if (Number.isNaN(d.getTime())) return v
+  return d.toLocaleString('zh-CN', { hour12: false })
 }
 
 async function fetchPreview() {
@@ -945,6 +1008,42 @@ onUnmounted(() => {
   color: var(--el-text-color-placeholder);
 }
 
+/* L1 今日方向条 */
+.dir-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--el-color-primary-light-7);
+  background: var(--el-color-primary-light-9);
+  font-size: 12.5px;
+  color: var(--el-text-color-regular);
+}
+.dir-bar.is-off {
+  border-color: var(--el-color-warning-light-5);
+  background: var(--el-color-warning-light-9);
+}
+.dir-tag {
+  flex: none;
+  font-weight: 600;
+  color: var(--el-color-primary);
+}
+.dir-bar.is-off .dir-tag { color: var(--el-color-warning); }
+.dir-line { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.dir-line.is-warn { color: var(--el-color-warning-dark-2); }
+.dir-chip {
+  font-style: normal;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.dir-chip.is-attack { color: var(--el-color-success-dark-2); background: var(--el-color-success-light-9); }
+.dir-chip.is-avoid { color: var(--el-color-danger-dark-2); background: var(--el-color-danger-light-9); }
+.dir-filtered { color: var(--el-text-color-placeholder); }
+
 /* 卡片 */
 .card-list {
   display: grid;
@@ -1261,6 +1360,11 @@ onUnmounted(() => {
   font-size: 15px;
   color: var(--el-text-color-primary);
 }
+.tp-sum-cash i {
+  font-style: normal;
+  margin-left: 6px;
+  color: var(--el-text-color-placeholder);
+}
 
 .tp-table { display: flex; flex-direction: column; }
 .tp-tr {
@@ -1305,6 +1409,12 @@ onUnmounted(() => {
   font-size: 11px;
   color: var(--el-text-color-placeholder);
   white-space: nowrap;
+}
+.tp-cell i.blk-reason {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .tp-cell b.is-down { color: var(--app-down); }
 .tp-cell b.is-warn-text { color: var(--el-color-warning); }

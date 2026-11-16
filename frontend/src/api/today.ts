@@ -23,15 +23,18 @@ export interface TodayBuyItem {
   trigger_date: string | null
   score?: number
   bias60?: number | null
-  current_price: number
+  current_price: number | null
+  price_source: 'live' | 'close' | 'signal' | 'none'
   trigger_price: number | null
-  stop_loss_price: number
-  take_profit_price: number
+  stop_loss_price: number | null
+  take_profit_price: number | null
   position_pct: number
   suggest_qty: number
   suggest_amount: number
+  risk_amount?: number
   held: boolean
   blocked: boolean
+  block_reason: string
   action: string
   summary: string
   reasons: ReasonItem[]
@@ -42,6 +45,7 @@ export interface TodayWatchItem {
   name: string
   industry: string
   status: string
+  stale?: boolean
   current_price: number
   trigger_price: number
   distance_to_trigger: number
@@ -97,15 +101,41 @@ export interface TodayEnvironment {
   degrade_note: string
 }
 
+export interface TodayDirection {
+  status: 'ok' | 'unavailable'
+  usable: boolean
+  attack_industries: string[]
+  avoid_industries: string[]
+  as_of: string | null
+  direction: string | null
+  conclusion: string
+  note: string
+}
+
+export interface TodayMeta {
+  rule_version: string
+  snapshot_hash: string
+  as_of: string
+  trade_date: string
+  rule_engine: string
+  data_quality: string[]
+}
+
 export interface TodayActions {
   as_of: string
   trade_date: string
-  session: { is_intraday: boolean; quote_as_of: string | null }
+  session: { is_intraday: boolean; quote_as_of: string | null; price_source?: string }
   gate: TodayGate
   mainlines: Array<{ name: string; streak: number; net_3d: number; pct_3d: number }>
   environment: TodayEnvironment
-  account: { cash_cny: number }
-  buy: { count: number; items: TodayBuyItem[] }
+  account: { cash_cny: number; equity: number }
+  direction: TodayDirection
+  buy: {
+    count: number
+    actionable_count: number
+    items: TodayBuyItem[]
+    filtered: { avoid: number; not_attack: number }
+  }
   watch: { count: number; near_count: number; items: TodayWatchItem[] }
   sell: {
     count: number
@@ -114,6 +144,7 @@ export interface TodayActions {
     hold_count: number
     items: TodaySellItem[]
   }
+  meta: TodayMeta
 }
 
 async function getData<T>(url: string, params?: Record<string, any>, timeout = 60000): Promise<T> {

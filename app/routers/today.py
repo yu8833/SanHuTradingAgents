@@ -1,169 +1,25 @@
 """今日待办聚合接口
 
-把系统里分散的买卖结论收敛成「一个页面、三块待办」：
-- 买：B2 突破买点已触发 → 代码 / 价格 / 仓位 / 止损（照做即可）
-- 盯：积累区观察池里距触发最近的标的 → 明天重点看这几只
-- 卖：持仓的统一离场结论 → 代码 / 原因 / 参考价
+三层分工，AI 只做方向、规则层负责执行：
+- L1 方向：大盘研判「今日结论」的结构化主攻/回避行业；
+- L2 候选：全市场 B2 + 观察池，经主攻/回避行业过滤；
+- L3 执行：纯规则计算仓位/止损/组合约束（decision.rules.decide）。
 
-每一条都直接给结论，并把系统内已有的依据（B1/B2 信号、积累区四条件、
-行业主线、环境闸门、统一离场原因）编排成可展开的「为什么」。
+接口本身只做「鉴权 → 构建快照 → 调用纯函数 → 组装页面数据」，不再内联买卖判定。
 """
 
 import logging
-from datetime import datetime
 
 from fastapi import APIRouter, Depends
 
-from app.core.collections import Collections
 from app.core.database import get_mongo_db
 from app.core.response import fail, ok
 from app.routers.auth_db import get_current_user
-from app.services.cache_layer import cached
-from app.services.cockpit import gate_service, position_service
-from app.services.industry_dashboard import get_industry_period_flows
-from app.services.intraday_guide_service import (
-    _advice_for,
-    _load_open_positions,
-    evaluate_sell_signal,
-)
-from app.utils.timezone import now_tz
-from app.utils.trading_time import is_trading_day
+from app.services.decision import decide
+from app.services.decision.snapshot import build_snapshot
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-# 三买三卖：单票最大仓位（占总资金），B2 position_pct=0.67 → 实际约 10%
-MAX_SINGLE_POSITION_PCT = 0.15
-# 环境闸门 → 仓位系数
-_GATE_FACTOR = {"green": 1.0, "yellow": 0.5, "red": 0.0}
-
-
-def _is_intraday(now: datetime) -> bool:
-    if not is_trading_day(now.strftime("%Y%m%d")):
-        return False
-    minutes = now.hour * 60 + now.minute
-    return (9 * 60 + 25) <= minutes <= (15 * 60 + 5)
-
-
-def _fmt_trade_date(raw) -> str | None:
-    if not raw:
-        return None
-    s = str(raw).replace("-", "")
-    return f"{s[:4]}-{s[4:6]}-{s[6:8]}" if len(s) == 8 and s.isdigit() else str(raw)
-
-
-def _holding_days(buy_date: str | None, trade_date: str) -> int:
-    try:
-        d0 = datetime.strptime(str(buy_date)[:10], "%Y-%m-%d")
-        d1 = datetime.strptime(trade_date, "%Y-%m-%d")
-        return max((d1 - d0).days, 0)
-    except (ValueError, TypeError):
-        return 0
-
-
-async def _gate_cached(db) -> dict:
-    async def _build() -> dict:
-        return await gate_service.build_gate(db)
-
-    return await cached("cockpit:gate", _build, category="market")
-
-
-async def _current_prices(db, codes: list[str]) -> tuple[dict[str, float], str | None]:
-    """批量取现价：盘中用实时行情，收盘后用当日收盘快照。"""
-    codes = [c for c in dict.fromkeys(codes) if c]
-    if not codes:
-        return {}, None
-    now = now_tz()
-    if _is_intraday(now):
-        try:
-            from app.services.quotes_service import get_quotes_service
-
-            quotes = await get_quotes_service().get_quotes(codes)
-            return {c: q["close"] for c, q in quotes.items() if q.get("close")}, None
-        except Exception as exc:
-            logger.warning(f"今日待办-实时价获取失败（回退收盘快照）: {exc}")
-    try:
-        latest = await db[Collections.market_quotes].find_one({}, {"trade_date": 1}, sort=[("trade_date", -1)])
-        trade_date = (latest or {}).get("trade_date")
-        if not trade_date:
-            return {}, None
-        rows = await db[Collections.market_quotes].find(
-            {"trade_date": trade_date, "code": {"$in": codes}}, {"code": 1, "close": 1, "_id": 0}
-        ).to_list(None)
-        return {r["code"]: r["close"] for r in rows if r.get("close")}, _fmt_trade_date(trade_date)
-    except Exception as exc:
-        logger.warning(f"今日待办-收盘快照读取失败: {exc}")
-        return {}, None
-
-
-def _mainline_map(periods: dict) -> dict[str, dict]:
-    """行业 → {streak, net_3d, pct_3d, is_mainline}（与 02 主线同口径）。"""
-    net_by_name: dict[str, dict[str, float]] = {}
-    pct_by_name: dict[str, float] = {}
-    for key in ("3", "5", "10", "20"):
-        for row in periods.get(key) or []:
-            name = row.get("name")
-            if not name:
-                continue
-            net_by_name.setdefault(name, {})[key] = row.get("net") or 0
-            if key == "3":
-                pct_by_name[name] = row.get("pct") or 0
-    out: dict[str, dict] = {}
-    for name, nets in net_by_name.items():
-        streak = 0
-        for key in ("3", "5", "10", "20"):
-            if nets.get(key, 0) > 0:
-                streak = int(key)
-            else:
-                break
-        out[name] = {
-            "streak": streak,
-            "net_3d": nets.get("3", 0),
-            "pct_3d": pct_by_name.get(name, 0),
-            "is_mainline": streak >= 3,
-        }
-    return out
-
-
-def _accum_reasons(doc: dict) -> list[dict]:
-    """积累区四条件（池内文档真实数值）→ 可展开依据。"""
-    reasons: list[dict] = []
-    sideways = doc.get("sideways_days")
-    volp = doc.get("volatility_pctile")
-    conv = doc.get("converge_ratio")
-    amount = doc.get("avg_amount_20d")
-    if sideways is not None:
-        reasons.append({"kind": "trend", "text": f"形态：横盘 {int(sideways)} 日未创新低（60 日低点之上，筹码在积累）"})
-    if volp is not None:
-        reasons.append({"kind": "trend", "text": f"波动收敛：20 日年化波动率处于自身 250 日的 {volp * 100:.0f}% 分位（阈值 <40%）"})
-    if conv is not None:
-        reasons.append({"kind": "trend", "text": f"振幅收敛：近 15 日均振幅 / 60 日均振幅 = {conv:.2f}（阈值 ≤0.9）"})
-    if amount is not None:
-        reasons.append({"kind": "liquidity", "text": f"流动性：20 日日均成交额 {amount / 1e8:.2f} 亿元（阈值 ≥1 亿）"})
-    return reasons
-
-
-def _industry_reason(industry: str, mainlines: dict[str, dict]) -> dict:
-    info = mainlines.get(industry) or {}
-    if info.get("is_mainline"):
-        return {
-            "kind": "mainline",
-            "text": (
-                f"主线共振：行业「{industry}」连续 {info['streak']} 日累计净流入为正，"
-                f"3 日涨幅 {info['pct_3d']:+.2f}%、净流入 {info['net_3d']:.2f} 亿"
-            ),
-        }
-    return {"kind": "flat", "text": f"行业「{industry or '—'}」当前不在资金持续净流入主线内（不享受主线溢价）"}
-
-
-def _env_reason(gate: dict) -> dict:
-    phase = (gate.get("emotion_phase") or {}).get("label") or "情绪数据缺失"
-    portrait = gate.get("portrait") or "画像缺失"
-    return {
-        "kind": "env",
-        "text": f"环境闸门：{gate.get('label')}（{portrait} · {phase}），仓位建议 {gate.get('position_hint')}",
-    }
-
 
 _GATE_CN = {"green": "绿灯", "yellow": "黄灯", "red": "红灯"}
 _PHASE_TONE = {
@@ -173,20 +29,19 @@ _PHASE_TONE = {
 
 
 def _build_environment(gate: dict, trade_date: str) -> dict:
-    """把环境闸门展开成「三层结论 + 详尽说明 + 该怎么做」。
-
-    三层结论：市场画像 · 情绪阶段 · 仓位纪律；每层给依据，再给买/盯/卖三条动作。
-    """
+    """把环境闸门展开成「三层结论 + 详尽说明 + 该怎么做」。"""
     gate_key = gate.get("gate") or "yellow"
     gate_label = gate.get("label") or "轻仓试错"
     portrait = gate.get("portrait") or "画像未知"
     phase = gate.get("emotion_phase") or {}
     phase_label = phase.get("label") or "情绪未知"
     position_hint = gate.get("position_hint") or "—"
+    advice = gate.get("advice")
+    if not isinstance(advice, str) or not advice:
+        advice = "顺势控制仓位"
     dims = gate.get("dims") or {}
     emotion = gate.get("emotion") or {}
 
-    # ① 画像：四维 + 判定依据
     portrait_points: list[str] = []
     dim_line = " · ".join(
         f"{k}{v}"
@@ -204,7 +59,6 @@ def _build_environment(gate: dict, trade_date: str) -> dict:
     if not portrait_points:
         portrait_points.append("画像依据暂缺，按保守口径处理")
 
-    # ② 情绪：当日涨停/跌停/炸板 + 阶段含义
     phase_points: list[str] = []
     if emotion.get("zt") is not None:
         phase_points.append(
@@ -222,7 +76,6 @@ def _build_environment(gate: dict, trade_date: str) -> dict:
         phase_points.append("情绪收缩期：等冰点/退潮走完、出现修复信号再谈进攻")
     phase_points.append(f"阶段判定：{phase.get('desc') or '情绪数据不足'}")
 
-    # ③ 仓位：闸门结论 + 为什么是这个仓位
     position_points = [f"闸门判定 {gate_label}（{_GATE_CN.get(gate_key, '')}）→ 仓位上限 {position_hint}"]
     if gate_key == "red":
         position_points.extend(
@@ -235,20 +88,19 @@ def _build_environment(gate: dict, trade_date: str) -> dict:
     elif gate_key == "yellow":
         position_points.extend(
             [
-                "轻仓试错：单票不超过总资金 10%，只做临近触发的标的",
+                "轻仓试错：单票不超过总资金 15%，持仓不超过 3 只，只做临近触发的标的",
                 "不追高、不接力，触发失败立即退出",
-                f"画像建议：{gate.get('advice') or '顺势控制仓位'}",
+                f"画像建议：{advice}",
             ]
         )
     else:
         position_points.extend(
             [
                 "趋势与情绪共振，可按 B2 信号正常执行",
-                f"画像建议：{gate.get('advice') or '顺势持仓，让利润奔跑'}",
+                f"画像建议：{advice}",
             ]
         )
 
-    # ④ 三块动作：与页面买/盯/卖一一对应
     if gate_key == "red":
         actions = [
             {
@@ -275,14 +127,14 @@ def _build_environment(gate: dict, trade_date: str) -> dict:
             {
                 "side": "买",
                 "tone": "down",
-                "title": "只做临近触发，单票 ≤10%",
-                "text": "只执行已触发且处于主线行业的 B2，回踩不破触发价再下手；环境一般时不追第二根阳线。",
+                "title": "只做临近触发，单票 ≤15%",
+                "text": "只执行已触发、且处于今日结论主攻方向的 B2；环境一般时风险预算减半、最多持有 3 只。",
             },
             {
                 "side": "盯",
                 "tone": "flat",
-                "title": "盯临近触发 + 主线方向",
-                "text": "优先看距触发 2% 以内的标的，叠加行业资金连续净流入的再加一分；退潮期不接力高位股。",
+                "title": "盯临近触发 + 主攻方向",
+                "text": "优先看距触发 2% 以内、且行业在今日主攻方向的标的；退潮期不接力高位股。",
             },
             {
                 "side": "卖",
@@ -297,13 +149,13 @@ def _build_environment(gate: dict, trade_date: str) -> dict:
                 "side": "买",
                 "tone": "up",
                 "title": "按 B2 信号正常进攻",
-                "text": "已触发且属于主线的 B2 可按建议仓位执行，单票不超过总资金 15%，首笔不满仓。",
+                "text": "已触发且属于主攻方向的 B2 可按规则仓位执行，单票不超过总资产 15%，首笔不满仓。",
             },
             {
                 "side": "盯",
                 "tone": "flat",
                 "title": "提前排好次日触发清单",
-                "text": "把积累区里距触发最近的标的按行业分组，开盘先看主线方向是否延续，再等触发确认。",
+                "text": "把积累区里距触发最近的标的按行业分组，开盘先看主攻方向是否延续，再等触发确认。",
             },
             {
                 "side": "卖",
@@ -320,7 +172,7 @@ def _build_environment(gate: dict, trade_date: str) -> dict:
         "portrait": {
             "value": portrait,
             "tone": "down" if "熊" in portrait else ("up" if "牛" in portrait else "flat"),
-            "desc": gate.get("advice") or "顺势控制仓位，等待方向明确",
+            "desc": advice,
             "points": portrait_points,
         },
         "phase": {
@@ -345,458 +197,25 @@ def _build_environment(gate: dict, trade_date: str) -> dict:
     }
 
 
-
-def _stop_line(price: float, plan_stop: float | None) -> float:
-    """统一离场口径：计划止损价与成本 -8% 取更紧的一条。"""
-    default_stop = price * 0.92
-    if plan_stop and plan_stop > 0:
-        return round(max(float(plan_stop), default_stop), 3)
-    return round(default_stop, 3)
-
-
-def _position_plan(close: float, gate: dict, cash_cny: float, signal_pct: float, plan_stop: float | None) -> dict:
-    """仓位/止损/止盈统一口径：信号强度 × 闸门系数 × 单票上限。"""
-    factor = _GATE_FACTOR.get(gate.get("gate"), 0.5)
-    position_pct = round(MAX_SINGLE_POSITION_PCT * signal_pct * factor, 4)
-    budget = max(cash_cny, 0.0) * position_pct
-    return {
-        "position_pct": position_pct,
-        "stop": _stop_line(close, plan_stop),
-        "take": round(close * 1.15, 2),
-        "budget": budget,
-        "suggest_qty": int(budget / close / 100) * 100 if close > 0 and budget > 0 else 0,
-    }
-
-
-def _execution_reasons(plan: dict) -> list[dict]:
-    return [
-        {
-            "kind": "risk",
-            "text": (
-                f"执行纪律：建议仓位 {plan['position_pct'] * 100:.1f}%"
-                f"（约 {plan['suggest_qty']} 股 / {round(plan['budget'], 2)} 元），"
-                f"止损 {plan['stop']:.2f}（成本 -8% 与计划止损取更紧），"
-                f"止盈 {plan['take']:.2f}（+15% 先卖一半）"
-            ),
-        },
-        {"kind": "risk", "text": "A股 T+1：今日买入次日才能卖出；买入当日所有离场信号只作预警"},
-    ]
-
-
-def _buy_item(doc: dict, price: float | None, gate: dict, mainlines: dict, cash_cny: float, held: bool) -> dict | None:
-    close = price or doc.get("last_price") or doc.get("close")
-    if not close:
-        return None
-    close = float(close)
-    trigger = doc.get("b2_trigger_price") or doc.get("trigger_price")
-    signal_pct = float(doc.get("position_pct") or 0.67)
-    blocked = gate.get("gate") == "red"
-    plan = _position_plan(close, gate, cash_cny, signal_pct, doc.get("b1_stop_loss_price"))
-    position_pct = plan["position_pct"]
-    stop = plan["stop"]
-    take = plan["take"]
-
-    reasons: list[dict] = [
-        {
-            "kind": "signal",
-            "text": (
-                f"B2 突破买点已确认：盘中量比 {doc.get('b2_volume_ratio') or '—'}（阈值 ≥1.5）、"
-                f"中阳站上 MA55 {doc.get('b2_ma55') or '—'} / MA60 {doc.get('b2_ma60') or '—'}，"
-                f"触发价 {float(trigger):.2f}，现价 {close:.2f}"
-            ),
-        }
-    ]
-    if doc.get("bias60") is not None:
-        reasons.append({"kind": "signal", "text": f"左侧 B1 仍在：BIAS60 {doc['bias60']:+.1f}%（未过热，右侧确认未透支）"})
-    reasons.extend(_accum_reasons(doc))
-    reasons.append(_industry_reason(doc.get("industry") or "", mainlines))
-    reasons.append(_env_reason(gate))
-    if blocked:
-        reasons.append(
-            {
-                "kind": "risk",
-                "text": "环境红灯（空仓等待）：B2 信号虽已触发，但闸门不允许开新仓，等转黄/绿再执行",
-            }
-        )
-    reasons.extend(_execution_reasons(plan))
-
-    return {
-        "code": doc["code"],
-        "name": doc.get("name") or doc["code"],
-        "industry": doc.get("industry") or "",
-        "signal_label": "B2 突破买点",
-        "trigger_date": doc.get("last_triggered_date") or _fmt_trade_date(doc.get("triggered_at")),
-        "current_price": round(close, 2),
-        "trigger_price": round(float(trigger), 2) if trigger else None,
-        "stop_loss_price": stop,
-        "take_profit_price": take,
-        "position_pct": position_pct,
-        "suggest_qty": plan["suggest_qty"],
-        "suggest_amount": round(plan["budget"], 2),
-        "held": held,
-        "blocked": blocked,
-        "action": "买入" if not blocked else "暂停",
-        "summary": (
-            "环境红灯 · 信号已触发但暂停买入"
-            if blocked
-            else f"B2 已确认 · 仓位 {position_pct * 100:.1f}% · 止损 {stop:.2f}"
-        ),
-        "reasons": reasons,
-    }
-
-
-async def _load_market_b2(db, trade_date: str) -> tuple[str | None, list[dict]]:
-    """全市场 B2 已触发信号：取 signal_tracking 中不晚于当日的最新一个有信号的交易日。
-
-    盘后全市场扫描当日就会落库；盘中今日尚无记录时，回落到上一交易日的 B2（盘后确认、次日执行）。
-    """
-    latest = await db[Collections.signal_tracking].find_one(
-        {"signal_type": "B2", "trigger_date": {"$lte": trade_date}},
-        {"trigger_date": 1},
-        sort=[("trigger_date", -1)],
-    )
-    if not latest:
-        return None, []
-    day = latest.get("trigger_date")
-    docs = await db[Collections.signal_tracking].find(
-        {"signal_type": "B2", "trigger_date": day}, {"_id": 0}
-    ).to_list(300)
-    return day, docs
-
-
-def _buy_item_from_signal(
-    sig: dict, price: float | None, gate: dict, mainlines: dict, cash_cny: float, held: bool
-) -> dict | None:
-    """全市场 B2 信号（signal_tracking）→ 买块卡片，评分映射仓位强度。"""
-    snap = sig.get("snapshot") or {}
-    close = price or snap.get("close") or sig.get("signal_price")
-    trigger = sig.get("signal_price") or snap.get("close")
-    if not close or not trigger:
-        return None
-    close, trigger = float(close), float(trigger)
-    score = int(snap.get("score") or 0)
-    signal_pct = 0.8 if score >= 80 else (0.67 if score >= 70 else 0.5)
-    blocked = gate.get("gate") == "red"
-    plan = _position_plan(close, gate, cash_cny, signal_pct, snap.get("stop_price"))
-    bias60 = snap.get("bias60")
-
-    reasons: list[dict] = [
-        {
-            "kind": "signal",
-            "text": (
-                f"全市场 B2 突破已触发（{sig.get('trigger_date')} 盘后确认）：收盘 {trigger:.2f} "
-                f"放量中阳站上 MA55/MA60，评分 {score}，现价 {close:.2f}"
-            ),
-        }
-    ]
-    if bias60 is not None:
-        b = float(bias60)
-        reasons.append(
-            {
-                "kind": "signal",
-                "text": f"BIAS60 {b:+.2f}%（相对 MA60 {'不过热，追高风险小' if b < 10 else '偏离较大，注意追高'}）",
-            }
-        )
-    if snap.get("ma60"):
-        reasons.append(
-            {
-                "kind": "flat",
-                "text": (
-                    f"MA60 {float(snap['ma60']):.2f} · 方向 {snap.get('ma60_direction') or '—'} · "
-                    f"触发日涨幅 {(snap.get('pct_chg') or 0):+.2f}% · 市场趋势 {snap.get('market_trend') or '—'}"
-                ),
-            }
-        )
-    reasons.append(_industry_reason(sig.get("industry") or "", mainlines))
-    reasons.append(_env_reason(gate))
-    if blocked:
-        reasons.append(
-            {
-                "kind": "risk",
-                "text": "环境红灯（空仓等待）：B2 信号成立但闸门不允许开新仓，等转黄/绿再执行",
-            }
-        )
-    reasons.extend(_execution_reasons(plan))
-
-    return {
-        "code": sig["code"],
-        "name": sig.get("name") or sig["code"],
-        "industry": sig.get("industry") or "",
-        "signal_label": sig.get("signal_label") or "B2 突破买点",
-        "trigger_date": sig.get("trigger_date"),
-        "score": score,
-        "bias60": bias60,
-        "current_price": round(close, 2),
-        "trigger_price": round(trigger, 2),
-        "stop_loss_price": plan["stop"],
-        "take_profit_price": plan["take"],
-        "position_pct": plan["position_pct"],
-        "suggest_qty": plan["suggest_qty"],
-        "suggest_amount": round(plan["budget"], 2),
-        "held": held,
-        "blocked": blocked,
-        "action": "买入" if not blocked else "暂停",
-        "summary": (
-            "环境红灯 · 信号已触发但暂停买入"
-            if blocked
-            else f"B2 已确认 · 评分 {score} · 仓位 {plan['position_pct'] * 100:.1f}% · 止损 {plan['stop']:.2f}"
-        ),
-        "reasons": reasons,
-    }
-
-
-def _watch_item(doc: dict, price: float | None, mainlines: dict) -> dict | None:
-    close = price or doc.get("last_price") or doc.get("close")
-    trigger = doc.get("trigger_price")
-    if not close or not trigger:
-        return None
-    close, trigger = float(close), float(trigger)
-    distance = close / trigger - 1
-    to_trigger = -distance
-
-    reasons: list[dict] = [
-        {
-            "kind": "signal",
-            "text": (
-                f"距突破触发价 {trigger:.2f} 还差 {to_trigger * 100:.2f}%（现价 {close:.2f}），"
-                + ("已进入 2% 临近区，明天开盘重点盯住" if distance >= -0.02 else "仍在观察区，等靠近再盯")
-            ),
-        },
-        {
-            "kind": "signal",
-            "text": "确认条件：放量（量比 ≥1.5）+ 中阳（实体 ≥5%）+ 收盘站上 MA55/MA60，缺一不买",
-        },
-    ]
-    reasons.extend(_accum_reasons(doc))
-    reasons.append(_industry_reason(doc.get("industry") or "", mainlines))
-
-    return {
-        "code": doc["code"],
-        "name": doc.get("name") or doc["code"],
-        "industry": doc.get("industry") or "",
-        "status": doc.get("status"),
-        "current_price": round(close, 2),
-        "trigger_price": round(trigger, 2),
-        "distance_to_trigger": round(distance, 4),
-        "to_trigger_pct": round(to_trigger, 4),
-        "action": "盯",
-        "summary": f"距触发 {to_trigger * 100:.2f}% · 触发价 {trigger:.2f}",
-        "reasons": reasons,
-    }
-
-
-def _sell_item_from_advice(
-    advice: dict, state: str, source: str, trade_date: str, buy_date: str | None = None, position_id: str | None = None
-) -> dict:
-    reasons = list(advice.get("reasons") or [])
-    cost = advice.get("avg_cost")
-    price = advice.get("last_price")
-    if cost and price:
-        days = _holding_days(buy_date, trade_date)
-        reasons.append(
-            {
-                "kind": "flat",
-                "text": f"持仓：成本 {float(cost):.2f} → 现价 {float(price):.2f}（{advice.get('profit_loss_rate') or 0:+.2f}%），持有 {days} 天",
-            }
-        )
-    return {
-        "code": advice["code"],
-        "name": advice.get("name") or advice["code"],
-        "source": source,
-        "position_id": position_id,
-        "state": state,
-        "quantity": advice.get("quantity"),
-        "avg_cost": cost,
-        "current_price": price,
-        "pnl_pct": advice.get("profit_loss_rate"),
-        "advice": advice.get("advice"),
-        "advice_label": advice.get("advice_label"),
-        "sell_pct": advice.get("sell_pct") or 0.0,
-        "reference_price": advice.get("trigger_price") or price,
-        "stop_loss_price": advice.get("stop_loss_price"),
-        "reasons": reasons,
-        "summary": f"{advice.get('advice_label') or ''} · {advice.get('advice') or ''}".strip(" ·"),
-    }
-
-
 @router.get("/api/today/actions")
 async def get_today_actions(current_user: dict = Depends(get_current_user)):
-    """今日待办：买 / 盯 / 卖 三块一次返回（每块独立容错，失败不拖垮其他块）。"""
+    """今日待办：买 / 盯 / 卖 三块一次返回（L1 方向 + L2 候选 + L3 规则执行）。"""
     db = get_mongo_db()
     user_id = current_user.get("user_id") or current_user.get("id")
-    now = now_tz()
-    trade_date = now.strftime("%Y-%m-%d")
 
-    # ── 环境闸门 + 行业主线（失败降级，不影响三块主体） ──
-    try:
-        gate = await _gate_cached(db)
-    except Exception as exc:
-        logger.error(f"今日待办-环境闸门失败: {exc}", exc_info=True)
-        gate = {"gate": "yellow", "label": "轻仓试错", "position_hint": "轻仓试错", "portrait": None,
-                "emotion_phase": {}, "hint": "环境数据缺失，按轻仓处理", "degraded": True}
-
-    mainlines: dict[str, dict] = {}
-    try:
-        flows = await get_industry_period_flows()
-        mainlines = _mainline_map((flows or {}).get("periods") or {})
-    except Exception as exc:
-        logger.warning(f"今日待办-行业主线失败: {exc}")
-
-    # ── 持仓（两套账本合并去重） ──
-    try:
-        paper_positions = await _load_open_positions(user_id)
-    except Exception as exc:
-        logger.warning(f"今日待办-模拟持仓读取失败: {exc}")
-        paper_positions = []
-    try:
-        cockpit_data = await position_service.list_positions(db, user_id)
-    except Exception as exc:
-        logger.warning(f"今日待办-纪律持仓读取失败: {exc}")
-        cockpit_data = {"items": []}
-    cockpit_open = [p for p in (cockpit_data.get("items") or []) if p.get("status") == "open"]
-    held_codes = {p["code"] for p in paper_positions} | {p["code"] for p in cockpit_open}
-
-    # ── 观察池（盯：提前埋伏参考，不参与买块判定） ──
-    try:
-        pool_docs = await db[Collections.cockpit_watch_pool].find(
-            {"status": {"$in": ["triggered", "watching", "near"]}}, {"_id": 0}
-        ).to_list(600)
-    except Exception as exc:
-        logger.error(f"今日待办-观察池读取失败: {exc}", exc_info=True)
-        pool_docs = []
-
-    # ── 买：全市场 B2 已触发（signal_tracking，不再依赖观察池是否存在标的） ──
-    try:
-        _, b2_docs = await _load_market_b2(db, trade_date)
-    except Exception as exc:
-        logger.error(f"今日待办-全市场 B2 读取失败: {exc}", exc_info=True)
-        b2_docs = []
-
-    codes = (
-        [d["code"] for d in pool_docs]
-        + [p["code"] for p in paper_positions]
-        + [d["code"] for d in b2_docs]
-    )
-    prices, quote_as_of = await _current_prices(db, codes)
-
-    # 模拟账户可用现金（用于把「建议仓位」换算成可直接下单的股数）
-    cash_cny = 0.0
-    try:
-        acc = await db["paper_accounts"].find_one({"user_id": user_id}) or {}
-        cash = acc.get("cash")
-        if isinstance(cash, dict):
-            cash_cny = float(cash.get("CNY") or 0)
-        elif cash is not None:
-            cash_cny = float(cash or 0)
-    except Exception as exc:
-        logger.warning(f"今日待办-账户读取失败: {exc}")
-
-    # ── 买：全市场 B2 已触发（观察池 triggered 作为补充，按代码去重） ──
-    def _b2_order(d: dict) -> tuple:
-        snap = d.get("snapshot") or {}
-        return (-int(snap.get("score") or 0), float(snap.get("bias60") or 0))
-
-    buy_items: list[dict] = []
-    seen_buy: set[str] = set()
-    for d in sorted(b2_docs, key=_b2_order):
-        code = d.get("code")
-        if not code or code in seen_buy:
-            continue
-        item = _buy_item_from_signal(d, prices.get(code), gate, mainlines, cash_cny, code in held_codes)
-        if item:
-            seen_buy.add(code)
-            buy_items.append(item)
-
-    triggered = [d for d in pool_docs if d.get("status") == "triggered"]
-    triggered.sort(key=lambda d: str(d.get("last_triggered_date") or ""), reverse=True)
-    for d in triggered:
-        if d["code"] in seen_buy:
-            continue
-        item = _buy_item(d, prices.get(d["code"]), gate, mainlines, cash_cny, d["code"] in held_codes)
-        if item:
-            seen_buy.add(d["code"])
-            buy_items.append(item)
-
-    # ── 盯：watching / near，距触发最近在前 ──
-    watch_items = []
-    for d in pool_docs:
-        if d.get("status") not in ("watching", "near"):
-            continue
-        item = _watch_item(d, prices.get(d["code"]), mainlines)
-        if item:
-            watch_items.append(item)
-    watch_items.sort(key=lambda x: x["distance_to_trigger"], reverse=True)
-
-    # ── 卖：模拟持仓 + 纪律持仓，统一离场结论合并去重 ──
-    sell_items: list[dict] = []
-    hold_count = 0
-    seen: set[str] = set()
-    for pos in paper_positions:
-        code = pos["code"]
-        try:
-            sig = await evaluate_sell_signal(code)
-            price = prices.get(code) or (sig or {}).get("close")
-            advice = _advice_for(pos, price, sig)
-        except Exception as exc:
-            logger.warning(f"今日待办-卖出评估失败 {code}: {exc}")
-            continue
-        warns = [r for r in (advice.get("reasons") or []) if r.get("kind") == "warn"]
-        if advice.get("advice") != "持有":
-            # 只有真正产出卖点时才占位去重；否则「持有」会把同代码的驾驶舱离场信号吞掉
-            seen.add(code)
-            sell_items.append(_sell_item_from_advice(advice, "exit", "paper", trade_date, pos.get("buy_date")))
-        elif warns:
-            seen.add(code)
-            sell_items.append(_sell_item_from_advice(advice, "warn", "paper", trade_date, pos.get("buy_date")))
-        else:
-            hold_count += 1
-
-    for pos in cockpit_open:
-        code = pos["code"]
-        if code in seen:
-            continue
-        seen.add(code)
-        reasons = [
-            {"kind": "warn" if pos.get("state") == "warn" else "exit", "text": str(r)}
-            for r in (pos.get("reasons") or [])
-        ]
-        item = {
-            "code": code,
-            "name": pos.get("name") or code,
-            "source": "cockpit",
-            "position_id": pos.get("id"),
-            "state": "exit" if pos.get("state") == "exit" else ("warn" if pos.get("state") == "warn" else "normal"),
-            "quantity": None,
-            "avg_cost": pos.get("buy_price"),
-            "current_price": pos.get("current_price"),
-            "pnl_pct": round((pos.get("pnl_pct") or 0) * 100, 2) if pos.get("pnl_pct") is not None else None,
-            "advice": "离场" if pos.get("state") == "exit" else ("预警" if pos.get("state") == "warn" else "持有"),
-            "advice_label": "",
-            "sell_pct": 1.0 if pos.get("state") == "exit" else 0.0,
-            "reference_price": pos.get("current_price"),
-            "stop_loss_price": pos.get("stop_loss_line"),
-            "reasons": reasons or [{"kind": "flat", "text": "未触发离场条件，继续持有观察"}],
-            "summary": "纪律离场" if pos.get("state") == "exit" else ("离场预警" if pos.get("state") == "warn" else "继续持有"),
-        }
-        if item["state"] == "normal":
-            hold_count += 1
-        else:
-            sell_items.append(item)
-
-    order = {"exit": 0, "warn": 1}
-    sell_items.sort(key=lambda x: order.get(x["state"], 9))
-    exit_count = sum(1 for x in sell_items if x["state"] == "exit")
-    warn_count = sum(1 for x in sell_items if x["state"] == "warn")
+    snapshot, extras = await build_snapshot(db, user_id)
+    decision = decide(snapshot)
+    gate = extras.get("gate") or {}
 
     mainline_rows = [
-        {"name": k, **v} for k, v in mainlines.items() if v.get("is_mainline")
+        {"name": k, **v} for k, v in (extras.get("mainlines") or {}).items() if v.get("is_mainline")
     ]
     mainline_rows.sort(key=lambda x: (-x["streak"], -(x["net_3d"] or 0)))
 
     data = {
-        "as_of": now.replace(microsecond=0).isoformat(),
-        "trade_date": trade_date,
-        "session": {"is_intraday": _is_intraday(now), "quote_as_of": quote_as_of},
+        "as_of": snapshot.as_of,
+        "trade_date": snapshot.trade_date,
+        "session": extras.get("session") or {},
         "gate": {
             "gate": gate.get("gate"),
             "label": gate.get("label"),
@@ -807,21 +226,13 @@ async def get_today_actions(current_user: dict = Depends(get_current_user)):
             "degraded": gate.get("degraded"),
         },
         "mainlines": mainline_rows[:5],
-        "environment": _build_environment(gate, trade_date),
-        "account": {"cash_cny": round(cash_cny, 2)},
-        "buy": {"count": len(buy_items), "items": buy_items},
-        "watch": {
-            "count": len(watch_items),
-            "near_count": sum(1 for x in watch_items if x["distance_to_trigger"] >= -0.02),
-            "items": watch_items[:20],
-        },
-        "sell": {
-            "count": len(sell_items),
-            "exit_count": exit_count,
-            "warn_count": warn_count,
-            "hold_count": hold_count,
-            "items": sell_items,
-        },
+        "environment": _build_environment(gate, snapshot.trade_date),
+        "account": extras.get("account") or {"cash_cny": 0.0, "equity": 0.0},
+        "direction": decision["direction"],
+        "buy": decision["buy"],
+        "watch": decision["watch"],
+        "sell": decision["sell"],
+        "meta": decision["meta"],
     }
     return ok(data)
 

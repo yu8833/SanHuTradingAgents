@@ -21,7 +21,8 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
-from app.services.cache_layer import cached, get_ttl, set_cache
+from app.core.industry import OTHER_THS, THS_90_INDUSTRIES, normalize_to_ths
+from app.services.cache_layer import cached, get_cache, get_ttl, set_cache
 from app.services.macro.macro_service import _get_llm_cfg, _parse_llm_json
 from app.utils.trading_time import get_market_trade_date
 
@@ -39,6 +40,8 @@ _SYSTEM_PROMPT = (
     '"operation_points":{"main_direction":"主攻方向：明确该进攻/重仓的板块、风格及买点立场（如：沿5日线低吸科技主线）",'
     '"avoid_direction":"回避方向：明确该回避的板块、风格与个股类型（如：回避高位连板股）",'
     '"position_discipline":"仓位纪律：当前建议总仓位区间、加减仓触发条件与纪律规则"},'
+    '"attack_industries":["主攻行业，3-8个，必须从【可选行业】原样选取"],'
+    '"avoid_industries":["回避行业，0-5个，必须从【可选行业】原样选取"],'
     '"external_observation":"外围观察：美股、大宗商品等外围变量对今日A股情绪的传导路径，点明传导逻辑（如：隔夜美股大跌→外资风险偏好下降→北向流出压制成长）",'
     '"strategy":"操作策略：含仓位建议、主攻风格与攻防侧重、当日执行节奏",'
     '"watch":["1-3条今日需盯的观察信号，如指数关键点位、量能变化、板块轮动确认信号"],'
@@ -47,6 +50,8 @@ _SYSTEM_PROMPT = (
     "字段要求：status/reasons/operation_points/external_observation/strategy/risk_tips 为必填；"
     "extra 可空但键必须存在。\n"
     "篇幅控制：全文控制在 1400 字以内，每个字符串字段精炼 1-2 句，列条目每条一句话，避免长篇大论。\n"
+    "行业字段铁律：attack_industries / avoid_industries 只能逐字复制【可选行业】中的名称，"
+    "不得自创、不得改写、不得使用概念题材名；无法判断时给空数组。\n"
     "数据可能有缺失：缺失时依据已有信息判断并在结论里点明不确定性，不要臆造数据。\n"
     "严禁编造数字：涨跌家数、指数涨跌幅、成交额、涨停家数等必须与【数据】中给出的数值一致；"
     "【数据】没有提供的指标不要写具体数字，只做定性描述。"
@@ -255,8 +260,31 @@ def _build_prompt(dashboard, emotion, concept, radar, regime, guide, external) -
         + "\n\n【外围市场】\n" + _prompt_external(external)
         + "\n\n【市场环境】\n" + _prompt_regime(regime)
         + "\n\n【现有买卖信号】\n" + _prompt_guide(guide)
+        + "\n\n【可选行业】（同花顺 90 行业，attack_industries / avoid_industries 只能从此处选取）\n"
+        + "、".join(sorted(THS_90_INDUSTRIES))
         + "\n\n请综合以上信息，输出当日市场综合研判 JSON。"
     )
+
+
+def normalize_industries(raw) -> list[str]:
+    """LLM 返回的行业名 → 同花顺 90 行业白名单（去重、保序、丢弃无法归一的自创名）。"""
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    for item in raw:
+        if not isinstance(item, str):
+            continue
+        name = item.strip()
+        if not name:
+            continue
+        ths = normalize_to_ths(name)
+        # 「其他」不构成有效方向（否则会把行业未知的候选全部放行）
+        if ths == OTHER_THS:
+            logger.debug(f"综合研判行业名未通过同花顺校验，已丢弃: {name!r}")
+            continue
+        if ths not in out:
+            out.append(ths)
+    return out
 
 
 def _fallback_verdict(regime: dict) -> dict:
@@ -285,6 +313,10 @@ def _fallback_verdict(regime: dict) -> dict:
         "watch": ["市场环境趋势是否延续（关注后续成交量与宽度变化）"],
         "risk_tips": ["本结论为规则兜底（AI 研判暂不可用）", "数据来自公开市场级信息，仅供参考，不构成投资建议"],
         "extra": [],
+        # 规则兜底不产出结构化方向 → 标记 unavailable，下游不得当作「无过滤」
+        "attack_industries": [],
+        "avoid_industries": [],
+        "direction_status": "unavailable",
     }
 
 
@@ -355,11 +387,11 @@ async def _build_market_part() -> dict:
 
     供 get_market_synthesis_cached 缓存构建与用户强制刷新复用。各数据源独立降级。
     """
+    from app.services import vibe_gstock
+    from app.services.concept_analysis import get_concept_analysis
     from app.services.market_dashboard import get_dashboard
     from app.services.market_overview import get_short_term_emotion
-    from app.services.concept_analysis import get_concept_analysis
     from app.services.newsradar import get_radar_cached
-    from app.services import vibe_gstock
 
     async def _external():
         # 外围（美股/港股/亚太/VIX/期货/A50/大宗商品），整体硬超时 30s 降级为空
@@ -392,6 +424,10 @@ async def _build_market_part() -> dict:
                 op = res.get("operation_points") or {}
                 if not isinstance(op, dict):
                     op = {}
+                attack = normalize_industries(res.get("attack_industries"))
+                avoid = normalize_industries(res.get("avoid_industries"))
+                # 回避优先：同一行业同时出现在两边时，从主攻里剔除
+                attack = [x for x in attack if x not in avoid]
                 verdict = {
                     "direction": res.get("direction") or "中性",
                     "confidence": int(res.get("confidence") or 0),
@@ -408,6 +444,10 @@ async def _build_market_part() -> dict:
                     "watch": res.get("watch") or [],
                     "risk_tips": res.get("risk_tips") or [],
                     "extra": res.get("extra") or [],
+                    "attack_industries": attack,
+                    "avoid_industries": avoid,
+                    # 两个方向都为空 = LLM 未给出可用方向，下游按 unavailable 处理（不做静默过滤）
+                    "direction_status": "ok" if (attack or avoid) else "unavailable",
                 }
                 llm_available = True
                 break
@@ -457,6 +497,38 @@ async def get_market_synthesis_cached() -> dict:
         ttl_fn=_synthesis_ttl,
         stale_pred=_is_llm_verdict,
     )
+
+
+async def get_cached_market_synthesis() -> dict | None:
+    """只读缓存（含 SWR 备用值），不触发 LLM；未命中返回 None。
+
+    今日待办用它取 L1 方向，避免为了一次页面加载去等 30s+ 的模型调用。
+    """
+    for key in ("vibe:market_synthesis", "vibe:market_synthesis:stale"):
+        try:
+            value = await get_cache(key)
+        except Exception:
+            continue
+        if isinstance(value, dict) and value.get("verdict"):
+            return value
+    return None
+
+
+_warm_tasks: set[asyncio.Task] = set()
+
+
+async def warm_market_synthesis() -> None:
+    """后台预热今日结论：立即返回，不阻塞请求方。"""
+
+    async def _run() -> None:
+        try:
+            await get_market_synthesis_cached()
+        except Exception as exc:
+            logger.warning(f"今日结论后台预热失败: {exc}")
+
+    task = asyncio.create_task(_run())
+    _warm_tasks.add(task)
+    task.add_done_callback(_warm_tasks.discard)
 
 
 async def build_market_synthesis(user_id: str, refresh: bool = False) -> dict:

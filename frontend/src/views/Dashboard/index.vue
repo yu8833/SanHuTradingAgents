@@ -394,15 +394,15 @@ const todayCols = computed<TodayCol[]>(() => {
     code: b.code,
     name: b.name,
     meta: b.blocked
-      ? `现价 ${b.current_price} · 环境红灯暂停`
-      : `现价 ${b.current_price} · 止损 ${b.stop_loss_price}`,
+      ? `现价 ${b.current_price ?? '—'} · ${b.block_reason || '暂停'}`
+      : `现价 ${b.current_price ?? '—'} · 止损 ${b.stop_loss_price ?? '—'}`,
   }))
 
   const nearCount = d.watch.near_count
   const watchItems: TodayColItem[] = d.watch.items.slice(0, TODAY_TOP_N).map((w) => ({
     code: w.code,
     name: w.name,
-    meta: `现价 ${w.current_price} · 距触发 ${pct(w.to_trigger_pct)}`,
+    meta: `${w.stale ? '信号过期 · ' : ''}现价 ${w.current_price} · 距触发 ${pct(w.to_trigger_pct)}`,
   }))
 
   const sellItems: TodayColItem[] = d.sell.items
@@ -420,8 +420,8 @@ const todayCols = computed<TodayCol[]>(() => {
     {
       key: 'buy',
       badge: '买',
-      count: d.buy.count,
-      text: d.buy.count ? '只已触发' : '今日无触发',
+      count: d.buy.actionable_count,
+      text: d.buy.count ? `只可执行 / 共 ${d.buy.count} 只` : '今日无触发',
       items: buyItems,
       empty: '今日无 B2 触发，不买',
     },
@@ -436,10 +436,10 @@ const todayCols = computed<TodayCol[]>(() => {
     {
       key: 'sell',
       badge: '卖',
-      count: d.sell.exit_count,
+      count: d.sell.exit_count + d.sell.warn_count,
       text: d.sell.exit_count
         ? (d.sell.warn_count ? `只需离场 · ${d.sell.warn_count} 只预警` : '只需离场')
-        : '无需离场',
+        : (d.sell.warn_count ? `${d.sell.warn_count} 只预警` : '无需离场'),
       items: sellItems,
       empty: '持仓无离场信号，继续持有',
     },
