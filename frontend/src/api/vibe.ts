@@ -437,7 +437,9 @@ export interface MarketPosition {
     zone: 'overheated' | 'warm' | 'neutral' | 'cool' | 'oversold' | 'unknown' | string
     advice: string
     components: string[]
-    /** 近 10 年合成分位曲线（最多 180 个点） */
+    /** 合成维度：深度 / 情绪 / 参与度，维度间等权 */
+    dimensions?: { key: string; label: string; weight: number; components: string[]; value: number | null }[]
+    /** 分位窗口内合成分位曲线（最多 180 个点，另保留同分位时点） */
     series: MarketPositionPoint[]
     /** 五档阈值：按合成自身分布定标的分位（P80 / P60 / P40 / P20） */
     thresholds: { top: number; warm: number; cool: number; bottom: number }

@@ -54,6 +54,16 @@ _ZONE_MAP = [
      "只做观察、不抢跑，需宽度回升 + 波动率回落 + 年线偏离收窄确认后再分批建仓"),
 ]
 
+# 合成分位的三个维度：维度间等权，维度内取均值。
+# 实测这 7 项指标只覆盖 3 个独立维度——回撤 / 年线偏离 / 3 元以下占比两两相关
+# 0.77~0.92，直接 7 项等权会让「跌得有多深」独占 3/7 权重；振幅与波动率相关 0.69。
+COMPOSITE_DIMENSIONS = {
+    "depth": ("drawdown", "ma250_dev", "low_price"),
+    "emotion": ("amplitude", "volatility"),
+    "participation": ("amount", "up_pct"),
+}
+COMPOSITE_DIMENSION_LABELS = {"depth": "深度", "emotion": "情绪", "participation": "参与度"}
+
 _SOURCE_PRIO = {"tushare": 0, "baostock": 1, "akshare": 2, "sina": 3}
 _MAX_STOCK_AMOUNT = 5e10
 
@@ -1259,17 +1269,27 @@ def compute_position_payload(rows: list[dict], live_row: dict[str, Any] | None =
                 m["desc"] = f"{desc}（开盘不足 60 分钟，开盘放量占比波动大，分位暂不折算）"
         metrics.append(m)
 
-    # 合成分位：长历史指标统一折算成热度分位后取均值；估值样本不足 3 年时不参与合成
+    # 合成分位：长历史指标折算成热度分位后，按「维度内均值 → 维度间等权」合成。
+    # 7 项直接等权会让深度维度（3 项高度相关）独占 43% 权重，实测明显偏向「跌得深浅」。
     hot_by_key = {spec[0]: spec[5] for spec in specs}
     long_keys = [spec[0] for spec in specs if spec[7]]
 
-    heat_series = [
-        [_heat_of(p, hot_by_key[k]) for p in _pct_series(rank_series_by_key[k])]
+    heat_by_key = {
+        k: [_heat_of(p, hot_by_key[k]) for p in _pct_series(rank_series_by_key[k])]
         for k in long_keys
-    ]
+    }
+    dim_series: dict[str, list[float | None]] = {}
+    for dname, keys in COMPOSITE_DIMENSIONS.items():
+        usable = [k for k in keys if k in heat_by_key]
+        dim_series[dname] = [
+            round(sum(v[i] for v in (heat_by_key[k] for k in usable) if v[i] is not None)
+                  / len([1 for k in usable if heat_by_key[k][i] is not None]), 1)
+            if any(heat_by_key[k][i] is not None for k in usable) else None
+            for i in range(len(rows))
+        ]
     composite_series: list[int | None] = []
     for i in range(len(rows)):
-        vals = [hs[i] for hs in heat_series if hs[i] is not None]
+        vals = [s[i] for s in dim_series.values() if s[i] is not None]
         composite_series.append(round(sum(vals) / len(vals)) if vals else None)
     composite = composite_series[-1] if composite_series else None
 
@@ -1314,6 +1334,14 @@ def compute_position_payload(rows: list[dict], live_row: dict[str, Any] | None =
             "zone": zone["zone"],
             "advice": zone["advice"],
             "components": [m["key"] for m in metrics if m["in_composite"]],
+            # 合成按维度等权：7 项指标实际只覆盖 3 个维度，避免深度项重复计权
+            "dimensions": [
+                {"key": dname, "label": COMPOSITE_DIMENSION_LABELS[dname],
+                 "weight": round(1 / len(COMPOSITE_DIMENSIONS), 3),
+                 "components": [k for k in keys if k in long_keys],
+                 "value": round(dim_series[dname][-1], 1) if dim_series[dname][-1] is not None else None}
+                for dname, keys in COMPOSITE_DIMENSIONS.items()
+            ],
             # 历史合成分位曲线 + 逃顶 / 判底阈值；same_level 日期强制保留在曲线上
             "series": _composite_points(rows, composite_series,
                                         keep_dates={p["date"] for p in same_level}),
@@ -1326,7 +1354,9 @@ def compute_position_payload(rows: list[dict], live_row: dict[str, Any] | None =
         "divergence": _divergence(percentiles, composite, cuts),
         # 与当前合成分位相同（±2）的历史时点：走势图高亮 + 行业榜联动
         "same_level": same_level,
-        "note": "分位窗口按全市场口径一致的历史起算（剔除股票池不完整的交易日，通常约 4.5 年）；"
+        "note": "合成分位按深度 / 情绪 / 参与度三个维度等权（7 项指标先按维度取均值，"
+                "避免回撤/年线偏离/低价股占比重复计权）；"
+                "分位窗口按全市场口径一致的历史起算（剔除股票池不完整的交易日，通常约 4.5 年）；"
                 "成交额按「当日 ÷ 近 250 日均值」量比分位以剔除扩容趋势；"
                 "历史区间按当日可得分布滚动定标，不含未来信息；"
                 "PE / PB 仅有 2024-07 之后的样本，不足 3 年不参与合成，仅供参考",
@@ -1364,7 +1394,7 @@ def _empty_payload(note: str = "历史分位基线首次构建中") -> dict[str,
         "samples": 0,
         "position": [],
         "composite": {"percentile": None, "label": "构建中", "zone": "unknown", "advice": "",
-                      "components": [], "series": [],
+                      "components": [], "series": [], "dimensions": [],
                       "thresholds": {"top": _DEFAULT_CUTS[0], "warm": _DEFAULT_CUTS[1],
                                      "cool": _DEFAULT_CUTS[2], "bottom": _DEFAULT_CUTS[3]}},
         "forward": None,
@@ -1413,7 +1443,7 @@ async def get_market_position() -> dict[str, Any]:
     from app.utils.trading_time import is_trading_time
 
     ttl = 300 if is_trading_time() else 900
-    return await cached("vibe:market:position:v8", _build, ttl=ttl)
+    return await cached("vibe:market:position:v9", _build, ttl=ttl)
 
 
 # ---------------------------------------------------------------------------

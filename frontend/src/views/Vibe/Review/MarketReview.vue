@@ -490,6 +490,13 @@
             </div>
           </div>
 
+          <div class="pos-dims" v-if="posDims.length">
+            <span v-for="d in posDims" :key="d.key" class="pos-dim" :title="`${Math.round(d.weight * 100)}% 权重`">
+              <em>{{ d.label }}</em><b>{{ d.value ?? '—' }}</b>
+            </span>
+            <span class="pos-dim-note">三维度等权（深度 / 情绪 / 参与度）</span>
+          </div>
+
           <div class="pos-gauge">
             <div class="pos-gauge-bar">
               <i
@@ -1160,6 +1167,9 @@ const winYears = computed(() => {
 })
 const winLabel = computed(() => (winYears.value ? `近 ${winYears.value} 年` : '历史'))
 
+// 合成维度得分：深度 / 情绪 / 参与度，维度间等权
+const posDims = computed(() => position.value?.composite.dimensions || [])
+
 /**
  * 三级重要性（后端 specs 顺序已按此排列）：
  *  core    核心合成：决定合成分位 100% 权重，大圆点 + 实线
@@ -1177,7 +1187,7 @@ const DOT_LEVEL_LABEL: Record<string, { tag: string; cap: string; hint: string }
   core: {
     tag: '⭐ 核心合成',
     cap: '核心合成',
-    hint: '决定合成分位的 7 项指标，全市场口径的完整历史',
+    hint: '7 项指标按深度 / 情绪 / 参与度三维度等权合成，全市场口径的完整历史',
   },
   aux: {
     tag: '🔸 重要佐证',
@@ -3910,6 +3920,36 @@ onActivated(() => {
 .pos-score-cap {
   margin-top: 4px;
   font-size: 11.5px;
+  color: var(--el-text-color-placeholder);
+}
+
+/* 合成维度得分条：深度 / 情绪 / 参与度（维度间等权，避免深度项重复计权） */
+.pos-dims {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 14px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  background: var(--el-fill-color-lighter);
+  font-size: 12px;
+}
+.pos-dim {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+.pos-dim em {
+  font-style: normal;
+  color: var(--el-text-color-secondary);
+}
+.pos-dim b {
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+.pos-dim-note {
+  margin-left: auto;
+  font-size: 11px;
   color: var(--el-text-color-placeholder);
 }
 
