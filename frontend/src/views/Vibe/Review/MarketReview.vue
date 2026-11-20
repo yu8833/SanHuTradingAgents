@@ -450,12 +450,12 @@
     </section>
     </section>
 
-    <!-- 03 当前位置：把今天放进近 10 年历史，回答「贵不贵、热不热、接近顶还是底」 -->
+    <!-- 03 当前位置：把今天放进全市场口径的历史窗口，回答「贵不贵、热不热、接近顶还是底」 -->
     <section id="position" class="mr-sec">
       <div class="mr-sec-head">
         <span class="mr-sec-no">03</span>
         <span class="mr-sec-title">当前位置</span>
-        <span class="mr-sec-hint">把今天的读数放进近 10 年里排队，看它排在哪个位置</span>
+        <span class="mr-sec-hint">把今天的读数放进{{ winLabel }}全市场口径的历史里排队，看它排在哪个位置</span>
         <span class="mr-sec-actions">
           <span v-if="position?.as_of" class="data-time">
             数据 {{ position.as_of }}<em v-if="position.live" class="pos-live-tag">今日实时</em>
@@ -486,7 +486,7 @@
             </div>
             <div class="pos-hero-score">
               <div class="pos-score-num">{{ compositePct ?? '—' }}<em>%</em></div>
-              <div class="pos-score-cap">近 10 年合成分位</div>
+              <div class="pos-score-cap">{{ winLabel }}合成分位</div>
             </div>
           </div>
 
@@ -570,10 +570,10 @@
           </div>
         </div>
 
-        <!-- 近 10 年合成分位走势：红线逃顶档、绿线判底档（阈值按合成自身分布动态定标）；橙点 = 与当前同分位的历史时点，点击看当日行业 -->
+        <!-- 合成分位走势：红线逃顶档、绿线判底档（阈值按合成自身分布动态定标）；橙点 = 与当前同分位的历史时点，点击看当日行业 -->
         <div v-if="compositeChartOption" class="pos-chart">
           <div class="pos-block-head">
-            近 10 年合成分位走势
+            {{ winLabel }}合成分位走势
             <span class="dist-note">点曲线任一点 → 看那天各行业涨跌</span>
           </div>
           <VChart
@@ -1153,6 +1153,13 @@ const GAUGE_TICKS = computed(() => {
 
 const compositePct = computed(() => position.value?.composite.percentile ?? null)
 
+// 分位窗口真实年数（后端按股票池覆盖度一致的历史起算，通常约 4.5 年）
+const winYears = computed(() => {
+  const y = position.value?.window?.years ?? position.value?.window_years ?? 0
+  return y > 0 ? Math.round(y * 10) / 10 : null
+})
+const winLabel = computed(() => (winYears.value ? `近 ${winYears.value} 年` : '历史'))
+
 /**
  * 三级重要性（后端 specs 顺序已按此排列）：
  *  core    核心合成：决定合成分位 100% 权重，大圆点 + 实线
@@ -1170,7 +1177,7 @@ const DOT_LEVEL_LABEL: Record<string, { tag: string; cap: string; hint: string }
   core: {
     tag: '⭐ 核心合成',
     cap: '核心合成',
-    hint: '决定合成分位的 7 项指标，10 年以上历史',
+    hint: '决定合成分位的 7 项指标，全市场口径的完整历史',
   },
   aux: {
     tag: '🔸 重要佐证',
@@ -1180,7 +1187,7 @@ const DOT_LEVEL_LABEL: Record<string, { tag: string; cap: string; hint: string }
   ref: {
     tag: '🔹 参考估值',
     cap: '参考估值',
-    hint: '仅 2.3 年历史（自 2024-07），非 10 年窗口，方向参考',
+    hint: '仅 2.3 年历史（自 2024-07），窗口更短，方向参考',
   },
 }
 

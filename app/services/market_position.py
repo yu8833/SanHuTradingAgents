@@ -121,6 +121,19 @@ def _smooth_series(values: list[float | None], window: int = 5) -> list[float | 
 # 合成分布的名义分档（P80 / P60 / P40 / P20）；样本足够时改用经验分位定标
 _DEFAULT_CUTS = (80, 60, 40, 20)
 MIN_CUTS_SAMPLES = 500
+# 滚动定标（历史打标签用）要求的最少历史样本：约 1 年，兼顾稳定与可用样本量
+MIN_ROLLING_SAMPLES = 250
+# 股票池覆盖度下限：某日样本数低于窗口内最大值的该比例，视为截面不完整
+COVERAGE_FLOOR_RATIO = 0.8
+
+
+def _cuts_from_sorted(vals: list[int]) -> tuple[int, int, int, int]:
+    """由升序分位值取 P80 / P60 / P40 / P20，强制严格递减。"""
+    c80, c60, c40, c20 = (int(round(_quantile(vals, q))) for q in (0.8, 0.6, 0.4, 0.2))
+    c60 = min(c60, c80 - 1)
+    c40 = min(c40, c60 - 1)
+    c20 = max(1, min(c20, c40 - 1))
+    return (c80, c60, c40, c20)
 
 
 def _composite_cuts(composite_series: list[int | None]) -> tuple[int, int, int, int]:
@@ -133,12 +146,29 @@ def _composite_cuts(composite_series: list[int | None]) -> tuple[int, int, int, 
     vals = sorted(v for v in composite_series if v is not None)
     if len(vals) < MIN_CUTS_SAMPLES:
         return _DEFAULT_CUTS
-    c80, c60, c40, c20 = (int(round(_quantile(vals, q))) for q in (0.8, 0.6, 0.4, 0.2))
-    # 分位值为整数，可能出现并列，强制严格递减保证区间不重叠
-    c60 = min(c60, c80 - 1)
-    c40 = min(c40, c60 - 1)
-    c20 = max(1, min(c20, c40 - 1))
-    return (c80, c60, c40, c20)
+    return _cuts_from_sorted(vals)
+
+
+def _rolling_zone_index(composite_series: list[int | None],
+                        min_samples: int = MIN_ROLLING_SAMPLES) -> list[int | None]:
+    """逐日的档位序号（0 最冷 ~ 4 最热），阈值只用当日之前的历史分布。
+
+    全样本阈值会让历史每一天的档位包含未来信息：实测按全样本定标与按当日可得
+    历史定标，35% 的交易日档位不同。历史「同类交易日」的统计必须用无前视口径。
+    """
+    hist: list[int] = []
+    out: list[int | None] = []
+    for v in composite_series:
+        if v is None:
+            out.append(None)
+            continue
+        if len(hist) < min_samples:
+            out.append(None)
+        else:
+            c80, c60, c40, c20 = _cuts_from_sorted(hist)
+            out.append(sum(1 for e in (c20, c40, c60, c80) if v >= e))
+        bisect.insort(hist, v)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -849,21 +879,25 @@ def _forward_stats(rows: list[dict], composite_series: list[int | None],
 
     分档边界用合成分布的经验分位（与位置区间同源），而不是固定 20 分一档——
     后者在分布收缩后，最热/最冷两档只剩个位数样本，统计没有意义。
+    历史每一天的档位用「当日之前」的分布判定（滚动定标），避免用未来样本分类。
     """
     if len(rows) < MIN_FORWARD_ROWS:
         return None
 
     edges = [0, cuts[3], cuts[2], cuts[1], cuts[0], 100]
+    # 档位成员按「当时可得分布」判定，因此标签用相对档位名（绝对区间仅作当前阈值参考）
+    names = ["当时最冷 20%", "当时偏冷", "当时中位", "当时偏热", "当时最热 20%"]
     bins = [
-        {"key": f"b{i}", "label": f"{edges[i]}–{edges[i + 1]}%",
+        {"key": f"b{i}", "label": names[i],
          "lo": edges[i], "hi": edges[i + 1], "n": 0, "returns": []}
         for i in range(5)
     ]
+    zone_idx = _rolling_zone_index(composite_series)
     for i, pct in enumerate(composite_series):
         ret = fwd_returns[i]
-        if pct is None or ret is None:
+        idx = zone_idx[i]
+        if pct is None or ret is None or idx is None:
             continue
-        idx = sum(1 for e in edges[1:5] if pct >= e)
         bins[idx]["n"] += 1
         bins[idx]["returns"].append(ret)
 
@@ -889,8 +923,8 @@ def _forward_stats(rows: list[dict], composite_series: list[int | None],
         })
 
     current = composite_series[-1] if composite_series else None
-    current_bin = (f"b{sum(1 for e in edges[1:5] if current >= e)}"
-                   if current is not None else None)
+    last_idx = zone_idx[-1] if zone_idx else None
+    current_bin = f"b{last_idx}" if last_idx is not None else None
     return {
         "day": FORWARD_DAYS,
         "samples": total_n,
@@ -898,10 +932,10 @@ def _forward_stats(rows: list[dict], composite_series: list[int | None],
         "bins": out_bins,
         "current_bin": current_bin,
         "current_percentile": current,
-        # 逃顶 / 判断底部的历史证据：最热 20% 与最冷 20% 的未来 20 日表现
+        # 逃顶 / 判断底部的历史证据：当时最热 20% 与最冷 20% 的未来 20 日表现
         "zones": {
-            "hot": {"label": f"合成分位 ≥{cuts[0]}（历史最热 20%）", **stat(bins[4]["returns"])},
-            "cold": {"label": f"合成分位 ≤{cuts[3]}（历史最冷 20%）", **stat(bins[0]["returns"])},
+            "hot": {"label": "当时处于历史最热 20%", **stat(bins[4]["returns"])},
+            "cold": {"label": "当时处于历史最冷 20%", **stat(bins[0]["returns"])},
         },
     }
 
@@ -1000,7 +1034,7 @@ def _guidance(zone: dict[str, Any], composite: float | None,
         "top": {
             "key": "top",
             "title": "逃顶（高位区）",
-            "rule": f"合成分位 ≥{cuts[0]}（历史最热 20% 经验阈值）：位置、情绪、参与度多数处于历史高位",
+            "rule": f"合成分位 ≥{cuts[0]}（当前历史最热 20% 阈值）：位置、情绪、参与度多数处于历史高位",
             "stats": stat_text(zones.get("hot"), short),
             "threshold": cuts[0],
             "active": bool(composite is not None and composite >= cuts[0]),
@@ -1009,7 +1043,7 @@ def _guidance(zone: dict[str, Any], composite: float | None,
         "bottom": {
             "key": "bottom",
             "title": "判断底部（低位区）",
-            "rule": f"合成分位 ≤{cuts[3]}（历史最冷 20% 经验阈值）：回撤接近历史极值、低价股占比抬升、波动率处于高位",
+            "rule": f"合成分位 ≤{cuts[3]}（当前历史最冷 20% 阈值）：回撤接近历史极值、低价股占比抬升、波动率处于高位",
             "stats": stat_text(zones.get("cold"), short),
             "threshold": cuts[3],
             "active": bool(composite is not None and composite <= cuts[3]),
@@ -1117,6 +1151,17 @@ def compute_position_payload(rows: list[dict], live_row: dict[str, Any] | None =
         return _empty_payload("历史样本为空")
 
     rows = sorted(rows, key=lambda r: r["date"])
+    # 股票池覆盖度过滤：剔除截面明显不完整的交易日。
+    # 2016-2021 基线只有约 1,100 只（当时全市场 3,500+），2022/2026 又各有几十天
+    # 只有 1,550 只——这些日子的 up_pct / 低价股占比 / 涨停占比 / 等权涨幅与全市场
+    # 口径不可比，混进分位会系统性低估「低价股扎堆」等底部信号（实测同一读数按全样本
+    # 定标是 56 分位，按全市场口径是 82 分位）。统一按窗口内最大样本的 80% 截断。
+    max_n = max(int(r.get("n") or 0) for r in rows)
+    if max_n > 0:
+        kept = [r for r in rows if int(r.get("n") or 0) >= max_n * COVERAGE_FLOOR_RATIO]
+        if len(kept) >= MIN_HISTORY_ROWS:
+            rows = kept
+
     latest = rows[-1]
     history = rows[:-1]
     is_live = bool(live_row) and latest["date"] == _normalize_date((live_row or {}).get("date"))
@@ -1257,8 +1302,9 @@ def compute_position_payload(rows: list[dict], live_row: dict[str, Any] | None =
         "amount_projected": amount_projected,
         "progress": round(progress, 4) if is_live else 1.0,
         "updated": now_tz().isoformat(),
-        # 分位窗口：固定近 10 年设计值 + 真实起止日期（前端统一展示，不再显示「10.1 年」）
-        "window": {"start": rows[0]["date"], "end": latest["date"], "years": POSITION_YEARS},
+        # 分位窗口：真实起止日期与年数（按股票池覆盖度一致的历史起算，通常短于 10 年）
+        "window": {"start": rows[0]["date"], "end": latest["date"],
+                   "years": _window_years([r["date"] for r in rows])},
         "window_years": _window_years([r["date"] for r in rows]),
         "samples": len(history),
         "position": metrics,
@@ -1280,7 +1326,9 @@ def compute_position_payload(rows: list[dict], live_row: dict[str, Any] | None =
         "divergence": _divergence(percentiles, composite, cuts),
         # 与当前合成分位相同（±2）的历史时点：走势图高亮 + 行业榜联动
         "same_level": same_level,
-        "note": "分位窗口固定近 10 年；成交额按「当日 ÷ 近 250 日均值」量比分位以剔除扩容趋势；"
+        "note": "分位窗口按全市场口径一致的历史起算（剔除股票池不完整的交易日，通常约 4.5 年）；"
+                "成交额按「当日 ÷ 近 250 日均值」量比分位以剔除扩容趋势；"
+                "历史区间按当日可得分布滚动定标，不含未来信息；"
                 "PE / PB 仅有 2024-07 之后的样本，不足 3 年不参与合成，仅供参考",
     }
 
@@ -1365,7 +1413,7 @@ async def get_market_position() -> dict[str, Any]:
     from app.utils.trading_time import is_trading_time
 
     ttl = 300 if is_trading_time() else 900
-    return await cached("vibe:market:position:v6", _build, ttl=ttl)
+    return await cached("vibe:market:position:v8", _build, ttl=ttl)
 
 
 # ---------------------------------------------------------------------------
