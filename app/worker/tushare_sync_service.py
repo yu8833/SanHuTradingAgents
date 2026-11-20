@@ -2193,6 +2193,9 @@ async def run_tushare_daily_moneyflow_sync(days_back: int = 45):
         result = await service.sync_daily_moneyflow_data(
             days_back=days_back, job_id="tushare_daily_moneyflow_sync"
         )
+        # 交易日历/接口不可用时返回 error，不能记为成功，否则任务页会掩盖失败
+        if isinstance(result, dict) and result.get("error"):
+            raise RuntimeError(str(result["error"]))
         logger.info(f"✅ Tushare每日资金流同步完成: {result}")
         return result
     except Exception as e:
