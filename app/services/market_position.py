@@ -118,6 +118,35 @@ def _latest_quote_date(db) -> str:
         return ""
 
 
+def _day_is_final(day: str, now: datetime | None = None) -> bool:
+    """该交易日是否可以按「完整交易日」写入 10 年基线。
+
+    只有收盘后（16:00 起，留出日线数据补齐时间）才算定稿。盘中全市场虽然已有
+    完整只数，但成交额、涨跌家数只是前几个小时的累计值——一旦写进基线，增量
+    游标（last+1）永远不会回补这一天，会永久污染分位与量比基准。
+    """
+    now = now or now_tz()
+    today = now.strftime("%Y-%m-%d")
+    if day < today:
+        return True
+    if day > today:
+        return False
+    return now.strftime("%H:%M") >= "16:00"
+
+
+def _prev_quote_date(db, day: str) -> str:
+    """严格早于 day 的最近日线交易日。"""
+    try:
+        doc = db["stock_daily_quotes"].find(
+            {"period": "daily", "trade_date": {"$lt": day, "$type": "string"}},
+            {"trade_date": 1},
+        ).sort("trade_date", -1).limit(1)
+        row = next(doc, None)
+        return _normalize_date((row or {}).get("trade_date"))
+    except Exception:
+        return ""
+
+
 def _status_sync(db) -> tuple[int, str]:
     try:
         count = db[COLLECTION].estimated_document_count()
@@ -146,7 +175,9 @@ def _live_row_sync(db) -> dict[str, Any] | None:
             return None
         _, last = _status_sync(db)
         if last and date <= last:
-            return None  # 基线已包含该交易日，无需重复补行
+            # 基线里若残留同一交易日（历史上盘中误写），且当日未收盘，忽略它继续补实时行
+            if not (date == last and not _day_is_final(date)):
+                return None  # 基线已包含该交易日，无需重复补行
 
         pipeline = [
             {"$match": {"trade_date": {"$in": [date, date.replace("-", "")]},
@@ -445,6 +476,18 @@ def _build_sync(full: bool = False) -> int:
     if not latest:
         logger.warning("📊 [position] 无日线数据，跳过历史基线构建")
         return 0
+    # 未收盘的当日不能进基线：盘中只有半天成交额/涨跌家数，写入后增量游标不会回补。
+    # 已存在的当日行（历史缺陷遗留）一并清掉，交给实时行承担当日展示。
+    if not _day_is_final(latest):
+        try:
+            removed = db[COLLECTION].delete_many({"date": latest}).deleted_count
+            if removed:
+                logger.warning(f"📊 [position] 清除盘中写入的不完整交易日 {latest}（{removed} 行）")
+        except Exception:
+            logger.exception("📊 [position] 清除盘中行失败")
+        latest = _prev_quote_date(db, latest)
+        if not latest:
+            return 0
     latest_dt = datetime.strptime(latest, "%Y-%m-%d")
 
     _, last_stored = _status_sync(db)
@@ -471,6 +514,14 @@ def _build_sync(full: bool = False) -> int:
         if int(r.get("n") or 0) > 0
     ]
     batch_ns: list[int] = []
+    # 收盘后仍可能遇到成交额补齐延迟：当日成交额若明显低于近 20 日中位数，说明日线
+    # 尚未补齐，先不写；次日（已不属于「当日」）会自动补上，不会永久缺失。
+    today_s = now_tz().strftime("%Y-%m-%d")
+    med_amt = _median([
+        _f(r.get("amount")) for r in
+        db[COLLECTION].find({}, {"amount": 1}).sort("date", -1).limit(20)
+        if _f(r.get("amount")) > 0
+    ]) or 0
     while cursor <= latest_dt:
         chunk_end = min(cursor + timedelta(days=CHUNK_DAYS - 1), latest_dt)
         s, e = cursor.strftime("%Y-%m-%d"), chunk_end.strftime("%Y-%m-%d")
@@ -486,6 +537,11 @@ def _build_sync(full: bool = False) -> int:
                 continue
             if ref_n and n < ref_n * 0.6:
                 logger.info(f"📊 [position] 跳过不完整交易日 {d}：仅 {n} 只个股（参考 {ref_n}）")
+                continue
+            amt_yi = _f(r.get("amount")) / 1e8
+            if d == today_s and med_amt and amt_yi < med_amt * 0.6:
+                logger.info(f"📊 [position] 当日成交额 {amt_yi:.0f} 亿 低于近 20 日中位 "
+                            f"{med_amt:.0f} 亿，视为日线未补齐，跳过 {d}")
                 continue
             up = int(r.get("up") or 0)
             zt = int(r.get("zt") or 0)
@@ -1224,6 +1280,8 @@ async def _build() -> dict[str, Any]:
     if live:
         from app.utils.date_utils import today_str
 
+        # 基线里若残留同一交易日，先剔除，避免与实时行重复（同一天算两次）
+        rows = [r for r in rows if r["date"] != live["date"]]
         progress = _session_progress() if live.get("date") == today_str() else 1.0
         return await asyncio.to_thread(compute_position_payload, rows + [live], live, progress)
     return await asyncio.to_thread(compute_position_payload, rows)
@@ -1246,7 +1304,7 @@ async def get_market_position() -> dict[str, Any]:
     from app.utils.trading_time import is_trading_time
 
     ttl = 300 if is_trading_time() else 900
-    return await cached("vibe:market:position:v3", _build, ttl=ttl)
+    return await cached("vibe:market:position:v4", _build, ttl=ttl)
 
 
 # ---------------------------------------------------------------------------
