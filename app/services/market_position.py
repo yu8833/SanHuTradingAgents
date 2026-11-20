@@ -30,9 +30,6 @@ POSITION_YEARS = 10
 MIN_FORWARD_ROWS = 750
 MIN_HISTORY_ROWS = 60
 FORWARD_DAYS = 20
-# 逃顶 / 判断底部的合成分位阈值（与 _ZONE_MAP 的 80 / 20 分区一致）
-TOP_THRESHOLD = 80
-BOTTOM_THRESHOLD = 20
 # 合成分位历史曲线最多返回的点数（前端折线图用，等距抽稀）
 MAX_SERIES_POINTS = 180
 # 单批回填的自然日跨度：控制单次聚合内存与耗时，整体在后台分块跑完
@@ -99,6 +96,49 @@ def _median(values: list[float]) -> float | None:
     n = len(arr)
     mid = n // 2
     return (arr[mid] + arr[n - 1 - mid]) / 2
+
+
+def _quantile(sorted_vals: list[float], q: float) -> float:
+    """线性插值分位数（输入须已升序）。"""
+    if not sorted_vals:
+        return 0.0
+    k = (len(sorted_vals) - 1) * q
+    lo, hi = math.floor(k), math.ceil(k)
+    if lo == hi:
+        return float(sorted_vals[int(k)])
+    return sorted_vals[lo] + (sorted_vals[hi] - sorted_vals[lo]) * (k - lo)
+
+
+def _smooth_series(values: list[float | None], window: int = 5) -> list[float | None]:
+    """尾随 N 日均值（只用当天及之前的数据，不含未来），用于压低单日噪声。"""
+    out: list[float | None] = []
+    for i in range(len(values)):
+        seg = [v for v in values[max(0, i - window + 1): i + 1] if v is not None]
+        out.append(round(sum(seg) / len(seg), 4) if seg else None)
+    return out
+
+
+# 合成分布的名义分档（P80 / P60 / P40 / P20）；样本足够时改用经验分位定标
+_DEFAULT_CUTS = (80, 60, 40, 20)
+MIN_CUTS_SAMPLES = 500
+
+
+def _composite_cuts(composite_series: list[int | None]) -> tuple[int, int, int, int]:
+    """按合成分位自身分布定档（P80 / P60 / P40 / P20）。
+
+    合成分位是多个分位的均值，分布必然向中间收缩：实测 10 年里 ≥80 只占 2.4%、
+    ≤20 只占 0.5%。直接套 80/20 会让「低位区」几乎永不触发，未来收益统计样本也
+    只剩个位数。改用合成序列自己的经验分位取阈值，每一档才是真实的历史 20%。
+    """
+    vals = sorted(v for v in composite_series if v is not None)
+    if len(vals) < MIN_CUTS_SAMPLES:
+        return _DEFAULT_CUTS
+    c80, c60, c40, c20 = (int(round(_quantile(vals, q))) for q in (0.8, 0.6, 0.4, 0.2))
+    # 分位值为整数，可能出现并列，强制严格递减保证区间不重叠
+    c60 = min(c60, c80 - 1)
+    c40 = min(c40, c60 - 1)
+    c20 = max(1, min(c20, c40 - 1))
+    return (c80, c60, c40, c20)
 
 
 # ---------------------------------------------------------------------------
@@ -642,13 +682,16 @@ def _rank_series(values: list[float | None]) -> list[int | None]:
     return out
 
 
-def _zone_of(pct: float | None) -> dict[str, Any]:
+def _zone_of(pct: float | None,
+             cuts: tuple[int, int, int, int] = _DEFAULT_CUTS) -> dict[str, Any]:
     if pct is None:
         return {"zone": "unknown", "label": "构建中", "advice": "历史样本不足，暂不给出位置结论"}
-    for threshold, zone, label, advice in _ZONE_MAP:
+    # cuts 为 (P80, P60, P40, P20)，对应前四档；低于 P20 落在最冷的「低位区」
+    for threshold, (_, zone, label, advice) in zip(cuts, _ZONE_MAP):
         if pct >= threshold:
             return {"zone": zone, "label": label, "advice": advice}
-    return {"zone": "unknown", "label": "构建中", "advice": ""}
+    _, zone, label, advice = _ZONE_MAP[-1]
+    return {"zone": zone, "label": label, "advice": advice}
 
 
 def _window_years(dates: list[str]) -> float:
@@ -800,21 +843,27 @@ def _forward_returns(rows: list[dict]) -> list[float | None]:
 
 
 def _forward_stats(rows: list[dict], composite_series: list[int | None],
-                   fwd_returns: list[float | None]) -> dict[str, Any] | None:
-    """把历史按合成分位分成 5 档，统计未来 20 日等权收益的中位数与胜率。"""
+                   fwd_returns: list[float | None],
+                   cuts: tuple[int, int, int, int] = _DEFAULT_CUTS) -> dict[str, Any] | None:
+    """把历史按合成分位分成 5 档，统计未来 20 日等权收益的中位数与胜率。
+
+    分档边界用合成分布的经验分位（与位置区间同源），而不是固定 20 分一档——
+    后者在分布收缩后，最热/最冷两档只剩个位数样本，统计没有意义。
+    """
     if len(rows) < MIN_FORWARD_ROWS:
         return None
 
+    edges = [0, cuts[3], cuts[2], cuts[1], cuts[0], 100]
     bins = [
-        {"key": f"b{i}", "label": f"{i * 20}–{i * 20 + 20}%", "lo": i * 20, "hi": i * 20 + 20,
-         "n": 0, "returns": []}
+        {"key": f"b{i}", "label": f"{edges[i]}–{edges[i + 1]}%",
+         "lo": edges[i], "hi": edges[i + 1], "n": 0, "returns": []}
         for i in range(5)
     ]
     for i, pct in enumerate(composite_series):
         ret = fwd_returns[i]
         if pct is None or ret is None:
             continue
-        idx = min(4, pct // 20)
+        idx = sum(1 for e in edges[1:5] if pct >= e)
         bins[idx]["n"] += 1
         bins[idx]["returns"].append(ret)
 
@@ -840,7 +889,8 @@ def _forward_stats(rows: list[dict], composite_series: list[int | None],
         })
 
     current = composite_series[-1] if composite_series else None
-    current_bin = f"b{min(4, current // 20)}" if current is not None else None
+    current_bin = (f"b{sum(1 for e in edges[1:5] if current >= e)}"
+                   if current is not None else None)
     return {
         "day": FORWARD_DAYS,
         "samples": total_n,
@@ -850,8 +900,8 @@ def _forward_stats(rows: list[dict], composite_series: list[int | None],
         "current_percentile": current,
         # 逃顶 / 判断底部的历史证据：最热 20% 与最冷 20% 的未来 20 日表现
         "zones": {
-            "hot": {"label": "合成分位 ≥80%（历史最热 20%）", **stat(bins[4]["returns"])},
-            "cold": {"label": "合成分位 ≤20%（历史最冷 20%）", **stat(bins[0]["returns"])},
+            "hot": {"label": f"合成分位 ≥{cuts[0]}（历史最热 20%）", **stat(bins[4]["returns"])},
+            "cold": {"label": f"合成分位 ≤{cuts[3]}（历史最冷 20%）", **stat(bins[0]["returns"])},
         },
     }
 
@@ -930,7 +980,8 @@ def _analogs(rows: list[dict], dims: list[list[int | None]], composite_series: l
 
 
 def _guidance(zone: dict[str, Any], composite: float | None,
-              fwd: dict[str, Any] | None) -> dict[str, Any]:
+              fwd: dict[str, Any] | None,
+              cuts: tuple[int, int, int, int] = _DEFAULT_CUTS) -> dict[str, Any]:
     """把「逃顶 / 判断底部」的判据与历史证据整理成前端可直接渲染的说明块。"""
     zones = (fwd or {}).get("zones") or {}
 
@@ -949,19 +1000,19 @@ def _guidance(zone: dict[str, Any], composite: float | None,
         "top": {
             "key": "top",
             "title": "逃顶（高位区）",
-            "rule": f"合成分位 ≥{TOP_THRESHOLD}：位置、情绪、参与度多数处于历史高位",
+            "rule": f"合成分位 ≥{cuts[0]}（历史最热 20% 经验阈值）：位置、情绪、参与度多数处于历史高位",
             "stats": stat_text(zones.get("hot"), short),
-            "threshold": TOP_THRESHOLD,
-            "active": bool(composite is not None and composite >= TOP_THRESHOLD),
+            "threshold": cuts[0],
+            "active": bool(composite is not None and composite >= cuts[0]),
             "advice": "优先减仓兑现，不追高；宽度与量能同步走弱时加快撤退",
         },
         "bottom": {
             "key": "bottom",
             "title": "判断底部（低位区）",
-            "rule": f"合成分位 ≤{BOTTOM_THRESHOLD}：回撤接近历史极值、低价股占比抬升、波动率处于高位",
+            "rule": f"合成分位 ≤{cuts[3]}（历史最冷 20% 经验阈值）：回撤接近历史极值、低价股占比抬升、波动率处于高位",
             "stats": stat_text(zones.get("cold"), short),
-            "threshold": BOTTOM_THRESHOLD,
-            "active": bool(composite is not None and composite <= BOTTOM_THRESHOLD),
+            "threshold": cuts[3],
+            "active": bool(composite is not None and composite <= cuts[3]),
             "advice": "低位区只是观察区，不抢跑；需宽度回升 + 波动率回落 + 年线偏离收窄确认后再分批建仓",
         },
         "current": {"zone": zone.get("zone"), "label": zone.get("label"),
@@ -969,7 +1020,8 @@ def _guidance(zone: dict[str, Any], composite: float | None,
     }
 
 
-def _divergence(percentiles: dict[str, int | None], composite: float | None) -> list[dict[str, Any]]:
+def _divergence(percentiles: dict[str, int | None], composite: float | None,
+                cuts: tuple[int, int, int, int] = _DEFAULT_CUTS) -> list[dict[str, Any]]:
     """用当前位置指标分位识别背离（指标分位，不是热度分位）。"""
     val = percentiles.get("valuation_pe")
     breadth = percentiles.get("up_pct")
@@ -996,12 +1048,13 @@ def _divergence(percentiles: dict[str, int | None], composite: float | None) -> 
         out.append({"level": "danger", "title": "深回撤 + 高波动",
                     "detail": f"指数距 250 日高点回撤深度处 {dd}% 分位，波动率同时处于 {vol}% 高位，"
                               "属于下跌加速段，不宜抢反弹"})
-    if composite is not None and composite >= 80 and not out:
+    if composite is not None and composite >= cuts[0] and not out:
         out.append({"level": "info", "title": "位置进入高位区",
-                    "detail": "位置、情绪与参与度同时处于历史高位，继续追高需要更强的催化"})
-    if composite is not None and composite <= 20 and not out:
+                    "detail": f"合成热度 {composite} 分已达历史最热 20% 区间（≥{cuts[0]}），继续追高需要更强的催化"})
+    if composite is not None and composite <= cuts[3] and not out:
         out.append({"level": "info", "title": "位置进入低位区",
-                    "detail": "多项指标同时处于历史低位，进入「判断底部」观察区，等宽度回升与波动率回落再确认"})
+                    "detail": f"合成热度 {composite} 分已进入历史最冷 20% 区间（≤{cuts[3]}），"
+                              "进入「判断底部」观察区，等宽度回升与波动率回落再确认"})
     return out[:3]
 
 
@@ -1112,6 +1165,10 @@ def compute_position_payload(rows: list[dict], live_row: dict[str, Any] | None =
     # 展示值仍是实际成交额（亿）。盘中先按交易进度折算全天成交额再算量比。
     rank_series_by_key = {k: list(v) for k, v in series_by_key.items()}
     rank_series_by_key["amount"] = _ratio_series(series_by_key["amount"])
+    # 单日噪声最大的两项先做 5 日均值再算分位（实测其热度分位日间平均跳动
+    # 33.9 / 13.7 分，是「位置」被单日行情带着翻档的主因）。展示值仍是当日实际值。
+    rank_series_by_key["up_pct"] = _smooth_series(series_by_key["up_pct"])
+    rank_series_by_key["amplitude"] = _smooth_series(series_by_key["amplitude"])
     amount_projected = None
     amount_too_early = is_live and 0.0 < progress < AMOUNT_PROJECT_MIN_PROGRESS
     if is_live and 0.0 < progress:
@@ -1171,9 +1228,11 @@ def compute_position_payload(rows: list[dict], live_row: dict[str, Any] | None =
         composite_series.append(round(sum(vals) / len(vals)) if vals else None)
     composite = composite_series[-1] if composite_series else None
 
-    zone = _zone_of(composite)
+    # 位置区间阈值按合成自身分布定标（P80/P60/P40/P20），不再用名义 80/20
+    cuts = _composite_cuts(composite_series)
+    zone = _zone_of(composite, cuts)
     fwd_returns = _forward_returns(rows)
-    fwd = _forward_stats(rows, composite_series, fwd_returns)
+    fwd = _forward_stats(rows, composite_series, fwd_returns, cuts)
     percentiles = {m["key"]: m["percentile"] for m in metrics}
     same_level = _same_level_points(rows, composite_series, fwd_returns)
 
@@ -1212,12 +1271,13 @@ def compute_position_payload(rows: list[dict], live_row: dict[str, Any] | None =
             # 历史合成分位曲线 + 逃顶 / 判底阈值；same_level 日期强制保留在曲线上
             "series": _composite_points(rows, composite_series,
                                         keep_dates={p["date"] for p in same_level}),
-            "thresholds": {"top": TOP_THRESHOLD, "bottom": BOTTOM_THRESHOLD},
+            # 档位阈值按合成自身分布定标（P80/P60/P40/P20），每档对应真实历史 20% 交易日
+            "thresholds": {"top": cuts[0], "warm": cuts[1], "cool": cuts[2], "bottom": cuts[3]},
         },
         "forward": fwd,
-        "guidance": _guidance(zone, composite, fwd),
+        "guidance": _guidance(zone, composite, fwd, cuts),
         "analogs": _analogs(rows, dims, composite_series, fwd_returns),
-        "divergence": _divergence(percentiles, composite),
+        "divergence": _divergence(percentiles, composite, cuts),
         # 与当前合成分位相同（±2）的历史时点：走势图高亮 + 行业榜联动
         "same_level": same_level,
         "note": "分位窗口固定近 10 年；成交额按「当日 ÷ 近 250 日均值」量比分位以剔除扩容趋势；"
@@ -1257,7 +1317,8 @@ def _empty_payload(note: str = "历史分位基线首次构建中") -> dict[str,
         "position": [],
         "composite": {"percentile": None, "label": "构建中", "zone": "unknown", "advice": "",
                       "components": [], "series": [],
-                      "thresholds": {"top": TOP_THRESHOLD, "bottom": BOTTOM_THRESHOLD}},
+                      "thresholds": {"top": _DEFAULT_CUTS[0], "warm": _DEFAULT_CUTS[1],
+                                     "cool": _DEFAULT_CUTS[2], "bottom": _DEFAULT_CUTS[3]}},
         "forward": None,
         "guidance": _guidance({"zone": "unknown", "label": "构建中", "advice": ""}, None, None),
         "analogs": None,
@@ -1304,7 +1365,7 @@ async def get_market_position() -> dict[str, Any]:
     from app.utils.trading_time import is_trading_time
 
     ttl = 300 if is_trading_time() else 900
-    return await cached("vibe:market:position:v4", _build, ttl=ttl)
+    return await cached("vibe:market:position:v6", _build, ttl=ttl)
 
 
 # ---------------------------------------------------------------------------

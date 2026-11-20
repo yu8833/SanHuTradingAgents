@@ -439,8 +439,8 @@ export interface MarketPosition {
     components: string[]
     /** 近 10 年合成分位曲线（最多 180 个点） */
     series: MarketPositionPoint[]
-    /** 逃顶 / 判底阈值（80 / 20） */
-    thresholds: { top: number; bottom: number }
+    /** 五档阈值：按合成自身分布定标的分位（P80 / P60 / P40 / P20） */
+    thresholds: { top: number; warm: number; cool: number; bottom: number }
   }
   forward: {
     day: number

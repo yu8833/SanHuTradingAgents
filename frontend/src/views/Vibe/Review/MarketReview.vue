@@ -498,7 +498,8 @@
                 class="pos-gauge-band"
                 :class="z.key"
                 :style="{ width: z.width + '%' }"
-              >{{ z.name }}</i>
+                :title="`${z.name}区 ${z.lo}–${z.hi}%`"
+              >{{ z.showName ? z.name : '' }}</i>
               <i v-if="compositePct != null" class="pos-gauge-needle" :style="{ left: compositePct + '%' }" />
               <em v-if="compositePct != null" class="pos-gauge-bubble" :style="{ left: compositePct + '%' }">{{ compositePct }}%</em>
             </div>
@@ -569,7 +570,7 @@
           </div>
         </div>
 
-        <!-- 近 10 年合成分位走势：红线 80 逃顶、绿线 20 判底；橙点 = 与当前同分位的历史时点，点击看当日行业 -->
+        <!-- 近 10 年合成分位走势：红线逃顶档、绿线判底档（阈值按合成自身分布动态定标）；橙点 = 与当前同分位的历史时点，点击看当日行业 -->
         <div v-if="compositeChartOption" class="pos-chart">
           <div class="pos-block-head">
             近 10 年合成分位走势
@@ -1128,15 +1129,27 @@ const posDataNote = computed(() => {
   return notes.join('；')
 })
 
-// 位置标尺：五档分区（0–100 各占 20 分位）+ 刻度
-const GAUGE_BANDS = [
-  { key: 'oversold', name: '判底', width: 20 },
-  { key: 'cool', name: '偏冷', width: 20 },
-  { key: 'neutral', name: '中位', width: 20 },
-  { key: 'warm', name: '偏热', width: 20 },
-  { key: 'overheated', name: '逃顶', width: 20 },
-]
-const GAUGE_TICKS = [0, 20, 40, 60, 80, 100]
+// 位置标尺：五档分区，边界取后端按合成自身分布定标的分位（P20/P40/P60/P80），
+// 因此各档宽度不再等分——「低位区 / 高位区」就是真实的历史最冷 / 最热 20% 交易日
+const gaugeCuts = computed(() => position.value?.composite.thresholds
+  || { top: 80, warm: 60, cool: 40, bottom: 20 })
+const GAUGE_BANDS = computed(() => {
+  const t = gaugeCuts.value
+  return [
+    { key: 'oversold', name: '判底', lo: 0, hi: t.bottom },
+    { key: 'cool', name: '偏冷', lo: t.bottom, hi: t.cool },
+    { key: 'neutral', name: '中位', lo: t.cool, hi: t.warm },
+    { key: 'warm', name: '偏热', lo: t.warm, hi: t.top },
+    { key: 'overheated', name: '逃顶', lo: t.top, hi: 100 },
+  ].map(b => {
+    const width = Math.max(0, b.hi - b.lo)
+    return { ...b, width, showName: width >= 12 }
+  })
+})
+const GAUGE_TICKS = computed(() => {
+  const t = gaugeCuts.value
+  return [0, t.bottom, t.cool, t.warm, t.top, 100]
+})
 
 const compositePct = computed(() => position.value?.composite.percentile ?? null)
 
@@ -1297,7 +1310,7 @@ const posVerdict = computed(() => {
   return { title: '位置中性' }
 })
 
-/** 近 10 年合成分位走势（标线：80 逃顶 / 20 判底；橙点：同分位历史时点；灰区：参照系未成形） */
+/** 近 10 年合成分位走势（标线：动态逃顶 / 判底阈值；橙点：同分位历史时点；灰区：参照系未成形） */
 const compositeChartOption = computed<EChartsOption | null>(() => {
   const pts = position.value?.composite.series || []
   if (pts.length < 2) return null
@@ -3917,6 +3930,8 @@ onActivated(() => {
   letter-spacing: .5px;
   color: #fff;
   opacity: .95;
+  overflow: hidden;
+  white-space: nowrap;
 }
 .pos-gauge-band.oversold { background: linear-gradient(180deg, #5cb87a, #49a568); border-radius: 6px 0 0 6px; }
 .pos-gauge-band.cool { background: linear-gradient(180deg, #b9d8ac, #94c183); color: #2f5539; }
